@@ -3,7 +3,7 @@
 Moved verbatim from qukaizen-arail's ``src/arail/world_forge.py`` (the
 `slugify` / `loose_json` / `first_array` helpers) as part of the
 ``dac_world`` migration — see
-``sprints/2026-07-19-dac-generates-arail-worlds/ARCHITECTURE.md`` (qukaizen-dac).
+``sprints/2026-07-19-dac-generates-arail-worlds/ARCHITECTURE.md`` (qukaizen-ddac).
 """
 
 from __future__ import annotations

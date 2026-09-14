@@ -45,7 +45,7 @@ from pathlib import Path
 DEFAULT_REPOS = [
     "qukaizen-aerollm",
     "qukaizen-arail",
-    "qukaizen-dac",
+    "qukaizen-ddac",
     "qukaizen-nucleus",
 ]
 

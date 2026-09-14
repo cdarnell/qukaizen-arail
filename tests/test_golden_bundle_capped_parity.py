@@ -1,10 +1,10 @@
 """Cross-repo capped-path golden-bundle parity test (F7) — ARAIL side.
 
-Mirror of qukaizen-dac's ``tests/python/test_golden_bundle_capped_parity.py``.
+Mirror of qukaizen-ddac's ``tests/python/test_golden_bundle_capped_parity.py``.
 ``tests/fixtures/golden-bundle-capped/`` here is byte-identical to
-qukaizen-dac's ``tests/python/fixtures/golden-bundle-capped/`` (both
+qukaizen-ddac's ``tests/python/fixtures/golden-bundle-capped/`` (both
 committed, not generated at test time — see
-``sprints/2026-08-27-heavy-world-model/BUILD_LOG.md`` step 6 in qukaizen-dac
+``sprints/2026-08-27-heavy-world-model/BUILD_LOG.md`` step 6 in qukaizen-ddac
 for how they were produced). Unlike the original 2-term ``golden-bundle``
 fixture (which always takes ``_skill_terms_capped``'s under-budget early
 return and can never exercise the capped branch), this is a 300-term
@@ -22,7 +22,7 @@ This test asserts:
    through ``dac_world`` via the shim, exactly as ARAIL's portal would call
    it) with the same pinned spec/terms/``created_at`` is byte-identical to
    the committed fixture — proving the shim doesn't silently diverge from
-   what qukaizen-dac itself would emit.
+   what qukaizen-ddac itself would emit.
 3. The fixture actually exercises the capped branch (kept < 300 terms, the
    honest over-budget note is present) — proving this fixture is not vacuous.
 """
@@ -55,7 +55,7 @@ N_TERMS = 300
 
 def _make_terms(n: int = N_TERMS) -> list[dict]:
     """Deterministic >253-term synthetic corpus — byte-for-byte the same
-    generator as qukaizen-dac's twin test, so both repos regenerate the
+    generator as qukaizen-ddac's twin test, so both repos regenerate the
     identical fixture from source."""
     terms = []
     for i in range(n):

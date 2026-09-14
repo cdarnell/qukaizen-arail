@@ -6,7 +6,7 @@
 # - nucleub (Nucleus pipeline for training Super Skills)
 # - aerollm (OSS inference engine)
 # - arail (Shareable AI Lab)
-# - qukaizen-dac (Data as Code)
+# - qukaizen-ddac (Data as Code)
 #
 # The model learns project conventions, architecture decisions, dependency
 # relationships, and development workflows from the actual source code.
@@ -23,7 +23,7 @@ superskill:
   description: >
     Lightweight (2B) domain-specialized model trained on QuKaiZen's own projects.
     Understands Nucleus (training pipeline), AeroLLM (inference), ARAIL (lab agent),
-    and qukaizen-dac (data infrastructure). Optimized for code navigation, architecture
+    and qukaizen-ddac (data infrastructure). Optimized for code navigation, architecture
     explanation, decision-rationale lookup, and cross-project reasoning within the
     QuKaiZen ecosystem. Apache 2.0 licensed (Gemma base).
 
@@ -77,7 +77,7 @@ corpus:
       exclude_patterns: ["**/data/", "**/.git/", "**/node_modules/"]
 
     - type: project_repo
-      path: /Users/netsushi/ProJects/qukaizen-dac
+      path: /Users/netsushi/ProJects/qukaizen-ddac
       description: "Data as Code infrastructure - versioning, reproducibility"
       include_patterns: ["*.py", "*.md", "*.yaml"]
       exclude_patterns: ["**/data/", "**/.git/"]

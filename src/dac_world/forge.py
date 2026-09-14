@@ -3,7 +3,7 @@ pipeline: SPEC -> SEED -> DISCOVER BFS -> LINK -> DEFINE -> CLOSE -> GATE).
 
 Moved from qukaizen-arail's ``src/arail/world_forge.py`` as part of the
 ``dac_world`` migration — see
-``sprints/2026-07-19-dac-generates-arail-worlds/ARCHITECTURE.md`` (qukaizen-dac).
+``sprints/2026-07-19-dac-generates-arail-worlds/ARCHITECTURE.md`` (qukaizen-ddac).
 
 Framework-free by design: sync functions, injectable router, tolerant
 never-raise model-output parsing. The caller (ARAIL's portal layer) owns
@@ -30,7 +30,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
-from .gate import GateRefused, GateResult, assert_closed_sourced_graph
+from .gate import EDGE_TYPES, GateRefused, GateResult, _edge_target, assert_closed_sourced_graph, make_edge
 from .parsing import first_array, loose_json, slugify
 from .provenance import _MODEL_SOURCE_RE, compute_provenance_tier
 from .skill import estimate_skill_chars
@@ -210,20 +210,30 @@ def forge_world(
 
     # 3b. LINK — connect every term to the EXISTING set: dense AND closed by
     # construction (edges only ever point at known slugs).
+    # Typed edges (ADR-0016 D4): the model is asked for {slug, rel} objects against
+    # the closed EdgeType enum; a bare slug or an undeclared rel degrades to a bare
+    # slug (== "related" to every reader). Nothing here can invent an edge type.
     roster = ", ".join(f"{t['slug']} ({t['term']})" for t in terms.values())
+    rel_menu = "|".join(sorted(EDGE_TYPES))
     for i, t in enumerate(terms.values()):
         r = call_model(
             f'Subject: "{p.subject}". From THIS list of known concepts:\n{roster}\n'
-            f'Return JSON array "related" of the slugs most directly associated with '
-            f'"{t["term"]}" (up to {MAX_RELATED_PER_TERM}, choose ONLY slugs from the list, '
-            f'exclude "{t["slug"]}").',
+            f'Return JSON array "related" of objects {{"slug": <slug>, "rel": <one of {rel_menu}>}} '
+            f'for the concepts most directly associated with "{t["term"]}" '
+            f'(up to {MAX_RELATED_PER_TERM}, choose ONLY slugs from the list, exclude "{t["slug"]}"). '
+            f'"rel" is the relationship of "{t["term"]}" TO the listed concept: '
+            f'prerequisite-of (must be understood first), part-of (is a component of), '
+            f'implements (realizes), contrasts-with (is commonly confused with), '
+            f'used-by (is applied by), related (associated, none of the above).',
             temperature=0.1,
         )
         items = first_array((r or {}).get("related", r) if isinstance(r, dict) else r)
+        have = {_edge_target(e) for e in t["related"]}
         for x in items[:MAX_RELATED_PER_TERM]:
             s = slugify(str(x.get("slug") or x.get("term") or x)) if isinstance(x, dict) else slugify(str(x))
-            if s in terms and s != t["slug"] and s not in t["related"]:
-                t["related"].append(s)
+            if s in terms and s != t["slug"] and s not in have:
+                t["related"].append(make_edge(s, x.get("rel") if isinstance(x, dict) else None))
+                have.add(s)
         progress("link", i + 1, len(terms), "")
 
     # 4. DEFINE — prose per term.
@@ -258,7 +268,8 @@ def forge_world(
     # 5. CLOSE — drop dangling/self edges (belt and suspenders for the gate).
     present = set(terms.keys())
     for t in terms.values():
-        t["related"] = [s for s in t["related"] if s in present and s != t["slug"]]
+        t["related"] = [e for e in t["related"]
+                        if _edge_target(e) in present and _edge_target(e) != t["slug"]]
 
     term_list = list(terms.values())
     gate = assert_closed_sourced_graph(term_list, declared)

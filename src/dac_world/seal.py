@@ -2,7 +2,7 @@
 
 Moved from qukaizen-arail's ``src/arail/world_forge.py`` as part of the
 ``dac_world`` migration — see
-``sprints/2026-07-19-dac-generates-arail-worlds/ARCHITECTURE.md`` (qukaizen-dac).
+``sprints/2026-07-19-dac-generates-arail-worlds/ARCHITECTURE.md`` (qukaizen-ddac).
 
 **Delta from the moved code:** the original ``_build_face`` did
 ``from arail.world_theme import parse_world_theme`` inline to hard-validate

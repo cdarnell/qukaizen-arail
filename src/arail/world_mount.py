@@ -1773,13 +1773,13 @@ def get_mounted_dict_terms(record: MountRecord) -> List[Dict[str, Any]]:
     return [term_to_dict_entry(t) for t in raw]
 
 
-# ── Shipped-bundle verification (vendored qukaizen-dac exports) ──────────────
+# ── Shipped-bundle verification (vendored qukaizen-ddac exports) ──────────────
 
 
 def verify_shipped_worlds(worlds_dir: Path | None = None) -> List[Dict[str, Any]]:
     """Run the full verify ladder over every bundle dir in the catalog.
 
-    Shipped Worlds are sealed qukaizen-dac exports committed into the repo;
+    Shipped Worlds are sealed qukaizen-ddac exports committed into the repo;
     this is the single-repo-install integrity check. Never raises. Returns one
     result dict per bundle dir: {"slug", "path", "ok", "reason", "terms",
     "seal"} — ``slug`` falls back to the dir name when the manifest is
@@ -1825,7 +1825,7 @@ def verify_shipped_worlds(worlds_dir: Path | None = None) -> List[Dict[str, Any]
 _VERIFY_SHIPPED_REMEDY = (
     "Shipped bundles are committed to git — restore with "
     "`git checkout -- lab/worlds/<slug>`. Do not hand-edit sealed files; "
-    "resealing lives upstream in qukaizen-dac (portal term edits reseal "
+    "resealing lives upstream in qukaizen-ddac (portal term edits reseal "
     "properly on their own)."
 )
 
@@ -1977,7 +1977,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # verify-shipped
     p_vs = sub.add_parser(
         "verify-shipped",
-        help="Verify every vendored bundle in lab/worlds/ (sealed qukaizen-dac exports)",
+        help="Verify every vendored bundle in lab/worlds/ (sealed qukaizen-ddac exports)",
     )
     p_vs.add_argument("--examples", action="store_true",
                       help="Also verify the demo bundles in examples/worlds/")

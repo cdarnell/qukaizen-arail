@@ -30,9 +30,9 @@ scanned catalog directory.
 ## Provenance
 
 Like the catalog defaults, these are sealed exports from the sibling
-**qukaizen-dac** repo (the offline authoring press), vendored into ARAIL and
+**qukaizen-ddac** repo (the offline authoring press), vendored into ARAIL and
 committed to git. Nothing is fetched at install time — a single ARAIL download
-contains every World dependency; qukaizen-dac is dev-time only. Check their
+contains every World dependency; qukaizen-ddac is dev-time only. Check their
 seals anytime with `./arailctl world verify-shipped --examples`. See
 `lab/worlds/README.md` for the full vendoring contract.
 

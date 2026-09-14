@@ -881,7 +881,7 @@ install_services() {
         # than the 1B for technical Worlds like physics). OFF by default — fires only
         # with ARAIL_DEFAULT_GEMMA=1 AND once BOTH gates land:
         #   G1: a real models/ai-eng/Modelfile.gemma (no __PLACEHOLDER__) + the Gemma
-        #       base, from the qukaizen-dac / Gemma POC session.
+        #       base, from the qukaizen-ddac / Gemma POC session.
         #   G2: the "Built with Gemma" disclosure
         #       (sprints/2026-06-14-world-model-hint/handoff/gemma-disclosure-checklist.md).
         # Until then this is a NO-OP and the default stays llama-ai-eng (below).
@@ -2358,7 +2358,7 @@ verify() {
         error "Inspect setup.log and re-run: ./arailctl setup"
     fi
 
-    # Integrity check of the vendored World bundles (sealed qukaizen-dac
+    # Integrity check of the vendored World bundles (sealed qukaizen-ddac
     # exports committed into lab/worlds/ — the single-repo install includes
     # them; nothing is fetched). A corrupt bundle must not brick setup: the
     # lab runs fine World-less and the picker omits broken bundles.

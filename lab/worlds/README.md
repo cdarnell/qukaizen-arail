@@ -9,13 +9,13 @@ directly.
 ## Provenance — where these come from
 
 The default bundles (`ai`, `qukaizen`) are authored and sealed upstream in the
-sibling **qukaizen-dac** repo — the offline curation press — and their exported
+sibling **qukaizen-ddac** repo — the offline curation press — and their exported
 bytes are **vendored into this repo and committed to git**.
 
 That means the coupling is by vendoring, not by fetching:
 
 - **Single-repo install, guaranteed.** Downloading ARAIL gives you every World
-  dependency. qukaizen-dac is dev-time only — it is never fetched, never a
+  dependency. qukaizen-ddac is dev-time only — it is never fetched, never a
   submodule, never imported at runtime.
 - **Airgapped-friendly by construction.** An airgapped lab's fundamental
   domain terms come from these in-box bundles; the research material is
@@ -23,14 +23,14 @@ That means the coupling is by vendoring, not by fetching:
 
 | Bundle | Display name | Terms | Provenance tier | Source |
 |--------|--------------|-------|-----------------|--------|
-| `ai` | AI & Machine Learning | 331 | sourced | qukaizen-dac export |
-| `qukaizen` | QuKaiZen | 32 | sourced | qukaizen-dac export |
+| `ai` | AI & Machine Learning | 331 | sourced | qukaizen-ddac export |
+| `qukaizen` | QuKaiZen | 32 | sourced | qukaizen-ddac export |
 | `video-games` | Video Games | 69 | sourced | in-repo forge (`scripts/forge_video_games_world.py`) |
 
 `video-games` is authored a third way: its inputs live in
 `scripts/worlds_src/video-games/` (reviewable JSON + a persona markdown file,
 committed) and its sealed bytes are produced by the same shared `dac_world`
-sealer the qukaizen-dac exporter uses — re-exported in-repo as
+sealer the qukaizen-ddac exporter uses — re-exported in-repo as
 `arail.world_forge` — via a committed script, no vendoring step. Same format,
 same seal.
 
@@ -59,7 +59,7 @@ picker until restored.
 - Term edits made **through the portal** are fine — they re-seal properly via
   `world_forge.reseal_bundle`.
 - Official upstream updates arrive as whole-bundle replacements from the
-  qukaizen-dac export pipeline; this README lives outside the bundle dirs so
+  qukaizen-ddac export pipeline; this README lives outside the bundle dirs so
   re-exports never conflict with it.
 - Worlds you forge in-lab are sealed by ARAIL's own `world_forge` and need no
   upstream at all.
@@ -72,6 +72,6 @@ picker until restored.
   `tests/test_default_worlds_catalog.py` fails if they ever go missing.
 
 > Naming note: new user-facing copy standardizes on **"Documentation as Code
-> (DaC)"** (as the shipped `qukaizen` World defines it). qukaizen-dac's own
+> (DaC)"** (as the shipped `qukaizen` World defines it). qukaizen-ddac's own
 > CLAUDE.md still says "Declarative-as-Code" — reconcile upstream at the next
 > reseal.

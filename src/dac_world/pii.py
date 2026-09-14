@@ -1,7 +1,7 @@
 """Tier-0 PII-leak gate — record-instance identifiers never become terms.
 
 The vault design's F12 / acceptance A5 (``docs/endgame/vault-and-pq.md``,
-qukaizen-dac): the *derivation* of a term from a sensitive record is fine —
+qukaizen-ddac): the *derivation* of a term from a sensitive record is fine —
 a W-2 legitimately creates the "wage-and-tax-boxes" vocabulary — but a
 **record-instance value** (this user's SSN, EIN, account number) must never
 land in a Tier-0 term, because Tier-0 is the shareable, cleartext bundle.

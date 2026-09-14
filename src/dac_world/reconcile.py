@@ -3,7 +3,7 @@
 
 Moved from qukaizen-arail's ``src/arail/world_forge.py`` as part of the
 ``dac_world`` migration — see
-``sprints/2026-07-19-dac-generates-arail-worlds/ARCHITECTURE.md`` (qukaizen-dac).
+``sprints/2026-07-19-dac-generates-arail-worlds/ARCHITECTURE.md`` (qukaizen-ddac).
 
 Not named in ARCHITECTURE.md's illustrative package-layout list (which names
 only ``forge``/``gate``/``provenance``/``seal``/``skill``/``validate``), but
@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from .forge import MAX_DEFINITION, MAX_EXAMPLE, MAX_RELATED_PER_TERM, MAX_SHORT
+from .gate import EDGE_TYPES, make_edge
 from .parsing import first_array, loose_json, slugify
 
 _log = logging.getLogger(__name__)
@@ -64,12 +65,24 @@ def apply_corrections(
                             "before": t.get("category"), "after": f.better_category, "note": f.note})
             t["category"] = f.better_category
         if f.bad_edges:
-            kept = [e for e in (t.get("related") or []) if e not in f.bad_edges]
+            # Edges may be bare slugs or typed {slug, rel} objects (RelatedEdge,
+            # src/types.ts); compare by target slug so a typed bad edge is unlinked too.
+            kept = [e for e in (t.get("related") or []) if _edge_slug(e) not in f.bad_edges]
             if kept != (t.get("related") or []):
                 changes.append({"slug": f.slug, "kind": "unlink", "field": "related",
                                 "before": list(t.get("related") or []), "after": kept, "note": f.note})
                 t["related"] = kept
     return terms, changes
+
+
+def _edge_slug(edge: Any) -> str:
+    """Target slug of a related edge — bare string or typed {slug, rel} object
+    (ADR-0016 D4: the forge and reconcile stages must tolerate both)."""
+    if isinstance(edge, str):
+        return edge.strip()
+    if isinstance(edge, dict) and isinstance(edge.get("slug"), str):
+        return edge["slug"].strip()
+    return ""
 
 
 def _grow_source_tag(resp: Any) -> str:
@@ -158,22 +171,29 @@ def propose_new_terms(
     all_slugs = existing | new_slugs
     if new:
         roster2 = ", ".join(f"{t['slug']} ({t['term']})" for t in (terms + new))
+        rel_menu = "|".join(sorted(EDGE_TYPES))
         for t in new:
             if cancel is not None and cancel.is_set():
                 break
             try:
                 r = router.complete(
                     f'Subject: "{subject}". From THIS list of known concepts:\n{roster2}\n'
-                    f'Return JSON array "related" of the slugs most directly associated with '
-                    f'"{t["term"]}" (up to {MAX_RELATED_PER_TERM}, choose ONLY slugs from the list, '
-                    f'exclude "{t["slug"]}").', max_tokens=200, temperature=0.1)
+                    f'Return JSON array "related" of objects {{"slug": <slug>, "rel": <one of {rel_menu}>}} '
+                    f'for the concepts most directly associated with "{t["term"]}" '
+                    f'(up to {MAX_RELATED_PER_TERM}, choose ONLY slugs from the list, exclude "{t["slug"]}"). '
+                    f'"rel" is the relationship of "{t["term"]}" TO the listed concept: '
+                    f'prerequisite-of, part-of, implements, contrasts-with, used-by, or related.',
+                    max_tokens=300, temperature=0.1)
             except Exception:  # noqa: BLE001
                 continue
-            rel: list[str] = []
+            # Typed edges (ADR-0016 D4): keep a declared rel, degrade anything else to a bare slug.
+            rel: list[Any] = []
+            seen: set[str] = set()
             for x in first_array(loose_json(getattr(r, "text", "") or ""))[:MAX_RELATED_PER_TERM]:
                 rs = slugify(str(x.get("slug") if isinstance(x, dict) else x))
-                if rs in all_slugs and rs != t["slug"] and rs not in rel:
-                    rel.append(rs)
+                if rs in all_slugs and rs != t["slug"] and rs not in seen:
+                    rel.append(make_edge(rs, x.get("rel") if isinstance(x, dict) else None))
+                    seen.add(rs)
             t["related"] = rel
     return new
 
@@ -223,7 +243,7 @@ def reconcile_terms(
         better = slugify(str(verdict.get("better_category") or ""))
         if better not in declared:
             better = ""
-        related = set(t.get("related") or [])
+        related = {_edge_slug(e) for e in (t.get("related") or [])} - {""}
         bad_edges = [s for s in (slugify(str(x)) for x in (verdict.get("bad_edges") or [])
                                  if isinstance(x, str)) if s in related]
         if correct and cat_ok and not bad_edges:

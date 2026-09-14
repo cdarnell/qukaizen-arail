@@ -4,7 +4,7 @@ Asserts ``import dac_world`` succeeds with the pinned/editable version, and
 that the ``world_forge`` shim re-exports exactly the public names ARAIL's
 portal/librarian_scout/world_sources/test suite actually import — a
 regression net for the shim itself, independent of dac_world's own test
-suite (which lives in qukaizen-dac).
+suite (which lives in qukaizen-ddac).
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ def test_dac_world_importable():
 
 def test_world_forge_shim_reexports_expected_names():
     # Grepped from every `wf.<name>` / `from arail.world_forge import <name>`
-    # call site in src/ and tests/ (see qukaizen-dac's BUILD_LOG.md step 6).
+    # call site in src/ and tests/ (see qukaizen-ddac's BUILD_LOG.md step 6).
     expected = {
         "BUNDLE_SCHEMA", "FORGE_STAGES", "MAX_DEFINITION", "MAX_EXAMPLE",
         "MAX_RELATED_PER_TERM", "MAX_SHORT", "MAX_TERMS_SOFT", "SEALED_FILES",

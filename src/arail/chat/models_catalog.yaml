@@ -45,7 +45,7 @@
 # ── Gemma 2B generalist — the STAGED minimalist default-floor (Phase B, DORMANT) ──
 # A ~2B Gemma generalist: a stronger default brain than the 1B for technical
 # Worlds (physics/math). DORMANT until G1 (weights + models/ai-eng/Modelfile.gemma
-# from the qukaizen-dac / Gemma POC session) and G2 ("Built with Gemma" disclosure
+# from the qukaizen-ddac / Gemma POC session) and G2 ("Built with Gemma" disclosure
 # — see sprints/2026-06-14-world-model-hint/handoff/gemma-disclosure-checklist.md).
 # Listed as `optional` until armed; the setup.sh ARAIL_DEFAULT_GEMMA=1 path is a
 # no-op until the real Modelfile.gemma (no __PLACEHOLDER__) exists. When armed:

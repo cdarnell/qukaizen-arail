@@ -4,7 +4,7 @@ This package is the single generator for ``dac.world-bundle/v1`` bundles.
 qukaizen-arail imports it at runtime (an intentional, human-approved
 reversal of the prior "no cross-repo runtime imports" stance — see
 ``sprints/2026-07-19-dac-generates-arail-worlds/ARCHITECTURE.md`` in
-qukaizen-dac for the full rationale, assumptions, and failure modes).
+qukaizen-ddac for the full rationale, assumptions, and failure modes).
 
 Everything under this package is pure and stdlib-only: no model calls of
 its own (a caller-supplied ``router`` object is required), no filesystem

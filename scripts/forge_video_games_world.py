@@ -6,7 +6,7 @@ reviewable source of truth; the sealed bundle in ``lab/worlds/video-games/``
 is this script's output and is committed alongside them.
 
 Unlike the ``ai`` and ``qukaizen`` defaults — which are authored and sealed
-upstream in the sibling qukaizen-dac repo and vendored in — this World is
+upstream in the sibling qukaizen-ddac repo and vendored in — this World is
 authored IN THIS REPO and sealed by the same shared ``dac_world`` sealer
 (re-exported as ``arail.world_forge``). Same format, same seal, no vendoring.
 

@@ -3,7 +3,7 @@ category, closed related-graph.
 
 Moved verbatim from qukaizen-arail's ``src/arail/world_forge.py`` as part of
 the ``dac_world`` migration — see
-``sprints/2026-07-19-dac-generates-arail-worlds/ARCHITECTURE.md`` (qukaizen-dac).
+``sprints/2026-07-19-dac-generates-arail-worlds/ARCHITECTURE.md`` (qukaizen-ddac).
 """
 
 from __future__ import annotations
@@ -28,12 +28,32 @@ class GateRefused(Exception):
         self.gate = gate
 
 
+# The closed EdgeType enum of DDaC's ``src/types.ts`` — the only relationship
+# types a World may carry. The forge/reconcile stages keep a model-proposed
+# ``rel`` only when it is in this set; anything else degrades to a bare slug,
+# which every reader treats as "related" (ADR-0016 D4).
+EDGE_TYPES: frozenset[str] = frozenset(
+    {"prerequisite-of", "part-of", "implements", "contrasts-with", "used-by", "related"}
+)
+
+
 def _edge_target(edge: Any) -> str:
+    """Target slug of a related edge — a bare slug string or a typed
+    ``{slug, rel}`` object (``RelatedEdge`` in ``src/types.ts``)."""
     if isinstance(edge, str):
         return edge.strip()
     if isinstance(edge, dict) and isinstance(edge.get("slug"), str):
         return edge["slug"].strip()
     return ""
+
+
+def make_edge(slug: str, rel: Any) -> Any:
+    """Build a related edge from a slug and a (possibly missing/invalid) rel:
+    a typed ``{slug, rel}`` object when ``rel`` is a declared EdgeType, else the
+    bare slug. Never invents a type the vocabulary did not declare."""
+    if isinstance(rel, str) and rel.strip() in EDGE_TYPES:
+        return {"slug": slug, "rel": rel.strip()}
+    return slug
 
 
 def assert_closed_sourced_graph(terms: list[dict], declared: set[str]) -> GateResult:

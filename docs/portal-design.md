@@ -148,5 +148,5 @@ transform/opacity/box-shadow, ≤ `--dur-3`, behind `prefers-reduced-motion`
   both sides of the DaC contract.
 - **New personality**: closed table by design — add to
   `ui_theme.PERSONALITIES` + `_PERSONALITY` + the DaC mirror
-  (`qukaizen-dac/src/arail-export/theme.ts`), with a schema bump per
+  (`qukaizen-ddac/src/arail-export/theme.ts`), with a schema bump per
   ADR-0004.

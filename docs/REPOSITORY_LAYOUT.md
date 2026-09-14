@@ -116,7 +116,7 @@ Separate the repo into four concerns:
 
 The World catalog (`lab/worlds/` — the shipped `ai` and `qukaizen` defaults)
 and the demos in `examples/worlds/` are **seed content committed to git**:
-sealed qukaizen-dac exports vendored into this repo so a single ARAIL
+sealed qukaizen-ddac exports vendored into this repo so a single ARAIL
 download carries every World dependency (no fetch, no submodule). Integrity
 is checked by `./arailctl world verify-shipped`; see `lab/worlds/README.md`
 for the full vendoring contract.

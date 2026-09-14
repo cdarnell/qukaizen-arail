@@ -1,9 +1,9 @@
 """Cross-repo golden-bundle parity test (Failures F2/F9) — ARAIL side.
 
-Mirror of qukaizen-dac's ``tests/python/test_golden_bundle_parity.py``.
-``tests/fixtures/golden-bundle/`` here is byte-identical to qukaizen-dac's
+Mirror of qukaizen-ddac's ``tests/python/test_golden_bundle_parity.py``.
+``tests/fixtures/golden-bundle/`` here is byte-identical to qukaizen-ddac's
 ``tests/python/fixtures/golden-bundle/`` (both committed, not generated at
-test time — see BUILD_LOG.md step 7 in qukaizen-dac's sprint folder for how
+test time — see BUILD_LOG.md step 7 in qukaizen-ddac's sprint folder for how
 they were produced). This test asserts:
 
 1. The golden fixture round-trips ARAIL's own consumer
@@ -13,7 +13,7 @@ they were produced). This test asserts:
    through ``dac_world`` via the shim, exactly as ARAIL's portal would call
    it) with the same pinned spec/terms/``created_at`` is byte-identical to
    the committed fixture — proving the shim doesn't silently diverge from
-   what qukaizen-dac itself would emit.
+   what qukaizen-ddac itself would emit.
 """
 
 from __future__ import annotations

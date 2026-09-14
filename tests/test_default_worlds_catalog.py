@@ -83,7 +83,7 @@ def test_qukaizen_graph_is_closed_and_connected():
 
 
 def test_ai_world_seals():
-    # The other shipped default — vendored qukaizen-dac export, seal intact.
+    # The other shipped default — vendored qukaizen-ddac export, seal intact.
     assert wm.verify_seal(wm.load_bundle(CATALOG / "ai")).ok
 
 

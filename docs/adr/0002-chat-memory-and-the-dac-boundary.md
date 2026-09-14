@@ -38,7 +38,7 @@ conversation survives navigation, including an in-flight response), and durable 
 (a retained record the lab's agents can use to understand the user across sessions).
 
 The request was that this data be "governed by DaC" — the sibling QuKaiZen project
-(`~/ProJects/qukaizen-dac`), which the workspace describes as the declarative layer for what
+(`~/ProJects/qukaizen-ddac`), which the workspace describes as the declarative layer for what
 agents know and can say. Taking that literally would mean routing per-user conversation
 history through DaC's pipeline. Investigation showed that would fight DaC's design rather than
 extend it, so the boundary needs to be recorded explicitly — otherwise the next sprint
@@ -88,7 +88,7 @@ that cross it. The split recorded here *is* that positioning applied honestly.
 
 > **Citation caveat (rev. 2026-07-17; supersedes the 2026-07-16 note).** Treat the filename above
 > as a snapshot. Resolve that record by its **slug**:
-> `git -C ~/ProJects/qukaizen-dac ls-files 'docs/adr/*dac-positioning*'`.
+> `git -C ~/ProJects/qukaizen-ddac ls-files 'docs/adr/*dac-positioning*'`.
 >
 > The prior note said the record was untracked, and advised citing it "by *filename*, not by
 > number." Both halves have been overtaken. It was committed on 2026-07-16 (DaC `dc729cc`), and it

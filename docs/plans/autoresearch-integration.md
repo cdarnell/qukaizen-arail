@@ -6,7 +6,7 @@
 > revert-on-loss loop work for someone over the long term; is this all
 > private git workspaces; and how do we have DDaC without our own git
 > layer. Every claim below is anchored to a file and line in this repo
-> (or in `qukaizen-dac`).
+> (or in `qukaizen-ddac`).
 >
 > The headline finding is not any of the five hazards this audit set out
 > to catalogue. It is **H0**: the loop could not complete a single pass,
@@ -227,9 +227,9 @@ tok/s numbers measured on different hardware).
 Because **DDaC never used git as its integrity or addressing layer.**
 This is the key correction to the framing of the question.
 
-- `qukaizen-dac/dac_world/seal.py` is the entire sealer and imports only
+- `qukaizen-ddac/dac_world/seal.py` is the entire sealer and imports only
   stdlib (`hashlib, json, os, shutil, datetime, pathlib`). A grep for
-  `git` across `qukaizen-dac`'s `src/`, `dac_world/`, and `scripts/`
+  `git` across `qukaizen-ddac`'s `src/`, `dac_world/`, and `scripts/`
   returns only the substring inside "logit". **Zero git dependency in
   the pipeline.**
 - The seal is `sha256(exact bytes)` per file, over six sealed files,

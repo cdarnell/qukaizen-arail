@@ -26,7 +26,7 @@ supersedes it.
 
 > **ADR numbers are not unique across this workspace.** ARAIL's own sequence starts
 > at 0001. A bare `ADR-0005` / `ADR-0006` in some build scripts and research notes
-> belongs to the sibling **aerollm** repo. The sibling **qukaizen-dac** repo runs a
+> belongs to the sibling **aerollm** repo. The sibling **qukaizen-ddac** repo runs a
 > third sequence that collides with both — two of its committed records even share
 > `0004`. So cite across repos by **repo + filename slug**, never by number alone:
 > DaC renumbered its positioning record 0005 → 0006 on landing, which silently

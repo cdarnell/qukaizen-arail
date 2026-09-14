@@ -241,7 +241,7 @@ parts.
   `dac_world`.** World generation's core code (`forge_world`/`write_bundle`/
   `reseal_bundle`/`render_world_skill`/`validate_bundle_content`) moved out of
   this repo's `src/arail/world_forge.py` into a vendored copy of DaC-owned code
-  (`src/dac_world/`, copied from `qukaizen-dac`'s `dac_world/`, per ADR-0004);
+  (`src/dac_world/`, copied from `qukaizen-ddac`'s `dac_world/`, per ADR-0004);
   `world_forge.py` is a thin re-export shim over it. This is a deliberate,
   narrow reversal of the boundary ADR-0002 guards for chat memory — it applies
   **only** to `dac_world` (World forging/sealing), not to chat memory or any

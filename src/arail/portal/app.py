@@ -1011,7 +1011,7 @@ async def _startup():
     asyncio.create_task(_init_knowledge_canvas())
 
     # Advisory integrity check of the vendored World bundles (sealed
-    # qukaizen-dac exports committed into lab/worlds/). Loud on failure,
+    # qukaizen-ddac exports committed into lab/worlds/). Loud on failure,
     # never blocks startup — mount() and /api/worlds already fail safe.
     async def _check_shipped_worlds():
         try:

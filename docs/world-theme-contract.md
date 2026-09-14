@@ -1,10 +1,10 @@
 # World Theme Contract — `dac.world-theme/v1`
 
 > The cross-repo contract for World-shipped UI themes. Producer:
-> `qukaizen-dac` (`scripts/export-bundle.mts` + `src/arail-export/theme.ts`).
+> `qukaizen-ddac` (`scripts/export-bundle.mts` + `src/arail-export/theme.ts`).
 > Consumer: ARAIL (`src/arail/world_theme.py` → `src/arail/identity.py` →
 > the `inject_ui_theme` middleware). Sibling of the mount contract in
-> qukaizen-dac's `docs/adr/0004-dac-arail-mount-contract.md`; per that ADR,
+> qukaizen-ddac's `docs/adr/0004-dac-arail-mount-contract.md`; per that ADR,
 > **DaC owns the format, ARAIL only reads.**
 
 ## What it is
@@ -32,7 +32,7 @@ never blocks a mount** — the World mounts with the fallback look.
 
 ## Validation rules (enforced twice, identically)
 
-Enforced at **export time** by qukaizen-dac (`validateWorldTheme` — a hard
+Enforced at **export time** by qukaizen-ddac (`validateWorldTheme` — a hard
 export failure with an author-actionable message) and at **mount/request
 time** by ARAIL (`parse_world_theme` — fail-closed to fallback):
 
