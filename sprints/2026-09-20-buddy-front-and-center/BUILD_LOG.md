@@ -943,7 +943,7 @@ production fix.
 - Real `DATA_DIR`: no `agent_traces.jsonl` / `flight_recorder.json` /
   `legacy_bodies_notice.json` after either run.
 
-Commit: `pending`
+Commit: `1bedf165`
 
 ## Final state
 
