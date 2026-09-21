@@ -43,7 +43,7 @@ aerollm-named integration surface.
 | Phase | Subagent | Artifact | Status | Started | Finished | Verdict |
 |---|---|---|---|---|---|---|
 | think | visionary | VISION.md | done | 2026-09-21 12:49 | 2026-09-21 13:00 | **proceed** — conditional on four cuts (commit `2884569f`) |
-| plan | architect (design) | ARCHITECTURE.md | pending | — | — | — |
+| plan | architect (design) | ARCHITECTURE.md | in progress | 2026-09-21 13:10 | — | — |
 | build | builder | BUILD_LOG.md | pending | — | — | — |
 | review | architect (review) | REVIEW.md | pending | — | — | — |
 | test | qa | TEST_REPORT.md | pending | — | — | — |
@@ -57,6 +57,11 @@ aerollm-named integration surface.
 | 2026-09-21 | Work in a dedicated worktree cut from main, not the main checkout | Main checkout is on the QA-failed `qukaizen/arail-ingress-spine` branch with the operator's uncommitted work; main also carries the `_normalize_keep_alive` resident-pin fix that older branches lack. |
 | 2026-09-21 | No push, no PR until the operator says so | Ship is an explicit confirmation step. |
 | 2026-09-21 | Visionary narrowed P1 from six deliverables to four + one counter | Wedge = trace + per-agent attribution at the existing `ModelRouter.complete/stream_complete` chokepoint · one shrunken Admin lane view · the kill switch made real · the flight recorder as a *reduction* of default capture · a read-only slot-overlap counter. **Cut/deferred:** the inference gateway (≈11 acquisition sites not ≈5, four non-agent, one out-of-process — the riskiest refactor would land with no telemetry, "D18 violated in the name of D18"), per-agent budgets (unenforceable without the gateway, no data to set numbers), the typed-action scaffold (no consumer until P5), and the control room's scrub/conveyor/gauges. Recommendation reverts to *defer* if the gateway re-enters this sprint. |
+| 2026-09-21 | **Operator accepted the gateway cut** | P1 = tracing + attribution at the existing chokepoint, one Admin lane view, a real kill switch, flight recorder, overlap counter. The gateway becomes its own sprint, built with telemetry already in place. Visionary's "proceed" stands. |
+| 2026-09-21 | **OQ1 — flight recorder defaults OFF** (operator) | Fresh lab captures metadata only; the Prompt Inspector shows an empty state ("flight recorder off — flip to capture prompt bodies"). No redacted-by-default middle setting, no per-operator env override. |
+| 2026-09-21 | **OQ3 — "hold all agents": SRE keeps watching but stops calling models** (operator) | Hold stops every agent's inference and speech, including SRE's LLM-written summaries; SRE's non-LLM crash detection keeps running and may raise a plain template alert. The switch must state this in the UI. |
+| 2026-09-21 | **OQ2 — per-agent budgets deferred** (operator) | No hard ceiling in P1. Budgets land next sprint with traced usage behind the numbers. |
+| 2026-09-21 | OQ4 — lane roster: fixed list of model-calling built-ins; user-defined loader agents render as a generic lane | Visionary's recommendation; first-class user-defined lanes are unbounded. Orchestrator decision, revisitable in build. |
 
 ## Skipped phases
 
