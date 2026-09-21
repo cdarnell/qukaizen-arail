@@ -703,6 +703,135 @@ None of the six changed an interface contract, blocked a later slice, or
 was worked around silently — every one is named in code comments and in
 this log at the point it was found.
 
+## Post-handoff defect: the new test suite was not hermetic
+
+**Filed 2026-09-21, after the S0-S7 handoff above, per orchestrator
+verification.** The "all passing, 0 regressions" claims above were true
+only for a first run on a clean tree — the suite passed once and failed
+on a second run, and (independently) had been silently writing into the
+developer's real, git-ignored `lab/data/` the entire time. Both are fixed
+below, in the same worktree, same sprint, no scope drift. **Correction to
+the record above: "0 regressions" and "all passing" must be read as "on a
+first, isolated run" — this section is the honest account of what a
+second run and a disk audit actually found.**
+
+### Root cause #1 — why `test_agents_status_v7_tokens.py` failed on a second run, even alone
+
+Not a production bug, not an F14-class per-instance-data-root issue —
+verified specifically because the orchestrator asked. In production,
+`activity.py`'s module-level `LOG_FILE` constant and its `ActivityLog`
+singleton are bound once per **process**, and each concurrent World
+instance is its own process (`docs/concurrent-worlds.md`) with its own
+correct `DATA_DIR` already live at that process's import time. There is
+no cross-instance leak in production.
+
+The leak is test-only, and specific to this fixture pattern: `activity.py`
+deliberately does **not** resolve `DATA_DIR` lazily the way `agent_trace.py`
+/ `redact.py` / `scheduler.py` do (`agent_trace.py`'s own module docstring
+already names this: *"unlike activity.py:22 — that constant is why
+activity tests need gymnastics"*). `LOG_FILE` is bound once, and the
+`activity_log = ActivityLog()` singleton every other module imports by
+reference (`from arail.activity import activity_log`) is constructed once
+— both at whatever `config.DATA_DIR` was live the first time `arail.
+activity` was imported in the process, typically during pytest collection,
+before any test's own fixture runs. `GET /api/agents/status`'s V7 fix
+(S6) reads `activity_log.recent()` as its fallback for an agent with no
+trace yet — that fallback was reading the **real, accumulated**
+`lab/data/activity.jsonl` this whole build tail-read into memory at
+collection time, which is exactly why `tokens_out` came back `3`
+(a real leftover "researcher" entry) instead of `0`, in a test that
+"alone" looked like it should be pristine.
+
+An earlier attempt at this fix (`ActivityLog._instance = None`) was a
+no-op: that only affects a *future* `ActivityLog()` call, and nothing in
+the codebase makes one after the first import — every module's `activity_
+log` reference still points at the original object. The fix that actually
+works mutates that object's buffer in place, the same technique `tests/
+test_autoresearch_e2e_fake_aerollm.py`'s local `_fresh_events()` helper
+already uses.
+
+### Structural guard added
+
+One new autouse fixture, `_isolated_agent_observability_data_root` in
+`tests/conftest.py`, alongside the repo's existing `_no_ambient_halt_flag`
+/ `_no_ambient_window_override` family (same file, same pattern, same
+"clear ambient state so tests can't see the developer's real lab"
+rationale — not a second, competing isolation mechanism):
+
+1. Monkeypatches `config.DATA_DIR` to a fresh `tmp_path` for **every**
+   test — covers `agent_trace.py`'s and `redact.py`'s and `scheduler.py`'s
+   `halt.json`/`flight_recorder.json` disk paths for free, since all three
+   already resolve `DATA_DIR` lazily by design.
+2. Monkeypatches `activity.LOG_FILE` to the same `tmp_path` and clears
+   `activity_log._buffer` in place, before and after every test.
+3. Resets `agent_context`/`agent_trace` in-memory state before and after
+   every test.
+4. Pre-seeds `tmp_path / ".world-prompt-seen"` — a companion fix this
+   redirect itself required (see below), not a new concern.
+
+**Deliberately does not touch `costs.json`.** `CostTracker`'s singleton
+binds `_data_path` once, at its own construction (also import time), and
+this sprint added no new `cost_tracker.track()` call site — only changed
+the `source=` value an existing call already used. `grep -rn "costs.json"
+tests/conftest.py` before this fix: zero hits — **the existing suite
+already leaks `costs.json` into the real `lab/data/`, pre-existing, not
+widened by this sprint, not fixed here** (per the orchestrator's own
+fallback instruction). Confirmed real: `lab/data/costs.json` predates this
+build and nothing in the fix above touches it.
+
+**A second, real regression this fix itself introduced and had to be
+caught and fixed in the same pass:** redirecting `DATA_DIR` to an
+always-empty `tmp_path` made `portal/app.py`'s one-shot World nudge
+(`_world_prompt_pending()`, checks `DATA_DIR/.world-prompt-seen`) fire on
+every page-rendering test that doesn't have its own opinion about it —
+those tests had been unknowingly relying on the developer's real, already-
+dismissed marker to see the normal dashboard chrome instead of the nudge.
+Caught by `tests/portal/test_base_template_smoke.py::test_page_has_shared_
+nav[/]` going from passing to failing the moment the DATA_DIR redirect
+landed. Fixed by pre-seeding the marker in the same fixture (step 4 above)
+— tests that deliberately want the marker absent
+(`tests/test_world_first_impression.py`, `tests/test_world_reset.py`)
+already monkeypatch `_world_prompt_marker` directly, which wins regardless
+of `DATA_DIR`, so they are unaffected.
+
+**Regression test added:** `tests/test_zzz_data_root_hermeticity.py` — the
+`zzz` prefix is deliberate (pytest's default alphabetical collection order
+runs it near the end of a session, after everything else has had a chance
+to pollute). Captures `config.DATA_DIR` at *module import* time (before
+any fixture can redirect it) as `_REAL_DATA_DIR`, then asserts
+`agent_traces.jsonl`, `agent_traces.jsonl.1`, `flight_recorder.json`, and
+`legacy_bodies_notice.json` do not exist there.
+
+### Three run results (after `rm lab/data/agent_traces.jsonl lab/data/flight_recorder.json`, this worktree only)
+
+- **Run 1** — the sprint's 19 test files: **256 passed**, 0 failed. Real
+  `DATA_DIR`: no `agent_traces.jsonl` / `flight_recorder.json` / `legacy_
+  bodies_notice.json`.
+- **Run 2** — identical command, immediately after: **256 passed**, 0
+  failed. Real `DATA_DIR`: still clean.
+- **Run 3** — the sprint's 19 files plus a ~37-file broad pre-existing
+  slice (including the full `tests/portal/` and `tests/router/`
+  directories): **909 passed, 8 failed** — the same 8 pre-existing,
+  unrelated failures identified in S5 (`test_token_compliance_ratchet`,
+  `test_health_refresh_probes_without_constructing_aerollm`, four in
+  `test_build_tab.py`, one each in `test_opencode_config_lifecycle.py` /
+  `test_opencode_lifecycle.py`), confirmed by re-running `tests/portal`
+  alone before and after this fix and diffing the failure list — identical
+  both times. Real `DATA_DIR`: still clean.
+
+### Corrected final numbers
+
+**252 new tests total** across S0-S7 (248) plus this defect fix's new
+`tests/test_zzz_data_root_hermeticity.py` (4). All passing, reproducibly,
+across repeated runs — the whole point of this fix. 0 regressions against
+the pre-sprint baseline, now genuinely verified by re-running rather than
+asserted from a single clean-tree run.
+
+Commit: `pending`
+
 ## Final state
 
-(filled in at handoff)
+**All eight slices (S0-S7) complete, plus one post-handoff hermeticity
+fix**, in order, each independently committed. See the slice table above
+this section for S0-S7's commits; the hermeticity fix's commit is recorded
+just above.

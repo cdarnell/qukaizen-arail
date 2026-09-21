@@ -247,6 +247,92 @@ def _no_ambient_world_mount(monkeypatch, tmp_path_factory):
 
 
 @pytest.fixture(autouse=True)
+def _isolated_agent_observability_data_root(monkeypatch, tmp_path):
+    """Isolate agent_trace / flight-recorder / agent_context state per test
+    (sprint 2026-09-20-buddy-front-and-center hermeticity fix).
+
+    Since that sprint, ``ModelRouter.complete()``/``.stream_complete()`` —
+    the single chokepoint every agent (and chat) inference call already
+    went through — now writes an ``agent_trace`` record on every call, and
+    may capture a body when the flight recorder is on. Both persist to
+    ``DATA_DIR`` (lazily resolved per call, by design — see
+    ``agent_trace.py``'s module docstring — specifically so a fixture like
+    this one can redirect it). Without this, ANY test anywhere in the
+    suite that drives a real ``ModelRouter`` — not just the sprint's own
+    new test files — writes into the developer's actual
+    ``lab/data/agent_traces.jsonl`` / ``flight_recorder.json``, following
+    the same pre-existing pattern as ``_no_ambient_halt_flag`` /
+    ``_no_ambient_window_override`` above, just for a data root instead of
+    a single file.
+
+    ``activity.py``'s ``LOG_FILE`` is the one exception in this family
+    that is NOT resolved lazily — it is a module-level constant bound to
+    the real ``config.DATA_DIR`` at ``activity.py``'s import time.
+    Monkeypatching ``activity_mod.LOG_FILE`` still works for *future*
+    ``.emit()`` disk writes (the method does a fresh global lookup of
+    ``LOG_FILE`` on every call, not a value captured once at
+    construction) — but the module-level ``activity_log`` singleton
+    itself is a specific object every other module already holds a direct
+    reference to (``from arail.activity import activity_log``), typically
+    imported during collection, well before any fixture runs. Setting
+    ``ActivityLog._instance = None`` does **not** reset that — it only
+    affects a *future* ``ActivityLog()`` call, and nothing in the
+    codebase makes one after the first (confirmed the hard way: an
+    earlier version of this fixture did exactly that and still leaked
+    200 stale in-memory events into every test). The only thing that
+    actually clears the singleton every other module already points at
+    is mutating its buffer in place — the same technique
+    ``test_autoresearch_e2e_fake_aerollm.py``'s local ``_fresh_events()``
+    helper already uses. This matters to this sprint specifically because
+    ``GET /api/agents/status`` (the V7 fix) reads ``activity_log.recent()``
+    as a fallback when an agent has no trace yet — an unisolated buffer
+    leaks real, accumulated activity into that fallback's numbers.
+
+    Deliberately does NOT isolate ``costs.json`` — ``CostTracker``'s
+    singleton binds its ``_data_path`` once, at its own construction
+    (also import time, also before any fixture runs), and this sprint
+    added no new ``cost_tracker.track()`` call site (only changed the
+    ``source=`` value an existing call already used). That leak is
+    pre-existing and out of this sprint's scope; see BUILD_LOG.md.
+
+    One companion fix this redirect itself requires: ``portal/app.py``'s
+    one-shot World nudge (``_world_prompt_pending()``) checks whether
+    ``DATA_DIR / ".world-prompt-seen"`` exists to decide whether to render
+    the dashboard's onboarding nudge instead of the normal page chrome.
+    Every test that hits a page route without its own opinion on that
+    marker (``tests/test_world_first_impression.py`` and
+    ``tests/test_world_reset.py`` DO have one — they monkeypatch
+    ``_world_prompt_marker`` directly, which wins over anything here
+    regardless of ``DATA_DIR``) was, before this fixture existed,
+    incidentally reading the real, already-dismissed marker on the
+    developer's machine. Redirecting ``DATA_DIR`` to an always-empty
+    ``tmp_path`` made every such page request look like a brand-new,
+    never-onboarded lab and started rendering the nudge instead of the
+    shared nav — a real regression this fixture would otherwise
+    introduce, caught by ``tests/portal/test_base_template_smoke.py``.
+    Pre-seeding the marker restores the ambient default those tests
+    already unknowingly depended on, without touching the tests that
+    deliberately override it.
+    """
+    from arail import agent_context, agent_trace, config
+    from arail import activity as activity_mod
+
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    (tmp_path / ".world-prompt-seen").touch()
+    monkeypatch.setattr(activity_mod, "LOG_FILE", tmp_path / "activity.jsonl")
+    activity_mod.activity_log._buffer.clear()
+
+    agent_context._reset_for_tests()
+    agent_trace._reset_for_tests()
+
+    yield
+
+    agent_context._reset_for_tests()
+    agent_trace._reset_for_tests()
+    activity_mod.activity_log._buffer.clear()
+
+
+@pytest.fixture(autouse=True)
 def _reset_egress_guard():
     """Reset the egress guard to un-installed state between tests.
 
