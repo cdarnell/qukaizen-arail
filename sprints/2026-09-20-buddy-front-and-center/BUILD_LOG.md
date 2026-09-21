@@ -45,7 +45,39 @@ Deviations from this table, if any, are recorded per-slice below, not silently a
 
 ## Execution
 
-(filled in per slice as work completes)
+### S0 — Prove the attribution mechanism
+
+**Result: A1-A4 all hold. Mechanism confirmed, no gap to surface.** On this
+worktree's interpreter (CPython 3.11.15, macOS/Darwin arm64):
+
+- A1 `asyncio.create_task` copies the calling `contextvars.Context` — confirmed,
+  including that the copy is a point-in-time snapshot (a parent mutation after
+  spawn does not leak into the already-spawned task).
+- A2 `asyncio.to_thread` copies the context into its worker thread — confirmed.
+- A3 a bare `threading.Thread` does **not** copy the context, and a
+  `contextvars.copy_context().run(...)`-wrapped `Thread` **does** — both halves
+  confirmed. The `spawn_thread` shim ARCHITECTURE.md prescribes is necessary
+  and works.
+- A4 `loop.run_in_executor` does **not** copy the context, and a static grep
+  confirms zero uses of `run_in_executor` under `src/arail/agents/` today — no
+  silent unattributed hop already exists.
+- Subprocess: no automatic context sharing across a process boundary (expected,
+  not an assumption to prove) — the JSON round-trip design (payload in via
+  stdin, child sets its own contextvar, reports back) works end to end via an
+  actual `subprocess.run` of a throwaway child script.
+
+**Deviation from plan:** the architecture doc's own draft used
+`@pytest.mark.asyncio`-shaped examples implicitly; this repo has no
+`pytest-asyncio` installed and its existing async tests (e.g.
+`tests/test_inference_scheduler.py`) use the `async def _scenario(): ...`
++ `asyncio.run(_scenario())` idiom instead. S0's tests follow that existing
+convention, not a new one — no dependency added.
+
+Tests: `tests/test_agent_context_propagation.py` — 9 new tests, all passing.
+Adjacent regression check (`test_costs_persistence`, `test_halt_persistence`,
+`test_inference_scheduler`, `test_scheduler`): 44 passed, 0 failed.
+
+Commit: pending (recorded immediately below after the commit is made)
 
 ## Architect feedback required
 
