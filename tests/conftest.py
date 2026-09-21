@@ -295,24 +295,32 @@ def _isolated_agent_observability_data_root(monkeypatch, tmp_path):
     ``source=`` value an existing call already used). That leak is
     pre-existing and out of this sprint's scope; see BUILD_LOG.md.
 
-    One companion fix this redirect itself requires: ``portal/app.py``'s
+    A companion default this redirect requires: ``portal/app.py``'s
     one-shot World nudge (``_world_prompt_pending()``) checks whether
     ``DATA_DIR / ".world-prompt-seen"`` exists to decide whether to render
     the dashboard's onboarding nudge instead of the normal page chrome.
-    Every test that hits a page route without its own opinion on that
-    marker (``tests/test_world_first_impression.py`` and
-    ``tests/test_world_reset.py`` DO have one — they monkeypatch
-    ``_world_prompt_marker`` directly, which wins over anything here
-    regardless of ``DATA_DIR``) was, before this fixture existed,
+    Before this fixture existed, most page-rendering tests were
     incidentally reading the real, already-dismissed marker on the
-    developer's machine. Redirecting ``DATA_DIR`` to an always-empty
-    ``tmp_path`` made every such page request look like a brand-new,
-    never-onboarded lab and started rendering the nudge instead of the
-    shared nav — a real regression this fixture would otherwise
-    introduce, caught by ``tests/portal/test_base_template_smoke.py``.
-    Pre-seeding the marker restores the ambient default those tests
-    already unknowingly depended on, without touching the tests that
-    deliberately override it.
+    developer's machine — an always-empty ``tmp_path`` makes every such
+    request look like a brand-new, never-onboarded lab instead, which
+    broke `tests/portal/test_base_template_smoke.py` AND
+    `tests/test_boot_overlay.py` (confirmed: both fail, even standalone,
+    without this). Pre-seeding "already seen" as the default restores the
+    ambient state those (and presumably other, not-yet-found) tests
+    already unknowingly depended on.
+
+    The one place that default is *wrong*: a test specifically about the
+    marker's absence. `tests/test_onboarding.py::test_dashboard_unblocks_
+    after_onboarding` is exactly that, and — like `tests/test_world_
+    first_impression.py`'s tests already do for the same reason —
+    explicitly monkeypatches `portal.app._world_prompt_marker` to a
+    guaranteed-absent path of its own, which wins over this fixture's
+    default regardless of `DATA_DIR`. A global fixture deciding an
+    ambient default is fine; a global fixture deciding it for the ONE
+    test that is *about* that state is the bug this docstring's git
+    history is a cautionary tale of (an earlier version of this fixture
+    got exactly this backwards twice: first by not seeding at all, then
+    by seeding only in one unrelated test module instead of here).
     """
     from arail import agent_context, agent_trace, config
     from arail import activity as activity_mod

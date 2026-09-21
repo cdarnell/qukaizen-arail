@@ -156,7 +156,6 @@ def test_f10_on_to_off_mid_call_still_captures():
 # ---------------------------------------------------------------------------
 
 def test_researcher_activity_log_carries_no_body(monkeypatch):
-    from arail.activity import activity_log
     from arail.agents import researcher
 
     class _R:
@@ -166,11 +165,31 @@ def test_researcher_activity_log_carries_no_body(monkeypatch):
                 "model": "m", "backend": "b",
             })()
 
-    activity_log._buffer.clear()  # deque has maxlen=200; clear, not index, to isolate new events
+    # Read researcher.py's OWN bound reference to activity_log -- NOT a
+    # fresh `from arail.activity import activity_log`. Both name the same
+    # object in the common case, but a test elsewhere in the same session
+    # that does `importlib.reload(arail.activity)` (tests/test_boot_
+    # security_scan.py does exactly this) rebinds arail.activity's module
+    # attribute to a brand-new ActivityLog() while researcher.py's own
+    # `from arail.activity import activity_log` (captured once, at
+    # researcher.py's own import time) keeps pointing at the pre-reload
+    # object. A fresh re-import in the test would then clear and inspect
+    # a DIFFERENT object than the one researcher._llm_complete() actually
+    # emits into -- exactly what produced this test's `assert []` failure
+    # order-dependently. Reading it off `researcher` itself guarantees
+    # we're looking at whatever object the code under test really uses.
+    log = researcher.activity_log
+    log._buffer.clear()  # deque has maxlen=200; clear, not index, to isolate new events
     researcher._llm_complete(_R(), "a prompt with sensitive-looking content")
-    new_events = list(activity_log._buffer)
+    new_events = list(log._buffer)
     done = [e for e in new_events if "LLM call completed" in e.get("message", "")]
-    assert done
+    # Never pass vacuously: an empty `done` proves nothing about bodies,
+    # it just means nothing was observed. Fail loudly and specifically.
+    assert done, (
+        f"no 'LLM call completed' event was emitted at all (buffer had "
+        f"{len(new_events)} other event(s)) -- this test proves nothing "
+        f"about body redaction unless a real event was captured first"
+    )
     trace = done[0]["data"]["prompt_trace"]
     assert "prompt" not in trace
     assert "response" not in trace
@@ -181,7 +200,6 @@ def test_researcher_activity_log_carries_no_body(monkeypatch):
 
 
 def test_browser_navigate_activity_log_carries_no_body(monkeypatch):
-    from arail.activity import activity_log
     from arail.agents import browser
 
     monkeypatch.setattr(browser, "_is_airgapped", lambda: False)
@@ -197,11 +215,20 @@ def test_browser_navigate_activity_log_carries_no_body(monkeypatch):
     monkeypatch.setattr(browser, "_consent_gate", lambda url, reason=None: None)
     monkeypatch.setattr(browser, "_ab_run", lambda cmd, timeout=30: {"success": True})
 
-    activity_log._buffer.clear()
+    # Same reasoning as the researcher test above: read browser.py's own
+    # bound reference, not a fresh re-import, so a reloaded arail.activity
+    # elsewhere in the session can't silently point this test at an
+    # object browser.py never actually writes into.
+    log = browser.activity_log
+    log._buffer.clear()
     browser.chat("go to a secret path")
-    new_events = list(activity_log._buffer)
+    new_events = list(log._buffer)
     nav = [e for e in new_events if "Navigation plan" in e.get("message", "")]
-    assert nav
+    assert nav, (
+        f"no 'Navigation plan' event was emitted at all (buffer had "
+        f"{len(new_events)} other event(s)) -- this test proves nothing "
+        f"about body redaction unless a real event was captured first"
+    )
     trace = nav[0]["data"]["prompt_trace"]
     assert "prompt" not in trace
     assert "response" not in trace

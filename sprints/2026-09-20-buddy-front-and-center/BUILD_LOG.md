@@ -829,9 +829,125 @@ asserted from a single clean-tree run.
 
 Commit: `fc9311a6`
 
+## Second post-handoff correction: the "same pre-existing failures" claim was unverified, and the fix itself introduced two real regressions
+
+**Filed 2026-09-21, after orchestrator re-verification of `fc9311a6`/
+`cb523c59`.** The hermeticity fix above held (sprint files passed twice
+back to back, real `lab/data` stayed clean even under a broad sweep) —
+but the "8 failed, same pre-existing failures" line in that section was
+never actually diffed against `main`; it was diffed against *this
+branch's own* before/after, which cannot distinguish "pre-existing on
+main" from "a regression this fix introduced that happens to reproduce
+consistently." A real differential sweep (181 files, orchestrator-
+supplied list, against a detached `main@236504ca` worktree) found three
+tests that pass on `main` and failed here. Both root causes trace back to
+the same hermeticity fix; **corrected claim, verified this time:** of the
+181-file sweep, **17 tests fail on both `main` and this branch** (pre-
+existing, confirmed, left alone) and, after the two fixes below, **0
+tests fail only on this branch**. Three tests fail only on `main` (pass
+here) — checked for flakiness by re-running `tests/test_docs_routes.py`
+alone on both sides twice; deterministic both times, not a regression, not
+chased further (fixing a main-only failure is not this task's job).
+
+### Regression A — the hermeticity fix silently decided onboarding state for the one test that is about that state
+
+`tests/test_onboarding.py::test_dashboard_unblocks_after_onboarding`
+expects the **first** post-onboarding `GET /` to redirect to the one-shot
+World-prompt nudge (`302` to `/welcome?step=world`) because the marker
+`DATA_DIR/.world-prompt-seen` is supposed to be absent on a genuinely
+fresh lab. The first version of the hermeticity fix pre-seeded that exact
+marker into **every** test's redirected `DATA_DIR` (added while fixing an
+unrelated regression against `tests/portal/test_base_template_smoke.py`
+— see the section above) — so this test's lab looked already-nudged from
+the start, and the second `GET /` (expected `302`) came back `200`.
+Root cause: a global, generic fixture (`tests/conftest.py`) had opinions
+about a specific piece of first-run state that one test suite is
+specifically the test of.
+
+**Fix:** kept the global "already seen" default — removing it outright
+reintroduced the *other* regression it was fixing, and further sweeping
+found a **third** file with the same dependency
+(`tests/test_boot_overlay.py`, 3 tests fail standalone without the
+default; not previously reported because the first fix's global seeding
+already covered it). Instead, `tests/test_onboarding.py`'s own `fresh_lab`
+fixture now explicitly overrides `portal.app._world_prompt_marker` to a
+path of its own that is guaranteed never touched — the exact pattern
+`tests/test_world_first_impression.py` already used for the same reason.
+The rule going forward, stated in `conftest.py`'s docstring: a global
+fixture may set an ambient *default*; a test that is *about* that state
+takes explicit, narrow control over it, the same way `test_world_first_
+impression.py` always has. No assertion in any test was weakened.
+
+### Regression B — order-dependent failure in the sprint's own tests, from the ActivityLog singleton-by-reference pattern
+
+`tests/test_flight_recorder.py::test_researcher_activity_log_carries_no_body`
+(and, in the full sweep, `test_browser_navigate_activity_log_carries_no_body`)
+failed with an empty event list, but only when run after
+`tests/test_boot_security_scan.py`, which calls
+`importlib.reload(arail.activity)`. That rebinds `arail.activity`'s
+module-level `activity_log` name to a **brand-new** `ActivityLog()` — but
+`researcher.py` / `browser.py` had already captured the **old** object at
+their own `from arail.activity import activity_log` import time, and keep
+using it forever (name bindings via `from X import Y` are copied once,
+not proxies — `importlib.reload()` only changes `X`'s own namespace).
+The tests did a fresh `from arail.activity import activity_log` and
+cleared/inspected the **new** (post-reload) object, while
+`researcher._llm_complete()` / `browser.chat()` kept emitting into the
+**old** one — two different objects, hence an empty list. This is exactly
+the fragility this sprint's own `BUILD_LOG.md` already named while
+building `agent_trace.py`'s per-instance isolation, now confirmed to bite
+a test the hard way.
+
+**Fix:** both tests now read `researcher.activity_log` / `browser.
+activity_log` — the module-under-test's **own** bound reference — instead
+of a fresh top-level import, so the object cleared and the object emitted
+into are provably the same one regardless of what any other test in the
+session has reloaded. Also strengthened per the orchestrator's request:
+each assertion that "no body was captured" is now preceded by an explicit,
+named assertion that at least one matching event **was** emitted first —
+an empty list now fails loudly with a diagnostic message naming how many
+other events were seen, instead of silently passing (or, as here, silently
+proving nothing) — F11's test can no longer pass vacuously.
+
+**Is this a production risk?** No — verified specifically because the
+orchestrator asked the same question of the *first* post-handoff defect.
+`importlib.reload()` of `arail.activity` never happens in production; it
+is a test-only technique (`test_boot_security_scan.py` uses it to force a
+fresh `config`/`LOG_FILE` binding for its own isolation, predating this
+sprint). In a real process, `researcher.py` / `browser.py` / `app.py` all
+import `activity_log` exactly once and it is never reloaded, so there is
+exactly one object for the whole process's life — no per-instance leak, no
+F14-class concern. The risk is specific to test suites that reach for
+`importlib.reload()` as an isolation technique for a module that also
+hands out singleton references by value; worth a one-line mention in
+`docs/agent-observability.md` or a future test-conventions note, but not a
+production fix.
+
+### Verified differential (181-file sweep, `main@236504ca` vs this branch, after both fixes)
+
+- **Main baseline**, 166 of 181 files exist there: **20 failed, 2222
+  passed** (2 skipped, 1 xfailed).
+- **This branch**, all 181 files exist: **17 failed, 2441 passed** (2
+  skipped, 1 xfailed).
+- **Set difference:**
+  - Failing on **both** (pre-existing, verified, left alone): **17**.
+  - Failing **only on this branch** (regressions): **0**.
+  - Failing **only on main** (pass here — `tests/test_docs_routes.py`'s 3
+    nav-rendering tests; confirmed deterministic on both sides, not
+    investigated further, not a regression): 3.
+
+### Three-run reproduction, this branch, after both fixes
+
+- **Run 1** — the sprint's 20 test files: **256 passed**, 0 failed.
+- **Run 2** — identical, immediately after: **256 passed**, 0 failed.
+- Real `DATA_DIR`: no `agent_traces.jsonl` / `flight_recorder.json` /
+  `legacy_bodies_notice.json` after either run.
+
+Commit: `pending`
+
 ## Final state
 
-**All eight slices (S0-S7) complete, plus one post-handoff hermeticity
-fix**, in order, each independently committed. See the slice table above
-this section for S0-S7's commits; the hermeticity fix's commit is recorded
-just above.
+**All eight slices (S0-S7) complete, plus two post-handoff hermeticity
+corrections**, in order, each independently committed. See the slice
+table above this section for S0-S7's commits; the hermeticity fix commits
+are recorded just above.
