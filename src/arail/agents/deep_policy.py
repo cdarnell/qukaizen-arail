@@ -195,6 +195,35 @@ def _get_fast_router():
             return None
 
 
+def _agent_stream_fast_enabled() -> bool:
+    """The only way to get a real (not honest-n/a) TTFT for any agent call
+    today (ARCHITECTURE.md finding 1) — the fast branch streams from
+    Ollama's native /api/chat with stream:true instead of stream:false,
+    joining the deltas back into the identical string complete() would
+    return. Default on; ``ARAIL_AGENT_STREAM_FAST=0`` reverts to the old
+    non-streaming call and every agent's TTFT becomes an honest ``n/a``
+    (F20) — one env var, not a revert of this function."""
+    return os.getenv("ARAIL_AGENT_STREAM_FAST", "1").strip().lower() not in (
+        "0", "false", "no")
+
+
+def _join_stream(router: Any, prompt: str, *, max_tokens: int,
+                 temperature: float, system: Optional[str]) -> Optional[str]:
+    """Consume ``stream_complete`` and return the same string ``complete()``
+    would — the terminal ``ModelResponse.text`` is the ground truth when
+    present, deltas joined otherwise. Raises on any failure; the caller
+    falls back to ``complete()`` unconditionally (F20)."""
+    parts: list[str] = []
+    final_text: Optional[str] = None
+    for item in router.stream_complete(prompt, max_tokens=max_tokens,
+                                       temperature=temperature, system=system):
+        if isinstance(item, str):
+            parts.append(item)
+        else:
+            final_text = getattr(item, "text", None)
+    return final_text if final_text is not None else "".join(parts)
+
+
 def complete_preferring_deep(
     prompt: str,
     *,
@@ -232,6 +261,13 @@ def complete_preferring_deep(
     fr = fast_router or _get_fast_router()
     if fr is None:
         return None
+    if _agent_stream_fast_enabled():
+        try:
+            text = _join_stream(fr, prompt, max_tokens=max_tokens,
+                                temperature=temperature, system=system)
+            return (text or "").strip() or None
+        except Exception:  # noqa: BLE001 - unconditional fallback (F20)
+            pass
     try:
         resp = fr.complete(prompt, max_tokens=max_tokens,
                            temperature=temperature, system=system)

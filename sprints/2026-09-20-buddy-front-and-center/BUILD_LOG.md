@@ -283,6 +283,67 @@ module still imports cleanly. Combined running total this build: 93 new
 tests across S0-S2 (9 + 69 + 15), all passing; 0 regressions against
 baseline.
 
+Commit: `fedfd5d9`
+
+### S3 — TTFT
+
+**Delivered:**
+
+- `router/backends.py`: `ModelResponse` gained `prefill_ms: Optional[float] =
+  None` (additive field, defaults None on every backend that doesn't set
+  it). `OllamaNativeBackend.complete()` and `.stream_complete()` both now
+  read `prompt_eval_duration` (nanoseconds) off Ollama's response/final
+  streamed chunk and convert to `prefill_ms`, `prefill_source` always
+  `"server_reported"` at the chokepoint.
+- `router/core.py`: `stream_complete()` implements the full TTFT truth
+  table — measured from `perf_counter()` taken *before* the generator is
+  entered; determined by the first item's shape (`ModelResponse` first ->
+  `emulated_stream`) and, failing that, the first non-empty string seen at
+  any point (`measured`); `no_tokens` when every item was an empty string
+  before the terminal response; `error` only when nothing was determined
+  before an exception (a real TTFT already measured survives a later
+  failure — F6's honesty contract, plus a case F6 didn't spell out but the
+  same reasoning covers). `ttft_ms` is never derived from `latency_ms`.
+- `agents/deep_policy.py`: `complete_preferring_deep`'s **fast branch only**
+  now tries `stream_complete()` first (joining deltas into the identical
+  string `complete()` would return, preferring the terminal
+  `ModelResponse.text` as ground truth), behind `ARAIL_AGENT_STREAM_FAST`
+  (default on), with an unconditional `except Exception` fallback to
+  `complete()` — including when a fake/legacy router has no
+  `stream_complete` at all.
+
+**Deviations from ARCHITECTURE.md, each with reason:**
+
+1. **The deep branch of `complete_preferring_deep` was left calling
+   `.complete()`, not switched to `.stream_complete()`.** ARCHITECTURE.md's
+   "Where the spec is wrong" finding #2 muses that Buddy's deep brain
+   "can never report a TTFT... honest `emulated_stream` forever" — which
+   reads as if the deep branch should also go through `stream_complete()`
+   (so `BaseBackend`'s default `yield self.complete(...)` shim produces
+   `emulated_stream` instead of `complete()`'s own honest
+   `non_streaming`). But the **Slice plan's actual S3 scope** names only
+   "the fast-branch streaming in `deep_policy`", and the whole point of
+   gating this behind one env var is that flipping it reverts *everything*
+   this slice changed to "honest n/a everywhere" — if the deep branch's
+   calling convention changed too, unconditionally, there would be no
+   single flag that reverts it. `non_streaming` is exactly as honest as
+   `emulated_stream` (both are non-`measured` with `ttft_ms=null`), so no
+   test in the documented strategy requires the relabel, and changing a
+   production call on Buddy's preferred voice for a cosmetic status string
+   is exactly the kind of thing the ledger's "no scope drift" rule exists
+   to stop. Flagged for architect review — if the intent really was to
+   force deep through `stream_complete()` too, that is a one-line change,
+   but it should be an explicit decision, not an inferred one.
+
+**Tests:** `tests/test_router_ttft.py` (13, one per truth-table row plus the
+"never equals latency_ms" invariant and the prefill_ms provenance pair),
+`tests/test_deep_policy_stream_fast.py` (11, F20). **24 new tests, all
+passing.** Regression: 247 passed across router/deep_policy/agent_context/
+agent_trace/attribution-wiring suites; 97 passed across every
+chat-streaming-adjacent suite (F19 — `billing_source == "ui"` path
+untouched). Running total: 117 new tests across S0-S3, all passing; 0
+regressions.
+
 Commit: `pending`
 
 ## Final state

@@ -274,6 +274,17 @@ class ModelRouter:
         slot = self._slot_info()
         tokens_in = max((len(prompt) + len(system or "")) // 4, 1)
 
+        # TTFT honesty contract (ARCHITECTURE.md interface contract #3):
+        # measured from perf_counter() taken here, *before* the generator
+        # is entered — never derived from latency_ms. Determined by the
+        # FIRST item's shape and, failing that, the first non-empty string
+        # seen at any point; never overwritten once set except by the one
+        # documented "no error yet" -> "error" transition below.
+        t_enter = time.perf_counter()
+        ttft_ms: Optional[float] = None
+        ttft_status: Optional[str] = None
+        is_first_item = True
+
         try:
             for item in self._backend.stream_complete(
                 prompt,
@@ -283,7 +294,23 @@ class ModelRouter:
                 system=system,
                 messages=messages,
             ):
+                if is_first_item:
+                    is_first_item = False
+                    if isinstance(item, ModelResponse):
+                        # The backend emulated the stream — no real
+                        # first-token signal exists to measure.
+                        ttft_status = "emulated_stream"
+                if (ttft_status is None and isinstance(item, str) and item):
+                    ttft_ms = (time.perf_counter() - t_enter) * 1000.0
+                    ttft_status = "measured"
+
                 if isinstance(item, ModelResponse):
+                    if ttft_status is None:
+                        # Every item so far was an empty string; the
+                        # generator never produced a real token before its
+                        # terminal response.
+                        ttft_status = "no_tokens"
+                    prefill_ms = getattr(item, "prefill_ms", None)
                     cost_tracker.track(
                         backend=item.backend,
                         model=item.model,
@@ -304,16 +331,21 @@ class ModelRouter:
                         entry_id=getattr(self, "entry_id", None),
                         tokens_in=tokens_in, tokens_out=item.tokens_used,
                         latency_ms=item.latency_ms,
-                        # TTFT measurement lands in S3 — until then this is
-                        # an honest "not yet measured", never a synthesised
-                        # number derived from latency_ms.
-                        ttft_ms=None, ttft_status=None,
+                        ttft_ms=ttft_ms, ttft_status=ttft_status,
+                        prefill_ms=prefill_ms,
+                        prefill_source="server_reported" if prefill_ms is not None else None,
                     )
                 yield item
         except Exception as exc:
+            # A TTFT already measured before the failure is real and kept;
+            # only "nothing determined yet" becomes "error" — an error
+            # after real tokens arrived doesn't retroactively erase them.
+            if ttft_status is None:
+                ttft_status = "error"
+                ttft_ms = None
             self._record(ctx, slot=slot, streamed=True,
                          outcome="error", error_class=type(exc).__name__,
-                         ttft_ms=None, ttft_status=None)
+                         ttft_ms=ttft_ms, ttft_status=ttft_status)
             raise
 
     def health_check(self) -> Dict[str, bool]:

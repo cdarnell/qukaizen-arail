@@ -94,6 +94,12 @@ class ModelResponse:
     # tokens written to cache this request (~1.25x cost). See ClaudeBackend.
     cache_read_input_tokens: int = 0
     cache_creation_input_tokens: int = 0
+    # Server-reported prefill time (sprint 2026-09-20-buddy-front-and-
+    # center, S3). Distinct from TTFT — see router/core.py's honesty
+    # contract: a client MUST NOT render this as TTFT. None on every
+    # backend that doesn't report it (only OllamaNativeBackend does today,
+    # from prompt_eval_duration).
+    prefill_ms: Optional[float] = None
 
 
 StreamResult = str | ModelResponse
@@ -2061,6 +2067,8 @@ class OllamaNativeBackend(OpenAICompatBackend):
         data = resp.json()
         # Ollama native response shape: {message: {role, content}, done: bool}
         text = (data.get("message") or {}).get("content") or ""
+        # prompt_eval_duration is nanoseconds; server-reported, never derived.
+        prefill_ns = data.get("prompt_eval_duration")
         return ModelResponse(
             text=text,
             model=data.get("model", self.model_name),
@@ -2068,6 +2076,7 @@ class OllamaNativeBackend(OpenAICompatBackend):
             backend="ollama_native",
             latency_ms=(time.time() - start) * 1000,
             cost_usd=0.0,
+            prefill_ms=(prefill_ns / 1_000_000.0) if prefill_ns is not None else None,
         )
 
     def stream_complete(self, prompt: str, max_tokens: int = 512,
@@ -2106,6 +2115,7 @@ class OllamaNativeBackend(OpenAICompatBackend):
 
         full_text = ""
         eval_count = 0
+        prefill_ns = None
         with self._session.post(
             f"{self._ollama_root()}/api/chat",
             headers={"Authorization": f"Bearer {self.api_key}",
@@ -2128,6 +2138,8 @@ class OllamaNativeBackend(OpenAICompatBackend):
                     yield delta
                 if data.get("eval_count"):
                     eval_count = int(data["eval_count"])
+                if data.get("prompt_eval_duration") is not None:
+                    prefill_ns = data["prompt_eval_duration"]
                 if data.get("done"):
                     break
 
@@ -2138,6 +2150,7 @@ class OllamaNativeBackend(OpenAICompatBackend):
             backend="ollama_native",
             latency_ms=(time.time() - start) * 1000,
             cost_usd=0.0,
+            prefill_ms=(prefill_ns / 1_000_000.0) if prefill_ns is not None else None,
         )
 
 
