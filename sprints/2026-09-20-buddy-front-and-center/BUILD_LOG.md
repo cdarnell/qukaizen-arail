@@ -543,6 +543,61 @@ pre-existing failures, not chased or fixed. Running total: 221 new tests
 across S0-S5 (9+69+15+24+38+66), all passing; 0 regressions this sprint
 introduced.
 
+Commit: `4b005034`
+
+### S6 — Admin surface
+
+**Delivered:**
+
+- `src/arail/agent_trace.py`: `lanes_snapshot()` extended with `hold`
+  (`agent_context.hold_state()`), `recorder` (`recorder_state()`), and
+  `slot` (`portal.scheduler.slot_pressure()` + `overlap_pct`/`samples`)
+  sections, each behind its own `try/except` so a failure in one never
+  blanks the whole snapshot. Added `find(trace_id)` (the "why?" drill-in's
+  data source) and `tokens_out_by_agent()` (the V7 fix's data source).
+- `src/arail/portal/scheduler.py`: `/api/admin/agent-lanes` added to
+  `FAST_PATH_PREFIXES` (the snapshot only — the SSE stream deliberately
+  is not, per contract #6's own reasoning).
+- `src/arail/portal/app.py`: the four endpoints — `GET
+  /api/admin/agent-lanes`, `GET /api/admin/agent-trace-stream` (SSE, one
+  frame per `agent_trace.subscribe()` record), `GET
+  /api/admin/agent-trace/{trace_id}` (404 on unknown id), `POST
+  /api/admin/agents/hold`, `POST /api/admin/flight-recorder` — each
+  explicitly `_require_surface("admin")`-gated. Also the V7 fix:
+  `/api/agents/status`'s per-agent token figure now sums real
+  `tokens_out` from the trace ring (falling back to a legacy
+  `prompt_trace.tokens_out` activity-log field for agents with no trace
+  yet), emitting both `tokens_out` (new) and `tokens` (deprecated alias,
+  same corrected value).
+- `src/arail/portal/templates/admin.html`: an "Agent lanes" card — the
+  hold control and flight-recorder toggle (their copy computed in JS from
+  `hold_state()`/`recorder_state()`, not hardcoded, so behaviour and
+  display can't independently drift), a per-lane table, and the
+  unattributed-calls line. Live via `EventSource('/api/admin/agent-trace-
+  stream')`, **no `setInterval`** for lane data — a fresh fetch on every
+  SSE frame.
+- `src/arail/portal/templates/agents.html`: V7's label fix (`"token
+  budget"` → `"tokens used"`) plus the four card stats' `title` attributes
+  ("estimated from prompt traces" → "real usage from the agent trace"),
+  now reading `tokens_out` in preference to the deprecated `tokens` alias.
+
+**Deviations from ARCHITECTURE.md:** none new this slice — S5's finding
+about the 17 pre-existing ungated `/api/admin/*` endpoints still applies
+(my four new ones are correctly gated regardless).
+
+**Tests:** `tests/test_admin_agent_lanes_endpoints.py` (20 — F13 gating
+parameterised over all four endpoints, GET-never-mutates, the hold/
+recorder toggles' CSRF rejection via the existing `local_trust_boundary`
+middleware, F17's copy-and-behaviour-together test, and the static
+no-`setInterval`-near-lanes check against the real `admin.html`),
+`tests/test_agents_status_v7_tokens.py` (4 — real usage vs the requested
+ceiling, summing across calls, system/unattributed never counted toward
+an agent). **24 new tests, all passing.** Regression: 81 passed across
+the S6 test files run together; 80 passed across the broader agent-
+workflow/debt-finance/costs/halt baseline; `/metrics` and scheduler
+suites (V9) unchanged, 44 passed. Running total: 245 new tests across
+S0-S6, all passing; 0 regressions.
+
 Commit: `pending`
 
 ## Final state

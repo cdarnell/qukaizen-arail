@@ -712,6 +712,17 @@
     <div id="scheduler-list" class="pr-card">Loading…</div>
   </div>
 
+  <!-- ═══ Agent lanes (sprint 2026-09-20-buddy-front-and-center) ═══ -->
+  <div class="admin-section">
+    <h2>Agent lanes</h2>
+    <div class="pr-card">
+      <div id="agent-hold-control" class="pr-hint">Loading…</div>
+      <div id="agent-recorder-control" class="pr-hint">Loading…</div>
+    </div>
+    <div id="agent-lanes-list" class="pr-card">Loading…</div>
+    <div id="agent-lanes-unattributed" class="pr-hint"></div>
+  </div>
+
   <!-- ═══ Push to TEAM ═══ -->
   <div class="admin-section">
     <h2>Push to TEAM</h2>
@@ -1642,6 +1653,117 @@ async function runSchedulerJob(jobId) {
     adminLog('Run failed: ' + e.message, 'error');
   }
 }
+
+// ── Agent lanes (sprint 2026-09-20-buddy-front-and-center) ──────────────
+// Live via SSE (/api/admin/agent-trace-stream), not a poll interval — a
+// poll here is the only way W1's "within 2s" bound could be missed.
+let AGENT_LANES_ES = null;
+
+function renderHoldControl(snap) {
+  const el = document.getElementById('agent-hold-control');
+  const hold = snap.hold || {held: false, in_flight: 0};
+  const copy = hold.held
+    ? `Hold all agents — agents stop calling models and stop speaking. ` +
+      `Calls already running finish (${hold.in_flight} in flight). The SRE ` +
+      `crash watcher keeps watching and may still post a plain, non-model ` +
+      `alert. This World only; survives a restart.`
+    : `Agents are not held. Flip this to stop every agent's inference and ` +
+      `proactive speech immediately (SRE's crash watcher is exempt).`;
+  el.innerHTML = `
+    <label class="admin-toggle">
+      <input type="checkbox" ${hold.held ? 'checked' : ''} onchange="setAgentHold(this.checked)">
+      Hold all agents
+    </label>
+    <div class="pr-hint">${esc(copy)}</div>`;
+}
+
+function renderRecorderControl(snap) {
+  const el = document.getElementById('agent-recorder-control');
+  const rec = snap.recorder || {enabled: false};
+  const copy = rec.enabled
+    ? 'Flight recorder is ON — prompt/response bodies are captured, redacted, and capped.'
+    : 'Flight recorder is OFF (default) — only metadata is captured, no prompt/response bodies.';
+  el.innerHTML = `
+    <label class="admin-toggle">
+      <input type="checkbox" ${rec.enabled ? 'checked' : ''} onchange="setFlightRecorder(this.checked)">
+      Flight recorder
+    </label>
+    <div class="pr-hint">${esc(copy)}</div>`;
+}
+
+function renderAgentLanes(snap) {
+  const list = document.getElementById('agent-lanes-list');
+  let html = '<table class="pr-table"><tr><th>Agent</th><th>Calls</th>' +
+             '<th>Brain</th><th>TTFT</th><th>Tokens out</th><th>Deep reason</th></tr>';
+  for (const lane of (snap.lanes || [])) {
+    const ttft = lane.ttft_ms != null ? Math.round(lane.ttft_ms) + 'ms'
+                : (lane.ttft_status || 'n/a');
+    const reason = lane.deep_reason_detail || lane.deep_reason_code || '';
+    const empty = lane.empty_reason ? ` <span class="pr-hint">(${esc(lane.empty_reason)})</span>` : '';
+    html += `<tr><td>${esc(lane.display)}${empty}</td><td>${lane.calls}</td>` +
+            `<td>${esc(lane.brain || '—')}</td><td>${esc(ttft)}</td>` +
+            `<td>${lane.tokens_out != null ? lane.tokens_out : '—'}</td>` +
+            `<td>${esc(reason)}</td></tr>`;
+  }
+  html += '</table>';
+  list.innerHTML = html;
+
+  const unattr = document.getElementById('agent-lanes-unattributed');
+  const u = snap.unattributed || {calls: 0, call_sites: []};
+  unattr.innerHTML = u.calls > 0
+    ? `Unattributed: ${u.calls} call(s) — ` +
+      u.call_sites.map(s => `${esc(s.call_site)} (${s.calls})`).join(', ')
+    : 'Unattributed: 0 calls';
+}
+
+async function loadAgentLanes() {
+  try {
+    const r = await fetch('/api/admin/agent-lanes');
+    if (r.status === 404) return;  // minimalist tier — surface not present
+    const snap = await r.json();
+    renderHoldControl(snap);
+    renderRecorderControl(snap);
+    renderAgentLanes(snap);
+  } catch (e) {
+    adminLog('Agent lanes fetch failed: ' + e.message, 'error');
+  }
+}
+
+function connectAgentLanesStream() {
+  if (AGENT_LANES_ES) AGENT_LANES_ES.close();
+  try {
+    AGENT_LANES_ES = new EventSource('/api/admin/agent-trace-stream');
+    AGENT_LANES_ES.onmessage = () => loadAgentLanes();
+    AGENT_LANES_ES.onerror = () => { /* browser auto-reconnects */ };
+  } catch (e) { /* SSE unavailable — the initial load above still rendered */ }
+}
+
+async function setAgentHold(held) {
+  try {
+    await fetch('/api/admin/agents/hold', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({hold: held}),
+    });
+    loadAgentLanes();
+  } catch (e) {
+    adminLog('Hold toggle failed: ' + e.message, 'error');
+  }
+}
+
+async function setFlightRecorder(enabled) {
+  try {
+    await fetch('/api/admin/flight-recorder', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({enabled: enabled}),
+    });
+    loadAgentLanes();
+  } catch (e) {
+    adminLog('Flight recorder toggle failed: ' + e.message, 'error');
+  }
+}
+
+loadAgentLanes();
+connectAgentLanesStream();
 
 async function loadTeamPush() {
   const el = document.getElementById('team-push-card');

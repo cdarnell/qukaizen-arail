@@ -197,6 +197,32 @@ def ring(n: int = 200) -> list[dict]:
     return list(_get_ring())[-n:]
 
 
+def tokens_out_by_agent() -> dict[str, int]:
+    """Real usage, summed from the trace ring, per agent_id. The V7 fix
+    (ARCHITECTURE.md contract #8): ``/api/agents/status``'s ``tokens`` used
+    to sum ``prompt_trace.max_tokens`` — the requested ceiling, not what
+    was actually spent."""
+    out: dict[str, int] = {}
+    for rec in _get_ring():
+        if rec.get("kind") != "agent":
+            continue
+        agent_id = rec.get("agent_id")
+        if not agent_id:
+            continue
+        out[agent_id] = out.get(agent_id, 0) + int(rec.get("tokens_out") or 0)
+    return out
+
+
+def find(trace_id: str) -> Optional[dict]:
+    """One record by trace_id, or None. The "why?" drill-in's data source
+    (``GET /api/admin/agent-trace/{trace_id}``) — searches the whole ring,
+    not just the last *n*."""
+    for rec in _get_ring():
+        if rec.get("trace_id") == trace_id:
+            return rec
+    return None
+
+
 def stats() -> dict:
     return {
         "recorded": _total_recorded,
@@ -359,6 +385,18 @@ def lanes_snapshot() -> dict:
             "empty_reason": _empty_reason(agent_id, bool(calls)),
         })
 
+    try:
+        from arail import agent_context
+        hold = agent_context.hold_state()
+    except Exception:  # noqa: BLE001
+        hold = {"held": False, "changed_at": None, "exempt_speakers": [], "in_flight": 0}
+
+    try:
+        from arail.portal import scheduler as _inference_scheduler
+        slot_base = _inference_scheduler.slot_pressure()
+    except Exception:  # noqa: BLE001
+        slot_base = {"capacity": None, "in_flight": None, "pending": None}
+
     return {
         "schema": "arail.agent_lanes/v1",
         "lanes": lanes,
@@ -371,6 +409,10 @@ def lanes_snapshot() -> dict:
             ),
         },
         "user_defined": {"calls": user_defined_calls},
+        "hold": hold,
+        "recorder": recorder_state(),
+        "slot": {**slot_base, "overlap_pct": _overlap_pct(),
+                 "samples": _overlap_samples},
         "drops": {"dropped_writes": _dropped_writes},
         "window": {"ring_size": _get_ring().maxlen, "recorded": _total_recorded},
     }

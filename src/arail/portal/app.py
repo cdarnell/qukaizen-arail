@@ -5076,19 +5076,25 @@ async def agents_status():
     workflow_rows = {row.get("agent_id"): row for row in list_agent_workflows()}
     researcher_redirect = get_agent_redirect("researcher")
 
-    # Walk the activity log once and bucket per-agent tokens + recent
-    # action snippets. Keeping it to a single pass means adding new
-    # agents later doesn't multiply the log scans.
+    # Walk the activity log once and bucket recent action snippets. Keeping
+    # it to a single pass means adding new agents later doesn't multiply
+    # the log scans. Token usage (V7, ARCHITECTURE.md contract #8) sources
+    # from the trace ring instead — real usage, not the requested ceiling
+    # activity_log's prompt_trace.max_tokens used to report — with a
+    # fallback to the legacy activity_log field for compatibility on a lab
+    # that has traces predating this sprint's chokepoint change.
+    from arail import agent_trace
     recent = activity_log.recent(200)
-    per_agent_tokens: dict[str, int] = {}
+    per_agent_tokens: dict[str, int] = dict(agent_trace.tokens_out_by_agent())
     per_agent_recent: dict[str, list[dict]] = {}
     for ev in recent:
         src = ev.get("source")
         if not src:
             continue
-        trace = ev.get("data", {}).get("prompt_trace")
-        if trace:
-            per_agent_tokens[src] = per_agent_tokens.get(src, 0) + int(trace.get("max_tokens", 0) or 0)
+        if src not in per_agent_tokens:
+            trace = ev.get("data", {}).get("prompt_trace")
+            if trace and trace.get("tokens_out"):
+                per_agent_tokens[src] = per_agent_tokens.get(src, 0) + int(trace.get("tokens_out") or 0)
         per_agent_recent.setdefault(src, []).append({
             "ts": ev.get("ts"),
             "level": ev.get("level", "info"),
@@ -5115,6 +5121,10 @@ async def agents_status():
         "workflow": researcher_workflow,
         "redirect": researcher_redirect,
         "has_goal": bool(goal and goal.get("goal_text")),
+        # V7: tokens_out is real usage; tokens is a deprecated alias now
+        # carrying the *corrected* value for one release (agents.html
+        # still reads "tokens" — filed to sprints/BACKLOG.md for removal).
+        "tokens_out": per_agent_tokens.get("researcher", 0),
         "tokens": per_agent_tokens.get("researcher", 0),
         "recent_actions": per_agent_recent.get("researcher", []),
     }
@@ -5128,14 +5138,17 @@ async def agents_status():
     c_status = {
         "pending": len(consent_store.list_pending()),
         "allowed": len(consent_store.list_allowed()),
+        "tokens_out": per_agent_tokens.get("curator", 0),
         "tokens": per_agent_tokens.get("curator", 0),
         "recent_actions": per_agent_recent.get("curator", []),
     }
 
     buddy_workflow = dict(workflow_rows.get("buddy") or {})
+    buddy_workflow["tokens_out"] = per_agent_tokens.get("buddy", 0)
     buddy_workflow["tokens"] = per_agent_tokens.get("buddy", 0)
     buddy_workflow["recent_actions"] = per_agent_recent.get("buddy", [])
     sre_workflow = dict(workflow_rows.get("sre") or {})
+    sre_workflow["tokens_out"] = per_agent_tokens.get("sre", 0)
     sre_workflow["tokens"] = per_agent_tokens.get("sre", 0)
     sre_workflow["recent_actions"] = per_agent_recent.get("sre", [])
 
@@ -5149,6 +5162,7 @@ async def agents_status():
     b_status = {
         "captures": captures,
         "last_task": last_task,
+        "tokens_out": per_agent_tokens.get("browser", 0),
         "tokens": per_agent_tokens.get("browser", 0),
         "recent_actions": per_agent_recent.get("browser", []),
     }
@@ -6243,6 +6257,89 @@ async def admin_legacy_bodies_dismiss():
         return gate
     activity.dismiss_legacy_notice()
     return {"dismissed": True}
+
+
+# -- Agent lanes (S6, sprint 2026-09-20-buddy-front-and-center) ------------
+# The four endpoints contract #6 names, each explicitly
+# _require_surface("admin")-gated. GET /api/admin/agent-lanes is in
+# FAST_PATH_PREFIXES (portal/scheduler.py) so it never queues behind an
+# inference; GET /api/admin/agent-trace-stream deliberately is NOT — see
+# that route's own docstring for why.
+
+@app.get("/api/admin/agent-lanes")
+async def admin_agent_lanes():
+    """Every agent as a living lane. Schema ``arail.agent_lanes/v1``."""
+    if (gate := _require_surface("admin")) is not None:
+        return gate
+    from arail import agent_trace
+    return agent_trace.lanes_snapshot()
+
+
+@app.get("/api/admin/agent-trace-stream")
+async def admin_agent_trace_stream():
+    """SSE, one frame per new trace record.
+
+    Deliberately a different route prefix from ``/api/admin/agent-lanes``:
+    ``FAST_PATH_PREFIXES`` matches with ``startswith``, so nesting this
+    under that prefix (e.g. ``/api/admin/agent-lanes/stream``) would make
+    the fast-path meter time this long-lived stream and inflate
+    ``fast_path_ms`` p95 — the exact bug ``_METRICS_EXCLUDED_PREFIXES``
+    already documents for a different endpoint. The awkward, unrelated-
+    looking name is the fix.
+    """
+    if (gate := _require_surface("admin")) is not None:
+        return gate
+    from arail import agent_trace
+
+    async def _generate():
+        async for rec in agent_trace.subscribe():
+            yield f"data: {json.dumps(rec, default=str)}\n\n"
+
+    return StreamingResponse(
+        _generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.get("/api/admin/agent-trace/{trace_id}")
+async def admin_agent_trace_detail(trace_id: str):
+    """One record, the "why?" drill-in. 404 on an unknown id. Bodies
+    present only if the flight recorder captured them."""
+    if (gate := _require_surface("admin")) is not None:
+        return gate
+    from arail import agent_trace
+    rec = agent_trace.find(trace_id)
+    if rec is None:
+        return JSONResponse(status_code=404, content={"error": "unknown_trace_id"})
+    return rec
+
+
+@app.post("/api/admin/agents/hold")
+async def admin_agents_hold(request: Request):
+    """{hold: bool} -> halt_all_jobs()/resume_all_jobs(). CSRF comes free
+    from local_trust_boundary (app.py's middleware, mutating methods only)
+    -- no new CSRF code."""
+    if (gate := _require_surface("admin")) is not None:
+        return gate
+    from arail import agent_context, scheduler as _job_scheduler
+    body = await request.json()
+    if bool(body.get("hold")):
+        _job_scheduler.halt_all_jobs()
+    else:
+        _job_scheduler.resume_all_jobs()
+    return agent_context.hold_state()
+
+
+@app.post("/api/admin/flight-recorder")
+async def admin_flight_recorder(request: Request):
+    """{enabled: bool} -> writes DATA_DIR/flight_recorder.json. Admin-only,
+    so a minimalist lab can never turn bodies on."""
+    if (gate := _require_surface("admin")) is not None:
+        return gate
+    from arail import agent_trace
+    body = await request.json()
+    return agent_trace.set_recorder_enabled(bool(body.get("enabled")))
 
 
 # -- Scheduler endpoints (admin Scheduler section) -------------------------

@@ -170,7 +170,7 @@
       </div>
       <div class="ag-card-task" id="task-researcher">Awaiting goal.</div>
       <div class="ag-card-stats">
-        <span class="ag-stat" title="LLM tokens spent (estimated from prompt traces)">🔣 <span class="ag-stat-val" id="stat-researcher-tok">0</span> tok</span>
+        <span class="ag-stat" title="LLM tokens spent (real usage from the agent trace)">🔣 <span class="ag-stat-val" id="stat-researcher-tok">0</span> tok</span>
         <span class="ag-stat">🧪 <span class="ag-stat-val" id="stat-researcher-exp">0</span> exps</span>
         <span class="ag-stat">📊 <span class="ag-stat-val" id="stat-researcher-pct">0%</span></span>
       </div>
@@ -195,7 +195,7 @@
       </div>
       <div class="ag-card-task" id="task-curator">Vetting incoming sources.</div>
       <div class="ag-card-stats">
-        <span class="ag-stat" title="LLM tokens spent (estimated from prompt traces)">🔣 <span class="ag-stat-val" id="stat-curator-tok">0</span> tok</span>
+        <span class="ag-stat" title="LLM tokens spent (real usage from the agent trace)">🔣 <span class="ag-stat-val" id="stat-curator-tok">0</span> tok</span>
         <span class="ag-stat">🟡 <span class="ag-stat-val" id="stat-curator-pending">0</span> pending</span>
         <span class="ag-stat">✅ <span class="ag-stat-val" id="stat-curator-approved">0</span> approved</span>
       </div>
@@ -218,7 +218,7 @@
       </div>
       <div class="ag-card-task" id="task-browser">Ready for web tasks.</div>
       <div class="ag-card-stats">
-        <span class="ag-stat" title="LLM tokens spent (estimated from prompt traces)">🔣 <span class="ag-stat-val" id="stat-browser-tok">0</span> tok</span>
+        <span class="ag-stat" title="LLM tokens spent (real usage from the agent trace)">🔣 <span class="ag-stat-val" id="stat-browser-tok">0</span> tok</span>
         <span class="ag-stat">📄 <span class="ag-stat-val" id="stat-browser-captures">0</span> captures</span>
         <span class="ag-stat">⏱ <span class="ag-stat-val" id="stat-browser-last">&mdash;</span></span>
       </div>
@@ -242,7 +242,7 @@
       </div>
       <div class="ag-card-task" id="task-buddy">Watching the lab.</div>
       <div class="ag-card-stats">
-        <span class="ag-stat" title="LLM tokens spent (estimated from prompt traces)">🔣 <span class="ag-stat-val" id="stat-buddy-tok">0</span> tok</span>
+        <span class="ag-stat" title="LLM tokens spent (real usage from the agent trace)">🔣 <span class="ag-stat-val" id="stat-buddy-tok">0</span> tok</span>
         <span class="ag-stat">💬 <span class="ag-stat-val" id="stat-buddy-utterances">0</span> said</span>
         <span class="ag-stat">⏱ <span class="ag-stat-val" id="stat-buddy-last">&mdash;</span></span>
       </div>
@@ -633,7 +633,7 @@ function getAgentSnapshot(agentId) {
       meta: [
         `${rs.experiments || 0} experiments`,
         `${Math.round((rs.progress || 0) * 100)}% progress`,
-        `${rs.tokens || 0} token budget`,
+        `${rs.tokens_out || rs.tokens || 0} tokens used`,
       ],
     };
   }
@@ -1009,7 +1009,7 @@ async function pollStatus() {
     setPill('pill-researcher', rPillClass, rPillText);
     document.getElementById('stat-researcher-pct').textContent = Math.round((rs.progress || 0) * 100) + '%';
     document.getElementById('stat-researcher-exp').textContent = rs.experiments || '0';
-    document.getElementById('stat-researcher-tok').textContent = fmtTokens(rs.tokens);
+    document.getElementById('stat-researcher-tok').textContent = fmtTokens(rs.tokens_out || rs.tokens);
     if (rs.current_task) document.getElementById('task-researcher').textContent = rs.current_task;
     renderTrail('trail-researcher', rs.recent_actions);
 
@@ -1026,7 +1026,7 @@ async function pollStatus() {
     const pending = cs.pending || 0;
     document.getElementById('stat-curator-pending').textContent = pending;
     document.getElementById('stat-curator-approved').textContent = cs.allowed || '0';
-    document.getElementById('stat-curator-tok').textContent = fmtTokens(cs.tokens);
+    document.getElementById('stat-curator-tok').textContent = fmtTokens(cs.tokens_out || cs.tokens);
     const badge = document.getElementById('badge-curator');
     if (pending > 0) {
       badge.style.display = 'inline';
@@ -1042,7 +1042,7 @@ async function pollStatus() {
     // Browser card
     const bs = d.browser || {};
     document.getElementById('stat-browser-captures').textContent = bs.captures || '0';
-    document.getElementById('stat-browser-tok').textContent = fmtTokens(bs.tokens);
+    document.getElementById('stat-browser-tok').textContent = fmtTokens(bs.tokens_out || bs.tokens);
     if (bs.last_task) {
       document.getElementById('stat-browser-last').textContent = bs.last_task.substring(0, 25);
       document.getElementById('task-browser').textContent = bs.last_task;
@@ -1054,7 +1054,7 @@ async function pollStatus() {
     // Buddy card — the polled status fields complement the SSE-driven
     // updateBuddyCard() which reacts in real-time as messages arrive.
     const ps = d.buddy || {};
-    document.getElementById('stat-buddy-tok').textContent = fmtTokens(ps.tokens);
+    document.getElementById('stat-buddy-tok').textContent = fmtTokens(ps.tokens_out || ps.tokens);
     renderTrail('trail-buddy', ps.recent_actions);
 
     renderRedirectState();

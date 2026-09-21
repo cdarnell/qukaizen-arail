@@ -67,6 +67,7 @@ FAST_PATH_PREFIXES: tuple[str, ...] = (
     "/api/admin/perf",
     "/api/admin/cleanup",
     "/api/admin/security",
+    "/api/admin/agent-lanes",
     "/api/pkb/",
     "/api/research/",
     "/static/",
