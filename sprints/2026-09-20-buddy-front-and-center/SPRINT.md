@@ -44,8 +44,8 @@ aerollm-named integration surface.
 |---|---|---|---|---|---|---|
 | think | visionary | VISION.md | done | 2026-09-21 12:49 | 2026-09-21 13:00 | **proceed** — conditional on four cuts (commit `2884569f`) |
 | plan | architect (design) | ARCHITECTURE.md | done | 2026-09-21 13:10 | 2026-09-21 13:30 | complete — 12 sections, slices S0–S7 (commit `600c9541`) |
-| build | builder | BUILD_LOG.md | in progress | 2026-09-21 13:35 | — | — |
-| review | architect (review) | REVIEW.md | pending | — | — | — |
+| build | builder | BUILD_LOG.md | done | 2026-09-21 13:35 | 2026-09-21 16:05 | S0–S7 complete (`ffcb1ba3`…`0d1de0b8`) + two orchestrator-found defect loops (`fc9311a6`, `1bedf165`) |
+| review | architect (review) | REVIEW.md | in progress | 2026-09-21 16:10 | — | — |
 | test | qa | TEST_REPORT.md | pending | — | — | — |
 | ship | — | PR | pending | — | — | — |
 
@@ -66,6 +66,8 @@ aerollm-named integration surface.
 | 2026-09-21 | **Legacy bodies: disclose and offer a purge** (operator) | Admin shows a one-time notice of bodies captured before the flight recorder existed, with a Purge button. Nothing is rewritten without the owner pressing it. No auto-purge, no silent leave. |
 | 2026-09-21 | **`ARAIL_AGENT_STREAM_FAST` on by default** (operator) | Buddy's fast path streams from Ollama (same endpoint, `stream:true`, deltas joined to the identical string) so agents get a true TTFT; env flag disables it. The deep QueueLLM path shows an honest `n/a` — that backend has no `stream_complete`. |
 | 2026-09-21 | Architect's spec corrections accepted into scope | (1) no agent calls `stream_complete` today, so TTFT needs the `deep_policy` fast branch to stream; (2) `AeroLLMBackend` cannot stream → deep TTFT is `n/a`; (3) W2 ("0 generic `agent` calls") needs a legacy-key migration because `calls_by_source` is persisted. Also noted: SRE calls no model today, so OQ3's "stops calling models" is currently vacuous but stays as the contract. |
+| 2026-09-21 | **Build looped back twice before review (orchestrator verification)** | Loop 1: the new suite passed on a clean tree and failed on the second run — four new test files drove the instrumented chokepoint without redirecting `DATA_DIR`, leaking 2,972 trace records into the worktree's real git-ignored `lab/data/`; because every `ModelRouter.complete()` now writes a trace, the pre-existing suite leaked too. Fixed with one autouse conftest guard + a hermeticity regression test (`fc9311a6`). Loop 2: a differential sweep against pristine main (181 files) showed the guard itself caused 3 regressions — it pre-seeded first-run state for every test (broke `test_dashboard_unblocks_after_onboarding`), and two new flight-recorder tests were order-dependent and could pass vacuously on an empty event list (`importlib.reload(arail.activity)` in a boot test rebinding the `ActivityLog` singleton). Fixed without weakening any assertion (`1bedf165`). |
+| 2026-09-21 | "Pre-existing failure" now means "fails on main too, verified" | Final differential vs `main@236504ca`: 17 fail on both, **0 fail only on this branch**. Sprint test files: 256 passed, twice back-to-back; real data root clean. Orchestrator re-ran all of this independently rather than accepting the builder's report. |
 
 ## Skipped phases
 
