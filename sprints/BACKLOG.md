@@ -1414,3 +1414,153 @@ the Researcher a code-writing committer, `agent-loop.md` saying `git
 reset`, `tuning-loop.md` listing two whitelisted files — was fixed in the
 same branch. The remaining prose risk is that "autoresearch" still names
 two unrelated engines.
+
+---
+
+## Portal authentication
+
+**Filed by:** `sprints/2026-09-20-buddy-front-and-center/ARCHITECTURE.md`
+("The portal has no authentication — stated plainly").
+
+**The gap.** `onboarding_gate` middleware (`app.py:395`) is not auth: it
+blocks every surface only until a passphrase exists, then every request
+passes with no per-request credential check — no `Depends(`, no token
+compare, anywhere in `portal/app.py`. Default bind is `127.0.0.1`;
+`BIND_ADDR=0.0.0.0` is supported and explicitly accepted as an
+operator-opted-in exposure. `local_trust_boundary` gives DNS-rebinding and
+cross-site protection for *mutating* methods only. **Any process running
+as any user on the machine — and, on a widened bind, any host on the
+LAN — can read every portal GET.**
+
+**Why it wasn't done now.** The buddy-front-and-center sprint reduces the
+*amount of sensitive content* behind that surface (flight-recorder bodies
+off by default, redacted, capped, admin-gated) but does not add
+authentication — a materially larger, cross-cutting change (session
+tokens or equivalent, every route, every existing integration that assumes
+no auth) that deserves its own VISION/ARCHITECTURE pass, not a rider on an
+observability sprint.
+
+**What a future sprint needs to decide:** session-based auth vs. a
+bearer-token model; whether `LAB_MODE=hybrid` cloud-key flows need a
+different trust boundary than local-only; how a forked/renamed lab
+(`examples/peanut_farmer/`) inherits whatever the answer is without a
+hardcoded assumption about the product name.
+
+---
+
+## Seventeen `/api/admin/*` endpoints are not tier-gated at the API layer
+
+**Filed by:** `sprints/2026-09-20-buddy-front-and-center/BUILD_LOG.md`
+(S5's deviation #1), discovered while wiring the sprint's own new admin
+endpoints.
+
+**The gap.** `ARCHITECTURE.md`'s contract #6 cites `/api/admin/security`
+as existing precedent for "gated by `_require_surface('admin')`, which
+404s on minimalist." That citation does not match the code: grepping every
+`@app.get("/api/admin/...")` / `@app.post("/api/admin/...")` route in
+`portal/app.py` (17 of them, predating this sprint — components,
+check-updates, perf, cleanup, security, scheduler, models, ...) finds zero
+calls to `_require_surface("admin")`. Only the `/admin` **page** route
+itself is gated; its JSON API siblings are wide open regardless of tier.
+A minimalist user who knows or guesses a URL can call any of them.
+
+**Why it wasn't done now.** Out of this sprint's scope — this sprint's
+job was to instrument the chokepoint and gate its *own* four new
+endpoints correctly (done: `agent-lanes`, `agent-trace-stream`,
+`agent-trace/{id}`, `agents/hold`, `flight-recorder`, plus the three
+legacy-bodies endpoints), not to retrofit 17 unrelated, already-shipped
+endpoints. Fixing it now would have been exactly the scope expansion the
+sprint's own ledger warns against.
+
+**What a future sprint needs to decide:** whether all 17 get
+`_require_surface("admin")` in one pass (likely low-risk — they're
+already conceptually admin-only, just not enforced) or whether some are
+deliberately meant to be readable pre-tier-check for a reason not
+currently documented; a regression test parameterised over the full
+existing list (mirroring this sprint's own F13 pattern) would catch any
+future admin endpoint shipped without the gate too.
+
+---
+
+## The agent-inference gateway — gated on this sprint's own overlap measurement
+
+**Filed by:** `sprints/2026-09-20-buddy-front-and-center/VISION.md` (DE1),
+cut from P1's scope per the ledger.
+
+**The gap.** Agent calls never enter `inference_slot` — they run outside
+the queue that serialises chat/world-forge/etc. work. The brief originally
+asked for a single admission gateway that would also *order* agent calls
+behind interactive chat. VISION.md's V8 finding showed the real blast
+radius is ~11 sites (not ~5), 4 of them non-agent, 1 cross-process — the
+riskiest refactor in the whole three-phase programme — and cut it in favor
+of first building the read-only overlap counter this sprint actually
+shipped (`slot.overlap_pct`/`slot.samples` in
+`GET /api/admin/agent-lanes`, fed by `held_by_other` recorded at every
+agent call).
+
+**Why it wasn't done now.** Building the gateway before the
+instrumentation that tells you whether it's needed inverts D18 (the whole
+reason this sprint was ordered first). The overlap counter is that
+instrumentation; it now exists.
+
+**What a future sprint needs to decide, using DE1's pre-committed
+thresholds** (from a week of the operator's ordinary use, once
+`overlap_pct` has real samples): **< 5%** → defer the gateway indefinitely,
+the contention risk was theoretical; **5-25%** → build it after P2's brain
+bake-off, as originally planned; **> 25%** → promote it ahead of the
+Buddy panel (P3) and revisit the deferral itself as having been wrong.
+
+---
+
+## Pre-existing, flagged not fixed by the buddy-front-and-center sprint
+
+**Filed by:** `sprints/2026-09-20-buddy-front-and-center/ARCHITECTURE.md`
+("Where the spec is wrong or unbuildable as scoped", items 7 and 8) —
+found while reading the router/backend and cost-tracking code this sprint
+touched, explicitly not fixed because each is a behaviour change on a path
+this sprint does not otherwise touch.
+
+- **`MLXBackend.stream_complete` signature bug** (`router/backends.py:
+  330-332`): does not accept `system=`/`messages=`, but
+  `ModelRouter.stream_complete` (`router/core.py`) always passes both →
+  `TypeError` on any MLX streaming call through the router. Currently
+  unreachable in production (chat resolves through the registry to
+  Ollama/OpenAICompat), but this sprint's own S3 work
+  (`ARAIL_AGENT_STREAM_FAST`) makes agent-path streaming a live feature
+  for the first time — worth fixing before an MLX-backed agent path is
+  ever wired to stream.
+- **Concurrent `costs.json` write race**: the goal-parser child process
+  runs its own `cost_tracker` singleton against the *same* `costs.json`
+  as the parent, and `CostTracker._save()` is a non-atomic `write_text`.
+  Parent and child can race. Not introduced by this sprint and not
+  widened by it — `agent_trace.jsonl`'s append-only, one-writer-per-
+  process design (contract #9) is strictly safer than what `costs.json`
+  already does, which is why the trace store didn't repeat the mistake
+  rather than a reason to leave `costs.json` unfixed forever.
+
+**What a future sprint needs to decide:** whether the MLX signature bug
+gets a defensive fix now (cheap: accept and ignore the two kwargs, or
+route them through) or waits for an actual MLX-backed streaming caller to
+surface it; whether `costs.json`'s write path moves to the same
+temp-file-plus-`os.replace` pattern `agent_trace.py`/`activity.py`
+already use.
+
+---
+
+## `/api/agents/status`'s deprecated `tokens` alias — removal window
+
+**Filed by:** `sprints/2026-09-20-buddy-front-and-center/ARCHITECTURE.md`
+(contract #8, the V7 fix) and `BUILD_LOG.md` (S6).
+
+**The gap.** `GET /api/agents/status` now emits both `tokens_out` (new,
+correct — real usage from the trace ring) and `tokens` (deprecated alias,
+now carrying the *same corrected* value) because `agents.html` still reads
+`.tokens` in four places. The alias is meant to live for **one release**,
+not indefinitely.
+
+**What a future sprint needs to do:** once `agents.html` is confirmed to
+read `tokens_out` everywhere `tokens` was read (four `fmtTokens(...)`
+call sites plus the Researcher meta-line, already switched to prefer
+`tokens_out` this sprint but still falling back to `tokens`), drop the
+`tokens` key from the endpoint response and the fallback reads in the
+template.

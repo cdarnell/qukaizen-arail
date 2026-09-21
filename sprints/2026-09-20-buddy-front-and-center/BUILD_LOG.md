@@ -598,7 +598,110 @@ workflow/debt-finance/costs/halt baseline; `/metrics` and scheduler
 suites (V9) unchanged, 44 passed. Running total: 245 new tests across
 S0-S6, all passing; 0 regressions.
 
+Commit: `f99da58f`
+
+### S7 — Docs and backlog
+
+**Delivered:**
+
+- `docs/agent-observability.md` (new) — the durable design summary: the
+  chokepoint diagram, the three attribution layers and why a contextvar
+  (not a router attribute or a new parameter), the trace store's
+  invariants, the TTFT honesty table, hold/speech gating, the flight
+  recorder + redaction, the admin surface, and an explicit "what this does
+  not fix" section (portal auth, the deferred gateway, the 17 ungated
+  admin endpoints).
+- `docs/agents.md` — a new "Attribution and hold contract" subsection
+  (under "The dynamic loader") telling a future agent author exactly what
+  they get for free via L1, what to do when a call site isn't reachable
+  through `start()`/`dream()` (wrap it, or use `spawn_thread` for a bare
+  `Thread`), and what `AgentHeldError`/`speech_gate` require of their own
+  exception handling.
+- `sprints/BACKLOG.md` — five new entries: portal authentication; the 17
+  ungated `/api/admin/*` endpoints (found in S5); the inference gateway,
+  gated on DE1's pre-committed `overlap_pct` thresholds; the pre-existing
+  MLX `stream_complete` signature bug and the concurrent `costs.json`
+  write race (both named in ARCHITECTURE.md, neither fixed); the
+  deprecated `tokens` alias's one-release removal window.
+
+**Deviations:** none.
+
+**Also closed two failure-mode coverage gaps found during the final
+pre-handoff check** (not part of S7's own file list, but the right place
+to fix them before declaring done): `tests/test_agent_trace.py` gained
+F18's explicit test (a burst of 1000 traces leaves `activity_log.recent
+(200)` untouched — named in the test strategy's Regression section but
+not yet written); `tests/test_halt_persistence.py` gained two tests for
+`scheduler.halt_changed_at()` (added in S4, exercised structurally via
+`hold_state()` but never tested for restart-survival on its own, the same
+property F15 requires of the `halted` flag itself).
+
+**Tests:** 3 new (folded into existing files, not new files — recorded
+here since they close named gaps). No new test *files* this slice; docs
+are prose. Running total: **248 new tests across S0-S7**, all passing.
+
 Commit: `pending`
+
+## Final state
+
+**All eight slices (S0-S7) complete**, in order, each independently
+committed:
+
+| Slice | Commit | What |
+|---|---|---|
+| S0 | `ffcb1ba3` | Proved A1-A4 (contextvar propagation) — all held |
+| S1 | `ee9c6057` | agent_context + agent_trace + chokepoint recording |
+| S2 | `fedfd5d9` | L1/L2/L3 attribution wiring + subprocess protocol |
+| S3 | `84be6c77` | TTFT honesty contract + fast-path streaming |
+| S4 | `d6b97a03` | halt_gate/speech_gate — the kill switch made real |
+| S5 | `4b005034` | redact.py + flight recorder + legacy-bodies purge |
+| S6 | `f99da58f` | Four admin endpoints + admin.html card + V7 fix |
+| S7 | *(this commit)* | Docs + BACKLOG.md + 2 failure-mode coverage gaps closed |
+
+**Tests:** 248 new tests, all passing, across 19 new test files plus
+targeted additions to 2 existing ones (`test_costs_persistence.py`
+untouched; `test_halt_persistence.py` and `test_agent_trace.py` extended).
+Zero regressions introduced — verified by re-running the original 15-suite
+baseline (294 passed, up from 292 at the start of this build, the +2 being
+this build's own additions to `test_halt_persistence.py`) and the three
+documented pre-existing failures (`test_notice_byte_identical_to_
+sibling_when_available`, `test_backends_raises_on_sentinel_before_any_
+load` — still failing for their documented, unrelated reasons;
+`test_cross_link_audit_all_internal_links_resolve` — passed throughout
+this build in this worktree, consistent with the "fresh worktree only"
+caveat not applying here).
+
+**Every failure mode in ARCHITECTURE.md (F1-F20) has at least one test**,
+cross-checked explicitly during this final pass — F18 and part of F15
+were the two gaps found and closed in S7.
+
+**No commented-out code. No TODO/FIXME/XXX comments introduced** (grepped
+every file this build touched; the handful of `TODO(deep-model)` hits are
+pre-existing, unrelated to this sprint, in `app.py`/`backends.py`).
+
+**Architect feedback required — six items, none blocking, all already
+individually flagged in their originating slice's section above and
+repeated here for a single scan:**
+
+1. `agent_trace.SYS_LANES`'s inferred fourth label (S1).
+2. `librarian`'s empty-reason overriding the doc's own claim (S1).
+3. A7's `forge._voice:321` citation error — grep matched inside a
+   template-literal string, not live code (S4).
+4. Three site-selection judgment calls for `speech_gate` wiring
+   (librarian/debt_advisor/consolidation_analyzer/presence) where
+   ARCHITECTURE.md didn't cite an exact line (S4) — QA-BLIND-2 is the
+   designated place to confirm or correct these.
+5. 17 pre-existing `/api/admin/*` endpoints are not actually gated by
+   `_require_surface("admin")` despite the doc's citation that they are
+   (S5) — filed to `sprints/BACKLOG.md`, not fixed.
+6. The deep branch of `complete_preferring_deep` was deliberately left
+   calling `.complete()` rather than `.stream_complete()`, reading
+   ARCHITECTURE.md finding #2 as prose musing rather than an S3 action
+   item (S3) — flagged in case the intent really was the latter.
+
+None of the six changed an interface contract, blocked a later slice, or
+was worked around silently — every one is named in code comments and in
+this log at the point it was found.
 
 ## Final state
 

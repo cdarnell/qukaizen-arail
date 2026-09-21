@@ -284,6 +284,29 @@ def test_subscribe_receives_a_record_pushed_before_record_returns():
     asyncio.run(_scenario())
 
 
+def test_f18_burst_of_traces_leaves_activity_log_untouched(monkeypatch, tmp_path):
+    """F18: the trace store is a separate persistence path from
+    activity.jsonl — nothing new is written there, so a burst of agent
+    traces cannot evict the operator's activity history out of its own
+    200-event ring."""
+    from arail import activity
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(activity, "LOG_FILE", tmp_path / "activity.jsonl")
+    activity.ActivityLog._instance = None
+    log = activity.ActivityLog()
+    for i in range(250):
+        log.emit("test", f"event-{i}")
+    before = log.recent(200)
+
+    for i in range(1000):
+        agent_trace.record(trace_id=f"{i:016x}", agent_id="buddy", kind="agent")
+
+    after = log.recent(200)
+    assert after == before
+    assert len(after) == 200
+    activity.ActivityLog._instance = None
+
+
 def test_subscribe_receives_from_a_foreign_thread():
     """record() called from a to_thread worker must still wake a subscriber
     on the event loop via call_soon_threadsafe (the activity.py idiom)."""
