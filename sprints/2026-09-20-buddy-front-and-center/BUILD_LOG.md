@@ -827,7 +827,7 @@ across repeated runs — the whole point of this fix. 0 regressions against
 the pre-sprint baseline, now genuinely verified by re-running rather than
 asserted from a single clean-tree run.
 
-Commit: `pending`
+Commit: `fc9311a6`
 
 ## Final state
 
