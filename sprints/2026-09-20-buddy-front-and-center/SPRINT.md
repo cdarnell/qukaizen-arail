@@ -43,8 +43,8 @@ aerollm-named integration surface.
 | Phase | Subagent | Artifact | Status | Started | Finished | Verdict |
 |---|---|---|---|---|---|---|
 | think | visionary | VISION.md | done | 2026-09-21 12:49 | 2026-09-21 13:00 | **proceed** — conditional on four cuts (commit `2884569f`) |
-| plan | architect (design) | ARCHITECTURE.md | in progress | 2026-09-21 13:10 | — | — |
-| build | builder | BUILD_LOG.md | pending | — | — | — |
+| plan | architect (design) | ARCHITECTURE.md | done | 2026-09-21 13:10 | 2026-09-21 13:30 | complete — 12 sections, slices S0–S7 (commit `600c9541`) |
+| build | builder | BUILD_LOG.md | in progress | 2026-09-21 13:35 | — | — |
 | review | architect (review) | REVIEW.md | pending | — | — | — |
 | test | qa | TEST_REPORT.md | pending | — | — | — |
 | ship | — | PR | pending | — | — | — |
@@ -62,6 +62,10 @@ aerollm-named integration surface.
 | 2026-09-21 | **OQ3 — "hold all agents": SRE keeps watching but stops calling models** (operator) | Hold stops every agent's inference and speech, including SRE's LLM-written summaries; SRE's non-LLM crash detection keeps running and may raise a plain template alert. The switch must state this in the UI. |
 | 2026-09-21 | **OQ2 — per-agent budgets deferred** (operator) | No hard ceiling in P1. Budgets land next sprint with traced usage behind the numbers. |
 | 2026-09-21 | OQ4 — lane roster: fixed list of model-calling built-ins; user-defined loader agents render as a generic lane | Visionary's recommendation; first-class user-defined lanes are unbounded. Orchestrator decision, revisitable in build. |
+| 2026-09-21 | **One halt switch, wider meaning** (operator) | The existing dashboard "Halt jobs" control (`scheduler.jobs_halted()`) becomes "hold all agents": background jobs, agent inference and proactive speech all stop. Relabelled so the UI states exactly what it holds. No second flag. |
+| 2026-09-21 | **Legacy bodies: disclose and offer a purge** (operator) | Admin shows a one-time notice of bodies captured before the flight recorder existed, with a Purge button. Nothing is rewritten without the owner pressing it. No auto-purge, no silent leave. |
+| 2026-09-21 | **`ARAIL_AGENT_STREAM_FAST` on by default** (operator) | Buddy's fast path streams from Ollama (same endpoint, `stream:true`, deltas joined to the identical string) so agents get a true TTFT; env flag disables it. The deep QueueLLM path shows an honest `n/a` — that backend has no `stream_complete`. |
+| 2026-09-21 | Architect's spec corrections accepted into scope | (1) no agent calls `stream_complete` today, so TTFT needs the `deep_policy` fast branch to stream; (2) `AeroLLMBackend` cannot stream → deep TTFT is `n/a`; (3) W2 ("0 generic `agent` calls") needs a legacy-key migration because `calls_by_source` is persisted. Also noted: SRE calls no model today, so OQ3's "stops calling models" is currently vacuous but stays as the contract. |
 
 ## Skipped phases
 
