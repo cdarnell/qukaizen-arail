@@ -162,11 +162,27 @@ class DrafterAgent:
         # (it's request-driven, invoked by blueprints), so its one
         # model-acquisition site gets its own explicit wrapper.
         from arail import agent_context
-        with agent_context.agent_call("drafter"):
-            response = used_router.complete(
-                prompt=prompt,
-                max_tokens=max_tokens,
-                temperature=temperature,
+        try:
+            with agent_context.agent_call("drafter"):
+                response = used_router.complete(
+                    prompt=prompt,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                )
+        except agent_context.AgentHeldError:
+            # F8 (ARCHITECTURE.md): compose() is the one model-calling site
+            # that does NOT swallow broadly (no try/except around
+            # router.complete() until now) -- an explicit guard, mirroring
+            # the existing "no router available" degradation above, so a
+            # held Drafter degrades to an empty draft instead of raising
+            # into whatever blueprint invoked it.
+            return Draft(
+                text="",
+                requires_consent=True,
+                tokens_in=len(prompt) // 4,
+                model="(held)",
+                voice=voice,
+                metadata={"error": "held"},
             )
 
         # ModelResponse: .text, .model (optional), .backend (optional)

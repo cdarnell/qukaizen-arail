@@ -340,7 +340,102 @@ def billing_source(ctx: Optional[AgentCall]) -> str:
     return "unattributed"
 
 
+# ---------------------------------------------------------------------------
+# Hold ("hold all agents") — S4
+# ---------------------------------------------------------------------------
+
+# Ledger OQ3: the SRE crash watcher keeps watching and may still post a
+# plain, non-model template alert while agents are held — every other
+# proactive speaker goes silent. This is the one hard-coded exemption.
+HOLD_EXEMPT_SPEAKERS = frozenset({"sre"})
+
+_in_flight_lock = threading.Lock()
+_in_flight_agent_calls = 0
+
+
+class AgentHeldError(RuntimeError):
+    """Raised at the router chokepoint when agents are held and the active
+    context is an agent-sourced call. Never raised for kind="system", "ui",
+    or an unattributed call — holding agents must not break the operator's
+    own chat turn while he is holding them."""
+
+
+def halt_gate(ctx: Optional[AgentCall]) -> None:
+    """Refuse an agent-sourced call while held. Raises :class:`AgentHeldError`
+    or returns. Admission control, not cancellation — a call already inside
+    a backend when the switch flips runs to completion; this only refuses
+    *new* calls at the door."""
+    if ctx is not None and ctx.kind == "agent":
+        from arail import scheduler as _job_scheduler
+        if _job_scheduler.jobs_halted():
+            raise AgentHeldError(
+                f"agent {ctx.agent_id!r} refused: agents are held "
+                "(hold all agents is on)"
+            )
+
+
+def speech_gate(agent_id: Any) -> bool:
+    """``True`` = allowed to speak right now. ``False`` when held, unless
+    ``agent_id`` is in :data:`HOLD_EXEMPT_SPEAKERS`. Never raises — a
+    resolution failure fails open (speak), because silencing on an
+    unrelated error would be a worse surprise than one extra line."""
+    sanitized = _sanitize_agent_id(agent_id) or ""
+    if sanitized in HOLD_EXEMPT_SPEAKERS:
+        return True
+    try:
+        from arail import scheduler as _job_scheduler
+        return not _job_scheduler.jobs_halted()
+    except Exception:  # noqa: BLE001
+        return True
+
+
+def hold_state() -> dict:
+    """Snapshot for the Admin control and F17's copy-and-behaviour test:
+    ``{held, changed_at, exempt_speakers, in_flight}``."""
+    try:
+        from arail import scheduler as _job_scheduler
+        held = _job_scheduler.jobs_halted()
+        changed_at = _job_scheduler.halt_changed_at()
+    except Exception:  # noqa: BLE001
+        held = False
+        changed_at = None
+    return {
+        "held": held,
+        "changed_at": changed_at,
+        "exempt_speakers": sorted(HOLD_EXEMPT_SPEAKERS),
+        "in_flight": in_flight_agent_calls(),
+    }
+
+
+def note_agent_call_entered(ctx: Optional[AgentCall]) -> None:
+    """Count one more agent-sourced call as in-flight. Called by the router
+    chokepoint immediately after ``halt_gate`` admits the call. No-op for
+    non-agent contexts."""
+    if ctx is None or ctx.kind != "agent":
+        return
+    global _in_flight_agent_calls
+    with _in_flight_lock:
+        _in_flight_agent_calls += 1
+
+
+def note_agent_call_exited(ctx: Optional[AgentCall]) -> None:
+    """Counterpart to :func:`note_agent_call_entered`, called in a
+    ``finally`` so a raising backend call still decrements."""
+    if ctx is None or ctx.kind != "agent":
+        return
+    global _in_flight_agent_calls
+    with _in_flight_lock:
+        _in_flight_agent_calls = max(0, _in_flight_agent_calls - 1)
+
+
+def in_flight_agent_calls() -> int:
+    return _in_flight_agent_calls
+
+
 def _reset_for_tests() -> None:
     """Test-only: drop whatever the current context is. Tests that assert
     on a clean slate call this in a fixture; production code never does."""
+    global _in_flight_agent_calls
     _CALL.set(None)
+    with _in_flight_lock:
+        _in_flight_agent_calls = 0

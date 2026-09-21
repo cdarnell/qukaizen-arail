@@ -229,6 +229,15 @@ class ModelRouter:
         slot = self._slot_info()
 
         try:
+            agent_context.halt_gate(ctx)
+        except agent_context.AgentHeldError:
+            self._record(ctx, slot=slot, streamed=False,
+                         outcome="refused_halted",
+                         ttft_ms=None, ttft_status="non_streaming")
+            raise
+
+        agent_context.note_agent_call_entered(ctx)
+        try:
             response = self._backend.complete(
                 prompt, max_tokens, temperature, top_p=top_p,
                 system=system, messages=messages,
@@ -237,6 +246,8 @@ class ModelRouter:
             self._record(ctx, slot=slot, streamed=False,
                          outcome="error", error_class=type(exc).__name__)
             raise
+        finally:
+            agent_context.note_agent_call_exited(ctx)
 
         # Track cost — estimate input tokens from prompt + frozen prefix length
         tokens_in = max((len(prompt) + len(system or "")) // 4, 1)
@@ -285,6 +296,15 @@ class ModelRouter:
         ttft_status: Optional[str] = None
         is_first_item = True
 
+        try:
+            agent_context.halt_gate(ctx)
+        except agent_context.AgentHeldError:
+            self._record(ctx, slot=slot, streamed=True,
+                         outcome="refused_halted",
+                         ttft_ms=None, ttft_status=None)
+            raise
+
+        agent_context.note_agent_call_entered(ctx)
         try:
             for item in self._backend.stream_complete(
                 prompt,
@@ -347,6 +367,8 @@ class ModelRouter:
                          outcome="error", error_class=type(exc).__name__,
                          ttft_ms=ttft_ms, ttft_status=ttft_status)
             raise
+        finally:
+            agent_context.note_agent_call_exited(ctx)
 
     def health_check(self) -> Dict[str, bool]:
         return {self.backend_name: self._backend.health_check()}

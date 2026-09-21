@@ -344,6 +344,101 @@ chat-streaming-adjacent suite (F19 — `billing_source == "ui"` path
 untouched). Running total: 117 new tests across S0-S3, all passing; 0
 regressions.
 
+Commit: `84be6c77`
+
+### S4 — The kill switch made real
+
+**Delivered:**
+
+- `src/arail/scheduler.py`: added `_halt_changed_at` (module global, loaded/
+  persisted alongside `_halted`) and a public `halt_changed_at()` reader —
+  needed because `hold_state()`'s documented shape includes `changed_at` and
+  nothing previously exposed the value `_persist_halt_locked()` already
+  wrote to disk.
+- `src/arail/agent_context.py`: `AgentHeldError`, `HOLD_EXEMPT_SPEAKERS =
+  {"sre"}`, `halt_gate(ctx)`, `speech_gate(agent_id)`, `hold_state()`, and
+  an in-flight-agent-calls counter (`note_agent_call_entered`/`_exited`/
+  `in_flight_agent_calls`) feeding `hold_state()`'s `"in_flight"` key.
+- `src/arail/router/core.py`: both `complete()` and `stream_complete()` call
+  `halt_gate(ctx)` **before** touching the backend; a refusal records
+  `outcome="refused_halted"` and re-raises; an admitted agent-kind call is
+  bracketed by the in-flight counter in a `finally` so a raising backend
+  call still decrements.
+- `src/arail/agents/deep_policy.py`: `complete_preferring_deep` catches
+  `AgentHeldError` **specifically**, before the generic `except Exception`,
+  in both the deep branch and the fast branch (both the streamed attempt
+  and the `.complete()` fallback) — returns `None` immediately rather than
+  trying the other path, so one held decision produces exactly one
+  `refused_halted` trace, not two.
+- `src/arail/agents/_builtin_drafter.py`: `compose()` — the one site A7
+  identified as not swallowing broadly — gets an explicit
+  `except AgentHeldError` branch returning `Draft(text="",
+  metadata={"error": "held"})`, distinguishable from the pre-existing
+  `{"error": "no router available"}` degradation.
+- **Speech gating (F9), five sites:**
+  - `_builtin_buddy.py`: `BuddyAgent._emit()` — the single funnel for every
+    watcher/suggester proactive line — gated at its top.
+  - `_builtin_librarian.py`: the shared `_emit()` static helper — the single
+    funnel for growth/scout/horizon-watch announcements — gated at its top.
+  - `_builtin_presence.py`: the one `activity_log.emit(...)` in `_tick()`.
+  - `_builtin_debt_advisor.py`: the "produced a new finding" success
+    announcement in `tick()` (the moment the model-touched framing sentence
+    would be spoken).
+  - `_builtin_consolidation_analyzer.py`: the "produced a new finding" and
+    "crossed your alert-breakeven threshold" announcements in `tick()`.
+
+**Deviations from ARCHITECTURE.md, each with reason:**
+
+1. **A7's citation `forge._voice:321` as a swallowing model-calling site is
+   incorrect** — verified by reading `agents/forge.py` line-by-line while
+   choosing where to wire S4's guards: `_voice()` and its `router.complete()`
+   call are inside the triple-quoted `_AGENT_PY_TEMPLATE` string (lines
+   201-443), a template for a **generated** agent's `.py` file, not live
+   code in `forge.py` itself (this matches S2's independent finding that
+   `forge` calls no model). A7's practical conclusion — "everything except
+   `_builtin_drafter.compose` already swallows" — is unaffected (forge
+   needed no guard either way, since it has no reachable call site), but
+   the citation itself is a grep-matched-a-string-inside-a-template-literal
+   error, not a verified code fact. Flagged for architect review, not a
+   blocker — no action item changed.
+2. **Which exact `activity_log`/`_host.emit()` call site counts as "the
+   proactive speech moment" for librarian/debt_advisor/consolidation_analyzer
+   was a judgment call, not a citation ARCHITECTURE.md supplies** (unlike
+   buddy's `_emit()`, which the doc's own V2 citations make unambiguous).
+   Chose: librarian's shared `_emit()` helper (all of it, including the
+   boot "on duty" notice — consistent with buddy's "gate the whole funnel"
+   shape); debt_advisor/consolidation_analyzer's per-tick "produced a new
+   finding" success announcements specifically (not their warning/error
+   diagnostics, which read as operational health signals rather than
+   proactive voice, and are structurally similar to SRE's exempted alerts).
+   Presence's one emit is gated too even though it carries no model output
+   at all — the ledger's "stop speaking" reads as silencing the lab's
+   narration broadly, not just LLM-authored lines. **QA-BLIND-2 is the
+   right place to confirm or correct these choices against the operator's
+   actual expectation** ("drive every proactive speech path... assert zero
+   new proactive lines from the five gated speakers").
+3. **`hold_state()`'s `"in_flight"` counter is real but only exercised by a
+   same-thread, synchronous test in this slice** — a genuine concurrent
+   in-flight count (a call actually running in another thread while
+   `hold_state()` is read) is S6's live-view territory once the Admin
+   endpoint exists to observe it meaningfully; S4's tests prove the
+   increment/decrement pairing and the zero-floor, not genuine concurrency.
+
+**Tests:** `tests/test_halt_gate.py` (30 — halt_gate's kind-based gate
+exhaustively, speech_gate's exemption, F7's chokepoint refusal with the
+backend never touched, W3's zero-admitted-traces precondition, the
+in-flight counter, `hold_state()`'s shape, and F17's three behavioural
+claims tested directly — the literal UI copy string is S6's job),
+`tests/test_halt_survival.py` (8 — F8, one test per real agent-kind
+model-calling site: `deep_policy` for both its branches [covering
+buddy/debt_advisor/consolidation_analyzer], researcher, browser,
+librarian_scout, and drafter's two distinguishable degradation paths).
+**38 new tests, all passing.** Regression: 443 passed across every
+buddy/debt-finance/consolidation/librarian/SRE-adjacent suite (1 skipped,
+1 xfailed, both pre-existing and unrelated); router/deep_policy suites
+still green. Running total: 155 new tests across S0-S4, all passing; 0
+regressions.
+
 Commit: `pending`
 
 ## Final state

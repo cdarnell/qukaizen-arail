@@ -1377,6 +1377,13 @@ class BuddyAgent:
         self._emit(chosen, kind="suggest")
 
     def _emit(self, obs: Observation, *, kind: str) -> None:
+        # F9 (ARCHITECTURE.md): the single funnel for every proactive line
+        # Buddy speaks (watchers and suggesters alike) — gated here rather
+        # than at each caller, same "one place, cannot be forgotten" logic
+        # as the chokepoint's halt_gate for inference.
+        from arail import agent_context
+        if not agent_context.speech_gate("buddy"):
+            return
         sentence = _voice(obs.fact)
         level = {
             "praise": "success",
