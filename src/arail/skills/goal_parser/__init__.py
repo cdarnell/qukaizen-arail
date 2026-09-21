@@ -7,9 +7,11 @@ import os
 import re
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
+from arail import agent_context, agent_trace
 from arail.router import ModelRouter
 
 
@@ -171,8 +173,13 @@ class GoalParser:
         :meth:`_llm_subprocess` in production.
         """
         try:
-            resp = self._get_router().complete(prompt, max_tokens=800,
-                                               temperature=0.5)
+            # L3 (ARCHITECTURE.md): goal_parser is not an agent -- system_call,
+            # same label as the subprocess path uses for the out-of-process
+            # trace, so the in-proc test path and the production path agree
+            # on what this work is called.
+            with agent_context.system_call("goal-parser"):
+                resp = self._get_router().complete(prompt, max_tokens=800,
+                                                   temperature=0.5)
             return resp.text
         except Exception:
             return None
@@ -184,11 +191,21 @@ class GoalParser:
         recoverable failure (subprocess crash, timeout, OOM, JSON
         protocol error). Callers fall back to the heuristic parser.
         """
+        # Attribution round-trip (ARCHITECTURE.md contract #9): merge the
+        # current context into the wire payload so the child can bill its
+        # own cost_tracker correctly. The child never writes a trace file
+        # itself (see _subprocess_runner.py's docstring) -- this function
+        # is the sole trace author for the whole round-trip, always
+        # recording exactly once, success or failure, so DE2's known leak
+        # (this subprocess) is closed rather than merely labelled.
+        subprocess_ctx = agent_context.to_subprocess_payload()
         request = json.dumps({
             "prompt": prompt,
             "max_tokens": 800,
             "temperature": 0.5,
+            **subprocess_ctx,
         })
+        t0 = time.monotonic()
         try:
             proc = subprocess.run(
                 [sys.executable, "-m",
@@ -199,26 +216,69 @@ class GoalParser:
                 timeout=_SUBPROCESS_TIMEOUT_SEC,
             )
         except subprocess.TimeoutExpired:
+            self._record_subprocess_trace(
+                subprocess_ctx, outcome="error", error_class="TimeoutExpired")
             return None
-        except (OSError, ValueError):
+        except (OSError, ValueError) as exc:
             # Couldn't spawn the subprocess at all (bad path, ulimit,
             # weird sys.executable). Fall back silently.
+            self._record_subprocess_trace(
+                subprocess_ctx, outcome="error", error_class=type(exc).__name__)
             return None
+        elapsed_ms = (time.monotonic() - t0) * 1000
 
         if proc.returncode != 0:
             # The runner caught its own errors and exited 0 even on
             # Python-level failure, so a non-zero return code means
             # the process itself died (Metal OOM, segfault, etc).
             # That's the hardened path the user reported — survive it.
+            self._record_subprocess_trace(
+                subprocess_ctx, outcome="error", error_class="SubprocessDied",
+                latency_ms=elapsed_ms)
             return None
 
         try:
             payload = json.loads(proc.stdout or "{}")
         except json.JSONDecodeError:
+            self._record_subprocess_trace(
+                subprocess_ctx, outcome="error", error_class="JSONDecodeError",
+                latency_ms=elapsed_ms)
             return None
         if not payload.get("ok"):
+            self._record_subprocess_trace(
+                subprocess_ctx, outcome="error",
+                error_class=str(payload.get("error", "unknown"))[:80],
+                latency_ms=elapsed_ms)
             return None
+
+        self._record_subprocess_trace(
+            subprocess_ctx, outcome="ok", latency_ms=elapsed_ms,
+            model=payload.get("model"), backend=payload.get("backend"),
+            tokens_out=payload.get("tokens_used"))
         return payload.get("text")
+
+    @staticmethod
+    def _record_subprocess_trace(subprocess_ctx: Dict[str, Any], **fields: Any) -> None:
+        """The parent authors the one trace record for this out-of-process
+        call (contract #9). ``out_of_process=True`` distinguishes it from
+        anything recorded by the router chokepoint directly."""
+        agent_trace.record(
+            trace_id=subprocess_ctx.get("trace_id"),
+            agent_id=subprocess_ctx.get("agent_id"),
+            kind="agent" if subprocess_ctx.get("agent_id") else "system",
+            label=subprocess_ctx.get("agent_id") or "goal-parser",
+            attribution=(
+                f"agent:{subprocess_ctx['agent_id']}"
+                if subprocess_ctx.get("agent_id") else "sys:goal-parser"
+            ),
+            brain=subprocess_ctx.get("brain"),
+            effort=subprocess_ctx.get("effort"),
+            out_of_process=True,
+            streamed=False,
+            ttft_ms=None,
+            ttft_status="non_streaming",
+            **fields,
+        )
 
     def parse_offline(self, goal_text: str) -> Dict[str, Any]:
         """Heuristic-only parsing — no LLM needed (works airgapped with no

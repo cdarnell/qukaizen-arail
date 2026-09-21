@@ -201,6 +201,12 @@ def test_lanes_snapshot_empty_reason_for_model_free_lanes():
     by_id = {lane["id"]: lane for lane in snap["lanes"]}
     assert by_id["sre"]["empty_reason"] == "does not call a model"
     assert by_id["presence"]["empty_reason"] == "does not call a model"
+    # Confirmed during S2's wiring pass (not assumed): curator has zero
+    # router references; forge is a code generator whose own top-level code
+    # never calls a model (the *generated* agent inherits attribution via
+    # L1 once deployed, under its own id, never under "forge").
+    assert by_id["curator"]["empty_reason"] == "does not call a model"
+    assert by_id["forge"]["empty_reason"] == "does not call a model"
 
 
 def test_lanes_snapshot_generic_empty_reason_for_others():

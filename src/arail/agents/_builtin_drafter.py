@@ -158,11 +158,16 @@ class DrafterAgent:
                 metadata={"error": "no router available"},
             )
 
-        response = used_router.complete(
-            prompt=prompt,
-            max_tokens=max_tokens,
-            temperature=temperature,
-        )
+        # L3 (ARCHITECTURE.md): drafter has no tick loop the loader wraps
+        # (it's request-driven, invoked by blueprints), so its one
+        # model-acquisition site gets its own explicit wrapper.
+        from arail import agent_context
+        with agent_context.agent_call("drafter"):
+            response = used_router.complete(
+                prompt=prompt,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
 
         # ModelResponse: .text, .model (optional), .backend (optional)
         text = getattr(response, "text", str(response)).strip()

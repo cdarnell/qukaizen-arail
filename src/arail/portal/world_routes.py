@@ -39,6 +39,7 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
+from arail import agent_context
 from arail import world_forge as wf
 from arail import world_mount as wm
 from arail.activity import activity_log
@@ -169,19 +170,25 @@ async def _run_forge(params: wf.ForgeParams, brain: str = "local") -> None:
     global _forge_state, _forge_result
     try:
         router_ = _curation_router(brain)
-        if brain in _CLOUD_BRAINS:
-            # Frontier API forge — no local model residency, so no
-            # inference_slot: the cloud calls run beside chat's GPU work.
-            result = await asyncio.to_thread(
-                wf.forge_world, params, router=router_,
-                progress_cb=_forge_progress, cancel=_forge_cancel,
-            )
-        else:
-            async with scheduler.inference_slot("world-forge"):
+        # L3 (ARCHITECTURE.md): world_routes is not an agent -- system_call
+        # under the same label already used for the inference_slot, so
+        # attribution and slot metrics agree on what this work is called.
+        # dac_world (wf) itself stays ARAIL-free (no import arail), so the
+        # wrap has to live here, around the to_thread hop that reaches it.
+        with agent_context.system_call("world-forge"):
+            if brain in _CLOUD_BRAINS:
+                # Frontier API forge — no local model residency, so no
+                # inference_slot: the cloud calls run beside chat's GPU work.
                 result = await asyncio.to_thread(
                     wf.forge_world, params, router=router_,
                     progress_cb=_forge_progress, cancel=_forge_cancel,
                 )
+            else:
+                async with scheduler.inference_slot("world-forge"):
+                    result = await asyncio.to_thread(
+                        wf.forge_world, params, router=router_,
+                        progress_cb=_forge_progress, cancel=_forge_cancel,
+                    )
         _forge_result = result
         _forge_state = {**_forge_state, "state": "done",
                         "terms_found": len(result.terms),
@@ -875,8 +882,9 @@ async def api_term_draft(request: Request):
         out["source"] = wf._source_tag_from_model(model_name)
         return out
 
-    async with scheduler.inference_slot("term-draft"):
-        proposal = await asyncio.to_thread(_draft)
+    with agent_context.system_call("term-draft"):
+        async with scheduler.inference_slot("term-draft"):
+            proposal = await asyncio.to_thread(_draft)
     return {"proposal": proposal}
 
 
@@ -897,10 +905,11 @@ async def _run_review(bundle_dir: Path, spec: dict, terms: list[dict]) -> None:
     display = str(spec.get("display_name", world))
     try:
         router_ = _review_router()
-        async with scheduler.inference_slot("world-review"):
-            flags = await asyncio.to_thread(
-                wf.reconcile_terms, spec, terms,
-                router=router_, limit=REVIEW_BATCH, cancel=_review_cancel)
+        with agent_context.system_call("world-review"):
+            async with scheduler.inference_slot("world-review"):
+                flags = await asyncio.to_thread(
+                    wf.reconcile_terms, spec, terms,
+                    router=router_, limit=REVIEW_BATCH, cancel=_review_cancel)
         doc = {
             "schema": REVIEW_SCHEMA,
             "world": world,
@@ -1018,16 +1027,17 @@ async def _run_grow(bundle_dir: Path, spec: dict, terms: list[dict], brain: str)
             global _grow_state
             _grow_state = {**_grow_state, "stage": stage, "message": note}
 
-        async with scheduler.inference_slot("world-grow"):
-            _grow_state = {**_grow_state, "stage": "reviewing"}
-            flags = await asyncio.to_thread(
-                wf.reconcile_terms, spec, terms, router=router_,
-                limit=GROW_REVIEW_BATCH, cancel=_grow_cancel)
-            _corrected, changes = wf.apply_corrections(terms, flags, declared)
-            _grow_state = {**_grow_state, "stage": "growing"}
-            new_terms = await asyncio.to_thread(
-                wf.propose_new_terms, spec, terms, router=router_,
-                limit=GROW_NEW_BATCH, cancel=_grow_cancel)
+        with agent_context.system_call("world-grow"):
+            async with scheduler.inference_slot("world-grow"):
+                _grow_state = {**_grow_state, "stage": "reviewing"}
+                flags = await asyncio.to_thread(
+                    wf.reconcile_terms, spec, terms, router=router_,
+                    limit=GROW_REVIEW_BATCH, cancel=_grow_cancel)
+                _corrected, changes = wf.apply_corrections(terms, flags, declared)
+                _grow_state = {**_grow_state, "stage": "growing"}
+                new_terms = await asyncio.to_thread(
+                    wf.propose_new_terms, spec, terms, router=router_,
+                    limit=GROW_NEW_BATCH, cancel=_grow_cancel)
 
         merged = terms + new_terms
         # Re-gate + reseal + swap (auto-applied; fully reversible via the log).

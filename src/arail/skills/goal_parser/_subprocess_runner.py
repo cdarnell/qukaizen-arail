@@ -11,8 +11,17 @@ parser.
 Protocol
 --------
 * **Input** (stdin, JSON): ``{"prompt": str, "max_tokens": int,
-  "temperature": float}``
-* **Output** (stdout, JSON): ``{"ok": true, "text": "..."}`` on
+  "temperature": float, "trace_id": str, "agent_id": str|null,
+  "brain": str|null, "effort": str|null}`` — the last four are the
+  attribution round-trip (ARCHITECTURE.md contract #9, sprint
+  2026-09-20-buddy-front-and-center): the child sets its own
+  attribution context from them so its *own* ``cost_tracker.track()``
+  call is billed correctly, but it never writes an agent-trace record
+  itself — the parent is the sole trace author, so there is exactly
+  one writer of ``agent_traces.jsonl`` per process and no interleaved
+  appends.
+* **Output** (stdout, JSON): ``{"ok": true, "text": "...", "model":
+  str|null, "backend": str|null, "tokens_used": int|null}`` on
   success, ``{"ok": false, "error": "..."}`` on a recoverable
   Python-level failure.
 * **Crash** (exit code != 0): the parent treats this as
@@ -46,10 +55,19 @@ def _main() -> int:
     try:
         # Lazy import — avoids paying the MLX load cost when callers
         # only want to inspect the protocol or run the parent's tests.
+        from arail import agent_context
         from arail.router import ModelRouter
         router = ModelRouter()
-        resp = router.complete(prompt, max_tokens=max_tokens, temperature=temperature)
-        sys.stdout.write(json.dumps({"ok": True, "text": resp.text}))
+        with agent_context.from_subprocess_payload(
+            request, default_label="goal-parser"
+        ):
+            resp = router.complete(prompt, max_tokens=max_tokens, temperature=temperature)
+        sys.stdout.write(json.dumps({
+            "ok": True, "text": resp.text,
+            "model": getattr(resp, "model", None),
+            "backend": getattr(resp, "backend", None),
+            "tokens_used": getattr(resp, "tokens_used", None),
+        }))
         return 0
     except MemoryError as e:
         # The mlx_guard pre-check throws MetalOutOfMemory, which is a

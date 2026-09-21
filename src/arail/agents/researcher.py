@@ -228,9 +228,15 @@ def _llm_complete(router, prompt: str, max_tokens: int = 512,
         return None
     try:
         import time as _time
+        from arail import agent_context
         t0 = _time.monotonic()
-        resp = router.complete(prompt, max_tokens=max_tokens, temperature=0.7,
-                               system=system)
+        # L3 (ARCHITECTURE.md): researcher is a top-level module the loader
+        # never touches, so it gets its own explicit wrapper at this single
+        # model-acquisition helper -- both the deep and fast paths funnel
+        # through here.
+        with agent_context.agent_call("researcher"):
+            resp = router.complete(prompt, max_tokens=max_tokens, temperature=0.7,
+                                   system=system)
         elapsed = (_time.monotonic() - t0) * 1000
         text = resp.text.strip() if resp.text else None
 

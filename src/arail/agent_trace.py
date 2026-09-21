@@ -284,12 +284,19 @@ FIXED_LANES: tuple[tuple[str, str], ...] = (
     ("forge", "Forge"),
 )
 
-# Verified in code (ARCHITECTURE.md "Where the spec is wrong" #5 and roster
-# note): these two genuinely call no model today — a file-tail/service-probe
-# watcher (sre) and a runtime-profile observer with no router reference
-# (presence). Everything else defaults to the generic "no calls yet this
-# session" empty state rather than a claim this builder could not verify.
-_MODEL_FREE_LANES = frozenset({"sre", "presence"})
+# Verified in code (ARCHITECTURE.md "Where the spec is wrong" #5, plus S2
+# wiring's own read of every FIXED_LANES module): these genuinely call no
+# model today. sre (file-tail/service-probe watcher) and presence
+# (runtime-profile observer) are the doc's own findings. curator
+# (agents/curator.py, the researcher's helper module -- zero router
+# references, confirmed by grep) and forge (agents/forge.py, "Agent Forge":
+# a code generator that writes a *new* agent's .py from a template string --
+# its own top-level code never calls a model; the *generated* agent inherits
+# attribution for free via L1 once the loader starts it) were confirmed
+# during S2's wiring pass, not assumed. Everything else defaults to the
+# generic "no calls yet this session" empty state rather than a claim this
+# builder could not verify.
+_MODEL_FREE_LANES = frozenset({"sre", "presence", "curator", "forge"})
 
 # The non-agent system callers this sprint wires with system_call() in S2:
 # world-forge (world_routes.py), dictionary, goal-parser (the subprocess

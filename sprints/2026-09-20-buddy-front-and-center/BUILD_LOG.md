@@ -155,7 +155,7 @@ design budget and DE4's 5 ms kill line). **69 new tests, all passing.**
 Combined with the S0 harness and the full adjacent-suite regression set:
 223 passed, 0 failed.
 
-Commit: `pending`
+Commit: `ee9c6057`
 
 ## Architect feedback required
 
@@ -176,6 +176,114 @@ tracked so review mode can confirm or correct them before S6 renders them:
 Neither gap changes an interface contract, blocks a later slice, or was
 worked around silently — both are visible in code (`agent_trace.py`) and in
 this log.
+
+### S2 — Attribution wiring
+
+**Delivered — L1, L2, and all eleven L3 sites plus the four non-agent
+callers plus the subprocess protocol extension:**
+
+- **L1** — `agents/loader.py`: `start_all_auto()` wraps `instance.start()` in
+  `agent_call(agent_id)`.
+- **L2** — `agents/dream_daemon.py`: `_dream_once()` wraps `agent.dream()` in
+  `agent_call(agent_id)`. `agents/job_daemon.py`: `_run_job()` wraps its body
+  in `system_call(job.id)` (not `agent_call` — a scheduled world script is
+  not a FIXED_LANES agent; see deviation below on why this is currently a
+  no-op for tracing).
+- **L3 agents** — `agents/researcher.py` (`_llm_complete`, one wrapper covers
+  both the deep and fast paths), `agents/browser.py` (three call sites:
+  navigate/interact/summarize, each wrapped individually — see deviation),
+  `librarian_scout.py` (`draft_proposal`, attributed to `"librarian"` per
+  S1's finding that it *is* the real model-calling path for that lane),
+  `agents/_builtin_drafter.py` (`compose`, the one call site A7 flagged as
+  not swallowing), `agents/recap/router_adapter.py` (`RouterAdapter.chat`,
+  `system_call("recap")` — confirmed dormant, no production caller today).
+- **L3 non-agent callers** — `portal/world_routes.py` (four sites:
+  `world-forge`, `term-draft`, `world-review`, `world-grow`, each
+  `system_call(...)` under the *same* label already used for that site's
+  `inference_slot(...)`), `dictionary.py` (`generate_terms`, `expand_term`,
+  both `system_call("dictionary")`).
+- **Subprocess protocol** — `skills/goal_parser/_subprocess_runner.py`:
+  stdin now carries `{trace_id, agent_id, brain, effort}` (via
+  `agent_context.to_subprocess_payload()`/`from_subprocess_payload()`),
+  stdout carries `{model, backend, tokens_used}`. The child sets its own
+  context (`out_of_process=True`) so its `cost_tracker.track()` is
+  attributed and the router chokepoint skips writing its own trace record;
+  `skills/goal_parser/__init__.py`'s `_llm_subprocess()` is the sole trace
+  author for the round-trip (`_record_subprocess_trace()`), recording
+  exactly once on every path (success, timeout, spawn failure, non-zero
+  exit, bad JSON, `{"ok": false}`). `_llm_inproc()` (the test-only in-process
+  path) gets `system_call("goal-parser")` too, so both paths agree on the
+  label.
+- `agent_trace.py`'s `_MODEL_FREE_LANES` gained `"curator"` and `"forge"` —
+  both confirmed to make zero router calls while reading their source for
+  this slice's wiring (see below).
+
+**Deviations from ARCHITECTURE.md, each with reason:**
+
+1. **`job_daemon._run_job` is wired but currently a no-op for tracing.** The
+   scheduled job's script runs as its own subprocess with no attribution
+   protocol (unlike goal-parser's) — nothing inside `_run_job` itself calls
+   the router. The wrap is in place per the doc's explicit L2 listing, so a
+   *future* job that calls the router in-process inherits attribution for
+   free; today it has no observable effect. Documented, not silently added
+   as dead code.
+2. **`browser.py` got three independent `agent_call("browser")` wrappers
+   instead of one wrapper around the whole `chat()` function.** Wrapping the
+   entire ~200-line function would need re-indenting all of it — a large,
+   risky mechanical change for a slice whose edits are supposed to be
+   "additive, no change to control flow." Each of the three phases
+   (navigate/interact/summarize) now gets its own `trace_id` instead of one
+   shared id for the whole browser task; each is still correctly attributed
+   to `"browser"`. Flagged for architect review — acceptable size/risk
+   trade, not free.
+3. **`forge` (Agent Forge, `agents/forge.py`) got no wiring at all** — read
+   the whole file: `_voice()`'s `router.complete()` call is *inside* the
+   triple-quoted `_AGENT_PY_TEMPLATE` string used to generate a **new**
+   agent's `.py` file, not live code in `forge.py` itself. The generated
+   agent inherits attribution via L1 the moment the loader starts it, under
+   its own id — never under `"forge"`. Confirmed `"forge"` is therefore a
+   structurally-always-empty FIXED_LANES entry, like `sre`/`presence`, and
+   added it to `_MODEL_FREE_LANES` accordingly (see S1's finding #4 for the
+   parallel case with `librarian`, where the opposite was true).
+4. **`curator` (`agents/curator.py`) got no wiring** — grepped the whole
+   file for `router`/`ModelRouter`/`complete(`: zero hits. Added to
+   `_MODEL_FREE_LANES`. This is the *same* `"curator"` id `loader.py`'s
+   `_SKILLS_ONLY` docstring already names as a helper module, not a ticking
+   agent — distinct from `portal/world_routes.py`'s unrelated "Curator
+   Review" world-review feature (an existing naming collision in the
+   codebase, not introduced here), which is wired as `system_call
+   ("world-review")`, not the `"curator"` agent lane.
+5. **`world_routes.py`'s `system_call(...)` labels reuse the existing
+   `inference_slot(...)` label strings** (`world-forge`, `term-draft`,
+   `world-review`, `world-grow`) rather than inventing new ones. Not
+   explicitly mandated by ARCHITECTURE.md's interface contracts, but its own
+   data-flow diagram cites `system_call("world-forge")` as the worked
+   example, which *is* that site's existing slot label — so attribution and
+   slot metrics now agree on what each call is called by construction.
+6. **World-forge, world-review, world-grow got only structural (source-scan)
+   test coverage in this slice, not functional coverage** — each depends on
+   the full `dac_world`/`world_forge` pipeline and FastAPI request context,
+   which is expensive to fake correctly and is squarely QA's existing
+   territory (`tests/test_world_forge_*.py`, run clean against this slice's
+   changes — 397 passed across every world/dictionary/recap/drafter/
+   librarian/browser/researcher suite touched this slice). Functional
+   confirmation that these three sites actually produce a correctly
+   attributed trace end-to-end is left to QA's blind tests.
+
+**Tests:** `tests/test_agent_attribution_wiring.py` — 15 new tests covering
+L1, both L2 daemons, all five L3 agent-module sites, one L3 non-agent site
+(`dictionary`, functional) plus a structural check for the other
+(`world_routes`), and the full subprocess round-trip including a direct,
+non-subprocess drive of `_subprocess_runner._main()` proving the child's
+`out_of_process` context suppresses its own chokepoint trace write.
+**15 new tests, all passing.** Regression: 397 passed across every
+world-forge/dictionary/recap/drafter/librarian/browser/researcher/
+program-drafter suite; `tests/test_imports.py` (21) confirms every touched
+module still imports cleanly. Combined running total this build: 93 new
+tests across S0-S2 (9 + 69 + 15), all passing; 0 regressions against
+baseline.
+
+Commit: `pending`
 
 ## Final state
 

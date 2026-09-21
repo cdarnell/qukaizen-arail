@@ -299,8 +299,13 @@ def chat(instruction: str) -> dict[str, Any]:
     import time as _time
     prompt = _NAVIGATE_PROMPT.format(instruction=instruction)
     try:
+        from arail import agent_context
         t0 = _time.monotonic()
-        resp = router.complete(prompt, max_tokens=256, temperature=0.2)
+        # L3 (ARCHITECTURE.md): browser is a top-level module the loader
+        # never touches -- each of its three model-acquisition call sites
+        # (navigate/interact/summarize) gets its own explicit wrapper.
+        with agent_context.agent_call("browser"):
+            resp = router.complete(prompt, max_tokens=256, temperature=0.2)
         elapsed = (_time.monotonic() - t0) * 1000
         nav_text = resp.text.strip()
 
@@ -364,8 +369,10 @@ def chat(instruction: str) -> dict[str, Any]:
             snapshot=snapshot_text[:4000],
         )
         try:
+            from arail import agent_context
             t1 = _time.monotonic()
-            interact_resp = router.complete(interact_prompt, max_tokens=256, temperature=0.2)
+            with agent_context.agent_call("browser"):
+                interact_resp = router.complete(interact_prompt, max_tokens=256, temperature=0.2)
             elapsed2 = (_time.monotonic() - t1) * 1000
             interact_text = interact_resp.text.strip()
 
@@ -422,7 +429,9 @@ def chat(instruction: str) -> dict[str, Any]:
             f"Include specific titles, links, and data points where available."
         )
         try:
-            summary_resp = router.complete(summary_prompt, max_tokens=1024, temperature=0.5)
+            from arail import agent_context
+            with agent_context.agent_call("browser"):
+                summary_resp = router.complete(summary_prompt, max_tokens=1024, temperature=0.5)
             summary = summary_resp.text.strip()
         except Exception:
             summary = combined[:3000]
