@@ -309,12 +309,13 @@ def chat(instruction: str) -> dict[str, Any]:
         elapsed = (_time.monotonic() - t0) * 1000
         nav_text = resp.text.strip()
 
+        # W4/V5 (ARCHITECTURE.md): activity.jsonl no longer carries prompt/
+        # response bodies -- metadata only; bodies live only in the flight
+        # recorder, off by default.
         activity_log.emit("browser",
                           f"Navigation plan ({int(elapsed)}ms)",
                           "info", {
                               "prompt_trace": {
-                                  "prompt": prompt[:3000],
-                                  "response": nav_text[:2000],
                                   "max_tokens": 256,
                                   "latency_ms": round(elapsed, 1),
                               }
@@ -380,8 +381,6 @@ def chat(instruction: str) -> dict[str, Any]:
                               f"Interaction plan ({int(elapsed2)}ms)",
                               "info", {
                                   "prompt_trace": {
-                                      "prompt": interact_prompt[:3000],
-                                      "response": interact_text[:2000],
                                       "max_tokens": 256,
                                       "latency_ms": round(elapsed2, 1),
                                   }

@@ -1077,13 +1077,10 @@ function connectSSE() {
       AG.feed.push(e);
       if (AG.feed.length > 300) AG.feed.shift();
 
-      // Extract prompt traces
-      if (e.data && e.data.prompt_trace) {
-        AG.promptTraces.push(e);
-        if (AG.promptTraces.length > 100) AG.promptTraces.shift();
-        if (AG.activeTab === 'prompts') renderPrompts();
-      }
-
+      // Prompt Inspector no longer live-pushes off the activity stream —
+      // it sources from agent_trace (a different shape) via loadPrompts(),
+      // called on every tab switch. A live SSE push for it is S6's
+      // /api/admin/agent-trace-stream, not this activity feed.
       if (AG.activeTab === 'feed') appendFeedEvent(e);
       renderMissionFeed();
       renderMovementConsole();
@@ -1131,16 +1128,27 @@ function renderEvent(e) {
   html += `<span class="ag-event-src ${e.source || ''}">${esc(e.source || '?')}</span>`;
   html += `<span class="ag-event-msg${lvlClass}">${esc(e.message || '')}</span>`;
 
-  // If has prompt_trace, add expand toggle
+  // If has prompt_trace, add expand toggle. CHANGED SHAPE (sprint
+  // 2026-09-20-buddy-front-and-center, W4/V5): researcher.py/browser.py no
+  // longer put "prompt"/"response" keys in this dict at all -- checked by
+  // key presence, never rendered as '(empty)' (that would look identical
+  // to a genuinely empty capture, which is exactly the ambiguity the
+  // architecture explicitly rules out).
   if (e.data && e.data.prompt_trace) {
+    const trace = e.data.prompt_trace;
+    const hasBody = Object.prototype.hasOwnProperty.call(trace, 'prompt');
     const id = 'trace-' + Math.random().toString(36).substring(2, 8);
     html += `<span class="ag-trace-toggle" onclick="toggleTrace('${id}')">[prompt]</span>`;
     html += `</div>`;
     html += `<div id="${id}" style="display:none" class="ag-prompt-block">`;
-    html += `<div class="ag-prompt-label sent">Prompt Sent</div>`;
-    html += `<div class="ag-prompt-text">${esc(e.data.prompt_trace.prompt || '(empty)')}</div>`;
-    html += `<div class="ag-prompt-label received">Model Response (${e.data.prompt_trace.latency_ms || '?'}ms)</div>`;
-    html += `<div class="ag-prompt-text">${esc(e.data.prompt_trace.response || '(empty)')}</div>`;
+    if (hasBody) {
+      html += `<div class="ag-prompt-label sent">Prompt Sent</div>`;
+      html += `<div class="ag-prompt-text">${esc(trace.prompt || '(empty)')}</div>`;
+      html += `<div class="ag-prompt-label received">Model Response (${trace.latency_ms || '?'}ms)</div>`;
+      html += `<div class="ag-prompt-text">${esc(trace.response || '(empty)')}</div>`;
+    } else {
+      html += `<div class="ag-empty">flight recorder off — flip it in Admin to capture bodies for future calls (${trace.latency_ms || '?'}ms, ${trace.model || 'model'})</div>`;
+    }
     html += `</div>`;
   } else {
     html += `</div>`;
@@ -1171,7 +1179,12 @@ async function loadPrompts() {
   try {
     const r = await fetch('/api/agents/prompts?limit=30');
     const data = await r.json();
-    AG.promptTraces = data;
+    // CHANGED SHAPE (sprint 2026-09-20-buddy-front-and-center, contract
+    // #7): the endpoint now returns {recorder, empty_state, traces},
+    // not a bare array.
+    AG.promptTraces = data.traces || [];
+    AG.promptRecorder = data.recorder || {enabled: false};
+    AG.promptEmptyState = data.empty_state || 'No prompt traces yet.';
     renderPrompts();
   } catch (e) {
     document.getElementById('prompt-list').innerHTML = '<div class="ag-empty">Failed to load prompt traces.</div>';
@@ -1183,27 +1196,31 @@ function renderPrompts() {
   const filtered = AG.promptFilter === 'all' ? AG.promptTraces : AG.promptTraces.filter(e => e.source === AG.promptFilter);
 
   if (!filtered.length) {
-    list.innerHTML = '<div class="ag-empty">No prompt traces yet. Run the researcher or a browser task to see prompts appear here.</div>';
+    list.innerHTML = `<div class="ag-empty">${esc(AG.promptEmptyState || 'No prompt traces yet.')}</div>`;
     return;
   }
 
-  list.innerHTML = filtered.map((e, i) => {
-    const t = e.data.prompt_trace;
-    const ts = (e.ts || '').substring(0, 19).replace('T', ' ');
+  list.innerHTML = filtered.map((t, i) => {
+    const ts = (t.ts || '').substring(0, 19).replace('T', ' ');
     const id = 'pc-' + i;
+    // "prompt"/"response" keys are ABSENT (not empty strings) when the
+    // flight recorder is off -- a client must not render '' as a body.
+    const hasBody = Object.prototype.hasOwnProperty.call(t, 'prompt');
+    const body = hasBody
+      ? `<div class="ag-prompt-label sent">Prompt Sent</div>
+         <div class="ag-prompt-text">${esc(t.prompt || '(empty)')}</div>
+         <div class="ag-prompt-label received">Model Response</div>
+         <div class="ag-prompt-text">${esc(t.response || '(empty)')}</div>`
+      : `<div class="ag-empty">flight recorder off — flip it in Admin to capture bodies for future calls</div>`;
     return `<div class="ag-trace-card" id="${id}">
       <div class="ag-trace-header" onclick="document.getElementById('${id}').classList.toggle('open')">
         <span class="ag-trace-arrow">&#9656;</span>
-        <span class="ag-trace-agent ag-event-src ${e.source}">${esc(e.source)}</span>
-        <span>${esc(e.message || 'LLM call')}</span>
-        <span class="ag-trace-meta">${esc(ts)} &middot; ${t.latency_ms || '?'}ms &middot; max ${t.max_tokens || '?'} tok</span>
+        <span class="ag-trace-agent ag-event-src ${esc(t.source || '')}">${esc(t.source || '')}</span>
+        <span>${esc(t.model || 'LLM call')}</span>
+        <span class="ag-trace-meta">${esc(ts)} &middot; ${t.latency_ms || '?'}ms &middot; ${t.tokens_out || '?'} tok out
+          &middot; TTFT ${t.ttft_ms != null ? Math.round(t.ttft_ms) + 'ms' : (t.ttft_status || 'n/a')}</span>
       </div>
-      <div class="ag-trace-body">
-        <div class="ag-prompt-label sent">Prompt Sent</div>
-        <div class="ag-prompt-text">${esc(t.prompt || '(empty)')}</div>
-        <div class="ag-prompt-label received">Model Response</div>
-        <div class="ag-prompt-text">${esc(t.response || '(empty)')}</div>
-      </div>
+      <div class="ag-trace-body">${body}</div>
     </div>`;
   }).join('');
 }
@@ -1515,7 +1532,9 @@ loadSkillsIntoForge();
   try {
     const events = await fetch('/api/activity/recent?n=100').then(r => r.json());
     AG.feed = events.filter(e => AGENT_SOURCES.has(e.source));
-    AG.promptTraces = AG.feed.filter(e => e.data && e.data.prompt_trace);
+    // Prompt Inspector loads its own shape from /api/agents/prompts via
+    // loadPrompts() (called on tab switch) -- not seeded from the
+    // activity feed, which no longer carries bodies at all.
     // Seed Buddy card stats from history so the page isn't blank on load.
     const buddyHistory = AG.feed.filter(e => e.source === 'buddy');
     BUDDY_STATS.utterances = buddyHistory.length;

@@ -159,3 +159,114 @@ class ActivityLog:
 
 # Convenience — importable singleton
 activity_log = ActivityLog()
+
+
+# ---------------------------------------------------------------------------
+# F12 (sprint 2026-09-20-buddy-front-and-center) — legacy bodies already on
+# disk in activity.jsonl from before the flight recorder existed. Disclosed
+# with a count, purged only when the operator clicks [Purge]. Never
+# automatic — silently rewriting the operator's log is worse than telling
+# him.
+# ---------------------------------------------------------------------------
+
+def _legacy_notice_path():
+    from arail.config import DATA_DIR
+    return DATA_DIR / "legacy_bodies_notice.json"
+
+
+def legacy_notice_dismissed() -> bool:
+    """True once the operator has clicked [Keep] — remembered so the
+    notice does not return every boot."""
+    path = _legacy_notice_path()
+    if not path.exists():
+        return False
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return False
+    return bool(isinstance(data, dict) and data.get("dismissed", False))
+
+
+def dismiss_legacy_notice() -> None:
+    path = _legacy_notice_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"dismissed": True}))
+    except OSError:
+        pass
+
+
+def _has_legacy_body(event: Dict[str, Any]) -> bool:
+    trace = (event.get("data") or {}).get("prompt_trace")
+    return isinstance(trace, dict) and ("prompt" in trace or "response" in trace)
+
+
+def scan_for_legacy_bodies() -> Dict[str, Any]:
+    """One-shot scan: how many activity.jsonl lines (active + one rotation)
+    still carry a pre-flight-recorder body. Never raises."""
+    count = 0
+    by_source: Dict[str, int] = {}
+    try:
+        for path in (LOG_FILE.with_suffix(".jsonl.1"), LOG_FILE):
+            if not path.exists():
+                continue
+            with open(path, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        event = json.loads(line)
+                    except (ValueError, TypeError):
+                        continue
+                    if _has_legacy_body(event):
+                        count += 1
+                        src = str(event.get("source", "?"))
+                        by_source[src] = by_source.get(src, 0) + 1
+    except OSError as e:
+        _log.warning("legacy body scan failed: %s", e)
+    return {"count": count, "by_source": by_source,
+            "dismissed": legacy_notice_dismissed()}
+
+
+def purge_legacy_bodies() -> Dict[str, Any]:
+    """Operator-initiated only. Streams each file, strips ``prompt``/
+    ``response`` from every ``prompt_trace`` that still carries one, stamps
+    ``body_purged: true`` in their place, and preserves every other field
+    and the exact line count (malformed lines pass through byte-identical).
+    Writes a temp file in the same directory, then ``os.replace`` — same
+    single-writer-process assumption as rotation (``activity.py``'s own
+    module docstring already documents single-process safety here).
+    """
+    purged = 0
+    for path in (LOG_FILE.with_suffix(".jsonl.1"), LOG_FILE):
+        if not path.exists():
+            continue
+        tmp_path = path.with_name(path.name + ".purge_tmp")
+        try:
+            with open(path, "r") as src, open(tmp_path, "w") as dst:
+                for line in src:
+                    raw = line.rstrip("\n")
+                    if not raw.strip():
+                        dst.write(line)
+                        continue
+                    try:
+                        event = json.loads(raw)
+                    except (ValueError, TypeError):
+                        dst.write(line)
+                        continue
+                    if _has_legacy_body(event):
+                        trace = event["data"]["prompt_trace"]
+                        trace.pop("prompt", None)
+                        trace.pop("response", None)
+                        trace["body_purged"] = True
+                        purged += 1
+                    dst.write(json.dumps(event, default=str) + "\n")
+            os.replace(tmp_path, path)
+        except OSError as e:
+            _log.warning("legacy body purge failed for %s: %s", path, e)
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+    return {"purged": purged}

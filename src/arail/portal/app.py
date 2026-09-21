@@ -25,6 +25,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Red
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from arail import activity
 from arail.activity import activity_log
 from arail.agent_redirects import clear_agent_redirect, get_agent_redirect, set_agent_redirect
 from arail.agent_workflows import get_agent_workflow, list_agent_workflows
@@ -5163,16 +5164,56 @@ async def agents_status():
 
 @app.get("/api/agents/prompts")
 async def agents_prompts(agent: str = "", limit: int = 30):
-    """Return recent prompt-trace events for the Prompt Inspector."""
-    traces = []
-    for ev in reversed(activity_log.recent(200)):
-        if agent and ev.get("source") != agent:
+    """Recent model-call traces for the Prompt Inspector.
+
+    CHANGED SHAPE (sprint 2026-09-20-buddy-front-and-center, contract #7,
+    breaking): sourced from the agent_trace ring, not activity_log's
+    prompt_trace convention — bodies only appear when the flight recorder
+    is on, and even then only ``prompt``/``response`` keys are added, never
+    present-but-empty. This is a strict reduction in exposure: every tier,
+    unauthenticated, up to 5000 chars of unredacted body before this
+    sprint; metadata-only (admin-toggle-gated for bodies) after it.
+    """
+    from arail import agent_trace
+
+    recorder = agent_trace.recorder_state()
+    traces: list[dict] = []
+    for rec in reversed(agent_trace.ring(200)):
+        if rec.get("kind") not in ("agent", "system"):
             continue
-        if ev.get("data", {}).get("prompt_trace"):
-            traces.append(ev)
-            if len(traces) >= limit:
-                break
-    return list(reversed(traces))
+        source = rec.get("agent_id") or rec.get("label")
+        if agent and source != agent:
+            continue
+        entry = {
+            "ts": rec.get("iso"),
+            "source": source,
+            "trace_id": rec.get("trace_id"),
+            "model": rec.get("model"),
+            "backend": rec.get("backend"),
+            "tokens_out": rec.get("tokens_out"),
+            "latency_ms": rec.get("latency_ms"),
+            "ttft_ms": rec.get("ttft_ms"),
+            "ttft_status": rec.get("ttft_status"),
+        }
+        bodies = rec.get("bodies")
+        if recorder["enabled"] and isinstance(bodies, dict):
+            entry["prompt"] = bodies.get("prompt")
+            entry["response"] = bodies.get("response")
+        traces.append(entry)
+        if len(traces) >= limit:
+            break
+    return {
+        "recorder": {
+            "enabled": recorder["enabled"],
+            "reason": "off_by_default" if not recorder["enabled"] else "on",
+        },
+        "empty_state": (
+            "flight recorder off — flip to capture prompt bodies"
+            if not recorder["enabled"] else
+            "no prompt traces yet — run the researcher or a browser task"
+        ),
+        "traces": list(reversed(traces)),
+    }
 
 
 @app.post("/api/agents/instruct")
@@ -6167,6 +6208,41 @@ async def admin_security_run_scan():
     started_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     result = await _sc.run_and_persist(trigger="manual")
     return {"ok": True, "status": result, "started_at": started_at}
+
+
+# -- Legacy bodies (F12, sprint 2026-09-20-buddy-front-and-center) ---------
+# Disclosed, never auto-purged. Explicitly _require_surface("admin")-gated —
+# unlike the pre-existing /api/admin/* endpoints above, which (verified
+# while wiring these) do not call _require_surface at all despite
+# ARCHITECTURE.md's citation that they do. Not fixed here (a pre-existing
+# gap, out of this sprint's scope); these three new endpoints are gated
+# correctly regardless.
+
+@app.get("/api/admin/legacy-bodies")
+async def admin_legacy_bodies_status():
+    """How many activity.jsonl lines still carry a pre-flight-recorder
+    body, and whether the operator already dismissed the notice."""
+    if (gate := _require_surface("admin")) is not None:
+        return gate
+    return activity.scan_for_legacy_bodies()
+
+
+@app.post("/api/admin/legacy-bodies/purge")
+async def admin_legacy_bodies_purge():
+    """Operator-initiated only — strips bodies, stamps body_purged=true,
+    preserves everything else. Never called automatically."""
+    if (gate := _require_surface("admin")) is not None:
+        return gate
+    return activity.purge_legacy_bodies()
+
+
+@app.post("/api/admin/legacy-bodies/dismiss")
+async def admin_legacy_bodies_dismiss():
+    """[Keep] — remembered so the notice does not return every boot."""
+    if (gate := _require_surface("admin")) is not None:
+        return gate
+    activity.dismiss_legacy_notice()
+    return {"dismissed": True}
 
 
 # -- Scheduler endpoints (admin Scheduler section) -------------------------

@@ -240,18 +240,19 @@ def _llm_complete(router, prompt: str, max_tokens: int = 512,
         elapsed = (_time.monotonic() - t0) * 1000
         text = resp.text.strip() if resp.text else None
 
-        traced_prompt = f"{system}\n\n{prompt}" if system else prompt
         # getattr-defensive: tests and bespoke routers pass duck-typed
         # responses that only guarantee `.text`.
         model = getattr(resp, "model", None)
         backend = getattr(resp, "backend", None)
         where = f", {model} @ {backend}" if model and backend else ""
+        # W4/V5 (ARCHITECTURE.md): activity.jsonl no longer carries prompt/
+        # response bodies at all -- metadata only. Bodies now live only in
+        # the flight recorder (agent_trace's bounded, admin-gated store,
+        # captured at the router chokepoint), off by default.
         activity_log.emit("researcher",
                           f"LLM call completed ({int(elapsed)}ms{where})",
                           "info", {
                               "prompt_trace": {
-                                  "prompt": traced_prompt[:3000],
-                                  "response": text[:2000] if text else None,
                                   "max_tokens": max_tokens,
                                   "latency_ms": round(elapsed, 1),
                                   "model": model,

@@ -227,6 +227,12 @@ class ModelRouter:
                  messages: Optional[list] = None) -> ModelResponse:
         ctx = agent_context.current()
         slot = self._slot_info()
+        # F10 (latching): read the recorder flag ONCE at call start and use
+        # that value for this call's whole duration. off->on mid-call does
+        # NOT start capturing; on->off mid-call DOES still capture — the
+        # safer half, since turning it on never retroactively captures
+        # in-flight work.
+        rec_bodies_at_start = agent_trace.recorder_on()
 
         try:
             agent_context.halt_gate(ctx)
@@ -265,6 +271,10 @@ class ModelRouter:
             entry_id=getattr(self, "entry_id", None),
             tab=getattr(self, "tab", None),
         )
+        bodies = None
+        if rec_bodies_at_start:
+            from arail import redact
+            bodies = redact.capture_body(prompt, response.text)
         self._record(
             ctx, slot=slot, streamed=False, outcome="ok",
             model=response.model, backend=response.backend,
@@ -273,6 +283,7 @@ class ModelRouter:
             tokens_in=tokens_in, tokens_out=response.tokens_used,
             latency_ms=response.latency_ms,
             ttft_ms=None, ttft_status="non_streaming",
+            bodies=bodies,
         )
         return response
 
@@ -284,6 +295,9 @@ class ModelRouter:
         ctx = agent_context.current()
         slot = self._slot_info()
         tokens_in = max((len(prompt) + len(system or "")) // 4, 1)
+        # F10 (latching) — see complete()'s identical comment.
+        rec_bodies_at_start = agent_trace.recorder_on()
+        full_text_parts: list[str] = []
 
         # TTFT honesty contract (ARCHITECTURE.md interface contract #3):
         # measured from perf_counter() taken here, *before* the generator
@@ -320,6 +334,8 @@ class ModelRouter:
                         # The backend emulated the stream — no real
                         # first-token signal exists to measure.
                         ttft_status = "emulated_stream"
+                if isinstance(item, str) and item:
+                    full_text_parts.append(item)
                 if (ttft_status is None and isinstance(item, str) and item):
                     ttft_ms = (time.perf_counter() - t_enter) * 1000.0
                     ttft_status = "measured"
@@ -344,6 +360,11 @@ class ModelRouter:
                         entry_id=getattr(self, "entry_id", None),
                         tab=getattr(self, "tab", None),
                     )
+                    bodies = None
+                    if rec_bodies_at_start:
+                        from arail import redact
+                        response_text = getattr(item, "text", None) or "".join(full_text_parts)
+                        bodies = redact.capture_body(prompt, response_text)
                     self._record(
                         ctx, slot=slot, streamed=True, outcome="ok",
                         model=item.model, backend=item.backend,
@@ -354,6 +375,7 @@ class ModelRouter:
                         ttft_ms=ttft_ms, ttft_status=ttft_status,
                         prefill_ms=prefill_ms,
                         prefill_source="server_reported" if prefill_ms is not None else None,
+                        bodies=bodies,
                     )
                 yield item
         except Exception as exc:

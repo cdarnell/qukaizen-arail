@@ -28,6 +28,7 @@ import asyncio
 import json
 import logging
 import os
+import threading
 import time
 from collections import deque
 from datetime import datetime, timezone
@@ -375,6 +376,84 @@ def lanes_snapshot() -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Flight recorder toggle (S5) — off by default, admin-only to flip
+# (`POST /api/admin/flight-recorder` in S6), persisted the same lazy-
+# DATA_DIR way as everything else in this module.
+# ---------------------------------------------------------------------------
+
+_recorder_lock = threading.Lock()
+_recorder_enabled: Optional[bool] = None   # None = not yet loaded this process
+_recorder_changed_at: Optional[str] = None
+
+
+def _recorder_path():
+    from arail import config
+    return config.DATA_DIR / "flight_recorder.json"
+
+
+def _load_recorder_locked() -> None:
+    global _recorder_enabled, _recorder_changed_at
+    if _recorder_enabled is not None:
+        return
+    path = _recorder_path()
+    if not path.exists():
+        _recorder_enabled = False
+        return
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        _recorder_enabled = False
+        return
+    if isinstance(data, dict):
+        _recorder_enabled = bool(data.get("enabled", False))
+        _recorder_changed_at = data.get("changed_at")
+    else:
+        _recorder_enabled = False
+
+
+def recorder_on() -> bool:
+    """Off by default on a fresh lab. Never raises."""
+    try:
+        with _recorder_lock:
+            _load_recorder_locked()
+            return bool(_recorder_enabled)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def recorder_state() -> dict:
+    with _recorder_lock:
+        _load_recorder_locked()
+        return {"enabled": bool(_recorder_enabled), "changed_at": _recorder_changed_at}
+
+
+def set_recorder_enabled(enabled: bool) -> dict:
+    """Flip the flight recorder. Persisted so a restart doesn't silently
+    turn bodies back off (or on) behind the operator's back."""
+    global _recorder_enabled, _recorder_changed_at
+    with _recorder_lock:
+        _recorder_enabled = bool(enabled)
+        _recorder_changed_at = datetime.now(timezone.utc).isoformat()
+        path = _recorder_path()
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps({
+                "enabled": _recorder_enabled,
+                "changed_at": _recorder_changed_at,
+            }, indent=2))
+        except OSError:
+            pass
+        return {"enabled": _recorder_enabled, "changed_at": _recorder_changed_at}
+
+
+def _reset_recorder_for_tests() -> None:
+    global _recorder_enabled, _recorder_changed_at
+    with _recorder_lock:
+        _recorder_enabled = None
+        _recorder_changed_at = None
+
+
 def _reset_for_tests() -> None:
     """Test-only: drop all module state. Production code never calls this."""
     global _RING, _total_recorded, _dropped_writes, _last_drop_log_ts
@@ -387,3 +466,4 @@ def _reset_for_tests() -> None:
     _write_count = 0
     _overlap_hits = 0
     _overlap_samples = 0
+    _reset_recorder_for_tests()

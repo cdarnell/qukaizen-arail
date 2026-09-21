@@ -439,6 +439,110 @@ buddy/debt-finance/consolidation/librarian/SRE-adjacent suite (1 skipped,
 still green. Running total: 155 new tests across S0-S4, all passing; 0
 regressions.
 
+Commit: `d6b97a03`
+
+### S5 — Flight recorder
+
+**Delivered:**
+
+- `src/arail/redact.py` (new) — `REDACTED`, `redact()` (known-value pass then
+  shape pass, always both, redact-then-truncate order), `capture_body()`
+  (fail-closed: any exception returns `None`). Known-value pass reads
+  `secrets.env` independently of `portal.app._read_secrets()` (same parsing
+  logic, no cross-layer import — `redact.py` stays importable from
+  `router/core.py` without pulling in the portal) plus `ARAIL_PASSWORD` /
+  `OPEN_NOTEBOOK_ENCRYPTION_KEY`. Shape pass: all seven documented patterns.
+  Caps: prompt <= 2000, response <= 1000.
+- `src/arail/agent_trace.py`: `recorder_on()`, `recorder_state()`,
+  `set_recorder_enabled()` — off by default, persisted to
+  `DATA_DIR/flight_recorder.json`, same lazy-DATA_DIR pattern as everything
+  else in this module.
+- `src/arail/router/core.py`: both `complete()` and `stream_complete()` read
+  `agent_trace.recorder_on()` **once at call start** (F10's latching) and
+  pass that captured value through to a single `redact.capture_body()` call
+  at the point the response text is known; `bodies=None` when the recorder
+  was off at call start, regardless of what it becomes mid-call.
+- `src/arail/agents/researcher.py` / `browser.py`: stopped writing
+  `prompt`/`response` into `activity_log`'s `prompt_trace` dict entirely —
+  metadata only (`max_tokens`, `latency_ms`, `model`, `backend`, `provider`,
+  `entry_id`, `tokens_out`) now reaches `activity.jsonl`.
+- `src/arail/activity.py`: `scan_for_legacy_bodies()`, `purge_legacy_bodies()`
+  (streams both the active file and its `.jsonl.1` rotation, strips
+  `prompt`/`response`, stamps `body_purged: true`, preserves every other
+  field and the exact line count including malformed lines, temp-file +
+  `os.replace`), `legacy_notice_dismissed()` / `dismiss_legacy_notice()`
+  (F12).
+- `src/arail/portal/app.py`: `GET /api/agents/prompts` rewritten to the new
+  contract shape (`{recorder, empty_state, traces}`, sourced from
+  `agent_trace.ring()` instead of `activity_log`, bodies present only when
+  the recorder is on AND the specific record captured one). Three new admin
+  endpoints — `GET /api/admin/legacy-bodies`, `POST .../purge`, `POST
+  .../dismiss` — each explicitly `_require_surface("admin")`-gated.
+- `src/arail/portal/templates/agents.html`: Prompt Inspector
+  (`loadPrompts()`/`renderPrompts()`) updated for the new endpoint shape,
+  checking key *presence* (not truthiness) to distinguish "no body captured"
+  from "empty capture"; the live activity-feed's inline `[prompt]` toggle
+  (`renderEvent()`) updated the same way, in the same commit as the source
+  change per the doc's explicit instruction.
+
+**Deviations from ARCHITECTURE.md, each with reason:**
+
+1. **Discovered while wiring the three new admin endpoints: none of the 17
+   pre-existing `/api/admin/*` endpoints actually call `_require_surface
+   ("admin")`** — verified by grep across every existing route in that
+   family. ARCHITECTURE.md's contract #6 cites `/api/admin/security` as a
+   precedent for "gated by `_require_surface('admin')`, which 404s on
+   minimalist"; that citation does not match the code (only the `/admin`
+   *page* route is gated; its JSON API siblings are not). Not fixed here —
+   out of this sprint's scope, and fixing a pre-existing gap on 17 unrelated
+   endpoints is exactly the scope expansion the ledger warns against. My
+   three new endpoints (and S6's four) are gated correctly regardless of
+   what the existing ones do. Flagged for architect review — this is a
+   real, if minor, pre-existing security gap the operator should know
+   about, independent of this sprint.
+2. **The live activity-feed's SSE push into the Prompt Inspector was
+   removed, not updated.** The old code pushed raw activity-stream events
+   (shape `{source, message, data:{prompt_trace:{...}}}`) directly into
+   `AG.promptTraces`; the new `/api/agents/prompts` contract's shape is
+   flat (`{ts, source, trace_id, model, ...}`) and comes from a different
+   store (`agent_trace`, not `activity_log`). Reconciling those live would
+   need `agent_trace`'s own SSE stream, which is `/api/admin/agent-trace-
+   stream` — **S6's deliverable, not S5's**. Removed the now-shape-
+   mismatched push (it would have silently broken `renderPrompts()` for
+   live-arriving items) rather than leave dead/wrong code; `loadPrompts()`
+   already re-fetches on every tab switch, so the Prompt Inspector still
+   works, just without a live push until S6 lands. `agents.html:1141-1143`
+   AND its live boot-time seed (`AG.promptTraces = AG.feed.filter(...)`)
+   both updated in this same commit, per the doc's instruction.
+3. **Legacy-bodies purge got three endpoints, not one** (`GET
+   /api/admin/legacy-bodies`, `POST .../purge`, `POST .../dismiss`) —
+   contract #6's table names exactly four endpoints and none of them is
+   this one; the slice plan's own S5 bullet ("the legacy-bodies notice and
+   the operator-initiated purge") assigns the *feature* to S5 without
+   naming a route. F13's own test strategy anticipates this exactly
+   ("parameterised over the endpoint list so **a fifth endpoint** added
+   without a gate fails the test") — treated as confirmation, not
+   improvisation.
+
+**Tests:** `tests/test_redact.py` (26 — every shape pattern, the known-value
+pass, ordering, F11's fail-closed behaviour), `tests/test_flight_recorder.py`
+(13 — recorder toggle, W4's baseline for both `complete()` and
+`stream_complete()`, F10's latching both directions, the researcher/browser
+body-removal), `tests/test_legacy_bodies_purge.py` (12 — F12's scan/purge/
+dismiss), `tests/test_legacy_bodies_admin_endpoints.py` (9 — F13's gating,
+parameterised, plus "GET never mutates"), `tests/test_agent_prompts_endpoint.py`
+(6 — the new contract shape, key-absence not empty-string). **66 new tests,
+all passing.** Regression: 351 passed / 8 failed in the broader
+`tests/portal/` sweep — the 8 failures (`test_token_compliance_ratchet`,
+`test_health_refresh_probes_without_constructing_aerollm`, four in
+`test_build_tab.py`, one each in `test_opencode_config_lifecycle.py` and
+`test_opencode_lifecycle.py`) were checked against this build's own commit
+diff (`git log --stat` on every file/module they import) and none touch
+anything this sprint changed — recorded here as newly-discovered
+pre-existing failures, not chased or fixed. Running total: 221 new tests
+across S0-S5 (9+69+15+24+38+66), all passing; 0 regressions this sprint
+introduced.
+
 Commit: `pending`
 
 ## Final state
