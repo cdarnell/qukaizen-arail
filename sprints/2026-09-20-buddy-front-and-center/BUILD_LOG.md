@@ -640,7 +640,7 @@ property F15 requires of the `halted` flag itself).
 here since they close named gaps). No new test *files* this slice; docs
 are prose. Running total: **248 new tests across S0-S7**, all passing.
 
-Commit: `pending`
+Commit: `9247f32e`
 
 ## Final state
 
@@ -656,7 +656,7 @@ committed:
 | S4 | `d6b97a03` | halt_gate/speech_gate — the kill switch made real |
 | S5 | `4b005034` | redact.py + flight recorder + legacy-bodies purge |
 | S6 | `f99da58f` | Four admin endpoints + admin.html card + V7 fix |
-| S7 | *(this commit)* | Docs + BACKLOG.md + 2 failure-mode coverage gaps closed |
+| S7 | `9247f32e` | Docs + BACKLOG.md + 2 failure-mode coverage gaps closed |
 
 **Tests:** 248 new tests, all passing, across 19 new test files plus
 targeted additions to 2 existing ones (`test_costs_persistence.py`
