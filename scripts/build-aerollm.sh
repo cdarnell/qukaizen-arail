@@ -42,7 +42,7 @@ info() { printf '%s\n' "${GRN}•${RST} $*"; }
 warn() { printf '%s\n' "${YLW}!${RST} $*" >&2; }
 err()  { printf '%s\n' "${RED}✗${RST} $*" >&2; }
 
-AEROLLM_REPO="${ARAIL_AEROLLM_REPO:-$HOME/ProJects/qukaizen-aerollm}"
+AEROLLM_REPO="${ARAIL_AEROLLM_REPO:-$HOME/ProJects/qukaizen-queuellm}"
 CRATE_DIR="$AEROLLM_REPO/crates/aerollm-api"
 PY="${PYTHON:-python3}"
 # Release channel — setup.sh overrides these from pyproject
@@ -123,7 +123,7 @@ clone_hint() {
     err "No aerollm sibling repo at ${BOLD}${AEROLLM_REPO}${RST}."
     warn "For a source (dev) build, either:"
     warn "  1) clone it next to arail:"
-    warn "       git clone https://github.com/cdarnell/qukaizen-aerollm \"${AEROLLM_REPO}\""
+    warn "       git clone https://github.com/cdarnell/qukaizen-queuellm \"${AEROLLM_REPO}\""
     warn "  2) or point ARAIL_AEROLLM_REPO at your checkout."
     warn "Or install the published wheel instead: ./arailctl deep update"
 }

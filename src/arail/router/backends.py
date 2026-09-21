@@ -1564,7 +1564,7 @@ class AeroLLMBackend(BaseBackend):
                 "needed; this is the route for most people). Maintainer-only "
                 "alternatives: `./arailctl deep rebuild` (build from the local "
                 "sibling repo — set ARAIL_AEROLLM_REPO if it's not at "
-                "~/ProJects/qukaizen-aerollm) or `./arailctl deep update` (pip "
+                "~/ProJects/qukaizen-queuellm) or `./arailctl deep update` (pip "
                 "install the published wheel from the private index, needs "
                 "credentials). Do NOT use `maturin develop` — see scripts/setup.sh "
                 "for why."
