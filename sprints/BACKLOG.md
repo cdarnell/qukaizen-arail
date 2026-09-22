@@ -1575,15 +1575,18 @@ sprint)"), during the fix loop that resolved B1–B6, D6, D8, F9, F13, and
 S1 (S1 was explicitly promoted to must-fix by the operator; the rest
 below were not).
 
-- **S2** — `src/arail/skills/goal_parser/__init__.py:250`:
+- **S2 — RESOLVED, see below.** ~~`src/arail/skills/goal_parser/__init__.py:250`:
   `error_class=str(payload.get("error", "unknown"))[:80]` persists up to 80
   chars of arbitrary child-process exception text to `agent_traces.jsonl`,
-  outside `redact.capture_body`'s reach, regardless of the flight recorder.
-  Everywhere else in this sprint `error_class` is `type(exc).__name__` only
-  — the one field guaranteed to carry no payload. Fix is one line:
-  `str(...).split(":", 1)[0][:64]`, or add a separate `error_detail` field
-  that goes through `redact.redact()` and is only populated when the
-  recorder is on.
+  outside `redact.capture_body`'s reach, regardless of the flight recorder.~~
+  QA's TEST_REPORT.md demonstrated this live (an `Authorization: Bearer …`
+  fragment reaching disk with the recorder off, its finding **F2**) and it
+  was fixed, not filed again, in the QA fix loop that followed: an
+  allow-list on the parent (`_sanitize_error_class`,
+  `^[A-Za-z_][A-Za-z0-9_]*$`) plus a real `error_class` on the child for
+  every failure branch. See that sprint's BUILD_LOG.md Re-review index
+  for the commit and proving tests. Left here, struck through, so this
+  entry's own history is legible rather than silently deleted.
 - **S3** — Buddy's dream announcement (`_builtin_buddy.py`'s `dream()`)
   puts up to 160 chars of raw model output into `activity.jsonl` via
   `data={"preview": reflection[:160]}`, ungated by redaction and
@@ -1643,13 +1646,58 @@ below were not).
   registering `pytest.mark.perf` in `pyproject.toml` (currently an
   unregistered marker warning).
 
-**What a future sprint needs to do:** pick these up in order of the
-security/exposure gradient — S2 first (it is the only remaining path that
-writes unredacted free text to disk regardless of the recorder), then S3
-(no code fix required, but it is now a live leak, not a theoretical one
-— see above), then D1 (undocumented timeout-semantics change, already
+**What a future sprint needs to do:** S2 is resolved (see above); pick
+the rest up in order of the security/exposure gradient — S3 first (no
+code fix required, but it is a live leak, not a theoretical one — see
+above), then D1 (undocumented timeout-semantics change, already
 shipped), then the rest as capacity allows. QA must be briefed on S3
 before the next sprint's QA pass (both that the leak is real and now
 live, and that the dream path itself is newly-reachable and untested in
 practice), or a planted-string hit there will keep looking like a false
 positive.
+
+---
+
+## QA fix loop (TEST_REPORT.md, commit `9d0e083f`) — filed as debt, not fixed
+
+**Filed by:** `sprints/2026-09-20-buddy-front-and-center/TEST_REPORT.md`
+("Fix or file as debt (builder's call, not ship-blocking)"), during the
+fix loop that resolved F7, F8, F2 (TEST_REPORT.md's own numbering — a
+different finding from REVIEW.md's F2 above; disambiguated as "QA F2" in
+that fix loop's commits), F4, F5, F9 and, as a judgment call, F3. Three
+of TEST_REPORT.md's four "fix or file" items are filed here; F3 was
+fixed instead (see BUILD_LOG.md for why).
+
+- **QA F1** — `src/arail/redact.py:52-54`: a JSON-quoted
+  `{"api_key": "<16 chars>"}` value is not redacted. The assignment
+  pattern requires the key name to be followed by optional whitespace
+  then `:`/`=`; a quoted JSON key never is. A spec gap, not a build
+  defect — ARCHITECTURE.md #5's pattern list is implemented exactly as
+  specified. Fix: one `["']?` in the pattern.
+- **QA F6** — `src/arail/portal/app.py:6326`, `:6344`: malformed JSON on
+  `POST /api/admin/agents/hold` (and the recorder toggle) is a 500 —
+  `await request.json()` is unguarded. Curl-only, after the tier gate,
+  no information disclosed. Low severity. Fix: wrap the parse and
+  return 400 on `json.JSONDecodeError`.
+- **QA F10** — `config.PKB_ROOT` is not isolated by the conftest, so
+  tests write the developer's real `lab/pkb`, and
+  `dream_daemon._dream_once`'s "already dreamed today" check reads it —
+  meaning any test of `_dream_once` that does not patch
+  `_dream_file_for` silently no-ops on a machine that has dreamed today.
+  Same class of bug as `cost_tracker` (QA F9, fixed) and `activity_log`
+  — a process-global singleton/module constant bound before any fixture
+  runs. QA's own tests isolate it locally; the shared conftest fixture
+  should too.
+
+**What a future sprint needs to do:** QA F1 first (it is the only
+remaining redaction gap with a recorder-on, disk-write consequence — one
+regex character), then QA F10 (the next candidate in the same
+un-isolated-singleton family `_isolated_agent_observability_data_root`'s
+own docstring already names as recurring), then QA F6 (low severity,
+curl-only). QA's own TEST_REPORT.md notes worth carrying forward
+regardless of which item is picked up first: "un-isolated process-global
+singletons are this repo's recurring defect class" (three found in one
+sprint: `DATA_DIR`, `cost_tracker._data_path`, `PKB_ROOT`) and
+"'never raises' docstrings are a claim" (grep for the phrase, test each
+one with a non-`OSError` exception — this is exactly how QA F3 was
+found).
