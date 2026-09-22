@@ -1352,3 +1352,196 @@ Commit: `59768bce`.
   fix loop. Not filed as new debt: it is the same class of flake
   `sprints/BACKLOG.md`'s existing "W1's wall-clock SSE test" entry
   already describes for a sibling test.
+
+## QA fix loop — TEST_REPORT.md FAIL, commit `9d0e083f`
+
+QA's "must fix before ship" list (five items) plus one judgment call
+(F3, filed as "fix or file as debt, builder's call" — fixed because it
+is a one-line guard and a 500 on every Admin page load from one corrupt
+log line is a setup-tier defect), worked in the order TEST_REPORT.md
+gave: security first.
+
+### F7 / F8 — purge honesty and ordering
+
+`jsonl_purge.purge_jsonl_bodies` counted a path's records as purged the
+moment `strip_body` ran, before `os.replace` — a failed replace (full
+disk, read-only mount) still reported `{"purged": N}` while every body
+stayed on disk. Fixed by accumulating each path's count locally and
+only folding it into the total once that path's `os.replace` succeeds;
+the function now returns `{"purged", "ok", "errors"}` instead of a bare
+int. `activity.purge_legacy_bodies()` (and, fixed the same way for
+consistency, `agent_trace.purge_flight_recorder_bodies()`) now only
+clears its in-memory copy when `disk_result["ok"]` is True — rewrite,
+then replace, then clear, never the reverse.
+
+Test: `tests/test_qa_security_surface.py::test_purge_leaves_the_original_intact_when_the_replace_fails`,
+`::test_purge_does_not_clear_memory_when_the_disk_half_failed`.
+Mutation: reverted the count-after-replace ordering (F7) and the
+ok-gated memory clear (F8) separately, each reproduced its finding
+exactly, both reverted after confirming red.
+Commit: `61f34bd7`.
+
+### F2 — error_class must be a class name
+
+`goal_parser`'s out-of-process leg stamped up to 80 chars of the
+child's raw exception message into `error_class`. Parent-side
+`_sanitize_error_class()` now allow-lists against
+`^[A-Za-z_][A-Za-z0-9_]*$`, enforced regardless of what the child
+sends; child-side `_subprocess_runner.py` now also emits a real
+`error_class` on every failure branch. Audited the other two candidate
+sites per TEST_REPORT.md's ask: `router/core.py`'s chokepoint error
+path already used `type(exc).__name__` correctly, and
+`agent_context.from_subprocess_payload` never writes an error field at
+all. Added a trace-schema-level test driving both the chokepoint and
+the goal-parser leg with an `Authorization: Bearer …`-bearing message,
+asserting `error_class` matches the class-name shape.
+
+Test: `tests/test_qa_security_surface.py::test_the_subprocess_error_field_is_a_class_name_not_the_childs_message`;
+`tests/test_agent_trace.py::test_error_class_is_never_free_text_from_the_router_chokepoint`,
+`::test_error_class_is_never_free_text_from_the_goal_parser_subprocess`.
+Mutation: reverted the parent-side sanitizer — both QA's test and the
+new schema test went red with the exact leaked fragment — reverted.
+Commit: `c3a34c64`.
+
+### F4 / F5 — guard the redact import and capture_body call at the chokepoint
+
+`from arail import redact` and `capture_body(...)` sat outside any
+`try` in both `complete()` and `stream_complete()` — a broken/shadowed
+module or a raising `capture_body` raised into an inference that had
+already produced (and, streaming, already yielded) a real answer.
+REVIEW.md D6 guarded two other imports on this path; this third/fourth
+instance was missed. Both sites now fold the import and the call into
+one `try/except` falling back to `bodies = None`.
+
+Test: `tests/test_qa_blind_recorder_secrets.py::test_a_broken_redact_module_does_not_raise_into_an_inference`,
+`::test_a_raising_capture_body_does_not_raise_into_an_inference`.
+Mutation: reverted both guards to their unguarded form; each raised
+into the inference exactly as QA described (`ModuleNotFoundError`,
+`RuntimeError`), reverted after confirming red.
+Commit: `79a96b29`.
+
+### F9 — cost_tracker isolation, the 21/23-test regression
+
+`CostTracker`'s singleton binds `_data_path` from `config.DATA_DIR`
+once, at import time, guarded by `self._initialized` — monkeypatching
+`config.DATA_DIR` later (as `_isolated_agent_observability_data_root`
+already does for `agent_trace`/`activity`) has no effect on it. Every
+test driving a real `ModelRouter` billed the real
+`lab/data/costs.json`; because recap's `$5` ceiling reads
+`cost_tracker.total_billed_usage_usd`, enough sweeps exhausted it —
+21-23 of `test_recap_{core,paranoid,robotouille_mock}.py`'s tests
+failed with `COST_EXCEEDED`, no code change needed to reproduce, just
+repeated use. Fixed by forcing `cost_tracker._initialized = False`
+then calling `cost_tracker.__init__()` again once `DATA_DIR` is
+already patched — re-runs the whole constructor **in place on the same
+object** every other module's import already points to (a fresh
+`CostTracker()` would not be seen by those references, the
+`activity_log` lesson this fixture's docstring already documents).
+
+A symmetrical teardown-side re-init was tried first and reverted: it
+crashed `test_a_data_dir_that_is_a_file_not_a_directory_is_survivable`
+(whose whole point is that `DATA_DIR` is a file, and `__init__`'s
+`mkdir(exist_ok=True)` cannot tolerate that). The setup-side reset
+alone is sufficient.
+
+Test: `tests/test_recap_core.py`, `tests/test_recap_paranoid.py`,
+`tests/test_recap_robotouille_mock.py` — **54 passed, no `ARAIL_DATA_DIR`
+set**, five consecutive runs, no accumulation.
+Mutation: reverted the fix and reproduced TEST_REPORT.md's exact
+"21 failed, 33 passed" figure, then restored.
+Commit: `b8b67378`.
+
+### F3 — scan_for_legacy_bodies crashes on a non-dict JSON line (judgment call, fixed not filed)
+
+`_has_legacy_body` called `.get()` on a non-dict `event` or a non-dict
+`data` value without an `isinstance` guard — `AttributeError` on
+`[1,2,3]`, `123`, a bare string, or `{"data": "oops"}`, against the
+function's own "Never raises" docstring (only `OSError` was caught).
+Fatal to every Admin page load since `loadLegacyBodiesNotice()` scans
+on boot. Two-line `isinstance` guard.
+
+Test: `tests/test_qa_setup_fresh_lab.py::test_scan_with_malformed_lines_counts_the_valid_ones_and_survives`.
+Mutation: reverted to the unguarded form, reproduced the exact
+`AttributeError`, reverted.
+Commit: `d8606bcf`.
+
+### Filed as debt, not fixed
+
+QA F1 (quoted-JSON `api_key` not redacted, `redact.py:52-54`), QA F6
+(malformed JSON on the hold/recorder-toggle endpoints is a 500), QA F10
+(`config.PKB_ROOT` un-isolated) — see `sprints/BACKLOG.md`'s "QA fix
+loop (TEST_REPORT.md, commit `9d0e083f`) — filed as debt, not fixed".
+The two proving tests (`test_json_quoted_api_key_is_redacted_before_disk`,
+`test_malformed_json_on_a_mutating_admin_endpoint_is_not_a_500`) remain
+**red by design** — the coordinator's own fix-loop instructions named
+these findings explicitly for debt-filing, not code change, and "do not
+weaken or delete QA's failing tests" forbids making them pass any other
+way. Flagging this plainly rather than silently claiming a fully-green
+`test_qa_*.py` suite.
+Commit: `b73148e7` (plus the pre-existing S2 entry annotated resolved).
+
+## Re-review index — QA fix loop
+
+| Finding | Commit | QA test now green |
+|---|---|---|
+| F7 | `61f34bd7` | `tests/test_qa_security_surface.py::test_purge_leaves_the_original_intact_when_the_replace_fails` |
+| F8 | `61f34bd7` | `tests/test_qa_security_surface.py::test_purge_does_not_clear_memory_when_the_disk_half_failed` |
+| F2 | `c3a34c64` | `tests/test_qa_security_surface.py::test_the_subprocess_error_field_is_a_class_name_not_the_childs_message` |
+| F4 | `79a96b29` | `tests/test_qa_blind_recorder_secrets.py::test_a_broken_redact_module_does_not_raise_into_an_inference` |
+| F5 | `79a96b29` | `tests/test_qa_blind_recorder_secrets.py::test_a_raising_capture_body_does_not_raise_into_an_inference` |
+| F9 | `b8b67378` | `tests/test_recap_core.py`, `tests/test_recap_paranoid.py`, `tests/test_recap_robotouille_mock.py` (54/54, no env var) |
+| F3 (judgment call) | `d8606bcf` | `tests/test_qa_setup_fresh_lab.py::test_scan_with_malformed_lines_counts_the_valid_ones_and_survives` |
+| F1 (filed, not fixed) | `b73148e7` | still red — see "Filed as debt" above |
+| F6 (filed, not fixed) | `b73148e7` | still red — see "Filed as debt" above |
+| F10 (filed, not fixed) | `b73148e7` | n/a — no reproducing test in this pass |
+
+### Final verification
+
+- `tests/test_qa_*.py` (32 files): **1312 passed, 2 failed** (F1, F6 —
+  filed as debt, not fixed, by explicit instruction), 6 xfailed.
+- Sprint + QA test files (28 files) run twice back to back: **2 failed
+  (F1, F6), 1643 passed** both times, identical failing set both times.
+- Real `lab/data`: no `agent_traces.jsonl` / `flight_recorder.json` /
+  `legacy_bodies_notice.json` / `secrets.env` / `costs.json` after
+  either run. No stray pytest processes after completion.
+- `lab/data/costs.json` (this worktree's pre-existing test pollution —
+  3,130 fake calls / $6.63 billed, orchestrator's call per `SPRINT.md`)
+  deleted. A full sprint+QA sweep afterward did not recreate it.
+- Whole-`tests/`-tree differential vs pristine `main@236504ca` (QA's own
+  method, both sides, same interpreter, bounded): branch **44 failed** /
+  6322 passed; main **41 failed** / 5753 passed. Fail-on-both **40**
+  (unchanged pre-existing set). Fail-only-on-main **1**
+  (`test_onboarding.py::test_dashboard_unblocks_after_onboarding` — the
+  branch legitimately fixes it, per TEST_REPORT.md). Fail-only-on-branch
+  **4**: F1 and F6 (expected, filed as debt) plus two tests in
+  `test_qa_security_surface.py`
+  (`test_activity_recent_endpoint_carries_no_body_after_a_purge`,
+  `test_the_body_is_never_written_to_the_activity_log_by_the_researcher`).
+
+  **Investigated these two, not hand-waved.** Both pass reliably
+  standalone, in a targeted 3-test group alongside
+  `test_recap_core.py::TestCostCeiling::test_calls_by_recap_depth_populated`
+  (itself confirmed failing **on both branch and main** in the full
+  sweep — genuinely pre-existing, unrelated to this loop), and in a
+  588-test sprint+QA combined run. They fail **deterministically** in
+  the full 6322-test single-process sweep — re-ran the whole tree a
+  second time end to end and got the byte-identical 44-failure set both
+  times, so this is not a one-off timing flake. Root cause traced to
+  the same class TEST_REPORT.md's own **F11** already names (job/
+  background-daemon threads started by some earlier test's
+  `TestClient(app)` triggering the app's `@app.on_event("startup")`
+  handlers, never stopped, still emitting into the process-global
+  `activity_log` singleton for the rest of the session): the two files
+  collected immediately before `test_qa_security_surface.py`
+  (`test_qa_security_hardening.py`, `test_qa_security_hygiene_paranoid.py`)
+  both spawn real threads and instantiate `TestClient(app)`, and every
+  thread they spawn directly is confirmed properly joined
+  (`thread.join(timeout=2)`) — the leak is not in those threads
+  themselves, consistent with it being the app's own daemon startup
+  events rather than test-authored ones. Neither this diagnosis nor a
+  fix is part of the five items this fix loop was scoped to; F11 was
+  not in the coordinator's debt-filing list for this loop, so it is
+  reported here rather than filed, for the next pass to decide.
+  **Not caused by any of this loop's six commits** — none of them touch
+  daemon lifecycle, `TestClient`, or `activity_log`'s isolation
+  fixture.
