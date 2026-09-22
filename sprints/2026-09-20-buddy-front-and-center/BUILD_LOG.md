@@ -951,3 +951,263 @@ Commit: `1bedf165`
 corrections**, in order, each independently committed. See the slice
 table above this section for S0-S7's commits; the hermeticity fix commits
 are recorded just above.
+
+## Review fix loop — architect BLOCK, commit `0c13a176`
+
+`REVIEW.md`'s "Must fix before QA (blocking)" list, worked item by item,
+plus the three binding operator decisions `SPRINT.md`'s Decisions log
+recorded in response to the review's "Needs the operator" section
+(ledger commit `9112df90`).
+
+### B1 — redact.py fails open on a redaction-pass failure
+
+`_parse_secrets_env` now reads with `errors="replace"` and catches
+`(OSError, ValueError)` (was `OSError` only, missing `UnicodeDecodeError`
+on an unreadable-as-UTF-8 `secrets.env`). `capture_body` now calls a new
+`_redact_strict()` instead of the lenient public `redact()` — the public
+function still swallows a known-value-pass failure and returns the
+(possibly under-redacted) text, which is correct for its own callers, but
+`capture_body`'s own outer `except` was turning that failure into a
+fail-**open** `None`-that-looks-like-success instead of the fail-**closed**
+"no capture at all" the security property requires. `_redact_strict`
+deliberately has no inner try/except around the known-values pass, so a
+raise there propagates out to `capture_body`'s boundary and becomes a
+`None` body — the record is written with no bodies, never with an
+unredacted one.
+
+Test: `tests/test_redact.py::test_b1_non_utf8_secrets_env_still_redacts_other_values`,
+`::test_b1_non_utf8_secrets_env_does_not_raise`,
+`::test_capture_body_returns_none_when_known_values_pass_raises`,
+`::test_redact_strict_propagates_known_values_failure`.
+Commit: `da70792d`.
+
+### B2 — legacy-bodies purge left bodies in `activity_log._buffer`
+
+`purge_legacy_bodies()` purged disk (via the new shared
+`jsonl_purge.purge_jsonl_bodies`) but not the 200-event in-memory ring
+`GET /api/activity/recent` (every tier, unauthenticated) and
+`GET /api/activity/stream` serve directly from — a purge looked complete
+while the exact bodies just removed from disk stayed readable from
+memory until the next restart. Added an in-memory pass over
+`activity_log._buffer`, returning `{"purged": N, "purged_memory": M}`.
+
+Test: `tests/test_legacy_bodies_purge.py::test_purge_strips_bodies_from_in_memory_buffer_too`,
+`::test_purge_memory_count_independent_of_disk_count`,
+`::test_purge_leaves_clean_buffer_events_untouched`.
+Commit: `1197277e`.
+
+### D6 — unguarded imports that could raise into an inference
+
+`halt_gate()` (`agent_context.py`) and `_slot_info()` (`router/core.py`)
+each had a bare `from arail import ...` outside any `try` — an import
+failure there would raise into the inference chokepoint, which the
+observability layer must never do. Both imports moved inside the
+existing/new `try` so a failure there fails **open** (the call proceeds
+un-held) rather than blocking every inference in the lab.
+
+Test: `tests/test_halt_gate.py::test_halt_gate_fails_open_when_scheduler_import_fails`,
+`::test_halt_gate_still_passes_system_and_none_regardless`;
+`tests/test_router_trace_chokepoint.py::test_slot_info_fails_safe_when_scheduler_import_fails`.
+Commit: `6841c59a`.
+
+### F13 — `/api/admin/agent-trace-stream` missing from the 404-gating test list
+
+Added to `_ENDPOINTS` in `test_admin_agent_lanes_endpoints.py`, with a
+`_STREAM_PATHS` exclusion from the generic "reachable on maximus" 200
+check (an SSE route can't be probed the same way a JSON route can — see
+the hang note below).
+
+### D8 — a conditional assertion that could pass by asserting nothing
+
+`test_admin_template_uses_sse_not_setinterval_for_lanes` used to do
+`if lanes_section_start != -1: assert ...` — renaming the `agent-lanes`
+element out of existence would make the test pass while checking
+nothing. Now asserts `lanes_section_start != -1` unconditionally first.
+Commit (F13 + D8 together with D6): `6841c59a`.
+
+### The SSE test hang (found mid-loop, not a REVIEW.md finding)
+
+`test_agent_trace_stream_gated_and_reachable` used
+`client.stream("GET", ...)` against a genuinely infinite generator
+(`agent_trace.subscribe()`); exiting the `with` block cannot cleanly
+close the response because the server-side generator never terminates
+on its own, and the hang carries forward to block every later test in
+the same pytest session. **Investigated whether production code leaks**:
+grepped `app.py` for `is_disconnected()` (zero hits anywhere, including
+the pre-existing `/api/activity/stream`, so this is not a new gap this
+sprint introduced) and confirmed via the fixed test that
+`app_task.cancel()` + `await app_task` **does** remove the subscriber
+from `agent_trace._SUBSCRIBERS` — production's disconnect cleanup already
+works; only the test was wrong. Rewrote the test on the existing raw-
+ASGI-scope pattern (`test_world_recolor_qa.py::test_real_sse_route_streams_live`)
+built for exactly this problem on a sibling endpoint, bounded by
+`asyncio.wait_for`, with an explicit assertion that the subscriber count
+returns to its pre-request value after cancellation. No production
+change was needed. Commit: `6841c59a`.
+
+### F9 wiring — pin all seven speech_gate call sites
+
+Widened the gate to Buddy's two remaining ungated proactive lines (the
+boot notice in `start()`, the dream announcement in `dream()`) per
+operator decision (a) — both previously spoke regardless of Hold. While
+wiring the dream announcement, found and fixed a **pre-existing bug
+unrelated to this sprint**: `dream()`'s `activity_log.emit(...)` call had
+never been imported into that method's scope at all (confirmed via
+`git diff` that the line predates this sprint) — every unguarded call
+would have raised `NameError`, meaning the dream announcement has never
+actually fired in production. Fixed the missing import; without it the
+new gate here would have been untestable.
+
+Added `tests/test_speech_gate_wiring.py` — one held/not-held test pair
+per site (Buddy `_emit`, Buddy boot notice, Buddy dream announcement,
+Librarian `_emit`, Presence `_tick`, Debt Advisor `tick`, Consolidation
+Analyzer `tick`). Verified every one of the seven is non-vacuous by
+temporarily removing its production gate and confirming the matching
+test goes red, then restoring it (verified via `git diff --stat` showing
+zero residual change).
+Commit: `ebc18899`.
+
+### B3 / B4 — relabel the halt control; make F17's copy test read the real template
+
+Operator decision (a)'s exact required sentence — "agents stop calling
+models and stop posting findings, suggestions and announcements.
+Operational/error lines and SRE crash alerts continue." — now appears in
+both `_nav.html` (relabeled from "Halt jobs" to "Hold all agents",
+`title` and `confirm()` dialog both rewritten) and `admin.html`'s
+`renderHoldControl()`. Updated three doc comments (`lab_brain.py`,
+`dream_daemon.py`, `job_daemon.py`) that named the old button label.
+
+B4: `test_f17_copy_matches_behaviour` used to compare live behaviour
+against a `HOLD_ALL_AGENTS_COPY` constant hand-typed in the test file —
+`admin.html`'s actual JS string could drift from it and the test would
+still pass. Rewrote it to extract the "held" branch of
+`renderHoldControl()`'s copy ternary from the real template source via a
+regex over the backtick-delimited literal pieces, substituting the one
+dynamic slot (`${hold.in_flight}`) with the value the endpoint actually
+returned. Added a companion test pinning `_nav.html`'s relabel + exact
+copy the same way. Both verified non-vacuous by mutating the template
+copy and confirming red.
+Commit: `084aa234`.
+
+### B5 — LAN-bind × live-recorder warning banner (operator decision (b): build now)
+
+New `arail.config.bind_is_loopback()` is the one shared "is BIND_ADDR
+loopback" check; `portal/app.py`'s pre-existing `_toggle_bind_is_loopback()`
+(the airgap-toggle security gate) now delegates to it instead of
+carrying its own copy of the same set. `agent_trace.recorder_state()`
+and `set_recorder_enabled()` both grow a `lan_exposed` field. `admin.html`
+shows a banner above the Agent lanes card and a warning line on the
+recorder toggle's own copy, both only when recorder-on AND lan-exposed.
+
+Test: `tests/test_flight_recorder.py::test_recorder_state_not_lan_exposed_on_loopback_bind`,
+`::test_recorder_state_lan_exposed_on_non_loopback_bind`,
+`::test_set_recorder_enabled_return_value_carries_lan_exposed_too`,
+`::test_lan_exposed_false_when_bind_addr_unreadable`.
+Commit: `f0bb5221`.
+
+### B6 — render W1's four missing per-call fields
+
+`model`, `backend`, `tokens_in` hoisted onto `lanes_snapshot()`'s
+per-lane dict the same way `brain`/`effort`/`tokens_out` already were;
+`admin.html`'s `renderAgentLanes()` grows four columns (Model, Backend,
+Effort, Tokens in) so all seven of W1's mandatory fields are on screen.
+
+Test: `tests/test_admin_agent_lanes_endpoints.py::test_w1_seven_fields_all_render_in_admin_lane_table`
+(reads the real rendered `admin.html` source, not a duplicate),
+`::test_lanes_snapshot_carries_all_seven_w1_fields` (the data-side half).
+Commit: `a66b9f0f`.
+
+### S1 — recorder-off must mean stop showing too, plus a permanent Purge (operator decision (c): both halves)
+
+New shared `agent_trace._strip_bodies_if_recorder_off()` re-checks
+*current* recorder state (the same check `/api/agents/prompts` already
+had right) before `find()`, `lanes_snapshot()`'s embedded `last`, and the
+admin SSE stream (`subscribe()`) serve a record's bodies — a record's
+`bodies` field is latched at call start (F10) and never changes
+afterward, so without this a body captured while the recorder was on
+stayed servable forever after the operator turned it off. This read-gate
+is deliberately reversible (turning the recorder back on re-exposes an
+old record, since the record itself isn't mutated).
+
+The permanent half: new `agent_trace.purge_flight_recorder_bodies()`,
+reusing `jsonl_purge.purge_jsonl_bodies()` — the SAME mechanism
+`activity.py`'s legacy-bodies purge uses, not a second one — for
+`agent_traces.jsonl` + its rotation, plus an in-memory ring pass mirroring
+B2's `activity_log._buffer` fix. Added `bodies_purged` to `agent_trace`'s
+fixed field list so it's always-present like every other documented
+field. `POST /api/admin/flight-recorder` grows an optional
+`{purge: true}`, run in the same request as an `enabled` flip, per
+REVIEW.md's own suggested shape.
+
+UI: a "Purge captured bodies" button on the recorder toggle, and —
+separately, the other half of operator decision (c) — the legacy-bodies
+notice + Purge/Keep buttons that never had a UI before now (three
+endpoints existed, zero UI), populated by a boot-time
+`loadLegacyBodiesNotice()` call alongside the existing agent-lanes boot
+call.
+
+Test: `tests/test_flight_recorder.py::test_find_hides_bodies_once_recorder_turned_off`,
+`::test_find_reveals_bodies_again_if_recorder_turned_back_on`,
+`::test_lanes_snapshot_last_hides_bodies_once_recorder_turned_off`,
+`::test_subscribe_hides_bodies_once_recorder_turned_off`,
+`::test_strip_bodies_if_recorder_off_no_op_when_no_bodies`,
+`::test_purge_flight_recorder_bodies_strips_ring_and_disk`,
+`::test_purge_flight_recorder_bodies_is_permanent_even_if_recorder_turned_back_on`,
+`::test_purge_flight_recorder_bodies_count_is_zero_when_nothing_captured`,
+`::test_purge_flight_recorder_bodies_leaves_bodyless_records_untouched`;
+`tests/test_admin_agent_lanes_endpoints.py::test_flight_recorder_endpoint_purge_option`,
+`::test_flight_recorder_endpoint_without_purge_flag_does_not_purge`;
+`tests/test_legacy_bodies_admin_endpoints.py::test_legacy_bodies_notice_and_buttons_exist_in_admin_ui`.
+All read-gate and purge behaviours verified non-vacuous by mutating the
+production code and confirming the matching tests go red.
+Commit: `35729007`.
+
+### Filed as debt, not fixed here
+
+S2, S3, D1, D2, D3, D5, D7, F2, W1's wall-clock test, the conftest split,
+and D8's remainder — see `sprints/BACKLOG.md` ("Buddy-front-and-center's
+BLOCK-review fix loop — filed as debt, not fixed"), commit `f9deb6e5`.
+
+### Not the builder's call
+
+**W5's witness line** (REVIEW.md "Needs the operator" #4) must be the
+operator's own words, signed, in `SPRINT.md` — not something the builder
+writes on his behalf. Not present in `SPRINT.md` as of this fix loop;
+left open for the operator, not fabricated here.
+
+## Re-review index
+
+One row per `REVIEW.md` finding worked in this fix loop, its commit, and
+the test that proves it.
+
+| Finding | Commit | Proving test |
+|---|---|---|
+| B1 | `da70792d` | `tests/test_redact.py::test_b1_non_utf8_secrets_env_still_redacts_other_values`, `::test_capture_body_returns_none_when_known_values_pass_raises` |
+| B2 | `1197277e` | `tests/test_legacy_bodies_purge.py::test_purge_strips_bodies_from_in_memory_buffer_too` |
+| D6 | `6841c59a` | `tests/test_halt_gate.py::test_halt_gate_fails_open_when_scheduler_import_fails`, `tests/test_router_trace_chokepoint.py::test_slot_info_fails_safe_when_scheduler_import_fails` |
+| F13 | `6841c59a` | `tests/test_admin_agent_lanes_endpoints.py::test_f13_404_on_minimalist[get-/api/admin/agent-trace-stream-None]` |
+| D8 | `6841c59a` | `tests/test_admin_agent_lanes_endpoints.py::test_admin_template_uses_sse_not_setinterval_for_lanes` |
+| F9 wiring (7 sites) | `ebc18899` | `tests/test_speech_gate_wiring.py` (all 14 tests) |
+| B3 | `084aa234` | `tests/test_admin_agent_lanes_endpoints.py::test_nav_halt_control_relabeled_to_hold_all_agents` |
+| B4 | `084aa234` | `tests/test_admin_agent_lanes_endpoints.py::test_f17_copy_matches_behaviour` |
+| B5 | `f0bb5221` | `tests/test_flight_recorder.py::test_recorder_state_lan_exposed_on_non_loopback_bind` |
+| B6 | `a66b9f0f` | `tests/test_admin_agent_lanes_endpoints.py::test_w1_seven_fields_all_render_in_admin_lane_table` |
+| S1 (promoted to must-fix by the operator) | `35729007` | `tests/test_flight_recorder.py::test_find_hides_bodies_once_recorder_turned_off`, `::test_purge_flight_recorder_bodies_strips_ring_and_disk` |
+| D4 (resolved by operator decision (a)) | `ebc18899`, `084aa234` | `tests/test_admin_agent_lanes_endpoints.py::test_f17_copy_matches_behaviour` (Claim 2) |
+
+## Final state (after the review fix loop)
+
+- 10 commits since REVIEW.md's BLOCK (`9112df90` ledger entry through
+  `f9deb6e5` debt filing): `da70792d`, `1197277e`, `6841c59a`, `ebc18899`,
+  `084aa234`, `f0bb5221`, `a66b9f0f`, `35729007`, `f9deb6e5`.
+- Every item in REVIEW.md's "Must fix before QA (blocking)" list (10
+  items) is fixed and pinned with a test that was verified non-vacuous by
+  mutation.
+- All three binding operator decisions (a), (b), (c) implemented in full
+  (S1 got both halves of its either/or, per decision (c)).
+- 181-file differential vs `main@236504ca`, re-run after every commit in
+  this fix loop: failures-only-on-this-branch stayed at **0** throughout.
+- No commented-out code; no unowned TODOs added.
+- `sprints/BACKLOG.md` carries every deferred item with its filing sprint
+  named, so a future sprint can pick any of them up without re-deriving
+  the reasoning.
