@@ -229,44 +229,42 @@ def scan_for_legacy_bodies() -> Dict[str, Any]:
             "dismissed": legacy_notice_dismissed()}
 
 
+def _strip_legacy_body(event: Dict[str, Any]) -> None:
+    trace = event["data"]["prompt_trace"]
+    trace.pop("prompt", None)
+    trace.pop("response", None)
+    trace["body_purged"] = True
+
+
 def purge_legacy_bodies() -> Dict[str, Any]:
     """Operator-initiated only. Streams each file, strips ``prompt``/
     ``response`` from every ``prompt_trace`` that still carries one, stamps
     ``body_purged: true`` in their place, and preserves every other field
     and the exact line count (malformed lines pass through byte-identical).
-    Writes a temp file in the same directory, then ``os.replace`` — same
-    single-writer-process assumption as rotation (``activity.py``'s own
-    module docstring already documents single-process safety here).
+    Writes a temp file in the same directory, then ``os.replace`` via the
+    shared ``jsonl_purge.purge_jsonl_bodies`` helper (REVIEW.md decision
+    (c): one purge mechanism, shared with ``agent_trace.py``'s
+    flight-recorder purge, not two).
+
+    REVIEW.md B2: also strips the same bodies from ``activity_log``'s
+    in-memory ``_buffer`` — the 200-event ring ``GET /api/activity/recent``
+    (every tier, no auth) and ``GET /api/activity/stream`` serve directly.
+    Without this, a purge looked complete (`{"purged": N}`) while the exact
+    bodies just removed from disk stayed readable from memory until the
+    next restart.
     """
-    purged = 0
-    for path in (LOG_FILE.with_suffix(".jsonl.1"), LOG_FILE):
-        if not path.exists():
-            continue
-        tmp_path = path.with_name(path.name + ".purge_tmp")
-        try:
-            with open(path, "r") as src, open(tmp_path, "w") as dst:
-                for line in src:
-                    raw = line.rstrip("\n")
-                    if not raw.strip():
-                        dst.write(line)
-                        continue
-                    try:
-                        event = json.loads(raw)
-                    except (ValueError, TypeError):
-                        dst.write(line)
-                        continue
-                    if _has_legacy_body(event):
-                        trace = event["data"]["prompt_trace"]
-                        trace.pop("prompt", None)
-                        trace.pop("response", None)
-                        trace["body_purged"] = True
-                        purged += 1
-                    dst.write(json.dumps(event, default=str) + "\n")
-            os.replace(tmp_path, path)
-        except OSError as e:
-            _log.warning("legacy body purge failed for %s: %s", path, e)
-            try:
-                tmp_path.unlink(missing_ok=True)
-            except OSError:
-                pass
-    return {"purged": purged}
+    from arail.jsonl_purge import purge_jsonl_bodies
+
+    purged_disk = purge_jsonl_bodies(
+        [LOG_FILE.with_suffix(".jsonl.1"), LOG_FILE],
+        _has_legacy_body,
+        _strip_legacy_body,
+    )
+
+    purged_memory = 0
+    for event in list(activity_log._buffer):
+        if _has_legacy_body(event):
+            _strip_legacy_body(event)
+            purged_memory += 1
+
+    return {"purged": purged_disk, "purged_memory": purged_memory}

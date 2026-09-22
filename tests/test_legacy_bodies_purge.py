@@ -5,6 +5,7 @@ it, [Keep] remembered so the notice does not return.
 
 from __future__ import annotations
 
+import copy
 import json
 
 import pytest
@@ -132,6 +133,58 @@ def test_purge_is_never_called_automatically_by_scan(log_path, monkeypatch):
     activity.scan_for_legacy_bodies()
     after = log_path.read_text()
     assert before == after
+
+
+# ---------------------------------------------------------------------------
+# B2 [BLOCK] — the purge must also strip the in-memory buffer, not just disk.
+# GET /api/activity/recent serves activity_log._buffer directly, every tier,
+# no auth -- a purge that clears disk but not memory is not a purge.
+# ---------------------------------------------------------------------------
+
+def test_purge_strips_bodies_from_in_memory_buffer_too(log_path):
+    """REVIEW.md B2's exact acceptance test, at the activity module level:
+    after a purge, activity_log.recent(200) carries no planted body."""
+    activity_log = activity.activity_log
+    activity_log._buffer.clear()
+    activity_log._buffer.append(copy.deepcopy(_LEGACY_EVENT))  # same shape as on disk
+
+    result = activity.purge_legacy_bodies()
+    assert result["purged_memory"] == 1
+
+    recent = activity_log.recent(200)
+    blob = json.dumps(recent)
+    assert "a legacy prompt" not in blob
+    assert "a legacy response" not in blob
+    for event in recent:
+        trace = event.get("data", {}).get("prompt_trace")
+        if trace:
+            assert "prompt" not in trace
+            assert "response" not in trace
+
+
+def test_purge_memory_count_independent_of_disk_count(log_path):
+    """The in-memory buffer and the on-disk file can hold different sets
+    of events (the buffer is a 200-event ring, the file is everything) --
+    purged_memory and purged (disk) must be counted separately."""
+    activity_log = activity.activity_log
+    activity_log._buffer.clear()
+    activity_log._buffer.append(copy.deepcopy(_LEGACY_EVENT))
+    activity_log._buffer.append(copy.deepcopy(_LEGACY_EVENT))
+    _write_lines(log_path, [_LEGACY_EVENT])  # only one on disk
+
+    result = activity.purge_legacy_bodies()
+    assert result["purged"] == 1
+    assert result["purged_memory"] == 2
+
+
+def test_purge_leaves_clean_buffer_events_untouched(log_path):
+    activity_log = activity.activity_log
+    activity_log._buffer.clear()
+    activity_log._buffer.append(copy.deepcopy(_CLEAN_EVENT))
+
+    activity.purge_legacy_bodies()
+    event = activity_log._buffer[0]
+    assert "body_purged" not in event.get("data", {}).get("prompt_trace", {})
 
 
 # ---------------------------------------------------------------------------
