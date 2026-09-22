@@ -1728,16 +1728,24 @@ function renderLanRecorderWarning(snap) {
 }
 
 function renderAgentLanes(snap) {
+  // B6 (REVIEW.md): W1 requires all seven fields on screen -- agent id,
+  // model, backend, brain+effort, TTFT-or-n/a, tokens in/out, reason code
+  // verbatim. Model/backend/tokens in were in the JSON (lanes_snapshot())
+  // but never rendered; effort was in the JSON but also never rendered.
   const list = document.getElementById('agent-lanes-list');
   let html = '<table class="pr-table"><tr><th>Agent</th><th>Calls</th>' +
-             '<th>Brain</th><th>TTFT</th><th>Tokens out</th><th>Deep reason</th></tr>';
+             '<th>Model</th><th>Backend</th><th>Brain</th><th>Effort</th>' +
+             '<th>TTFT</th><th>Tokens in</th><th>Tokens out</th><th>Deep reason</th></tr>';
   for (const lane of (snap.lanes || [])) {
     const ttft = lane.ttft_ms != null ? Math.round(lane.ttft_ms) + 'ms'
                 : (lane.ttft_status || 'n/a');
     const reason = lane.deep_reason_detail || lane.deep_reason_code || '';
     const empty = lane.empty_reason ? ` <span class="pr-hint">(${esc(lane.empty_reason)})</span>` : '';
     html += `<tr><td>${esc(lane.display)}${empty}</td><td>${lane.calls}</td>` +
-            `<td>${esc(lane.brain || '—')}</td><td>${esc(ttft)}</td>` +
+            `<td>${esc(lane.model || '—')}</td><td>${esc(lane.backend || '—')}</td>` +
+            `<td>${esc(lane.brain || '—')}</td><td>${esc(lane.effort || '—')}</td>` +
+            `<td>${esc(ttft)}</td>` +
+            `<td>${lane.tokens_in != null ? lane.tokens_in : '—'}</td>` +
             `<td>${lane.tokens_out != null ? lane.tokens_out : '—'}</td>` +
             `<td>${esc(reason)}</td></tr>`;
   }

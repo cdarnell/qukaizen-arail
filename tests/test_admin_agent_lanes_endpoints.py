@@ -193,6 +193,55 @@ def test_agent_lanes_shape(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# B6 (REVIEW.md) — W1's seven mandatory per-call fields (agent id, model,
+# backend, brain+effort, TTFT-or-n/a, tokens in/out, reason code) must all
+# reach the actual rendered admin.html markup, not just the JSON.
+# ---------------------------------------------------------------------------
+
+def test_w1_seven_fields_all_render_in_admin_lane_table():
+    import pathlib
+    from arail.portal import app as app_mod
+
+    admin_html = (
+        pathlib.Path(app_mod.__file__).parent / "templates" / "admin.html"
+    )
+    src = admin_html.read_text()
+    start = src.find("function renderAgentLanes")
+    assert start != -1, "renderAgentLanes() not found in admin.html at all"
+    end = src.find("\nfunction ", start + 1)
+    section = src[start:end if end != -1 else start + 4000]
+
+    # Header cells -- the human-visible column names.
+    for header in ("Agent", "Model", "Backend", "Brain", "Effort", "TTFT",
+                   "Tokens in", "Tokens out", "Deep reason"):
+        assert header in section, f"{header!r} column header missing"
+
+    # Row template -- the JSON fields lanes_snapshot() puts on each lane
+    # (agent_trace.py) must actually be read here, not just declared in a
+    # header with nothing underneath it.
+    for field in ("lane.display", "lane.model", "lane.backend", "lane.brain",
+                  "lane.effort", "lane.tokens_in", "lane.tokens_out"):
+        assert field in section, f"{field!r} never read in renderAgentLanes()"
+
+
+def test_lanes_snapshot_carries_all_seven_w1_fields():
+    """The data-side half of B6 -- lanes_snapshot() must expose every
+    field the admin markup now reads, or the previous test's field names
+    would just be reading `undefined`."""
+    agent_trace.record(trace_id="d" * 16, agent_id="buddy", kind="agent",
+                       model="qwen2.5-7b", backend="ollama", brain="deep",
+                       effort="high", tokens_in=42, tokens_out=7)
+    snap = agent_trace.lanes_snapshot()
+    lane = next(l for l in snap["lanes"] if l["id"] == "buddy")
+    assert lane["model"] == "qwen2.5-7b"
+    assert lane["backend"] == "ollama"
+    assert lane["brain"] == "deep"
+    assert lane["effort"] == "high"
+    assert lane["tokens_in"] == 42
+    assert lane["tokens_out"] == 7
+
+
+# ---------------------------------------------------------------------------
 # GET /api/admin/agent-trace/{trace_id}
 # ---------------------------------------------------------------------------
 
