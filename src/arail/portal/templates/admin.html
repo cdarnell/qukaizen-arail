@@ -547,6 +547,15 @@
   .pr-table th, .pr-table td { text-align: left; padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--border); }
   .pr-table th { color: var(--text-muted); font-weight: 500; }
   .pr-hint { font-size: 0.65rem; color: var(--text-muted); margin-top: 0.15rem; }
+  .pr-warning {
+    font-size: 0.72rem;
+    color: var(--warn);
+    border: 1px solid var(--warn-a28);
+    background: color-mix(in srgb, var(--warn) 6%, transparent);
+    border-radius: var(--radius-m);
+    padding: 0.5rem 0.65rem;
+    margin-bottom: 0.5rem;
+  }
   .pr-err  { font-size: 0.7rem; color: var(--danger);  margin-top: 0.4rem; }
   .pr-vuln-row { font-size: 0.72rem; color: var(--text-muted); margin-bottom: 0.2rem; }
   .pr-vuln-row .pr-sev-crit { color: var(--danger); font-weight: 700; }
@@ -715,6 +724,9 @@
   <!-- ═══ Agent lanes (sprint 2026-09-20-buddy-front-and-center) ═══ -->
   <div class="admin-section">
     <h2>Agent lanes</h2>
+    <!-- Operator decision (b): LAN-bind x live-recorder warning banner --
+         hidden unless BIND_ADDR is non-loopback AND the recorder is on. -->
+    <div id="agent-lan-warning" class="pr-hint pr-warning" style="display:none"></div>
     <div class="pr-card">
       <div id="agent-hold-control" class="pr-hint">Loading…</div>
       <div id="agent-recorder-control" class="pr-hint">Loading…</div>
@@ -1679,16 +1691,40 @@ function renderHoldControl(snap) {
 
 function renderRecorderControl(snap) {
   const el = document.getElementById('agent-recorder-control');
-  const rec = snap.recorder || {enabled: false};
-  const copy = rec.enabled
+  const rec = snap.recorder || {enabled: false, lan_exposed: false};
+  let copy = rec.enabled
     ? 'Flight recorder is ON — prompt/response bodies are captured, redacted, and capped.'
     : 'Flight recorder is OFF (default) — only metadata is captured, no prompt/response bodies.';
+  // Operator decision (b), SPRINT.md 2026-09-20-buddy-front-and-center:
+  // warn right on the toggle too, not only in the banner above the lanes
+  // table, since this is the control an operator is looking at when they
+  // flip the recorder on.
+  if (rec.enabled && rec.lan_exposed) {
+    copy += ' This lab is bound to a non-loopback address — captured bodies ' +
+            'are reachable from other machines on the LAN, not just this one.';
+  }
   el.innerHTML = `
     <label class="admin-toggle">
       <input type="checkbox" ${rec.enabled ? 'checked' : ''} onchange="setFlightRecorder(this.checked)">
       Flight recorder
     </label>
     <div class="pr-hint">${esc(copy)}</div>`;
+}
+
+function renderLanRecorderWarning(snap) {
+  const el = document.getElementById('agent-lan-warning');
+  if (!el) return;
+  const rec = snap.recorder || {enabled: false, lan_exposed: false};
+  if (rec.enabled && rec.lan_exposed) {
+    el.style.display = '';
+    el.textContent = '⚠ This lab is bound to a non-loopback address and the ' +
+      'flight recorder is ON — captured prompt/response bodies are reachable ' +
+      'from other machines on the LAN. Turn off the recorder or bind to ' +
+      'loopback (BIND_ADDR=127.0.0.1) if that is not intended.';
+  } else {
+    el.style.display = 'none';
+    el.textContent = '';
+  }
 }
 
 function renderAgentLanes(snap) {
@@ -1721,6 +1757,7 @@ async function loadAgentLanes() {
     const r = await fetch('/api/admin/agent-lanes');
     if (r.status === 404) return;  // minimalist tier — surface not present
     const snap = await r.json();
+    renderLanRecorderWarning(snap);
     renderHoldControl(snap);
     renderRecorderControl(snap);
     renderAgentLanes(snap);

@@ -464,10 +464,29 @@ def recorder_on() -> bool:
         return False
 
 
+def _lan_exposed() -> bool:
+    """True when BIND_ADDR is non-loopback -- i.e. this lab is reachable
+    from other machines on the LAN. Operator decision (b), SPRINT.md
+    2026-09-20-buddy-front-and-center: combined with the recorder's own
+    ``enabled`` flag by callers (Admin's banner, the recorder toggle's own
+    copy) to warn when prompt/response bodies would be captured on a
+    lab that isn't loopback-only. Never raises -- an unreadable BIND_ADDR
+    should not crash the recorder-status endpoint, just fail to warn."""
+    try:
+        from arail import config
+        return not config.bind_is_loopback()
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def recorder_state() -> dict:
     with _recorder_lock:
         _load_recorder_locked()
-        return {"enabled": bool(_recorder_enabled), "changed_at": _recorder_changed_at}
+        return {
+            "enabled": bool(_recorder_enabled),
+            "changed_at": _recorder_changed_at,
+            "lan_exposed": _lan_exposed(),
+        }
 
 
 def set_recorder_enabled(enabled: bool) -> dict:
@@ -486,7 +505,11 @@ def set_recorder_enabled(enabled: bool) -> dict:
             }, indent=2))
         except OSError:
             pass
-        return {"enabled": _recorder_enabled, "changed_at": _recorder_changed_at}
+        return {
+            "enabled": _recorder_enabled,
+            "changed_at": _recorder_changed_at,
+            "lan_exposed": _lan_exposed(),
+        }
 
 
 def _reset_recorder_for_tests() -> None:

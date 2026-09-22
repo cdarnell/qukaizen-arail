@@ -11776,8 +11776,8 @@ def _toggle_audit_path() -> Path:
 
 
 def _toggle_bind_is_loopback() -> bool:
-    bind = os.getenv("BIND_ADDR", "127.0.0.1").strip().lower()
-    return bind in {"127.0.0.1", "::1", "localhost"}
+    from arail import config
+    return config.bind_is_loopback()
 
 
 def _check_local_mutation_request(request: Request):

@@ -48,7 +48,12 @@ def _router() -> ModelRouter:
 
 def test_recorder_off_by_default_on_fresh_lab():
     assert agent_trace.recorder_on() is False
-    assert agent_trace.recorder_state() == {"enabled": False, "changed_at": None}
+    # lan_exposed is additive (B5/decision (b)) -- assert the pre-existing
+    # fields precisely rather than exact dict equality, so a genuinely new
+    # field doesn't look like a shape regression here.
+    state = agent_trace.recorder_state()
+    assert state["enabled"] is False
+    assert state["changed_at"] is None
 
 
 def test_set_recorder_enabled_persists(tmp_path):
@@ -245,3 +250,62 @@ def test_next_call_after_flip_off_respects_new_state():
     recs = agent_trace.ring(2)
     assert recs[0]["bodies"] is not None
     assert recs[1]["bodies"] is None
+
+
+# ---------------------------------------------------------------------------
+# B5 (REVIEW.md) / operator decision (b), SPRINT.md
+# 2026-09-20-buddy-front-and-center: the LAN-bind x live-recorder warning.
+# recorder_state() and set_recorder_enabled() both carry a "lan_exposed"
+# flag Admin's banner and the recorder toggle's own copy read -- both
+# branches (loopback-safe, non-loopback-exposed) pinned here so the
+# warning can't silently stop firing.
+# ---------------------------------------------------------------------------
+
+def test_recorder_state_not_lan_exposed_on_loopback_bind(monkeypatch):
+    monkeypatch.setenv("BIND_ADDR", "127.0.0.1")
+    agent_trace.set_recorder_enabled(True)
+    state = agent_trace.recorder_state()
+    assert state["enabled"] is True
+    assert state["lan_exposed"] is False
+
+
+def test_recorder_state_lan_exposed_on_non_loopback_bind(monkeypatch):
+    monkeypatch.setenv("BIND_ADDR", "0.0.0.0")
+    agent_trace.set_recorder_enabled(True)
+    state = agent_trace.recorder_state()
+    assert state["enabled"] is True
+    assert state["lan_exposed"] is True
+
+
+def test_set_recorder_enabled_return_value_carries_lan_exposed_too(monkeypatch):
+    """The toggle endpoint returns set_recorder_enabled()'s dict directly
+    (see admin_flight_recorder in portal/app.py) -- the flag has to be on
+    THIS return value, not only on the separate recorder_state() getter,
+    or the toggle's own response would omit it on the very click that
+    turns the recorder on."""
+    monkeypatch.setenv("BIND_ADDR", "192.168.1.50")
+    result = agent_trace.set_recorder_enabled(True)
+    assert result["lan_exposed"] is True
+
+    result = agent_trace.set_recorder_enabled(False)
+    # lan_exposed reflects the bind address, not the enabled flag -- it
+    # stays True (still LAN-bound) even though the recorder is now off;
+    # callers gate the *warning* on enabled AND lan_exposed together.
+    assert result["lan_exposed"] is True
+    assert result["enabled"] is False
+
+
+def test_lan_exposed_false_when_bind_addr_unreadable(monkeypatch):
+    """_lan_exposed() must never raise -- an unreadable/malformed
+    BIND_ADDR should fail to warn, not crash the recorder-status
+    endpoint an operator is trying to check."""
+    import arail.config as config_mod
+
+    def _boom():
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(config_mod, "bind_is_loopback", _boom)
+    assert agent_trace._lan_exposed() is False
+    # And the surrounding recorder_state() call still succeeds.
+    state = agent_trace.recorder_state()
+    assert state["lan_exposed"] is False

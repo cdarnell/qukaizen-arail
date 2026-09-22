@@ -43,6 +43,19 @@ def get(key: str, default: str | None = None) -> str | None:
     return os.getenv(key, default)
 
 
+def bind_is_loopback() -> bool:
+    """True when BIND_ADDR resolves to loopback (the safe default).
+    Read fresh from the environment on every call, same as BIND_ADDR's
+    other call sites in portal/app.py, so a live .env edit is picked up
+    without a restart. Shared by the airgap-toggle security gate
+    (``_toggle_bind_is_loopback`` in portal/app.py) and the LAN-bind x
+    live-recorder warning (agent_trace.py) — one definition of
+    "loopback", not two."""
+    return get("BIND_ADDR", "127.0.0.1").strip().lower() in {
+        "127.0.0.1", "::1", "localhost",
+    }
+
+
 # Re-export the canonical mode helpers from arail.airgap.
 # Any module that was doing its own os.getenv("LAB_MODE", ...) dance
 # should import from here (or from arail.airgap directly) instead.
