@@ -1584,14 +1584,30 @@ below were not).
   `str(...).split(":", 1)[0][:64]`, or add a separate `error_detail` field
   that goes through `redact.redact()` and is only populated when the
   recorder is on.
-- **S3** — Buddy's dream announcement (`_builtin_buddy.py`'s `dream()`,
-  gated this fix loop) still puts up to 160 chars of raw model output into
-  `activity.jsonl` via `data={"preview": reflection[:160]}` — ungated by
-  redaction and pre-existing, not introduced by this sprint. Not a
-  `prompt_trace` body, so `_has_legacy_body`/the legacy-bodies purge will
-  never find it. **QA must be told this directly**: a "grep the whole
-  DATA_DIR tree" pass can legitimately hit a planted string here, and that
-  is a real (pre-existing) finding, not a false positive.
+- **S3** — Buddy's dream announcement (`_builtin_buddy.py`'s `dream()`)
+  puts up to 160 chars of raw model output into `activity.jsonl` via
+  `data={"preview": reflection[:160]}`, ungated by redaction and
+  independent of the flight recorder. **This is now LIVE, not merely
+  gated.** REVIEW.md R5 (re-review): the fix loop's own `dream()`
+  NameError fix (adding the missing `from arail.activity import
+  activity_log` import) was correct and in scope, but it activates a
+  path that had never once run to completion in production — on
+  pristine main, every call to `dream()` raised `NameError` before
+  reaching this emit, and `dream_daemon._dream_once` caught that
+  exception and logged a warn instead. After the fix loop, on an
+  unheld lab, `dream()` reaches this line and writes the preview every
+  night. The speech_gate added this same fix loop only silences it
+  while **held** — an unheld lab (the default) now has this line firing
+  for the first time ever. Not a `prompt_trace` body, so
+  `_has_legacy_body`/the legacy-bodies purge will never find it.
+  **QA must be told this directly, and must exercise the dream path
+  specifically**: (1) a "grep the whole DATA_DIR tree" pass can
+  legitimately hit a planted string here, and that is a real, now-live
+  finding, not a false positive; (2) everything in `dream()` after the
+  emit (`_recent_actions.append`, `_sync_workflow`, `return reflection`)
+  is also newly-reachable code that has never executed in production
+  and is therefore untested in practice, independent of this specific
+  leak.
 - **D1** — `ARAIL_AGENT_STREAM_FAST` removes the 120s total-generation
   ceiling from Buddy's fast streamed calls (a `requests` per-read socket
   timeout, not a total-duration timeout, once `stream=True`); undocumented.
@@ -1629,8 +1645,11 @@ below were not).
 
 **What a future sprint needs to do:** pick these up in order of the
 security/exposure gradient — S2 first (it is the only remaining path that
-writes unredacted free text to disk regardless of the recorder), then D1
-(undocumented timeout-semantics change, already shipped), then the rest
-as capacity allows. S3 does not need a code fix by itself but does need
-QA-BLIND-1 briefed before the next sprint's QA pass, or it will keep
-looking like a false positive.
+writes unredacted free text to disk regardless of the recorder), then S3
+(no code fix required, but it is now a live leak, not a theoretical one
+— see above), then D1 (undocumented timeout-semantics change, already
+shipped), then the rest as capacity allows. QA must be briefed on S3
+before the next sprint's QA pass (both that the leak is real and now
+live, and that the dream path itself is newly-reachable and untested in
+practice), or a planted-string hit there will keep looking like a false
+positive.
