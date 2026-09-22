@@ -49,7 +49,8 @@ aerollm-named integration surface.
 | review | architect (review) | REVIEW.md | done → loop back to build | 2026-09-21 16:10 | 2026-09-21 16:35 | **BLOCK** (commit `0c13a176`) — ten must-fix items, no redesign |
 | re-review | architect (review) | REVIEW.md (appended) | done | 2026-09-21 23:25 | 2026-09-21 23:40 | **WEAK_PASS** (commit `051eac4a`) — six residual ASKs R1–R6 from 17 mutation tests |
 | build (R-loop) | builder | BUILD_LOG.md | done | 2026-09-21 23:45 | 2026-09-22 00:05 | R1–R6 fixed, each mutation-verified red-then-reverted (`ef593c1c`…`63484814`) |
-| test | qa | TEST_REPORT.md | in progress | 2026-09-22 00:10 | — | — |
+| test | qa | TEST_REPORT.md | done → loop back to build | 2026-09-22 00:10 | 2026-09-22 00:55 | **FAIL** (commit `9d0e083f`) — W1–W4 PASS, hot path confirmed; 5 must-fix defects, 1 regression |
+| build (QA loop) | builder | BUILD_LOG.md | in progress | 2026-09-22 01:00 | — | TEST_REPORT.md must-fix list |
 | ship | — | PR | pending | — | — | — |
 
 ## Decisions log
@@ -80,6 +81,20 @@ aerollm-named integration surface.
 | 2026-09-21 | Re-review WEAK_PASS — gate to QA passes | Reviewer mutation-tested 17 production edits: 14 red as claimed, 3 green → new findings. Satisfied: B2, B3, B5, D6, F9, F13, D8, S1 (recorder-off read-gate sits inside `subscribe()`, so the SSE stream cannot bypass it). SSE hang ruling: only the test was wrong — production ends the generator via ASGI task cancellation reaching `subscribe()`'s `finally`; D7 correctly stays debt. Unreadable-`secrets.env` ruling: a residual fail-open that must return `None` (R1). |
 | 2026-09-21 | **Orchestrator: fix R1–R6 BEFORE QA, not after** (deviation from the reviewer's "before the PR, not before QA") | Two of the six are things QA's blind tests would simply re-discover (R1 fail-open — the reviewer's own "QA first" list names a `chmod 000 secrets.env` variant; R6 — `test_reachable_on_maximus` now passes with the admin gate broken, a test-strength regression introduced while fixing a test-strength finding). Running QA against known defects spends its budget re-finding them; one short builder loop is cheaper than a second QA pass. R2 (not-held copy still says "proactive speech" — operator decision (a) half-implemented), R3 (F17 test green under a rewritten admission clause), R4 (B6 header check satisfiable by a comment) ride along. R5 (`dream()` NameError fix activates a never-run path, making S3's 160-char unredacted preview live) → BACKLOG S3 entry corrected to "newly live", and QA is directed to exercise the dream path end-to-end. |
 | 2026-09-22 | R-loop verified independently; gate to QA open | Orchestrator live-checked R1's three states (`secrets.env` unreadable → `None`; readable → redacted; absent → captured, shape pass only). Sprint's 21 test files 321 passed + 1 skipped twice; 181-file differential vs main: 0 failing only here; real `lab/data` clean; no stray processes. Builder observed one timing flake in `test_observability_under_load.py` (<50 ms wall-clock assertion) on one of three sweeps — passed in isolation and on the next sweep; same class as the existing wall-clock-test debt entry, not a regression. |
+| 2026-09-22 | QA verdict FAIL — loop back to build | 263 QA tests / 7 files, allocation 29/30/21/10/10 vs the 30/30/20/10/10 target; QA-BLIND-1/2/3 authored from ARCHITECTURE.md contracts before reading the builder's tests (3 of 8 defects came from them). **W1–W4 all PASS** (7 fields 3/3 with `explain()` compared to a live call; 0 bare `agent` / 0 unattributed; 132 hold refusals / 0 admitted on a simulated clock; 0 bodies on a whole-tree grep). Hot path: `record()` p95 46–49 µs over three runs, matching the builder's 46.8 µs; full ring 50–58 µs; ENOSPC 7 µs — 20× under budget. **Must fix:** (1) `jsonl_purge.py:44-72` a failed `os.replace` still reports `{"purged": N}` — the operator is told secrets were deleted while every body remains; (2) `activity.py:264-270` the same failed purge clears the in-memory buffer anyway — evidence hidden, not removed; (3) `goal_parser/__init__.py:250` 80 chars of the child's raw exception text land in `error_class` — an `Authorization: Bearer …` fragment reaches `agent_traces.jsonl` with the recorder off (S2, now demonstrated); (4) `router/core.py:282-283, 371-373` unguarded `from arail import redact` + `capture_body` can raise into an inference (D6's third and fourth instances); (5) **23-test regression** — every `tests/test_recap_*` fails here only because `cost_tracker` is un-isolated and the suite has billed $6.37 of fake usage past recap's $5 ceiling into this worktree's git-ignored `lab/data/costs.json`; `ARAIL_DATA_DIR=$(mktemp -d)` → 174/174 pass. Orchestrator reproduced (1) and (5). Regression differential re-established on the whole 366-file tree: 40 fail on both main and branch, 23 only here (one root cause), 1 only on main (fixed by this branch) — supersedes the earlier 181-file "17/0". |
+| 2026-09-22 | Polluted `lab/data/costs.json` in `arail-buddy-wt` is test pollution and will be deleted once `cost_tracker` is isolated | The worktree was created by the orchestrator on 2026-09-21 from main; its `lab/data/` never held operator data. The operator's main checkout is untouched. |
+
+## W5 — operator's witness line (open)
+
+VISION.md's fifth win condition is the only test of "fun vs boring metrics": the
+operator opens the Admin agent-lanes view on an idle lab and narrates what the
+agents are doing for ten minutes **without a terminal or a log file**. It passes
+only if the operator writes the line below in their own words and signs it.
+Nobody else may write it, and it may not be inferred from other evidence. If W5
+fails, the next sprint's first task is a rewrite of the view, not more
+instrumentation (REVIEW.md).
+
+> _(operator's line, date, initials — unwritten)_
 
 ## Skipped phases
 
