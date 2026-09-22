@@ -141,29 +141,56 @@ def test_sse_stream_serves_no_body_once_the_recorder_is_off():
 
 
 def test_the_body_is_never_written_to_the_activity_log_by_the_researcher(
-        client, monkeypatch, tmp_path):
+        monkeypatch, tmp_path):
     """W4's baseline behaviour: researcher.py used to write up to 3000 chars
-    of prompt + 2000 of response into activity.jsonl on every call."""
+    of prompt + 2000 of response into activity.jsonl on every call.
+
+    Captured at the module-under-test's own ``activity_log`` binding rather
+    than read back out of the 200-event global ring. The ring is shared with
+    every background daemon a previous test's ``TestClient(app)`` startup
+    left running (TEST_REPORT.md F11, pre-existing and present on main), so
+    reading it makes this test a function of how many tests ran before it —
+    which it was, and which is what made it fail only in whole-tree sweeps.
+    """
     from arail.agents import researcher
+
+    captured: list[tuple] = []
+    monkeypatch.setattr(researcher.activity_log, "emit",
+                        lambda *a, **kw: captured.append((a, kw)))
 
     router = ModelRouter.from_backend(_FakeBackend(f"reply {PLANTED}"), "fake")
     text = researcher._llm_complete(router, f"ask about {PLANTED}")
     assert text, "presence first: the call really happened"
+    assert captured, "presence first: the researcher emitted its metadata line"
 
-    events = [e for e in activity.activity_log.recent(50)
-              if e.get("source") == "researcher"]
-    assert events, "presence first: the researcher emitted its metadata line"
-    dumped = json.dumps(events)
+    dumped = json.dumps(captured, default=str)
     assert PLANTED not in dumped, dumped[:400]
-    for event in events:
-        trace = (event.get("data") or {}).get("prompt_trace") or {}
+    for args, kwargs in captured:
+        data = kwargs.get("data") or (args[3] if len(args) > 3 else {}) or {}
+        trace = (data or {}).get("prompt_trace") or {}
         assert "prompt" not in trace
         assert "response" not in trace
+        assert trace, "the metadata prompt_trace itself must still be emitted"
 
 
-def test_activity_recent_endpoint_carries_no_body_after_a_purge(client):
+def test_activity_recent_endpoint_carries_no_body_after_a_purge(client,
+                                                                monkeypatch):
     """B2: the purge has to reach the in-memory ring that
-    ``GET /api/activity/recent`` (every tier, no auth) serves."""
+    ``GET /api/activity/recent`` (every tier, no auth) serves.
+
+    The ring is ``deque(maxlen=200)`` and is shared with every background
+    daemon left running by an earlier test's ``TestClient(app)`` startup
+    (TEST_REPORT.md F11). In a long single-process sweep those daemons emit
+    enough to evict this test's own planted event between the emit and the
+    read, which is exactly how this test failed in whole-tree runs and
+    passed everywhere else. Widen the ring for the duration — ``emit`` and
+    ``recent`` both look the attribute up per call, so replacing it is seen
+    by the daemons too — and the test becomes a statement about purge
+    behaviour instead of about ring capacity.
+    """
+    from collections import deque
+    monkeypatch.setattr(activity.activity_log, "_buffer",
+                        deque(activity.activity_log._buffer, maxlen=20000))
     activity.activity_log.emit(
         "researcher", "LLM call completed", "info",
         {"prompt_trace": {"prompt": f"leaked {PLANTED}",

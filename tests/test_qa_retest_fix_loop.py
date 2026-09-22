@@ -594,17 +594,32 @@ def test_f9_b_the_next_test_sees_a_zeroed_tracker_again():
 
 
 def test_f9_the_re_init_approach_is_the_only_one_other_modules_would_see():
-    """Why re-``__init__`` rather than a fresh instance: every module did
-    ``from arail.costs import cost_tracker`` at import time, so rebinding the
-    module attribute would leave those references on the old object — the
-    ``ActivityLog`` lesson. ``CostTracker()`` also cannot make a new one."""
+    """Why re-``__init__`` rather than replacing the object: every module did
+    ``from arail.costs import cost_tracker`` at import time, so rebinding
+    ``arail.costs.cost_tracker`` would leave those references on the old
+    object — the ``ActivityLog`` lesson this fixture's own docstring tells.
+
+    The load-bearing assertion is therefore about *identity of the object the
+    consumers hold*, not about the class's singleton discipline. (The latter
+    is not actually stable across a session: ``test_costs_legacy_migration``
+    and ``test_costs_persistence`` both null ``CostTracker._instance`` on
+    purpose, after which ``CostTracker()`` builds a *second* object that no
+    consumer references. That divergence is test-only and harmless — the
+    fixture re-inits the object the consumers hold — but asserting
+    ``CostTracker() is cost_tracker`` would make this test a function of
+    which files ran first, which is the very defect class it exists to
+    guard.)"""
     from arail import costs as costs_mod
     from arail.costs import cost_tracker
-    assert costs_mod.CostTracker() is cost_tracker, (
-        "CostTracker is a singleton; a fresh instance is not obtainable")
     from arail.router import core as router_core
+
     assert router_core.cost_tracker is cost_tracker, (
-        "the router holds its own import-time reference to the same object")
+        "the router holds its own import-time reference; the fixture must "
+        "re-init that object, not replace the module attribute")
+    assert costs_mod.cost_tracker is cost_tracker
+    # The consumer-held object is the isolated one, whatever the class's
+    # _instance currently points at.
+    assert cost_tracker._data_path.parent == config.DATA_DIR
 
 
 def test_f9_the_binding_is_import_time_which_is_safe_per_world_in_production():
