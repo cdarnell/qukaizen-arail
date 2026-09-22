@@ -191,17 +191,22 @@ def test_activity_recent_endpoint_carries_no_body_after_a_purge(client,
     from collections import deque
     monkeypatch.setattr(activity.activity_log, "_buffer",
                         deque(activity.activity_log._buffer, maxlen=20000))
+    # ...and ask the endpoint for a window wide enough to contain the planted
+    # event regardless of how much ambient daemon noise lands after it.
+    # `/api/activity/recent` defaults to n=30, so widening the ring alone
+    # turns eviction into burial.
+    window = "?n=20000"
     activity.activity_log.emit(
         "researcher", "LLM call completed", "info",
         {"prompt_trace": {"prompt": f"leaked {PLANTED}",
                           "response": "also leaked"}})
-    before = client.get("/api/activity/recent").json()
+    before = client.get("/api/activity/recent" + window).json()
     assert PLANTED in json.dumps(before), (
         "precondition: the legacy body is readable from memory")
 
     activity.purge_legacy_bodies()
 
-    after = client.get("/api/activity/recent").json()
+    after = client.get("/api/activity/recent" + window).json()
     assert PLANTED not in json.dumps(after)
     assert json.dumps(after).count("prompt_trace") >= 1, (
         "the metadata line itself must survive the purge")
