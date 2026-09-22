@@ -279,8 +279,18 @@ class ModelRouter:
         )
         bodies = None
         if rec_bodies_at_start:
-            from arail import redact
-            bodies = redact.capture_body(prompt, response.text)
+            # QA F4/F5 (TEST_REPORT.md): both the import and the call sit
+            # inside the same try -- a broken/shadowed redact module, or
+            # capture_body itself raising, must never raise into an
+            # inference that has already produced its answer (D6's
+            # posture). capture_body is documented fail-closed on its
+            # own, but the chokepoint does not borrow that guarantee
+            # from a leaf module's internal discipline; it owns it here.
+            try:
+                from arail import redact
+                bodies = redact.capture_body(prompt, response.text)
+            except Exception:  # noqa: BLE001 - observability must never break inference
+                bodies = None
         self._record(
             ctx, slot=slot, streamed=False, outcome="ok",
             model=response.model, backend=response.backend,
@@ -368,9 +378,16 @@ class ModelRouter:
                     )
                     bodies = None
                     if rec_bodies_at_start:
-                        from arail import redact
-                        response_text = getattr(item, "text", None) or "".join(full_text_parts)
-                        bodies = redact.capture_body(prompt, response_text)
+                        # QA F4/F5 -- same guard as complete()'s identical
+                        # comment: the import and the call share one try,
+                        # so this can never raise into a stream that has
+                        # already yielded real tokens.
+                        try:
+                            from arail import redact
+                            response_text = getattr(item, "text", None) or "".join(full_text_parts)
+                            bodies = redact.capture_body(prompt, response_text)
+                        except Exception:  # noqa: BLE001 - observability must never break inference
+                            bodies = None
                     self._record(
                         ctx, slot=slot, streamed=True, outcome="ok",
                         model=item.model, backend=item.backend,
