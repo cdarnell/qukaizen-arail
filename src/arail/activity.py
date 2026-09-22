@@ -196,8 +196,19 @@ def dismiss_legacy_notice() -> None:
         pass
 
 
-def _has_legacy_body(event: Dict[str, Any]) -> bool:
-    trace = (event.get("data") or {}).get("prompt_trace")
+def _has_legacy_body(event: Any) -> bool:
+    """QA F3 (TEST_REPORT.md): a non-dict JSON line (``[1,2,3]``, ``123``,
+    ``"a bare string"``) or a non-dict ``data`` value used to raise
+    ``AttributeError`` here (``.get()`` on a list/int/str), which
+    ``scan_for_legacy_bodies``'s docstring promises "never raises" but
+    only caught ``OSError`` -- reachable via a torn write on a crash, and
+    fatal to every admin page load since ``loadLegacyBodiesNotice()``
+    scans on boot. The purge path already survived this (its per-record
+    loop wraps ``has_body`` in ``except Exception``); the scan did not."""
+    if not isinstance(event, dict):
+        return False
+    data = event.get("data")
+    trace = data.get("prompt_trace") if isinstance(data, dict) else None
     return isinstance(trace, dict) and ("prompt" in trace or "response" in trace)
 
 
