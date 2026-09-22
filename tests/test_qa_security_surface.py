@@ -178,25 +178,42 @@ def test_activity_recent_endpoint_carries_no_body_after_a_purge(client,
     """B2: the purge has to reach the in-memory ring that
     ``GET /api/activity/recent`` (every tier, no auth) serves.
 
-    The ring is ``deque(maxlen=200)`` and is shared with every background
-    daemon left running by an earlier test's ``TestClient(app)`` startup
-    (TEST_REPORT.md F11). In a long single-process sweep those daemons emit
-    enough to evict this test's own planted event between the emit and the
-    read, which is exactly how this test failed in whole-tree runs and
-    passed everywhere else. Widen the ring for the duration — ``emit`` and
-    ``recent`` both look the attribute up per call, so replacing it is seen
-    by the daemons too — and the test becomes a statement about purge
-    behaviour instead of about ring capacity.
+    Two pieces of shared process state made this a function of how many
+    tests ran before it, both of them test-environment artifacts rather than
+    product defects — pinned here so neither can be rediscovered as a
+    mystery:
+
+    1. **Reload aliasing.** ``tests/test_boot_security_scan.py`` does
+       ``importlib.reload(arail.activity)`` in a fixture. After that,
+       ``arail.portal.app.activity_log`` (bound at app import) and
+       ``arail.activity.activity_log`` are *different objects* for the rest
+       of the process — verified directly. Emitting through one and reading
+       the endpoint that serves the other makes the planted event invisible.
+       This is also why the repo conftest's ``activity_log._buffer.clear()``
+       isolation stops working for ``app.py`` after that reload (REVIEW.md
+       already named this as the fixture's second weakness). Production is
+       unaffected: ``grep -rn "importlib.reload" src/`` is empty.
+    2. **Ring pressure.** The ring is ``deque(maxlen=200)`` and is shared
+       with every background daemon an earlier ``TestClient(app)`` startup
+       left running (TEST_REPORT.md F11, pre-existing). Those daemons emit
+       enough to evict — or, once the ring is widened, to bury past the
+       endpoint's ``n=30`` default — this test's own event.
+
+    Bind to one object and ask for a wide window, and the test becomes a
+    statement about purge behaviour instead of about module identity and
+    ring capacity.
     """
     from collections import deque
-    monkeypatch.setattr(activity.activity_log, "_buffer",
-                        deque(activity.activity_log._buffer, maxlen=20000))
-    # ...and ask the endpoint for a window wide enough to contain the planted
-    # event regardless of how much ambient daemon noise lands after it.
-    # `/api/activity/recent` defaults to n=30, so widening the ring alone
-    # turns eviction into burial.
+
+    from arail.portal import app as portal_app
+
+    served = portal_app.activity_log
+    # Point the module-level name the purge uses at the object the endpoint
+    # actually serves, so emit -> read -> purge -> read is one object.
+    monkeypatch.setattr(activity, "activity_log", served)
+    monkeypatch.setattr(served, "_buffer", deque(served._buffer, maxlen=20000))
     window = "?n=20000"
-    activity.activity_log.emit(
+    served.emit(
         "researcher", "LLM call completed", "info",
         {"prompt_trace": {"prompt": f"leaked {PLANTED}",
                           "response": "also leaked"}})
