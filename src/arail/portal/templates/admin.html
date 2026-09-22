@@ -1678,13 +1678,20 @@ let AGENT_LANES_ES = null;
 function renderHoldControl(snap) {
   const el = document.getElementById('agent-hold-control');
   const hold = snap.hold || {held: false, in_flight: 0};
+  // R2 (re-review): operator decision (a)'s exact sentence used to be
+  // applied only to the held branch -- the un-flipped state is what the
+  // operator reads *at the moment of decision*, and it still overclaimed
+  // ("proactive speech" instead of naming findings/suggestions/
+  // announcements, and it didn't say diagnostics/SRE continue). Both
+  // branches now carry the same clauses.
   const copy = hold.held
     ? `Hold all agents — agents stop calling models and stop posting ` +
       `findings, suggestions and announcements. Operational/error lines ` +
       `and SRE crash alerts continue. Calls already running finish ` +
       `(${hold.in_flight} in flight). This World only; survives a restart.`
-    : `Agents are not held. Flip this to stop every agent's inference and ` +
-      `proactive speech immediately (SRE's crash watcher is exempt).`;
+    : `Agents are not held. Flip this and agents stop calling models and ` +
+      `stop posting findings, suggestions and announcements. ` +
+      `Operational/error lines and SRE crash alerts continue.`;
   el.innerHTML = `
     <label class="admin-toggle">
       <input type="checkbox" ${hold.held ? 'checked' : ''} onchange="setAgentHold(this.checked)">

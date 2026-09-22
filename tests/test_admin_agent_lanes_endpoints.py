@@ -371,11 +371,14 @@ def test_no_new_get_route_mutates_static_check():
 # extract the "held" branch of renderHoldControl()'s copy ternary straight
 # out of the real template source and test THAT string's content.
 
-def _admin_hold_control_held_copy() -> str:
+def _admin_hold_control_copy() -> tuple[str, str]:
     """Read admin.html's renderHoldControl() and return the literal text
-    of the "held" branch of its ``copy`` ternary, with the one dynamic
-    slot (``${hold.in_flight}``) left as a literal placeholder for the
-    caller to substitute."""
+    of BOTH branches of its ``copy`` ternary -- (held, not_held) -- with
+    the one dynamic slot (``${hold.in_flight}``) left as a literal
+    placeholder for the caller to substitute. R2 (re-review): the
+    original extractor only pulled the held branch, so the un-flipped
+    state's copy (what the operator reads *before* deciding) was never
+    pinned at all."""
     import pathlib
     import re
     from arail.portal import app as app_mod
@@ -385,7 +388,7 @@ def _admin_hold_control_held_copy() -> str:
     )
     src = admin_html.read_text()
     match = re.search(
-        r"const copy = hold\.held\s*\n(?P<held>.*?)\n\s*:\s*`",
+        r"const copy = hold\.held\s*\n(?P<held>.*?)\n\s*:\s*(?P<notheld>.*?`;)",
         src, re.DOTALL,
     )
     assert match, (
@@ -393,17 +396,23 @@ def _admin_hold_control_held_copy() -> str:
         "ternary was not found in admin.html at all -- this test would "
         "otherwise silently check nothing"
     )
-    pieces = re.findall(r"`([^`]*)`", match.group("held"))
-    assert pieces, "no backtick-delimited literal in the held branch"
-    return "".join(pieces)
-
+    held_pieces = re.findall(r"`([^`]*)`", match.group("held"))
+    notheld_pieces = re.findall(r"`([^`]*)`", match.group("notheld"))
+    assert held_pieces, "no backtick-delimited literal in the held branch"
+    assert notheld_pieces, "no backtick-delimited literal in the not-held branch"
+    return "".join(held_pieces), "".join(notheld_pieces)
 
 def test_f17_copy_matches_behaviour(monkeypatch):
     monkeypatch.setenv("LAB_TIER", "maximus")
     client = _client()
     r = client.post("/api/admin/agents/hold", json={"hold": True})
     state = r.json()
-    held_copy = _admin_hold_control_held_copy()
+    held_copy, notheld_copy = _admin_hold_control_copy()
+    # R3 (re-review): the ${hold.in_flight} slot itself must be present in
+    # the raw (unsubstituted) held-branch literal -- .replace() at the
+    # next line is a silent no-op if the slot were ever removed, and
+    # nothing else here would catch that.
+    assert "${hold.in_flight}" in held_copy
     # ${hold.in_flight} is the one dynamic slot in the held-branch template
     # literal -- substitute the real value the endpoint returned so
     # `rendered` matches what a browser would actually show.
@@ -450,6 +459,21 @@ def test_f17_copy_matches_behaviour(monkeypatch):
     assert "This World only" in rendered
     assert "survives a restart" in rendered
 
+    # Claim 5 (R3, re-review): the admission-control clause itself --
+    # the one that stops the UI implying cancellation. Mutation M4
+    # rewrote this to "All running calls are cancelled immediately" and
+    # every other assertion in this test still passed; this is the one
+    # that would have caught it.
+    assert "Calls already running finish" in rendered
+
+    # R2 (re-review): the not-held branch is what the operator reads
+    # *before* deciding -- it must carry the same clauses as the held
+    # branch, not the pre-decision "proactive speech" wording.
+    assert "stop calling models" in notheld_copy
+    assert "stop posting findings, suggestions and announcements" in notheld_copy
+    assert "Operational/error lines and SRE crash alerts continue" in notheld_copy
+    assert "proactive speech" not in notheld_copy
+
 
 def test_nav_halt_control_relabeled_to_hold_all_agents():
     """B3 (REVIEW.md): _nav.html's dashboard button is the SAME
@@ -480,6 +504,14 @@ def test_nav_halt_control_relabeled_to_hold_all_agents():
         "SRE crash alerts continue."
     )
     assert required in src
+
+    # R2 (re-review): unlike admin.html's toggle, _nav.html's control has
+    # only one button (btn-halt/btn-resume swap visibility, not a two-
+    # branch copy string) whose title is shown only in the not-held state
+    # -- so there is no separate "un-flipped state" wording here to have
+    # gone stale. Confirmed by grep: no "proactive speech" text exists
+    # anywhere in this file.
+    assert "proactive speech" not in src
 
 
 # ---------------------------------------------------------------------------
