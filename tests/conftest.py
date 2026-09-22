@@ -288,12 +288,34 @@ def _isolated_agent_observability_data_root(monkeypatch, tmp_path):
     as a fallback when an agent has no trace yet — an unisolated buffer
     leaks real, accumulated activity into that fallback's numbers.
 
-    Deliberately does NOT isolate ``costs.json`` — ``CostTracker``'s
-    singleton binds its ``_data_path`` once, at its own construction
-    (also import time, also before any fixture runs), and this sprint
-    added no new ``cost_tracker.track()`` call site (only changed the
-    ``source=`` value an existing call already used). That leak is
-    pre-existing and out of this sprint's scope; see BUILD_LOG.md.
+    Also isolates ``cost_tracker`` (QA F9, TEST_REPORT.md). Same class of
+    bug as ``activity_log`` above: ``CostTracker.__new__`` returns a
+    process-global singleton, and ``__init__`` binds ``_data_path`` from
+    ``config.DATA_DIR`` once — but only the *first* time, guarded by
+    ``self._initialized`` — so simply monkeypatching ``config.DATA_DIR``
+    later, the way this fixture already does, has no effect on a
+    ``CostTracker`` constructed before this fixture ran (i.e. at import
+    time, on every module that did ``from arail.costs import
+    cost_tracker``). Every test that drives a real ``ModelRouter`` bills
+    this singleton to the real ``lab/data/costs.json``; this sprint's own
+    per-agent ``source=`` attribution (contract #8) made that pollution
+    directly visible on the cost page instead of an anonymous "cloud"
+    bucket, and — because recap's ``$5`` cost ceiling
+    (``RECAP_COST_CEILING_USD``) reads ``cost_tracker.total_billed_usage_
+    usd``, a real, accumulating number — running the suite enough times
+    exhausts it and 21 of ``test_recap_{core,paranoid,robotouille_
+    mock}.py``'s tests fail with ``COST_EXCEEDED``, on a worktree that has
+    simply been used, no code change required to reproduce.
+
+    Forcing ``_initialized = False`` then calling ``__init__()`` again
+    (rather than replacing ``cost_tracker`` with a new instance, which —
+    per the ``activity_log`` lesson just above — every other module's
+    already-bound reference would not see) re-runs the whole constructor
+    against the by-then-patched ``config.DATA_DIR``: every accumulator
+    (``total_calls``, ``total_billed_usage_usd``, ``calls_by_source``,
+    etc.) goes back to its own zero-state and ``_data_path`` is rebound
+    to this test's ``tmp_path``, in one call, immune to a future
+    accumulator being added to ``__init__`` and forgotten here.
 
     A companion default this redirect requires: ``portal/app.py``'s
     one-shot World nudge (``_world_prompt_pending()``) checks whether
@@ -324,6 +346,7 @@ def _isolated_agent_observability_data_root(monkeypatch, tmp_path):
     """
     from arail import agent_context, agent_trace, config
     from arail import activity as activity_mod
+    from arail.costs import cost_tracker
 
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
     (tmp_path / ".world-prompt-seen").touch()
@@ -332,6 +355,12 @@ def _isolated_agent_observability_data_root(monkeypatch, tmp_path):
 
     agent_context._reset_for_tests()
     agent_trace._reset_for_tests()
+    # QA F9: force a full re-__init__ against the now-patched DATA_DIR --
+    # see the docstring above for why a fresh CostTracker() would not do
+    # (every other module's `from arail.costs import cost_tracker` import
+    # would keep pointing at the old, unpatched object).
+    cost_tracker._initialized = False
+    cost_tracker.__init__()
 
     yield
 
