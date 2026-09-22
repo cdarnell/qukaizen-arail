@@ -158,8 +158,14 @@ class ModelRouter:
 
     @staticmethod
     def _slot_info() -> dict:
-        from arail.portal import scheduler as _inference_scheduler
+        # D6 (REVIEW.md): the import must be inside the try too -- this is
+        # called from contexts that are not the portal (the goal-parser
+        # subprocess, lab/tools/model_router.py, CLI paths), and
+        # arail.portal is a namespace package (no __init__.py) an
+        # ImportError there must not escape into an inference the same way
+        # a slot_pressure() failure already can't.
         try:
+            from arail.portal import scheduler as _inference_scheduler
             slot = _inference_scheduler.slot_pressure()
         except Exception:  # noqa: BLE001 - observability must never break inference
             return {"capacity": None, "in_flight": None, "pending": None,

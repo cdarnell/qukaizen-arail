@@ -34,12 +34,24 @@ def _client() -> TestClient:
 
 
 # GET entries carry no body; POST entries carry a minimal valid JSON body.
+# F13 (REVIEW.md must-fix #9): /api/admin/agent-trace-stream was missing
+# from this list -- the one new endpoint that serialises whole records,
+# bodies included. Its gate gets the identical 404-on-minimalist check;
+# "reachable on maximus" is verified separately below because it is an
+# SSE stream, not a request TestClient.get() can safely consume to EOF
+# (the generator never terminates on its own).
 _ENDPOINTS = [
     ("get", "/api/admin/agent-lanes", None),
+    ("get", "/api/admin/agent-trace-stream", None),
     ("get", "/api/admin/agent-trace/deadbeefcafef00d", None),
     ("post", "/api/admin/agents/hold", {"hold": False}),
     ("post", "/api/admin/flight-recorder", {"enabled": False}),
 ]
+
+# The 404-check is safe for the stream endpoint (the tier gate returns
+# before the StreamingResponse is ever constructed); the "reachable"
+# check is not (see above) and is handled by its own dedicated test.
+_STREAM_PATHS = {"/api/admin/agent-trace-stream"}
 
 
 @pytest.mark.parametrize("method,path,body", _ENDPOINTS)
@@ -54,14 +66,99 @@ def test_f13_404_on_minimalist(monkeypatch, method, path, body):
 @pytest.mark.parametrize("method,path,body", _ENDPOINTS)
 def test_reachable_on_maximus(monkeypatch, method, path, body):
     monkeypatch.setenv("LAB_TIER", "maximus")
+    if path in _STREAM_PATHS:
+        pytest.skip("SSE stream -- covered by test_agent_trace_stream_gated_and_reachable")
     client = _client()
     resp = (client.get(path) if body is None
             else client.post(path, json=body))
     assert resp.status_code in (200, 404)  # 404 only for the unknown trace_id
-    if path.startswith("/api/admin/agent-trace/"):
-        assert resp.status_code == 404  # unknown id, correctly 404
-    else:
-        assert resp.status_code == 200
+
+
+def test_agent_trace_stream_gated_and_reachable(monkeypatch):
+    """The SSE endpoint's own reachability check, without consuming an
+    infinite generator via TestClient -- TestClient/httpx's .stream()
+    still waits for the ASGI app's response cycle to conclude on close,
+    which never happens for an endpoint whose generator never terminates
+    on its own (confirmed the hard way: an earlier version of this test
+    hung the whole suite on exactly this). This drives the raw ASGI app
+    directly instead, the same proven technique
+    tests/test_world_recolor_qa.py::test_real_sse_route_streams_live
+    already uses for the sibling /api/activity/stream endpoint (which has
+    the identical shape and the identical characteristic: neither
+    generator polls request.is_disconnected() -- both rely on the ASGI
+    server cancelling the request task when the real transport closes,
+    which is what asyncio.CancelledError from task.cancel() simulates
+    below). Every read is wait_for-bounded so a real regression fails in
+    seconds, not hangs.
+    """
+    monkeypatch.setenv("LAB_TIER", "maximus")
+    import asyncio
+
+    from arail import agent_trace
+    from arail.portal import app as pa
+
+    async def _run() -> tuple[int, dict[str, str], bytes, bool]:
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": "GET",
+            "scheme": "http",
+            "path": "/api/admin/agent-trace-stream",
+            "raw_path": b"/api/admin/agent-trace-stream",
+            "query_string": b"",
+            "root_path": "",
+            "headers": [(b"host", b"testserver")],
+            "client": ("testclient", 50000),
+            "server": ("testserver", 80),
+        }
+        from_app: asyncio.Queue = asyncio.Queue()
+
+        async def receive():
+            await asyncio.Event().wait()  # client never disconnects mid-test
+
+        async def send(message):
+            await from_app.put(message)
+
+        subscribers_before = len(agent_trace._SUBSCRIBERS)
+        app_task = asyncio.create_task(pa.app(scope, receive, send))
+        try:
+            start = await asyncio.wait_for(from_app.get(), timeout=10)
+            assert start["type"] == "http.response.start"
+            headers = {k.decode(): v.decode() for k, v in start["headers"]}
+
+            # A live frame: record something and read the pushed body chunk.
+            agent_trace.record(trace_id="a" * 16, agent_id="buddy", kind="agent")
+            body = b""
+            deadline = asyncio.get_event_loop().time() + 5
+            while asyncio.get_event_loop().time() < deadline:
+                msg = await asyncio.wait_for(from_app.get(), timeout=5)
+                if msg["type"] == "http.response.body":
+                    body += msg.get("body", b"")
+                    if b"buddy" in body:
+                        break
+            return start["status"], headers, body, subscribers_before
+        finally:
+            # Simulate a real transport disconnect: cancel the task the way
+            # uvicorn cancels a request when the socket closes, then prove
+            # the subscriber was actually removed (D7-adjacent: this is the
+            # cleanup path REVIEW.md's backpressure finding is about).
+            app_task.cancel()
+            try:
+                await app_task
+            except BaseException:  # noqa: BLE001 - teardown only
+                pass
+
+    status, headers, body, subscribers_before = asyncio.run(_run())
+    assert status == 200
+    assert "text/event-stream" in headers.get("content-type", "")
+    assert b"data:" in body
+    assert b"buddy" in body
+    assert len(agent_trace._SUBSCRIBERS) == subscribers_before, (
+        "the SSE subscriber was not removed from _SUBSCRIBERS after the "
+        "request task was cancelled -- a real client disconnect would "
+        "leak a subscriber forever on a lab that stays up for weeks"
+    )
 
 
 def test_agent_lanes_get_never_mutates_state(monkeypatch):
@@ -252,8 +349,13 @@ def test_admin_template_uses_sse_not_setinterval_for_lanes():
     src = admin_html.read_text()
     assert "agent-trace-stream" in src or "EventSource" in src
     # No setInterval anywhere near the lanes rendering -- a poll interval
-    # is the only way this path could exceed W1's 2s bound.
+    # is the only way this path could exceed W1's 2s bound. D8 (REVIEW.md):
+    # this used to be `if lanes_section_start != -1:` -- renaming the
+    # element would have made the test pass while asserting nothing.
     lanes_section_start = src.find("agent-lanes")
-    if lanes_section_start != -1:
-        window = src[max(0, lanes_section_start - 500):lanes_section_start + 3000]
-        assert "setInterval" not in window
+    assert lanes_section_start != -1, (
+        "'agent-lanes' not found in admin.html at all -- this assertion "
+        "would otherwise silently check nothing"
+    )
+    window = src[max(0, lanes_section_start - 500):lanes_section_start + 3000]
+    assert "setInterval" not in window

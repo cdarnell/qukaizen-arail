@@ -302,3 +302,43 @@ def test_hold_is_admission_control_not_cancellation():
     with agent_context.agent_call("buddy"):
         response = router.complete("hi")  # must not raise -- already admitted
     assert response.text == "hi"
+
+
+# ---------------------------------------------------------------------------
+# D6 -- halt_gate's import + call are both inside one try; an import
+# failure must fail OPEN (not refuse, not raise), not escape into the
+# chokepoint. "Observability never breaks inference" is absolute or it
+# isn't.
+# ---------------------------------------------------------------------------
+
+def _poison_import(monkeypatch, dotted_name: str) -> None:
+    """Force `from X import Y` to actually raise ImportError, not just
+    silently keep returning Y's already-imported attribute off the parent
+    package (which is what merely poisoning sys.modules[dotted_name] does
+    -- verified the hard way: a first version of this test poisoned only
+    sys.modules and passed vacuously, because `from arail import
+    scheduler` reads the already-set `arail.scheduler` attribute without
+    re-consulting sys.modules at all when that attribute already exists).
+    Removing the attribute *and* poisoning sys.modules together forces the
+    import machinery to actually run and hit the None sentinel."""
+    import importlib
+    import sys
+    parent_name, _, attr = dotted_name.rpartition(".")
+    importlib.import_module(dotted_name)  # ensure the parent is registered
+    parent = sys.modules[parent_name]
+    monkeypatch.delattr(parent, attr, raising=False)
+    monkeypatch.setitem(sys.modules, dotted_name, None)
+
+
+def test_halt_gate_fails_open_when_scheduler_import_fails(monkeypatch):
+    _poison_import(monkeypatch, "arail.scheduler")
+    with agent_context.agent_call("buddy") as call:
+        agent_context.halt_gate(call)  # must not raise, even though it
+        # cannot determine hold state -- see the module docstring's D6 note.
+
+
+def test_halt_gate_still_passes_system_and_none_regardless():
+    # Sanity: the existing exemptions are untouched by the D6 fix.
+    with agent_context.system_call("world-forge") as call:
+        agent_context.halt_gate(call)
+    agent_context.halt_gate(None)

@@ -217,3 +217,36 @@ def test_two_concurrent_tasks_through_one_cached_router_stay_separate():
     assert ids == {"researcher", "browser"}
     trace_ids = {r["trace_id"] for r in recs}
     assert len(trace_ids) == 2  # never shared across the two tasks
+
+
+# ---------------------------------------------------------------------------
+# D6 — _slot_info()'s import must be inside its own try; an ImportError from
+# arail.portal.scheduler (a namespace package, reachable from non-portal
+# contexts like the goal-parser subprocess) must not escape into an
+# inference. Observability never breaks inference is absolute or it isn't.
+# ---------------------------------------------------------------------------
+
+def _poison_import(monkeypatch, dotted_name: str) -> None:
+    """See tests/test_halt_gate.py's identical helper for why both the
+    parent attribute AND sys.modules must be touched -- poisoning
+    sys.modules alone lets `from X import Y` keep returning the
+    already-imported Y off the parent package, passing vacuously."""
+    import importlib
+    import sys
+    parent_name, _, attr = dotted_name.rpartition(".")
+    importlib.import_module(dotted_name)  # ensure the parent is registered
+    parent = sys.modules[parent_name]
+    monkeypatch.delattr(parent, attr, raising=False)
+    monkeypatch.setitem(sys.modules, dotted_name, None)
+
+
+def test_slot_info_fails_safe_when_scheduler_import_fails(monkeypatch):
+    _poison_import(monkeypatch, "arail.portal.scheduler")
+    router = _router()
+    with agent_context.agent_call("buddy"):
+        router.complete("hi")  # must not raise
+    rec = agent_trace.ring(1)[0]
+    assert rec["outcome"] == "ok"
+    assert rec["slot"] == {
+        "capacity": None, "in_flight": None, "pending": None, "held_by_other": None,
+    }

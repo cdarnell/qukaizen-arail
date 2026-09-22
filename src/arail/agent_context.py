@@ -364,10 +364,22 @@ def halt_gate(ctx: Optional[AgentCall]) -> None:
     """Refuse an agent-sourced call while held. Raises :class:`AgentHeldError`
     or returns. Admission control, not cancellation — a call already inside
     a backend when the switch flips runs to completion; this only refuses
-    *new* calls at the door."""
+    *new* calls at the door.
+
+    D6 (REVIEW.md): the ``arail.scheduler`` import and the ``jobs_halted()``
+    call are both inside the same ``try`` — this observability/hold-check
+    machinery must never itself be the reason an inference fails. An
+    ``ImportError`` or any other failure here fails **open** (does not
+    refuse) rather than raising into the chokepoint, the same posture
+    ``_halted()`` already takes for the informational ``halted`` field.
+    """
     if ctx is not None and ctx.kind == "agent":
-        from arail import scheduler as _job_scheduler
-        if _job_scheduler.jobs_halted():
+        try:
+            from arail import scheduler as _job_scheduler
+            held = _job_scheduler.jobs_halted()
+        except Exception:  # noqa: BLE001 - hold-check must never break inference
+            return
+        if held:
             raise AgentHeldError(
                 f"agent {ctx.agent_id!r} refused: agents are held "
                 "(hold all agents is on)"
