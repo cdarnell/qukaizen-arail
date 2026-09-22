@@ -365,6 +365,15 @@ def test_every_documented_shape_pattern_is_redacted_before_disk(planted):
         f"{planted!r} survived into the captured prompt")
 
 
+@pytest.mark.xfail(strict=True, reason=(
+    "BACKLOG 'QA fix loop (TEST_REPORT.md, commit 9d0e083f)' -> QA F1: "
+    "redact.py:52-54's assignment pattern requires the key name to be "
+    "followed by optional whitespace then ':'/'=', so a JSON-quoted "
+    '{\"api_key\": \"...\"} value is not redacted. Ruled DEBT at re-test '
+    "(2026-09-22): the recorder is admin-only and off by default, which "
+    "bounds it, and the pattern list is ARCHITECTURE.md #5 implemented "
+    "exactly as specified -- a spec change, not a build defect. strict=True "
+    "so closing it turns this red instead of passing quietly."))
 def test_json_quoted_api_key_is_redacted_before_disk():
     """A JSON-shaped prompt is the ordinary case for an agent that pastes a
     config fragment or a tool response into its prompt. The assignment

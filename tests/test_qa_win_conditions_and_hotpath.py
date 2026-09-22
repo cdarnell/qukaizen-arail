@@ -412,9 +412,14 @@ def test_a_failing_disk_write_does_not_slow_the_hot_path(monkeypatch, capsys):
             raise OSError(28, "No space left on device")
         return real_open(path, *a, **kw)
 
-    monkeypatch.setattr(builtins, "open", _enospc)
-    stats = _measure(500)
-    monkeypatch.undo()
+    # Restore by hand, not monkeypatch.undo(): undo() reverts every patch on
+    # this function-scoped monkeypatch instance, including the conftest
+    # autouse fixtures' config.DATA_DIR redirect.
+    builtins.open = _enospc
+    try:
+        stats = _measure(500)
+    finally:
+        builtins.open = real_open
 
     print(f"\nENOSPC record() p95={stats['p95']*1000:.1f}us")
     assert stats["p95"] < 1.0, stats
@@ -455,11 +460,13 @@ def test_the_drop_counter_is_visible_rather_than_silent(monkeypatch):
             raise OSError(28, "No space left on device")
         return real_open(path, *a, **kw)
 
-    monkeypatch.setattr(builtins, "open", _enospc)
-    for i in range(3):
-        agent_trace.record(trace_id=f"{i:016x}", kind="agent",
-                           agent_id="buddy", outcome="ok")
-    monkeypatch.undo()
+    builtins.open = _enospc
+    try:
+        for i in range(3):
+            agent_trace.record(trace_id=f"{i:016x}", kind="agent",
+                               agent_id="buddy", outcome="ok")
+    finally:
+        builtins.open = real_open
     assert agent_trace.stats()["dropped_writes"] == 3
     assert agent_trace.lanes_snapshot()["drops"]["dropped_writes"] == 3
 

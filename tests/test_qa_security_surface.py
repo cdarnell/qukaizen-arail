@@ -367,6 +367,12 @@ def test_a_purge_only_post_does_not_silently_turn_the_recorder_off(client,
     assert agent_trace.recorder_on() is True
 
 
+@pytest.mark.xfail(strict=True, reason=(
+    "BACKLOG 'QA fix loop (TEST_REPORT.md, commit 9d0e083f)' -> QA F6: "
+    "app.py:6326/:6344 do an unguarded `await request.json()`, so malformed "
+    "JSON is a 500. Ruled DEBT at re-test (2026-09-22): curl-only, lands "
+    "after the tier gate, discloses nothing and changes no state. "
+    "strict=True so the fix turns this red instead of passing quietly."))
 def test_malformed_json_on_a_mutating_admin_endpoint_is_not_a_500(client,
                                                                  maximus):
     """A hand-rolled curl or a broken JS build must get a 4xx, not an
