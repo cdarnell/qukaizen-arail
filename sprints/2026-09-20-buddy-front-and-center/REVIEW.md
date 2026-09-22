@@ -856,3 +856,378 @@ The ten must-fix items, the diff for each, and one number: `redactions >= 1`
 with a deliberately unreadable `secrets.env`, and a `grep -r` of the real
 `DATA_DIR` tree plus `curl /api/activity/recent` after a purge, both clean.
 Everything else can be read.
+
+---
+---
+
+# Re-review: the fix loop
+
+**Date:** 2026-09-21 (appended; the original review above is unchanged)
+**Reviewing:** `git diff 0c13a176..HEAD` — 10 commits, `da70792d`…`eb4950b0`, 25 files, +1866/−112
+**Against:** the original BLOCK's "Must fix before QA" list (10 items) + the three
+binding operator decisions recorded in `SPRINT.md` after it
+**Mode:** review
+
+I did not take the fix loop on trust. I ran the sprint suite (**303 passed, 1
+skipped**, 2.3 s, no hang), ran 18 at-risk *pre-existing* suites (**318 passed,
+1 skipped**), reproduced my two original security defects to confirm they are
+gone, audited every code path that can serve a body, and **mutation-tested 17
+production edits** — breaking each fix in turn and checking that the claimed
+proving test goes red, then restoring. Three of those mutations came back green,
+which is where this section's new findings are.
+
+## Verdict: WEAK_PASS
+
+No BLOCK-class defect remains. Both security BLOCKs are closed and
+mutation-pinned. Both undeclared operator decisions are implemented. The LAN
+banner is built. W1's fields render. D6, F13, D8 and the seven `speech_gate`
+pins are all genuinely non-vacuous.
+
+Five ASKs remain, and they must land before the PR — not before QA. One is a
+residual fail-open in redaction that I am ruling on explicitly below; one is a
+partial non-implementation of operator decision (a); three are test-strength
+problems, **including one assertion the fix loop actively weakened**. None of
+the five prevents QA from doing its job, and none is reachable in a default
+configuration.
+
+---
+
+## Must-fix findings: satisfied / partially / not
+
+| id | Status | Evidence |
+|---|---|---|
+| **B1** redaction fails open | **PARTIALLY** | `redact.py:141-163` — `_redact_strict()` has no inner `try` around the known-values pass, so a raise propagates to `capture_body`'s boundary → `None`. `_parse_secrets_env` (`:70-90`) now reads `errors="replace"` and catches `(OSError, ValueError)`. Mutation **M13** (restore the lenient swallow) → 2 tests red. My original repro (non-UTF-8 `secrets.env`) is fixed *and improved*: the other values in the file are still redacted rather than the whole pass being lost. **Residual, reproduced — see R1.** |
+| **B2** purge leaves bodies in memory | **SATISFIED** | `activity.py:245-267` — disk via the shared atomic `jsonl_purge.purge_jsonl_bodies` (tmp file in the same dir + `os.replace`, `jsonl_purge.py:66`), then an in-place pass over `activity_log._buffer`. My named proof re-run: `/api/activity/recent` body-free after a purge, disk clean, `{"purged": 1, "purged_memory": 1}`. Mutation **M12** (neuter the memory pass) → 2 tests red. |
+| **B3** halt control not relabelled | **SATISFIED** | `_nav.html:118-119` label + `title`, `:177` `confirm()`. Carries operator decision (a)'s exact sentence verbatim. Mutation **M3** (revert the label to "Halt jobs") → red. Doc comments in `lab_brain.py:76-79`, `dream_daemon.py:166`, `job_daemon.py:241-242` updated too — a thoroughness I did not ask for and welcome. |
+| **B4** F17 copy test self-comparison | **PARTIALLY** | `tests/…:374-398` — `_admin_hold_control_held_copy()` now regex-extracts the real held-branch literal from `admin.html` and asserts the ternary exists ("this test would otherwise silently check nothing"). The self-comparison is genuinely gone. **But** mutation **M4** — rewriting the copy to *"All running calls are cancelled immediately"* — leaves all 27 admin tests green. See R3. |
+| **B5** LAN-bind banner dropped | **SATISFIED** | `config.bind_is_loopback():46-55` (one definition, `app.py:11784-11786`'s pre-existing airgap gate now delegates to it — behaviour identical, and all four airgap-toggle suites still pass), `agent_trace._lan_exposed():499-511`, `lan_exposed` on both `recorder_state()` and `set_recorder_enabled()`, banner at `admin.html:728` + `renderLanRecorderWarning():1719-1733` + a warning appended to the toggle's own copy `:1705-1709`. Probed directly: `lan_exposed` True on `0.0.0.0`, False on loopback. |
+| **B6** W1 fields not on screen | **PARTIALLY** | `agent_trace.py:405-408,414` hoists `model`/`backend`/`tokens_in`; `admin.html:1696-1719` renders nine columns. All seven W1 fields now reach the markup. Mutation **M16** (drop the `lane.model` data cell) → red. **But** mutation **M15** (drop `<th>Model</th>` and keep everything else) → green. See R4. |
+| **D6** unguarded imports | **SATISFIED** | `agent_context.py:375-381` and `router/core.py:159-168` — both imports inside the `try`. Mutation **M14** (hoist the import back out) → red. `halt_gate` now fails **open** on any failure; correct trade for availability (refusing every inference on an `ImportError` would brick the lab), and documented inline. |
+| **F9** no test pins the gate sites | **SATISFIED** | `tests/test_speech_gate_wiring.py` — 14 tests, a held/not-held pair per site, seven sites (Buddy `_emit`, Buddy boot notice, Buddy dream, Librarian `_emit`, Presence `_tick`, Debt Advisor, Consolidation Analyzer). I spot-checked three by mutation (**M5** Buddy `_emit`, **M6** Presence, **M7** Buddy's gate argument) — each turned exactly one test red. Each test reads the module-under-test's own bound `activity_log`, the pattern learned from defect-loop regression B. |
+| **F13** stream endpoint ungated in test | **SATISFIED** | `tests/…:41` adds `/api/admin/agent-trace-stream` to `_ENDPOINTS`, plus `test_agent_trace_stream_gated_and_reachable:76-163`, which drives the raw ASGI app (bounded by `asyncio.wait_for`) and additionally asserts `_SUBSCRIBERS` returns to its pre-request length after task cancellation. Better than I asked for. |
+| **D8** conditional assertion | **SATISFIED** | `tests/…:334` — `assert lanes_section_start != -1` is now unconditional. |
+| **S1** recorder-off must stop showing (promoted to must-fix by the operator) | **SATISFIED** | `agent_trace._strip_bodies_if_recorder_off():216-240` applied at `find():248`, `subscribe():310`, `lanes_snapshot()`'s `last:400`. I audited every body read path independently: `grep` for `get("bodies")`/`["bodies"]` across `src/` returns only `agent_trace.py`'s own gate/purge helpers and `app.py:5212` (`/api/agents/prompts`, already gated on *current* state), and `agent_trace.ring()` has **exactly one** caller (`app.py:5195`, that same gated endpoint). No fifth path. The gate sits **inside** `subscribe()` rather than in the route, so the SSE stream cannot bypass it and any future consumer inherits it — the right placement. Mutations **M8/M9/M10** (remove each strip) → red; **M11** (neuter the purge's ring pass) → red. `purge_flight_recorder_bodies():556-590` reuses the same `jsonl_purge` helper, so there is one purge mechanism, as decision (c) required. |
+| **D4** copy overclaims | **PARTIALLY** | Held-branch copy narrowed to the operator's exact sentence in both templates; Buddy's two remaining proactive lines gated, so "announcements" is now true of Buddy. **But** the not-held branch still carries the pre-decision wording. See R2. |
+
+## Updated F1–F20 rows (only those that changed)
+
+| # | Was | Now |
+|---|---|---|
+| **F1** | mitigated in code, detection half incomplete (no UI) | **unchanged** — `drops.dropped_writes` is still not rendered on the card; correctly filed as debt (D3). |
+| **F9** | 5 of 84 emit sites gated, UI claim overshoots the code, `speech_gate()` tested only in isolation | **mitigated as designed** — 7 sites gated (`_builtin_buddy.py:1264-1272,1487-1497` are the two new ones), each pinned by a mutation-verified test pair, and the held copy now names what is actually silenced. The remaining ~77 emit sites are operational/diagnostic lines the operator's decision (a) explicitly leaves running. |
+| **F11** | **NOT mitigated** — `capture_body` could return unredacted text | **mitigated as designed, with one residual** — the designed hole is closed and pinned; R1 is a narrower, different door. |
+| **F12** | mechanism built, disclosure half absent, purge incomplete | **mitigated as designed** — in-memory purge added (B2); the notice + Purge/Keep buttons exist (`admin.html:731`, `loadLegacyBodiesNotice():1839-1864`, called at boot `:1893`); `test_legacy_bodies_notice_and_buttons_exist_in_admin_ui` pins the UI. |
+| **F13** | gate correct, stream endpoint untested | **mitigated as designed** — all five endpoints parameterised; the stream gets its own bounded reachability + subscriber-cleanup test. |
+| **F16** | **NOT mitigated as designed** — an unattributed call escapes the hold, undocumented | **unchanged, now correctly filed** — `halt_gate` still admits `ctx is None` (by design, contract §4). D5 in `sprints/BACKLOG.md` carries both halves (convert `_builtin_presence.py:127`; say it in `docs/agents.md` **and** the Admin copy). Still the one place the UI's "agents stop calling models" is broader than the code. |
+| **F17** | behaviour tested, copy not tested, copy overclaims | **partially mitigated** — the copy is now read from the real template and three of its four clauses are pinned; the admission-control clause is not (R3), and the not-held branch is neither narrowed nor pinned (R2). |
+| **S3** (not an F-row, but changed materially) | a theoretical leak — the line could never fire | **now live** — see R5. |
+
+---
+
+## New findings introduced by the fix loop
+
+Ten commits is where regressions hide. These are the ones I found.
+
+### R1 — [ASK] B1's residual: an *existing-but-unreadable* `secrets.env` still yields a captured, under-redacted body
+
+`src/arail/redact.py:78-80` · `:99`
+
+```python
+    try:
+        text = path.read_text(errors="replace")
+    except (OSError, ValueError):
+        return values          # ← "couldn't read it" is indistinguishable from "it was empty"
+```
+
+`_known_values()` gates the parse on `path.exists()` (`:99`), so the code
+*knows* the file is there. A permission/IO failure collapses to `[]`, the
+known-value pass finds nothing, `_redact_strict` runs the shape pass only, and
+`capture_body` returns a body with `redactions: 0`.
+
+**Reproduced** (`secrets.env` present, `chmod 000`, recorder on):
+
+```
+capture_body("here is supersecretvalue123 in a prompt", "resp")
+  -> {'prompt': 'here is supersecretvalue123 in a prompt', 'response': 'resp',
+      'truncated': False, 'redactions': 0}
+```
+
+**My ruling, since the orchestrator asked for it explicitly: this is a residual
+fail-open and it must return `None`, but it is not BLOCK-class.**
+
+Why it must be fixed: the code distinguishes the three states (absent / present
+and readable / present and unreadable) and deliberately collapses the third into
+the first. That is the same shape as the bug I blocked on — "the pass silently
+did nothing" looking identical to "the pass ran and found nothing" — and it is
+undetectable from the outside, because `redactions: 0` is also the normal
+result for a clean prompt. `path.exists()` is already in hand, so the fix is
+about six lines: have `_parse_secrets_env` signal unreadability (raise, or
+return `(values, ok)`), let `_known_values` propagate it, and let
+`_redact_strict`'s no-`try` policy carry it to `capture_body`'s `None`. Note
+`redact()` (the lenient public function, used for display text) must keep
+swallowing — the split the builder introduced is exactly the right structure and
+this fix rides on it.
+
+Why it is not BLOCK-class: it needs the recorder **on** (an explicit admin
+action, not the default) **and** a `secrets.env` the portal cannot read. And
+there is a real mitigating coupling — if the portal cannot read `secrets.env`, it
+never loaded those provider keys either, so they are not in prompts this process
+builds. The exposed window is narrow: keys loaded at boot and the file becoming
+unreadable afterwards, or a differently-privileged reader (this product does ship
+`scripts/install-daemon.sh` and per-instance `secrets.env` files, so "created
+under a different uid" is not hypothetical). The shape pass still runs throughout,
+catching `sk-`/`hf_`/`nvapi-`/`ghp_`/`AKIA`/`Bearer`/`key=` forms.
+
+### R2 — [ASK] operator decision (a) narrowed only half the hold copy; the *un*-flipped state still overclaims
+
+`src/arail/portal/templates/admin.html:1686-1687` — the only remaining
+"proactive speech" string anywhere in `src/` or `docs/` (verified by grep):
+
+```js
+    : `Agents are not held. Flip this to stop every agent's inference and ` +
+      `proactive speech immediately (SRE's crash watcher is exempt).`;
+```
+
+This is what the operator reads **at the moment of decision** — before flipping —
+and it is the wording decision (a) replaced. One second later the same control
+tells him something narrower and more accurate. `_admin_hold_control_held_copy()`
+extracts only the `hold.held` branch, so nothing pins this string either.
+
+**What would satisfy me.** Rewrite the not-held branch with the same clauses
+("Flip this and agents stop calling models and stop posting findings,
+suggestions and announcements. Operational/error lines and SRE crash alerts
+continue.") and extend the extractor to pin both branches.
+
+### R3 — [ASK] the fix loop's F17 test still cannot catch a lying admission-control clause
+
+`tests/test_admin_agent_lanes_endpoints.py:401-451`
+
+The test asserts four **phrases** are present in the extracted copy. The clause
+my F17 row cares about most — *"Calls already running finish (N in flight)"*,
+the one that stops the UI implying cancellation — is not among them.
+
+**Mutation M4**, run against the whole file:
+
+```
+admin.html: "Calls already running finish `"  ->  "All running calls are cancelled immediately. `"
+result: 27 passed, 1 skipped
+```
+
+The copy can be made to state the exact opposite of the code's behaviour
+(`test_hold_is_admission_control_not_cancellation` proves in-flight calls *do*
+finish) with every test green. Also unpinned: the presence of the
+`${hold.in_flight}` slot — `held_copy.replace(...)` at `:410` is a silent no-op
+if it is gone.
+
+**What would satisfy me.** Add the fifth assertion (`"Calls already running
+finish" in rendered` and `"${hold.in_flight}" in held_copy`) beside the
+behavioural test that already proves it.
+
+### R4 — [ASK] B6's column-header assertions can be satisfied by the function's own comment
+
+`tests/test_admin_agent_lanes_endpoints.py:196-223`
+
+The test slices `renderAgentLanes()` out of `admin.html` and asserts each header
+word appears *somewhere in that slice*. The explanatory comment the fix loop
+added inside the function contains `Model/backend/tokens in were in the JSON` —
+so the capitalised word "Model" is present twice, once in a comment and once in
+the real `<th>`.
+
+**Mutation M15**: delete `<th>Model</th>` from the markup → **green**.
+**Mutation M17**: delete it *and* the word from the comment → red.
+**Mutation M16**: delete the `lane.model` data cell → red.
+
+So the data-read half of B6 is properly pinned; the header half is not, and a
+column can lose its name while keeping its values. Cosmetic in effect, but it is
+the vacuous-assertion class and the fix is to assert the markup
+(`"<th>Model</th>"`) rather than the bare word.
+
+### R5 — [BLOCK-adjacent, ruled ASK] the `dream()` NameError fix is correct and in scope, but it **activates a path that has never run in production** — and one of its effects is the S3 leak
+
+`src/arail/agents/_builtin_buddy.py:1454` (the added
+`from arail.activity import activity_log`)
+
+I verified the builder's claim against pristine main: `activity_log` is bound
+**only** inside `_DefaultHost.emit()` (`:109`) and is not a module-level name, so
+`dream()`'s `activity_log.emit(...)` at main's line 1466 raised
+`NameError: name 'activity_log' is not defined` on every call. Genuinely
+pre-existing, genuinely a blocker for testing the widened gate, genuinely a
+one-line import adjacent to the gated line. **In scope. Correct.**
+
+But its consequences are a behaviour change, and they are not in the BUILD_LOG:
+`dream_daemon._dream_once` (`:102-108`) caught that `NameError` and emitted
+*"buddy dream failed: NameError…"* as a **warn**, every night, while the dream
+file itself had already been written — so `dream()` never reached its emit, its
+`_recent_actions.append`, its `_sync_workflow`, or its `return reflection`. After
+the fix all four run and `_dream_once` takes its success branch
+(*"buddy dreamed · N chars"*).
+
+The security-relevant consequence: `data={"preview": reflection[:160]}` — 160
+characters of raw model output into `activity.jsonl`, unredacted and
+recorder-independent — is my S3 finding, which I filed as debt partly because it
+was theoretical. **It is now live.** The BACKLOG entry for S3 says the line was
+"gated this fix loop", which is true, but a gate only silences it while *held*;
+on an unheld lab it now writes where it previously crashed.
+
+**What would satisfy me.** No code change required beyond what is filed, but:
+(1) `sprints/BACKLOG.md`'s S3 entry should say the line is newly *live*, not
+merely gated; and (2) **QA must exercise the dream path** — it has never
+executed to completion in production, so everything after that emit is untested
+code in practice.
+
+### R6 — [ASK] the fix loop **weakened** an assertion: `test_reachable_on_maximus` is now vacuous
+
+`tests/test_admin_agent_lanes_endpoints.py:64-72`
+
+Before the fix loop this test asserted `status in (200, 404)` **and then
+tightened it** — exactly 404 for the unknown-trace-id case, exactly 200 for
+everything else. The fix loop added the `_STREAM_PATHS` skip and **deleted the
+tightening branch**, leaving only `assert resp.status_code in (200, 404)`. A 404
+now satisfies both this test and `test_f13_404_on_minimalist`.
+
+**Mutation M1b** — change `admin_agent_lanes`'s gate to
+`_require_surface("no_such_surface")` so the endpoint 404s on *maximus* too, then
+run only this test:
+
+```
+4 passed, 1 skipped
+```
+
+In the original review I explicitly *retracted* a vacuity complaint about this
+test because the tightening branch existed. It no longer does. Other tests in the
+file do catch a broken gate (M1 over the whole file fails), so the endpoint is
+not unprotected — but this is a real, avoidable loss of test strength introduced
+while fixing a test-strength finding, and it is two lines to restore.
+
+### R7 — [INFO] smaller things the fix loop added
+
+- **`POST /api/admin/flight-recorder {"purge": true}` with no `enabled` key
+  silently turns the recorder off** — `bool(body.get("enabled"))` is `False`
+  (`app.py:6346`). The UI always sends both (`admin.html:1826`), so this is a
+  curl-only footgun, but the purge also rewrites `flight_recorder.json` and
+  resets `changed_at` on a purge-only call. Consider making `enabled` optional
+  and defaulting to the current state.
+- **`loadLegacyBodiesNotice()` runs a full `activity.jsonl` (+ rotation) scan on
+  every admin page load**, synchronously on the event loop, where the
+  architecture specified a one-shot boot scan. **Measured: 43 ms over 17 MB /
+  40 000 lines** — comfortably fine, ~50 ms at the 10 MB×2 ceiling. Noting it
+  because it is event-loop-blocking work that grows with lab age, not because it
+  is a problem today.
+- **`_FIELDS` gained `bodies_purged` while `SCHEMA` stayed
+  `arail.agent_trace/v1`** (`agent_trace.py:56`). Additive and nullable, and no
+  consumer asserts an exact key set, so no reader breaks — but a v1 record shape
+  grew a field. Acceptable; worth a line in `docs/agent-observability.md`.
+- **Cosmetics:** `_nav.html:177`'s confirm string reads "Hold all agents? agents
+  stop calling models…" (lowercase mid-sentence); the adjacent Resume button's
+  title is still "Resume scheduler" though it now resumes agents too;
+  `loadLegacyBodiesNotice` double-escapes `bySource` (`esc()` per entry then
+  `esc()` on the join) — over-escaped, which is the safe direction.
+- **`sprints/BACKLOG.md`'s conftest-split entry misdescribes the second
+  concern** as "ambient defaults (tier, etc.)". It is the `.world-prompt-seen`
+  onboarded-ness marker. As written the entry is harder to act on than it needs
+  to be.
+
+---
+
+## Debt filing: verified
+
+Every item I marked "file as debt" is in `sprints/BACKLOG.md` under
+*"Buddy-front-and-center's BLOCK-review fix loop — filed as debt, not fixed"*
+(commit `f9deb6e5`), each with a file:line or a concrete fix sketch: **S2, S3,
+D1, D2, D3, D5, D7, F2**, W1's wall-clock test, the conftest split, and D8's
+remainder. It even orders them by exposure gradient and flags the S3/QA briefing.
+
+**Nothing I marked must-fix was quietly moved to debt.** All ten are worked in
+code; S1 was *promoted* (by the operator, not the builder) from ASK to must-fix
+and got both halves of its either/or.
+
+**D7 is still correctly filed as debt, and the orchestrator's question about it
+has a clean answer: only the test was wrong.** The hang was a test artifact —
+`client.stream()` against a generator that never terminates on its own. The
+production generator *does* end on disconnect, via ASGI task cancellation
+reaching `subscribe()`'s `finally`, and the rewritten test now **asserts** that
+(`_SUBSCRIBERS` returns to its pre-request length after `app_task.cancel()`),
+which is strictly more than existed before. D7's actual content is different and
+untouched: `_fanout`'s same-loop `QueueFull` branch (`agent_trace.py:255-258`)
+removes a subscriber that is still awaiting `q.get()`, so a backpressured client
+keeps an open connection and silently never receives another frame — plus the
+one-snapshot-fetch-per-trace amplification. Neither is a leak and neither is
+reachable without a burst, so debt is the right home. The builder's
+`is_disconnected()` grep is also correct: zero hits anywhere, including the
+pre-existing `/api/activity/stream` — not a gap this sprint introduced.
+
+## Regression check on the fix loop
+
+- Sprint suite (22 files): **303 passed, 1 skipped**, 2.3 s, no hang, no stray
+  process. (The orchestrator's 316 is a slightly different file list; same
+  result — zero failures.)
+- 18 pre-existing suites most exposed to the fix loop's edits — `test_lab_brain`,
+  `test_lab_brief`, all four airgap-toggle suites (the `_toggle_bind_is_loopback`
+  delegation), `test_boot_security_scan` (the `importlib.reload` hazard),
+  `test_onboarding`, `test_boot_overlay`, `portal/test_base_template_smoke`,
+  `test_world_first_impression` (the conftest first-run trio),
+  `test_activity_rotation`, `test_health_metrics`, `test_imports`,
+  `test_agent_workflows`, `test_debt_finance_agents`: **318 passed, 1 skipped**.
+- No `AERO_*` / `aerollm-api` / frozen-identifier change in the fix-loop diff.
+- `/metrics` and `per_label_snapshot()` untouched in the fix-loop diff.
+- 17 mutations run and reverted; every file byte-identical afterwards
+  (asserted programmatically after each restore).
+
+---
+
+## What QA should hit first
+
+1. **QA-BLIND-1, with two additions.** (a) Brief QA on **R5/S3** before they
+   start: Buddy's dream announcement writes 160 chars of raw model output into
+   `activity.jsonl`, unredacted and recorder-independent, and the
+   legacy-bodies scanner will never find it because it is not a `prompt_trace`.
+   A tree-grep hit there is a **real pre-existing finding**, not a false
+   positive. (b) Add a variant that plants a key in `secrets.env`, makes that
+   file unreadable (`chmod 000`), turns the recorder on, and greps the tree —
+   that is **R1**, and QA finding it independently would be worth more than my
+   reading it.
+2. **The dream path end to end.** It has never run to completion in production
+   (R5). Everything after `dream()`'s emit — `_recent_actions`,
+   `_sync_workflow`, the returned reflection, `_dream_once`'s success branch —
+   is untested-in-practice code that this fix loop switched on.
+3. **QA-BLIND-2 against all seven gated sites**, plus the two Buddy lines the
+   operator's decision (a) added (boot notice, dream announcement). Then the
+   honest inverse: confirm what still speaks while held (researcher's 42
+   diagnostic emits, browser's 8, loader/seed/forge boot notices, SRE by
+   design) and judge it against the control's new copy. F16's hole is the one
+   to probe deliberately: a user-defined agent that spawns a bare
+   `threading.Thread` inside `start()` keeps calling models while held.
+4. **The recorder-off contract on all four read paths**
+   (`/api/agents/prompts`, `/api/admin/agent-lanes`,
+   `/api/admin/agent-trace/{id}`, `/api/admin/agent-trace-stream`) and the
+   *distinction* decision (c) created: the read-gate is **reversible** (recorder
+   back on re-exposes old bodies), the purge is **permanent**. Both behaviours
+   are intended; confirm the UI does not imply otherwise.
+5. **The purge's concurrent-write window**, unchanged from the original review:
+   `ActivityLog.emit()` takes no lock, so activity lines emitted *during* a
+   purge are lost, and the docstring still claims "the exact line count never
+   changes". Small, real, easy to demonstrate with a burst.
+6. **The legacy notice/Purge/Keep UI on a lab that actually has legacy bodies** —
+   the endpoints were tested from the start; the UI landed in this fix loop and
+   has one structural test.
+
+## Required before the PR (not before QA)
+
+1. **R1** — `redact.py:78-80`: an existing-but-unreadable `secrets.env` must
+   produce `None`, not a shape-pass-only body.
+2. **R2** — `admin.html:1686-1687`: narrow the not-held branch; pin both
+   branches.
+3. **R6** — `tests/…:72`: restore the deleted tightening branch.
+4. **R3** — pin the admission-control clause and the `${hold.in_flight}` slot.
+5. **R4** — assert `"<th>Model</th>"`, not the bare word `Model`.
+6. **R7's BACKLOG corrections** — S3 is live, not merely gated; the conftest
+   entry's second concern is `.world-prompt-seen`.
+
+## Still needs the operator
+
+**W5's witness line.** Unwritten, and the builder correctly refused to write it.
+It must be the operator's own words, signed, in `SPRINT.md`, after opening the
+lane view on an idle lab and narrating for ten minutes without a log file or a
+terminal. W1's four missing fields now render, so the screen can finally support
+that test — but if W5 fails, the next sprint's first task is a rewrite of the
+view, not more instrumentation.
