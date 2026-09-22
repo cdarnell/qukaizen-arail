@@ -1564,3 +1564,73 @@ call sites plus the Researcher meta-line, already switched to prefer
 `tokens_out` this sprint but still falling back to `tokens`), drop the
 `tokens` key from the endpoint response and the fallback reads in the
 template.
+
+---
+
+## Buddy-front-and-center's BLOCK-review fix loop — filed as debt, not fixed
+
+**Filed by:** `sprints/2026-09-20-buddy-front-and-center/REVIEW.md`
+("Required actions before merge" → "File as debt (BACKLOG, not this
+sprint)"), during the fix loop that resolved B1–B6, D6, D8, F9, F13, and
+S1 (S1 was explicitly promoted to must-fix by the operator; the rest
+below were not).
+
+- **S2** — `src/arail/skills/goal_parser/__init__.py:250`:
+  `error_class=str(payload.get("error", "unknown"))[:80]` persists up to 80
+  chars of arbitrary child-process exception text to `agent_traces.jsonl`,
+  outside `redact.capture_body`'s reach, regardless of the flight recorder.
+  Everywhere else in this sprint `error_class` is `type(exc).__name__` only
+  — the one field guaranteed to carry no payload. Fix is one line:
+  `str(...).split(":", 1)[0][:64]`, or add a separate `error_detail` field
+  that goes through `redact.redact()` and is only populated when the
+  recorder is on.
+- **S3** — Buddy's dream announcement (`_builtin_buddy.py`'s `dream()`,
+  gated this fix loop) still puts up to 160 chars of raw model output into
+  `activity.jsonl` via `data={"preview": reflection[:160]}` — ungated by
+  redaction and pre-existing, not introduced by this sprint. Not a
+  `prompt_trace` body, so `_has_legacy_body`/the legacy-bodies purge will
+  never find it. **QA must be told this directly**: a "grep the whole
+  DATA_DIR tree" pass can legitimately hit a planted string here, and that
+  is a real (pre-existing) finding, not a false positive.
+- **D1** — `ARAIL_AGENT_STREAM_FAST` removes the 120s total-generation
+  ceiling from Buddy's fast streamed calls (a `requests` per-read socket
+  timeout, not a total-duration timeout, once `stream=True`); undocumented.
+  Needs a bound plus a doc note on the behaviour change.
+- **D2** — no structural test asserts Ollama's streamed vs non-streamed
+  request bodies agree on everything except `stream`; add one so a future
+  edit to one path can't silently diverge from the other.
+- **D3** — `lanes_snapshot()` returns `user_defined`, `dropped_writes`,
+  `overlap_pct` that `admin.html` never renders; the trace drill-in
+  (`GET /api/admin/agent-trace/{id}`) has no UI entry point; `SYS_LANES`
+  is defined but neither emitted nor deleted.
+- **D5** — `_builtin_presence.py:127`'s thread should use whatever
+  `spawn_thread`/context-carrying helper the rest of the agents use (F3's
+  static guard would have caught this); document in `docs/agents.md` and
+  the Admin copy that a call which lost its attribution context is
+  visible in the trace but **not** covered by Hold.
+- **D7** — the admin SSE stream (`agent-trace-stream`) has no
+  backpressure/debounce behaviour defined for a fast-emitting lane; decide
+  how DE4's "kill line" number is measured against it.
+- **F2** — a disk-rotation failure in `_append_disk` is silently dropped;
+  should increment `dropped_writes` the same way a write failure does.
+- **W1's wall-clock SSE test** — promote the "within 2s" structural guard
+  (no `setInterval` near the lanes markup, pinned this fix loop) to an
+  actual timed `@pytest.mark.timing` test, plus a stronger `q.qsize()`
+  assertion on the subscriber queue than currently exists.
+- **conftest split** — the shared fixture doing both hermeticity
+  (DATA_DIR redirection) and ambient defaults (tier, etc.) should split
+  into two, so a test that only needs one doesn't have to reason about
+  the other.
+- **D8's remainder** — the `/api/agents/status` fallback loop bug, the
+  `calls_by_source` cardinality cap, streamed-response `model` provenance,
+  a missing trace on an abandoned stream, the purged-event UI string, and
+  registering `pytest.mark.perf` in `pyproject.toml` (currently an
+  unregistered marker warning).
+
+**What a future sprint needs to do:** pick these up in order of the
+security/exposure gradient — S2 first (it is the only remaining path that
+writes unredacted free text to disk regardless of the recorder), then D1
+(undocumented timeout-semantics change, already shipped), then the rest
+as capacity allows. S3 does not need a code fix by itself but does need
+QA-BLIND-1 briefed before the next sprint's QA pass, or it will keep
+looking like a false positive.
