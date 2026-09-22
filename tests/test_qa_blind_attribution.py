@@ -355,15 +355,19 @@ def test_legacy_agent_bucket_is_renamed_once_and_idempotently(tmp_path,
         "calls_by_source": {"agent": 412, "ui": 9},
         "total_calls": 421,
     }))
-    monkeypatch.setattr(costs_mod, "DATA_DIR", tmp_path, raising=False)
+    from arail import config as config_mod
+    monkeypatch.setattr(config_mod, "DATA_DIR", tmp_path)
 
     def _fresh():
-        t = costs_mod.CostTracker.__new__(costs_mod.CostTracker)
-        t._data_path = path
-        t._lock = threading.Lock()
-        t.calls_by_source = {}
-        t.history = []
-        t._load()
+        # CostTracker is a singleton whose __new__ hands back the live
+        # instance, so bypass it entirely: allocate, mark uninitialised, and
+        # run the real __init__ against the patched DATA_DIR. That exercises
+        # the actual _load()/_save() pair rather than a hand-built stand-in
+        # missing half its attributes.
+        t = object.__new__(costs_mod.CostTracker)
+        t._initialized = False
+        t.__init__()
+        assert t._data_path == path
         return t
 
     first = _fresh()
@@ -387,11 +391,11 @@ def test_migration_merges_rather_than_clobbers_an_existing_legacy_key(
     path.write_text(json.dumps({
         "calls_by_source": {"agent": 5, "agent:pre-p1-legacy": 7},
     }))
-    t = costs_mod.CostTracker.__new__(costs_mod.CostTracker)
-    t._data_path = path
-    t._lock = threading.Lock()
-    t.calls_by_source = {}
-    t.history = []
-    t._load()
+    from arail import config as config_mod
+    monkeypatch.setattr(config_mod, "DATA_DIR", tmp_path)
+    t = object.__new__(costs_mod.CostTracker)
+    t._initialized = False
+    t.__init__()
+    assert t._data_path == path
     assert t.calls_by_source["agent:pre-p1-legacy"] == 12
     assert "agent" not in t.calls_by_source

@@ -63,7 +63,14 @@ out of those three files.
 
 Running the seven files together: **251 passed, 9 failed, 3 xfailed** in 8 s.
 Identical result in reverse file order and under two independent shuffles —
-no order dependence, no non-idempotence.
+no order dependence, no non-idempotence. Run alongside the sprint's own 27
+files and the repo's 27 pre-existing `test_qa_*` files (61 files, 1,700
+tests): **1,624 passed, 9 failed, 6 xfailed** — the same nine failures, so
+none of them is an interaction artefact and none of the builder's tests break
+in the presence of mine. (One interaction *was* found and fixed in my own
+code: a hand-built `CostTracker` stand-in that only worked when
+`test_costs_legacy_migration.py` had not run first; it now allocates and runs
+the real `__init__` against a patched `DATA_DIR`.)
 
 ---
 
