@@ -45,8 +45,9 @@ aerollm-named integration surface.
 | think | visionary | VISION.md | done | 2026-09-21 12:49 | 2026-09-21 13:00 | **proceed** — conditional on four cuts (commit `2884569f`) |
 | plan | architect (design) | ARCHITECTURE.md | done | 2026-09-21 13:10 | 2026-09-21 13:30 | complete — 12 sections, slices S0–S7 (commit `600c9541`) |
 | build | builder | BUILD_LOG.md | done | 2026-09-21 13:35 | 2026-09-21 16:05 | S0–S7 complete (`ffcb1ba3`…`0d1de0b8`) + two orchestrator-found defect loops (`fc9311a6`, `1bedf165`) |
-| build (fix loop) | builder | BUILD_LOG.md | in progress | 2026-09-21 16:40 | — | REVIEW.md must-fix list + operator answers below |
+| build (fix loop) | builder | BUILD_LOG.md | done | 2026-09-21 16:40 | 2026-09-21 23:20 | 10 commits `da70792d`…`8e943ca5`; all must-fix items + 3 operator decisions; rate-limit interruption recovered |
 | review | architect (review) | REVIEW.md | done → loop back to build | 2026-09-21 16:10 | 2026-09-21 16:35 | **BLOCK** (commit `0c13a176`) — ten must-fix items, no redesign |
+| re-review | architect (review) | REVIEW.md (appended) | in progress | 2026-09-21 23:25 | — | — |
 | test | qa | TEST_REPORT.md | pending | — | — | — |
 | ship | — | PR | pending | — | — | — |
 
@@ -73,6 +74,8 @@ aerollm-named integration surface.
 | 2026-09-21 | **Hold = widen Buddy's gating + narrow the copy to the truth** (operator) | Gate Buddy's remaining proactive lines (online notice `_builtin_buddy.py:1263`, dream announcement `:1473`) and make the copy exact: "agents stop calling models and stop posting findings, suggestions and announcements. Operational/error lines and SRE crash alerts continue." Resolves REVIEW D4 / B3. |
 | 2026-09-21 | **Build the LAN-bind × live-recorder banner now** (operator) | Portal has no auth; a friend/family lab bound beyond loopback with the recorder on exposes prompt bodies to the network. Resolves REVIEW B5. |
 | 2026-09-21 | **Recorder off = stop capturing, stop showing, offer a purge** (operator) | Bodies captured while on are no longer served once off; Admin offers the same Purge used for legacy bodies to delete them from disk and memory. One purge mechanism. Resolves REVIEW S1 (promoted from ASK to must-fix). |
+| 2026-09-21 | Fix loop interrupted by an API rate limit; recovered without loss | Builder was terminated mid-loop (2 of 10 fixes committed, 5 files uncommitted). Orchestrator found the uncommitted D6 fix coherent and two test files passing, but a new SSE test (`client.stream()` on `/api/admin/agent-trace-stream`) hung every subsequent test because the server-side generator never terminated on close — HEAD's version of the file passed in 0.8 s. A stale pytest process was killed. Builder resumed with that diagnosis; fixed the test and checked the production generator's disconnect handling. |
+| 2026-09-21 | Fix loop verified independently by the orchestrator | Sprint's 22 test files: 316 passed + 1 skipped, twice back-to-back, no hang, no stray process, real `lab/data` clean. 181-file differential vs `main@236504ca`: 0 failing only here, same 17 pre-existing. B1 live-checked: `_redact_strict` propagates, `capture_body` → `None` on a pass failure, test patches `_known_values` to raise. Halt copy present in `_nav.html` and the Admin card; W1's four fields rendered; LAN-bind × recorder banner wired. No frozen renames; `/metrics` intact. **Flagged for re-review, not ruled on:** an *existing-but-unreadable* `secrets.env` (OSError) yields an empty known-values list and the body is still captured — the reviewer's B1 criteria asked for that catch, so whether that is acceptable is the reviewer's call. |
 
 ## Skipped phases
 
