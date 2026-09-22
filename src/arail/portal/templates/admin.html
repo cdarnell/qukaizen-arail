@@ -727,6 +727,10 @@
     <!-- Operator decision (b): LAN-bind x live-recorder warning banner --
          hidden unless BIND_ADDR is non-loopback AND the recorder is on. -->
     <div id="agent-lan-warning" class="pr-hint pr-warning" style="display:none"></div>
+    <!-- F12 legacy-bodies notice (S1 / operator decision (c)): populated by
+         a boot-time scan; hidden once count is 0 or the operator dismisses
+         it. Three endpoints already existed with zero UI before this. -->
+    <div id="legacy-bodies-notice" class="pr-hint pr-warning" style="display:none"></div>
     <div class="pr-card">
       <div id="agent-hold-control" class="pr-hint">Loading…</div>
       <div id="agent-recorder-control" class="pr-hint">Loading…</div>
@@ -1689,9 +1693,12 @@ function renderHoldControl(snap) {
     <div class="pr-hint">${esc(copy)}</div>`;
 }
 
+let _RECORDER_ENABLED = false;
+
 function renderRecorderControl(snap) {
   const el = document.getElementById('agent-recorder-control');
   const rec = snap.recorder || {enabled: false, lan_exposed: false};
+  _RECORDER_ENABLED = !!rec.enabled;
   let copy = rec.enabled
     ? 'Flight recorder is ON — prompt/response bodies are captured, redacted, and capped.'
     : 'Flight recorder is OFF (default) — only metadata is captured, no prompt/response bodies.';
@@ -1708,7 +1715,8 @@ function renderRecorderControl(snap) {
       <input type="checkbox" ${rec.enabled ? 'checked' : ''} onchange="setFlightRecorder(this.checked)">
       Flight recorder
     </label>
-    <div class="pr-hint">${esc(copy)}</div>`;
+    <div class="pr-hint">${esc(copy)}</div>
+    <button class="pr-btn" onclick="purgeFlightRecorderBodies()" style="margin-top:0.3rem;">Purge captured bodies</button>`;
 }
 
 function renderLanRecorderWarning(snap) {
@@ -1807,7 +1815,78 @@ async function setFlightRecorder(enabled) {
   }
 }
 
+async function purgeFlightRecorderBodies() {
+  // S1 / operator decision (c), SPRINT.md 2026-09-20-buddy-front-and-center:
+  // the permanent half -- deletes captured bodies from disk and the live
+  // ring, via the same shared purge mechanism as legacy-bodies below.
+  // Preserves the current on/off setting; only adds purge:true.
+  if (!confirm('Delete all captured prompt/response bodies from disk and '
+             + 'memory? This cannot be undone.')) return;
+  try {
+    const r = await fetch('/api/admin/flight-recorder', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({enabled: _RECORDER_ENABLED, purge: true}),
+    });
+    const data = await r.json();
+    const p = data.purge || {purged: 0, purged_memory: 0};
+    adminLog(`Flight recorder purge: ${p.purged} on disk, ${p.purged_memory} in memory`, 'info');
+    loadAgentLanes();
+  } catch (e) {
+    adminLog('Flight recorder purge failed: ' + e.message, 'error');
+  }
+}
+
+async function loadLegacyBodiesNotice() {
+  // S1 / operator decision (c): boot-time scan populating the notice --
+  // three endpoints (status/purge/dismiss) existed with no UI before this.
+  const el = document.getElementById('legacy-bodies-notice');
+  if (!el) return;
+  try {
+    const r = await fetch('/api/admin/legacy-bodies');
+    if (r.status === 404) { el.style.display = 'none'; return; }  // minimalist
+    const data = await r.json();
+    if (data.dismissed || !data.count) {
+      el.style.display = 'none';
+      el.innerHTML = '';
+      return;
+    }
+    const bySource = Object.entries(data.by_source || {})
+      .map(([src, n]) => `${esc(src)} (${n})`).join(', ');
+    el.style.display = '';
+    el.innerHTML =
+      `⚠ ${data.count} pre-flight-recorder activity line(s) still carry a ` +
+      `captured prompt/response body${bySource ? ' — ' + esc(bySource) : ''}. ` +
+      `<button class="pr-btn" onclick="purgeLegacyBodies()">Purge</button> ` +
+      `<button class="pr-btn" onclick="dismissLegacyBodiesNotice()">Keep</button>`;
+  } catch (e) {
+    el.style.display = 'none';
+  }
+}
+
+async function purgeLegacyBodies() {
+  if (!confirm('Delete all captured prompt/response bodies from '
+             + 'activity.jsonl? This cannot be undone.')) return;
+  try {
+    const r = await fetch('/api/admin/legacy-bodies/purge', {method: 'POST'});
+    const data = await r.json();
+    adminLog(`Legacy bodies purge: ${data.purged} on disk, ${data.purged_memory} in memory`, 'info');
+    loadLegacyBodiesNotice();
+  } catch (e) {
+    adminLog('Legacy bodies purge failed: ' + e.message, 'error');
+  }
+}
+
+async function dismissLegacyBodiesNotice() {
+  try {
+    await fetch('/api/admin/legacy-bodies/dismiss', {method: 'POST'});
+    loadLegacyBodiesNotice();
+  } catch (e) {
+    adminLog('Legacy bodies dismiss failed: ' + e.message, 'error');
+  }
+}
+
 loadAgentLanes();
+loadLegacyBodiesNotice();
 connectAgentLanesStream();
 
 async function loadTeamPush() {

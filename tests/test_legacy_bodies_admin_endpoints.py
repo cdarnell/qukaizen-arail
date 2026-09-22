@@ -92,3 +92,46 @@ def test_dismiss_endpoint_is_remembered(monkeypatch, tmp_path):
     assert r.status_code == 200
     assert r.json() == {"dismissed": True}
     assert activity.legacy_notice_dismissed() is True
+
+
+# ---------------------------------------------------------------------------
+# S1 / operator decision (c), SPRINT.md 2026-09-20-buddy-front-and-center:
+# these three endpoints had zero UI. Read admin.html's actual source (not a
+# duplicate string) to prove a notice, a boot-time scan, and Purge/Keep
+# buttons actually exist and are wired to these exact endpoints.
+# ---------------------------------------------------------------------------
+
+def test_legacy_bodies_notice_and_buttons_exist_in_admin_ui():
+    import pathlib
+    from arail.portal import app as app_mod
+
+    admin_html = (
+        pathlib.Path(app_mod.__file__).parent / "templates" / "admin.html"
+    )
+    src = admin_html.read_text()
+
+    assert 'id="legacy-bodies-notice"' in src, "no notice element in the DOM"
+
+    start = src.find("function loadLegacyBodiesNotice")
+    assert start != -1, "no boot-time scan function at all"
+    end = src.find("\nfunction ", start + 1)
+    scan_section = src[start:end if end != -1 else start + 1500]
+    assert "/api/admin/legacy-bodies" in scan_section
+    assert "purgeLegacyBodies()" in scan_section
+    assert "dismissLegacyBodiesNotice()" in scan_section
+
+    purge_start = src.find("function purgeLegacyBodies")
+    assert purge_start != -1, "no Purge handler at all"
+    purge_section = src[purge_start:purge_start + 800]
+    assert "/api/admin/legacy-bodies/purge" in purge_section
+
+    dismiss_start = src.find("function dismissLegacyBodiesNotice")
+    assert dismiss_start != -1, "no Keep handler at all"
+    dismiss_section = src[dismiss_start:dismiss_start + 400]
+    assert "/api/admin/legacy-bodies/dismiss" in dismiss_section
+
+    # Actually invoked at boot (top-level, unindented), not just defined.
+    assert "loadLegacyBodiesNotice();" in src.splitlines(), (
+        "loadLegacyBodiesNotice() is defined but never called at boot -- "
+        "the notice would never populate on page load"
+    )

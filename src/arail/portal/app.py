@@ -6333,13 +6333,19 @@ async def admin_agents_hold(request: Request):
 
 @app.post("/api/admin/flight-recorder")
 async def admin_flight_recorder(request: Request):
-    """{enabled: bool} -> writes DATA_DIR/flight_recorder.json. Admin-only,
-    so a minimalist lab can never turn bodies on."""
+    """{enabled: bool, purge: bool} -> writes DATA_DIR/flight_recorder.json
+    and, when ``purge`` is true, also strips every captured body from disk
+    and the live ring (REVIEW.md S1 / operator decision (c): the same
+    purge mechanism as the legacy-bodies purge, not a second one).
+    Admin-only, so a minimalist lab can never turn bodies on."""
     if (gate := _require_surface("admin")) is not None:
         return gate
     from arail import agent_trace
     body = await request.json()
-    return agent_trace.set_recorder_enabled(bool(body.get("enabled")))
+    result = agent_trace.set_recorder_enabled(bool(body.get("enabled")))
+    if bool(body.get("purge")):
+        result["purge"] = agent_trace.purge_flight_recorder_bodies()
+    return result
 
 
 # -- Scheduler endpoints (admin Scheduler section) -------------------------

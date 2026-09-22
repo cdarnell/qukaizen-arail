@@ -306,6 +306,41 @@ def test_flight_recorder_endpoint_rejects_cross_site(monkeypatch):
     assert r.status_code == 403
 
 
+def test_flight_recorder_endpoint_purge_option(monkeypatch, tmp_path):
+    """S1 / operator decision (c): {enabled, purge: true} on the SAME
+    endpoint strips bodies from disk and the ring, and the response
+    reports both counts under "purge" -- not a second endpoint."""
+    monkeypatch.setenv("LAB_TIER", "maximus")
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    agent_trace.set_recorder_enabled(True)
+    agent_trace.record(trace_id="9" * 16, agent_id="researcher", kind="agent",
+                       bodies={"prompt": "p", "response": "r"})
+
+    client = _client()
+    r = client.post("/api/admin/flight-recorder",
+                    json={"enabled": False, "purge": True})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["enabled"] is False
+    assert body["purge"] == {"purged": 1, "purged_memory": 1}
+    assert agent_trace.find("9" * 16)["bodies"] is None
+
+
+def test_flight_recorder_endpoint_without_purge_flag_does_not_purge(monkeypatch, tmp_path):
+    monkeypatch.setenv("LAB_TIER", "maximus")
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    agent_trace.set_recorder_enabled(True)
+    agent_trace.record(trace_id="8" * 16, agent_id="researcher", kind="agent",
+                       bodies={"prompt": "p", "response": "r"})
+
+    client = _client()
+    r = client.post("/api/admin/flight-recorder", json={"enabled": True})
+    assert r.status_code == 200
+    assert "purge" not in r.json()
+    # Recorder is still on, so bodies are still visible (not purged).
+    assert agent_trace.find("8" * 16)["bodies"] == {"prompt": "p", "response": "r"}
+
+
 # ---------------------------------------------------------------------------
 # No GET mutates state (static check over the route decorators)
 # ---------------------------------------------------------------------------

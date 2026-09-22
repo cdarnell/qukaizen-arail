@@ -53,7 +53,7 @@ _FIELDS: tuple[str, ...] = (
     "slot",
     "halted",
     "outcome", "error_class",
-    "bodies",
+    "bodies", "bodies_purged",
 )
 
 # ---------------------------------------------------------------------------
@@ -213,13 +213,39 @@ def tokens_out_by_agent() -> dict[str, int]:
     return out
 
 
+def _strip_bodies_if_recorder_off(rec: Optional[dict]) -> Optional[dict]:
+    """REVIEW.md S1 / operator decision (c), SPRINT.md
+    2026-09-20-buddy-front-and-center: "recorder off" must mean stop
+    capturing AND stop showing. A record's ``bodies`` is latched at call
+    start (F10) and never changes afterward, so a record captured while
+    the recorder was on would otherwise keep serving its prompt/response
+    through find()/lanes_snapshot()/subscribe() forever after the
+    operator turns the recorder off -- ``/api/agents/prompts`` already
+    gets this right by checking *current* recorder state before adding
+    body keys (app.py's agents_prompts); this is the same check applied
+    at the three read paths that were returning the whole record instead.
+
+    Returns ``rec`` unchanged when the recorder is currently on (or the
+    record has no bodies to strip) -- no allocation in the common case --
+    and a shallow copy with ``bodies`` cleared otherwise."""
+    if rec is None:
+        return None
+    if recorder_on():
+        return rec
+    if not isinstance(rec.get("bodies"), dict):
+        return rec
+    stripped = dict(rec)
+    stripped["bodies"] = None
+    return stripped
+
+
 def find(trace_id: str) -> Optional[dict]:
     """One record by trace_id, or None. The "why?" drill-in's data source
     (``GET /api/admin/agent-trace/{trace_id}``) — searches the whole ring,
     not just the last *n*."""
     for rec in _get_ring():
         if rec.get("trace_id") == trace_id:
-            return rec
+            return _strip_bodies_if_recorder_off(rec)
     return None
 
 
@@ -281,7 +307,7 @@ async def subscribe() -> AsyncGenerator[dict, None]:
     try:
         while True:
             rec = await q.get()
-            yield rec
+            yield _strip_bodies_if_recorder_off(rec)
     finally:
         if entry in _SUBSCRIBERS:
             _SUBSCRIBERS.remove(entry)
@@ -368,7 +394,10 @@ def lanes_snapshot() -> dict:
     lanes = []
     for agent_id, display in FIXED_LANES:
         calls = by_agent.get(agent_id, [])
-        last = calls[-1] if calls else None
+        # S1/(c): "last" is served whole to /api/admin/agent-lanes -- strip
+        # its bodies too if the recorder is currently off, same as find()
+        # and subscribe().
+        last = _strip_bodies_if_recorder_off(calls[-1]) if calls else None
         lanes.append({
             "id": agent_id,
             "display": display,
@@ -513,6 +542,47 @@ def set_recorder_enabled(enabled: bool) -> dict:
             "changed_at": _recorder_changed_at,
             "lan_exposed": _lan_exposed(),
         }
+
+
+def _has_recorder_body(rec: dict) -> bool:
+    return isinstance(rec.get("bodies"), dict)
+
+
+def _strip_recorder_body(rec: dict) -> None:
+    rec["bodies"] = None
+    rec["bodies_purged"] = True
+
+
+def purge_flight_recorder_bodies() -> dict:
+    """Operator-initiated only. REVIEW.md S1 / operator decision (c),
+    SPRINT.md 2026-09-20-buddy-front-and-center: the recorder-off read
+    gate (``_strip_bodies_if_recorder_off``) hides bodies while off but
+    is reversible (turning the recorder back on re-exposes them) -- this
+    is the permanent half. Strips ``bodies`` from every ring record and
+    every ``agent_traces.jsonl`` line that still carries one, stamping
+    ``bodies_purged: true`` in their place, via the SAME shared
+    ``jsonl_purge.purge_jsonl_bodies`` helper ``activity.py``'s
+    legacy-bodies purge uses (one purge mechanism, not two) -- and also
+    the in-memory ring, mirroring REVIEW.md B2's activity_log._buffer
+    fix: a purge that leaves the live ring readable would look complete
+    (``{"purged": N}``) while still serving the exact bodies it claimed
+    to have removed."""
+    from arail.jsonl_purge import purge_jsonl_bodies
+
+    path = _trace_path()
+    purged_disk = purge_jsonl_bodies(
+        [path.with_suffix(".jsonl.1"), path],
+        _has_recorder_body,
+        _strip_recorder_body,
+    )
+
+    purged_memory = 0
+    for rec in list(_get_ring()):
+        if _has_recorder_body(rec):
+            _strip_recorder_body(rec)
+            purged_memory += 1
+
+    return {"purged": purged_disk, "purged_memory": purged_memory}
 
 
 def _reset_recorder_for_tests() -> None:
