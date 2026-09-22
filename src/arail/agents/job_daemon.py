@@ -238,8 +238,8 @@ class JobDaemon:
             return
 
     async def _tick(self) -> None:
-        # Same guard dream_daemon uses: if the user hit "Halt jobs" on the
-        # dashboard, background work — including scheduled jobs — stops too.
+        # Same guard dream_daemon uses: if the user hit "Hold all agents" on
+        # the dashboard, background work — including scheduled jobs — stops too.
         if jobs_halted():
             return
         now = _time.monotonic()

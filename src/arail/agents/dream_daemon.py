@@ -163,7 +163,7 @@ class DreamDaemon:
 
     async def _tick(self) -> None:
         """One poll cycle. Decide whether to dream, and which agents."""
-        # Respect the global halt flag — if the user hit 'Halt jobs'
+        # Respect the global halt flag — if the user hit 'Hold all agents'
         # on the dashboard they don't want background model calls.
         if jobs_halted():
             return

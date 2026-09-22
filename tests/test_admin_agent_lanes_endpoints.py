@@ -279,13 +279,39 @@ def test_no_new_get_route_mutates_static_check():
 # ---------------------------------------------------------------------------
 # F17 — copy + behaviour tested together (the literal control string)
 # ---------------------------------------------------------------------------
+#
+# B4 (REVIEW.md): this used to compare behaviour against a hand-typed
+# HOLD_ALL_AGENTS_COPY constant duplicated in this file -- admin.html's
+# actual JS string could drift from that constant and the test would
+# still pass, since it was only ever comparing itself to itself. Instead,
+# extract the "held" branch of renderHoldControl()'s copy ternary straight
+# out of the real template source and test THAT string's content.
 
-HOLD_ALL_AGENTS_COPY = (
-    "Hold all agents — agents stop calling models and stop speaking. "
-    "Calls already running finish ({in_flight} in flight). The SRE crash "
-    "watcher keeps watching and may still post a plain, non-model alert. "
-    "This World only; survives a restart."
-)
+def _admin_hold_control_held_copy() -> str:
+    """Read admin.html's renderHoldControl() and return the literal text
+    of the "held" branch of its ``copy`` ternary, with the one dynamic
+    slot (``${hold.in_flight}``) left as a literal placeholder for the
+    caller to substitute."""
+    import pathlib
+    import re
+    from arail.portal import app as app_mod
+
+    admin_html = (
+        pathlib.Path(app_mod.__file__).parent / "templates" / "admin.html"
+    )
+    src = admin_html.read_text()
+    match = re.search(
+        r"const copy = hold\.held\s*\n(?P<held>.*?)\n\s*:\s*`",
+        src, re.DOTALL,
+    )
+    assert match, (
+        "renderHoldControl()'s `const copy = hold.held ? ... : ...` "
+        "ternary was not found in admin.html at all -- this test would "
+        "otherwise silently check nothing"
+    )
+    pieces = re.findall(r"`([^`]*)`", match.group("held"))
+    assert pieces, "no backtick-delimited literal in the held branch"
+    return "".join(pieces)
 
 
 def test_f17_copy_matches_behaviour(monkeypatch):
@@ -293,7 +319,11 @@ def test_f17_copy_matches_behaviour(monkeypatch):
     client = _client()
     r = client.post("/api/admin/agents/hold", json={"hold": True})
     state = r.json()
-    rendered = HOLD_ALL_AGENTS_COPY.format(in_flight=state["in_flight"])
+    held_copy = _admin_hold_control_held_copy()
+    # ${hold.in_flight} is the one dynamic slot in the held-branch template
+    # literal -- substitute the real value the endpoint returned so
+    # `rendered` matches what a browser would actually show.
+    rendered = held_copy.replace("${hold.in_flight}", str(state["in_flight"]))
 
     # Claim 1: agents stop calling models.
     from arail.router.backends import BaseBackend, ModelResponse
@@ -317,13 +347,16 @@ def test_f17_copy_matches_behaviour(monkeypatch):
             router.complete("hi")
     assert "agents stop calling models" in rendered
 
-    # Claim 2: agents stop speaking.
+    # Claim 2: agents stop posting findings, suggestions and announcements
+    # (operator decision (a), SPRINT.md 2026-09-20-buddy-front-and-center --
+    # widened from the old "stop speaking" wording to name what actually
+    # gets silenced).
     assert agent_context.speech_gate("buddy") is False
-    assert "stop speaking" in rendered
+    assert "stop posting findings, suggestions and announcements" in rendered
 
-    # Claim 3: SRE keeps watching, may still post a plain alert.
+    # Claim 3: operational/error lines and SRE crash alerts continue.
     assert agent_context.speech_gate("sre") is True
-    assert "SRE crash watcher keeps watching" in rendered
+    assert "Operational/error lines and SRE crash alerts continue" in rendered
     import pathlib
     from arail.agents import _builtin_sre
     assert "jobs_halted" not in pathlib.Path(_builtin_sre.__file__).read_text()
@@ -332,6 +365,37 @@ def test_f17_copy_matches_behaviour(monkeypatch):
     # persisted (already tested in test_halt_persistence.py / F14's tests).
     assert "This World only" in rendered
     assert "survives a restart" in rendered
+
+
+def test_nav_halt_control_relabeled_to_hold_all_agents():
+    """B3 (REVIEW.md): _nav.html's dashboard button is the SAME
+    halt_all_jobs()/resume_all_jobs() mechanism as admin's "Hold all
+    agents" toggle (both post to endpoints that call the scheduler
+    functions directly) -- it must carry the same label and the same
+    "what actually happens" copy, not the old "cancels agent work only"
+    wording that predates speech_gate being wired everywhere."""
+    import pathlib
+    from arail.portal import app as app_mod
+
+    nav_html = (
+        pathlib.Path(app_mod.__file__).parent / "templates" / "_nav.html"
+    )
+    src = nav_html.read_text()
+    assert "btn-halt" in src, "the halt control id changed or was removed"
+
+    # Relabeled -- the stale "Halt jobs" label must be gone.
+    assert "Halt jobs" not in src
+    assert "Hold all agents" in src
+
+    # The button's title and its confirm() dialog both carry the exact
+    # operator-specified sentence (SPRINT.md 2026-09-20-buddy-front-and-center,
+    # decision (a)) -- not a paraphrase.
+    required = (
+        "agents stop calling models and stop posting findings, "
+        "suggestions and announcements. Operational/error lines and "
+        "SRE crash alerts continue."
+    )
+    assert required in src
 
 
 # ---------------------------------------------------------------------------

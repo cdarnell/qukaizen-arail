@@ -1663,10 +1663,10 @@ function renderHoldControl(snap) {
   const el = document.getElementById('agent-hold-control');
   const hold = snap.hold || {held: false, in_flight: 0};
   const copy = hold.held
-    ? `Hold all agents — agents stop calling models and stop speaking. ` +
-      `Calls already running finish (${hold.in_flight} in flight). The SRE ` +
-      `crash watcher keeps watching and may still post a plain, non-model ` +
-      `alert. This World only; survives a restart.`
+    ? `Hold all agents — agents stop calling models and stop posting ` +
+      `findings, suggestions and announcements. Operational/error lines ` +
+      `and SRE crash alerts continue. Calls already running finish ` +
+      `(${hold.in_flight} in flight). This World only; survives a restart.`
     : `Agents are not held. Flip this to stop every agent's inference and ` +
       `proactive speech immediately (SRE's crash watcher is exempt).`;
   el.innerHTML = `
