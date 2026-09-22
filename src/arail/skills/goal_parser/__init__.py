@@ -20,6 +20,32 @@ from arail.router import ModelRouter
 # the first time. Tunable via ARAIL_GOAL_PARSE_TIMEOUT_SEC.
 _SUBPROCESS_TIMEOUT_SEC = int(os.getenv("ARAIL_GOAL_PARSE_TIMEOUT_SEC", "60"))
 
+# QA F2 (TEST_REPORT.md): error_class is documented in the trace schema as
+# a class name -- ``type(exc).__name__`` shape only, never free text. The
+# child (_subprocess_runner.py) is trusted to send a real class name in
+# its own "error_class" field, but the parent must not take that on
+# faith: an old or hostile child could still send only the legacy
+# "error" message field (or something else entirely) in its JSON, and
+# that message text (which has already been shown to carry an
+# ``Authorization: Bearer ...`` fragment) must never reach a trace
+# record just because it happened to be present. This allow-list is the
+# actual enforcement point; everything else is defense in depth.
+_ERROR_CLASS_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_ERROR_CLASS_MAX_LEN = 64
+
+
+def _sanitize_error_class(payload: Any) -> str:
+    """Return a value safe for the trace schema's error_class field, or
+    a generic fallback -- never anything derived from a free-text
+    ``error`` message, and never unbounded length."""
+    if isinstance(payload, dict):
+        candidate = payload.get("error_class")
+        if (isinstance(candidate, str)
+                and 0 < len(candidate) <= _ERROR_CLASS_MAX_LEN
+                and _ERROR_CLASS_RE.fullmatch(candidate)):
+            return candidate
+    return "SubprocessError"
+
 
 DOMAIN_KEYWORDS: Dict[str, list[str]] = {
     "farming": ["crop", "crop yield", "farm", "farming", "soil", "harvest",
@@ -247,7 +273,7 @@ class GoalParser:
         if not payload.get("ok"):
             self._record_subprocess_trace(
                 subprocess_ctx, outcome="error",
-                error_class=str(payload.get("error", "unknown"))[:80],
+                error_class=_sanitize_error_class(payload),
                 latency_ms=elapsed_ms)
             return None
 

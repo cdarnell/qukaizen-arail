@@ -22,8 +22,16 @@ Protocol
   appends.
 * **Output** (stdout, JSON): ``{"ok": true, "text": "...", "model":
   str|null, "backend": str|null, "tokens_used": int|null}`` on
-  success, ``{"ok": false, "error": "..."}`` on a recoverable
-  Python-level failure.
+  success, ``{"ok": false, "error": "...", "error_class": "..."}`` on a
+  recoverable Python-level failure. ``error`` is a human-readable
+  message for logs and may contain arbitrary text (including a
+  request fragment from a backend exception); ``error_class`` is
+  always ``type(exc).__name__``-shaped (or a synthetic name for a
+  non-exception failure, e.g. ``MissingPrompt``) and is the ONLY one
+  of the two the parent is allowed to put into a trace record — QA F2
+  (TEST_REPORT.md): the trace schema documents error_class as a class
+  name, and the parent enforces this with its own allow-list
+  regardless of what this child sends.
 * **Crash** (exit code != 0): the parent treats this as
   "subprocess died, fall back."
 
@@ -42,12 +50,18 @@ def _main() -> int:
     try:
         request = json.loads(sys.stdin.read() or "{}")
     except json.JSONDecodeError as e:
-        sys.stdout.write(json.dumps({"ok": False, "error": f"bad input: {e}"}))
+        sys.stdout.write(json.dumps({
+            "ok": False, "error": f"bad input: {e}",
+            "error_class": type(e).__name__,
+        }))
         return 0
 
     prompt = request.get("prompt", "")
     if not prompt:
-        sys.stdout.write(json.dumps({"ok": False, "error": "missing prompt"}))
+        sys.stdout.write(json.dumps({
+            "ok": False, "error": "missing prompt",
+            "error_class": "MissingPrompt",
+        }))
         return 0
     max_tokens = int(request.get("max_tokens", 800))
     temperature = float(request.get("temperature", 0.5))
@@ -74,14 +88,20 @@ def _main() -> int:
         # RuntimeError — caught below. MemoryError is the Python-side
         # symptom for some allocator paths; surface it cleanly so the
         # parent can attribute the fallback correctly.
-        sys.stdout.write(json.dumps({"ok": False, "error": f"OOM: {e}"}))
+        sys.stdout.write(json.dumps({
+            "ok": False, "error": f"OOM: {e}",
+            "error_class": type(e).__name__,
+        }))
         return 0
     except Exception as e:
         # Any other Python-level error: surface it so the parent can
-        # log a meaningful message before falling back.
+        # log a meaningful message before falling back. "error" carries
+        # the full message for a human reading logs; "error_class" is
+        # the only field the parent may put into a trace record.
         sys.stdout.write(json.dumps({
             "ok": False,
             "error": f"{type(e).__name__}: {e}",
+            "error_class": type(e).__name__,
             "trace": traceback.format_exc()[-500:],
         }))
         return 0

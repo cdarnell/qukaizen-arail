@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import stat
 
 import pytest
@@ -50,6 +51,94 @@ def test_unknown_kwargs_are_dropped_not_stored():
     agent_trace.record(trace_id="a" * 16, made_up_field="should not appear")
     rec = agent_trace.ring(1)[0]
     assert "made_up_field" not in rec
+
+
+# ---------------------------------------------------------------------------
+# QA F2 (TEST_REPORT.md): error_class is documented as a class name only.
+# Schema-level assertion, not tied to one producer -- every real writer of
+# a failing record (the router chokepoint, the goal-parser's out-of-process
+# leg) must produce a value with this exact shape, never message text.
+# ---------------------------------------------------------------------------
+
+_ERROR_CLASS_SHAPE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def test_error_class_is_never_free_text_from_the_router_chokepoint():
+    from arail.router.backends import BaseBackend
+    from arail.router.core import ModelRouter
+
+    class _Boom(BaseBackend):
+        def complete(self, *a, **kw):
+            raise RuntimeError(
+                "Authorization: Bearer sk-shouldnotleak0123456789 rejected"
+            )
+
+        def stream_complete(self, *a, **kw):
+            raise NotImplementedError
+
+        def health_check(self):
+            return True
+
+    router = ModelRouter.from_backend(_Boom(), "fake")
+    with pytest.raises(RuntimeError):
+        router.complete("hi")
+
+    rec = agent_trace.ring(1)[0]
+    assert rec["outcome"] == "error"
+    assert rec["error_class"] == "RuntimeError"
+    assert _ERROR_CLASS_SHAPE.fullmatch(rec["error_class"])
+    assert "Bearer" not in json.dumps(rec, default=str)
+
+
+def test_error_class_is_never_free_text_from_the_goal_parser_subprocess(monkeypatch, tmp_path):
+    import subprocess as subprocess_mod
+
+    from arail import config
+    from arail.skills.goal_parser import GoalParser
+
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+
+    class _Completed:
+        returncode = 0
+        stdout = json.dumps({
+            "ok": False,
+            "error": ("AuthError: 401 for https://api.example.com/v1 "
+                      "(Authorization: Bearer sk-shouldnotleak0123456789)"),
+        })
+        stderr = ""
+
+    monkeypatch.setattr(subprocess_mod, "run", lambda *a, **kw: _Completed())
+    parser = GoalParser.__new__(GoalParser)
+    assert parser._llm_subprocess("parse this goal") is None
+
+    rec = agent_trace.ring(1)[0]
+    assert rec["error_class"] is not None
+    assert _ERROR_CLASS_SHAPE.fullmatch(rec["error_class"]), (
+        f"error_class {rec['error_class']!r} is not a bare class name"
+    )
+    assert "Bearer" not in json.dumps(rec, default=str)
+
+
+@pytest.mark.parametrize("message_shaped_value", [
+    "RuntimeError: something failed",
+    "Authorization: Bearer sk-abc123",
+    "",
+    "has spaces",
+])
+def test_error_class_shape_regex_rejects_message_text(message_shaped_value):
+    """Proves the shape assertion the two tests above rely on is a real
+    filter, not a regex that happens to accept everything -- every one
+    of these is exactly the kind of value error_class must never hold.
+    (Length is a separate concern, enforced by goal_parser's own
+    _sanitize_error_class, not by this shape regex.)"""
+    assert not _ERROR_CLASS_SHAPE.fullmatch(message_shaped_value)
+
+
+@pytest.mark.parametrize("class_shaped_value", [
+    "RuntimeError", "JSONDecodeError", "MissingPrompt", "SubprocessError",
+])
+def test_error_class_shape_regex_accepts_real_class_names(class_shaped_value):
+    assert _ERROR_CLASS_SHAPE.fullmatch(class_shaped_value)
 
 
 # ---------------------------------------------------------------------------
