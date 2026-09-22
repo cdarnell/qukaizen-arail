@@ -1211,3 +1211,144 @@ the test that proves it.
 - `sprints/BACKLOG.md` carries every deferred item with its filing sprint
   named, so a future sprint can pick any of them up without re-deriving
   the reasoning.
+
+## Re-review fix loop — WEAK_PASS, commit `051eac4a`
+
+Six residual findings (R1-R6) from the architect's re-review of the
+previous fix loop, worked before QA by orchestrator decision (recorded
+in `SPRINT.md`) because two of them (R1, R6) QA would just re-discover.
+
+### R1 — an existing-but-unreadable secrets.env still yielded an under-redacted body
+
+`_parse_secrets_env` swallowed a read-time `OSError`/`ValueError` into an
+empty list — the same shape as B1's bug, narrower: "can't read it"
+collapsed into "found nothing", so `capture_body` proceeded with a
+shape-pass-only body and `redactions: 0`, indistinguishable from a clean
+prompt. Now raises `_SecretsUnreadable` instead of returning `[]`;
+`redact()` keeps swallowing it (lenient, unchanged), `_redact_strict`'s
+no-try policy lets it propagate to `capture_body`'s fail-closed `None`.
+`errors="replace"` decode behaviour (B1's other half) untouched.
+
+Test: `tests/test_redact.py::test_r1_existing_but_unreadable_secrets_env_fails_capture_closed`
+(chmod 000 on a real file, skips under root),
+`::test_r1_missing_secrets_env_still_captures`,
+`::test_r1_mangled_but_readable_secrets_env_still_redacts_other_lines`.
+Mutation: reverted `_parse_secrets_env` to its exact original
+`except (OSError, ValueError): return values` — reproduced the
+reviewer's own repro byte-for-byte (`{'redactions': 0, ...}` with the
+secret still present, `body is not None`) — then restored the fix.
+Commit: `ef593c1c`.
+
+### R2 — the not-held hold-copy branch still overclaimed
+
+`renderHoldControl()`'s not-held branch — what the operator reads
+*before* deciding — still said "proactive speech immediately" and never
+named findings/suggestions/announcements or that operational/error lines
+and SRE crash alerts continue, even though the held branch had already
+been narrowed. Rewritten to carry the same clauses. Checked `_nav.html`
+too: it has one button whose title only appears in the not-held state
+(no second branch to go stale), confirmed by grep and pinned with an
+explicit absence check.
+
+Test: `tests/test_admin_agent_lanes_endpoints.py::test_f17_copy_matches_behaviour`
+(not-held assertions), `::test_nav_halt_control_relabeled_to_hold_all_agents`
+("proactive speech" absence in `_nav.html`).
+Mutation: reverted the not-held branch to its pre-fix text — red — then
+restored.
+Commit: `bf3e38f1`.
+
+### R3 — F17's test could not catch a lying admission-control clause
+
+The copy test asserted four phrases but never the one REVIEW.md's F17
+row cares about most — "Calls already running finish (N in flight)",
+the clause that stops the UI implying cancellation. Added the fifth
+assertion, plus a check that the `${hold.in_flight}` slot itself is
+present in the raw literal (so the substitution line can't silently
+become a no-op).
+
+Test: `tests/test_admin_agent_lanes_endpoints.py::test_f17_copy_matches_behaviour`
+(Claim 5).
+Mutation **M4** (the reviewer's exact mutation): `"Calls already running
+finish "` → `"All running calls are cancelled immediately. "` — red
+(before this fix loop's M4 ran green, all 27 admin tests passed) — then
+reverted.
+Commit: `bf3e38f1` (same commit as R2 — both are the same copy-pinning
+test and touch the same extractor function).
+
+### R4 — B6's header assertions were satisfiable by the function's own comment
+
+`renderAgentLanes()`'s own explanatory comment contains the word "Model"
+— asserting the bare word against the whole function's source let the
+comment satisfy the check on the header's behalf. Now asserts the literal
+`<th>{header}</th>` markup.
+
+Test: `tests/test_admin_agent_lanes_endpoints.py::test_w1_seven_fields_all_render_in_admin_lane_table`.
+Mutation **M15** (the reviewer's exact mutation): deleted `<th>Model</th>`
+from the markup, left the comment intact — red (before this fix loop's
+M15 ran green) — then reverted (no production change needed;
+`admin.html`'s markup was already correct, only the test was too
+lenient).
+Commit: `c82d7a7e`.
+
+### R5 — the dream() fix activates a path that has never run in production; S3 is now live
+
+No code change — REVIEW.md's ruling was explicit that the `dream()`
+NameError fix is correct and in scope, and no further code change was
+required beyond what is already filed. `sprints/BACKLOG.md`'s S3 entry
+rewritten to say plainly that the 160-char unredacted preview leak is now
+**live** on an unheld lab (previously theoretical — `dream()` crashed
+with `NameError` before reaching that line on every call, on pristine
+main), not merely "gated this fix loop", and that everything in
+`dream()` after the emit is newly-reachable, untested-in-practice code.
+No mutation applicable (a docs-only fix).
+Commit: `64eb165a`.
+
+### R6 — the fix loop weakened test_reachable_on_maximus into vacuity
+
+Adding the `_STREAM_PATHS` skip for the new SSE endpoint deleted the
+pre-existing tightening branch (exactly 404 for the unknown-trace-id
+case, exactly 200 for everything else), leaving only
+`status_code in (200, 404)` — a broken admin gate that 404s on maximus
+too would have satisfied this test just as well as the correct 200 did.
+Restored the exact-status tightening plus a body-shape assertion
+(`_EXPECTED_200_KEY` per path).
+
+Test: `tests/test_admin_agent_lanes_endpoints.py::test_reachable_on_maximus`.
+Mutation **M1b** (the reviewer's exact mutation): `admin_agent_lanes`'s
+`_require_surface("admin")` → `_require_surface("no_such_surface")` — red
+(`4 passed, 1 skipped` before this fix loop's M1b ran green) — then
+reverted (no production change needed; the gate itself was never broken,
+only this test had stopped checking it).
+Commit: `59768bce`.
+
+### Re-review index — R1-R6
+
+| Finding | Commit | Proving test | Mutation run, result |
+|---|---|---|---|
+| R1 | `ef593c1c` | `tests/test_redact.py::test_r1_existing_but_unreadable_secrets_env_fails_capture_closed` | Reverted `_parse_secrets_env`'s except-clause to its original `return values` — reproduced the exact repro (`redactions: 0`, secret present) — reverted mutation |
+| R2 | `bf3e38f1` | `tests/test_admin_agent_lanes_endpoints.py::test_f17_copy_matches_behaviour` (not-held assertions) | Reverted the not-held branch text — red — reverted mutation |
+| R3 | `bf3e38f1` | `tests/test_admin_agent_lanes_endpoints.py::test_f17_copy_matches_behaviour` (Claim 5) | **M4**: admission-control clause rewritten to a cancellation lie — red — reverted mutation |
+| R4 | `c82d7a7e` | `tests/test_admin_agent_lanes_endpoints.py::test_w1_seven_fields_all_render_in_admin_lane_table` | **M15**: `<th>Model</th>` deleted, comment kept — red — reverted mutation |
+| R5 | `64eb165a` | n/a (docs-only) | n/a |
+| R6 | `59768bce` | `tests/test_admin_agent_lanes_endpoints.py::test_reachable_on_maximus` | **M1b**: `admin_agent_lanes`'s gate surface swapped to a nonexistent one — red (`1 failed, 3 passed, 1 skipped`) — reverted mutation |
+
+### Final verification
+
+- Sprint test files (21 files, including `test_speech_gate_wiring.py`)
+  run twice back to back: **321 passed, 1 skipped** both times, identical.
+- Real `lab/data`: no `agent_traces.jsonl` / `flight_recorder.json` /
+  `legacy_bodies_notice.json` / `secrets.env` after either run.
+- No stray pytest processes after completion.
+- 181-file differential vs `main@236504ca`, run three times total this
+  fix loop: **17 failed** twice (identical set to the previous fix
+  loop's verified baseline — failures-only-on-this-branch **0**), and
+  once **18 failed** — the extra one,
+  `tests/test_observability_under_load.py::test_metrics_latency_under_50ms_while_slot_held`,
+  is a hard-coded wall-clock assertion (its own docstring notes "CI tol
+  100 ms") that passed in isolation immediately after and passed again
+  on the very next full 181-file run with no code change in between —
+  a machine-load timing flake from running this sweep repeatedly back
+  to back in the same session, not a regression from any commit in this
+  fix loop. Not filed as new debt: it is the same class of flake
+  `sprints/BACKLOG.md`'s existing "W1's wall-clock SSE test" entry
+  already describes for a sibling test.
