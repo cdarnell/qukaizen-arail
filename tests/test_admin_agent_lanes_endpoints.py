@@ -53,6 +53,15 @@ _ENDPOINTS = [
 # check is not (see above) and is handled by its own dedicated test.
 _STREAM_PATHS = {"/api/admin/agent-trace-stream"}
 
+# R6 (re-review): the one top-level key each 200 response is expected to
+# carry, so test_reachable_on_maximus can assert real body shape, not
+# just a status code a broken gate could also produce by accident.
+_EXPECTED_200_KEY = {
+    "/api/admin/agent-lanes": "schema",
+    "/api/admin/agents/hold": "held",
+    "/api/admin/flight-recorder": "enabled",
+}
+
 
 @pytest.mark.parametrize("method,path,body", _ENDPOINTS)
 def test_f13_404_on_minimalist(monkeypatch, method, path, body):
@@ -71,7 +80,21 @@ def test_reachable_on_maximus(monkeypatch, method, path, body):
     client = _client()
     resp = (client.get(path) if body is None
             else client.post(path, json=body))
-    assert resp.status_code in (200, 404)  # 404 only for the unknown trace_id
+    # R6 (re-review): this test used to tighten past "in (200, 404)" to
+    # the exact expected status per path, and the fix loop that added
+    # the _STREAM_PATHS skip deleted that tightening branch, leaving only
+    # the loose check below -- a 404 from an admin gate broken so it
+    # 404s on maximus too (mutation M1b) satisfied this test just as well
+    # as the correct 200 did. Restored: exactly 404 for the one
+    # legitimate case (an unknown trace_id), exactly 200 with the
+    # expected body shape for everything else.
+    if "deadbeefcafef00d" in path:
+        assert resp.status_code == 404
+    else:
+        assert resp.status_code == 200
+        expected_key = _EXPECTED_200_KEY.get(path)
+        if expected_key:
+            assert expected_key in resp.json()
 
 
 def test_agent_trace_stream_gated_and_reachable(monkeypatch):
