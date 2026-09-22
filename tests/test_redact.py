@@ -8,6 +8,8 @@ independently by QA from ARCHITECTURE.md's contract, not from this file.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from arail import config, redact
@@ -142,8 +144,33 @@ def test_capture_body_returns_none_on_redactor_failure(monkeypatch):
     def _boom(text):
         raise RuntimeError("redactor exploded")
 
-    monkeypatch.setattr(redact, "redact", _boom)
+    monkeypatch.setattr(redact, "_redact_strict", _boom)
     assert redact.capture_body("hi", "there") is None
+
+
+def test_capture_body_returns_none_when_known_values_pass_raises(monkeypatch):
+    """REVIEW.md B1's exact acceptance test: capture_body must fail closed
+    when the known-value pass itself raises, not just when capture_body's
+    own outer wrapper does."""
+    def _boom():
+        raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "bad byte")
+
+    monkeypatch.setattr(redact, "_known_values", _boom)
+    assert redact.capture_body("a prompt containing supersecretvalue123", "resp") is None
+
+
+def test_redact_strict_propagates_known_values_failure(monkeypatch):
+    """redact() (the lenient, general-purpose function) must stay
+    unaffected -- only _redact_strict (capture_body's own path) propagates."""
+    def _boom():
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(redact, "_known_values", _boom)
+    with pytest.raises(RuntimeError):
+        redact._redact_strict("some text")
+    # The lenient public redact() still degrades gracefully.
+    out, n = redact.redact("some text")
+    assert out == "some text"
 
 
 def test_capture_body_handles_none_inputs():
@@ -156,6 +183,36 @@ def test_capture_body_handles_non_string_inputs():
     assert body is not None
     assert body["prompt"] == ""
     assert body["response"] == ""
+
+
+def test_b1_non_utf8_secrets_env_still_redacts_other_values(tmp_path):
+    """REVIEW.md B1's reproduction scenario, now fixed: a secrets.env with
+    one stray non-UTF-8 byte inside a key's value must not silently
+    disable the whole known-value pass. errors="replace" keeps the file
+    parseable; the OTHER lines' values still redact."""
+    path = tmp_path / "secrets.env"
+    # A clean key plus a line with a raw invalid UTF-8 byte inside the
+    # value (a stray \xff, e.g. from a terminal paste or non-Python writer).
+    path.write_bytes(
+        b"CLEAN_KEY=supersecretvalue123\n"
+        b"MANGLED_KEY=abc\xffdef01234567\n"
+    )
+    redact._reset_cache_for_tests()
+    body = redact.capture_body("here is supersecretvalue123 in a prompt", "resp")
+    assert body is not None
+    assert "supersecretvalue123" not in body["prompt"]
+    assert body["redactions"] >= 1
+
+
+def test_b1_non_utf8_secrets_env_does_not_raise():
+    """The file itself must never be the thing that turns a capture into
+    a raised exception -- confirmed via the real parser, not a mock."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        path = Path(d) / "secrets.env"
+        path.write_bytes(b"KEY=bad\xffvalue0123456789\n")
+        values = redact._parse_secrets_env(path)
+        assert isinstance(values, list)  # never raises, always a list
 
 
 # ---------------------------------------------------------------------------

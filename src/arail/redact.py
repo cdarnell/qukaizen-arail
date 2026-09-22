@@ -68,18 +68,26 @@ def _secrets_path() -> Path:
 
 
 def _parse_secrets_env(path: Path) -> list[str]:
+    """Best-effort parse. ``errors="replace"`` so a ``secrets.env`` with one
+    stray non-UTF-8 byte (a key pasted from a terminal, a file written by a
+    non-Python tool) still yields every *other* line's value instead of
+    raising ``UnicodeDecodeError`` (a ``ValueError`` subclass) and losing the
+    whole pass — see REVIEW.md B1. ``(OSError, ValueError)`` covers both the
+    filesystem failures this always caught and any decode failure that
+    ``errors="replace"`` doesn't already avoid."""
     values: list[str] = []
     try:
-        for line in path.read_text().splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            _, _, v = line.partition("=")
-            v = v.strip()
-            if len(v) >= _MIN_SECRET_LEN:
-                values.append(v)
-    except OSError:
-        pass
+        text = path.read_text(errors="replace")
+    except (OSError, ValueError):
+        return values
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        _, _, v = line.partition("=")
+        v = v.strip()
+        if len(v) >= _MIN_SECRET_LEN:
+            values.append(v)
     return values
 
 
@@ -130,10 +138,36 @@ def redact(text: str) -> tuple[str, int]:
     return out, n
 
 
+def _redact_strict(text: str) -> tuple[str, int]:
+    """Like :func:`redact`, but does **not** swallow a known-value-pass
+    failure (REVIEW.md B1). ``redact()`` stays lenient — best-effort
+    redaction degrading to "shape pass only" — because it has callers
+    (and tests) that only ever redact *display* text, never a body headed
+    to disk. ``capture_body`` is the one caller for whom "the known-value
+    pass silently did nothing" must never look identical to "the
+    known-value pass ran and found nothing" — so this variant lets a
+    failure inside ``_known_values()`` propagate, and ``capture_body``'s
+    own outer ``except`` turns that into a fail-closed ``None`` instead of
+    an unredacted (or partially redacted) body reaching disk."""
+    if not text:
+        return text, 0
+    out = text
+    n = 0
+    for value in _known_values():  # deliberately no try/except here
+        if value and value in out:
+            n += out.count(value)
+            out = out.replace(value, REDACTED)
+    for pattern in _SHAPE_PATTERNS:
+        out, count = pattern.subn(REDACTED, out)
+        n += count
+    return out, n
+
+
 def capture_body(prompt: Optional[str], response: Optional[str]) -> Optional[dict]:
     """The only function permitted to put a body into a trace record.
 
-    Fail-closed on bodies: any exception here returns ``None`` (the
+    Fail-closed on bodies: any exception here — including a known-value-
+    pass failure inside :func:`_redact_strict` — returns ``None`` (the
     metadata record around it is still written by the caller — this
     function never blocks that). Redact-then-truncate, always, both
     fields.
@@ -141,8 +175,8 @@ def capture_body(prompt: Optional[str], response: Optional[str]) -> Optional[dic
     try:
         p = prompt if isinstance(prompt, str) else ""
         r = response if isinstance(response, str) else ""
-        p_redacted, p_n = redact(p)
-        r_redacted, r_n = redact(r)
+        p_redacted, p_n = _redact_strict(p)
+        r_redacted, r_n = _redact_strict(r)
         truncated = len(p_redacted) > _PROMPT_CAP or len(r_redacted) > _RESPONSE_CAP
         return {
             "prompt": p_redacted[:_PROMPT_CAP],
