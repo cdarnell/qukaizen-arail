@@ -211,10 +211,17 @@ def test_w1_seven_fields_all_render_in_admin_lane_table():
     end = src.find("\nfunction ", start + 1)
     section = src[start:end if end != -1 else start + 4000]
 
-    # Header cells -- the human-visible column names.
+    # Header cells -- the human-visible column names. R4 (re-review):
+    # asserting the bare word (e.g. "Model") is satisfiable by the
+    # explanatory comment this function's own docstring-style header
+    # comment carries ("Model/backend/tokens in were in the JSON..."),
+    # not just by the real <th>. Assert the actual markup instead, so a
+    # column that loses its <th> while the comment survives goes red
+    # (mutation M15's exact scenario).
     for header in ("Agent", "Model", "Backend", "Brain", "Effort", "TTFT",
                    "Tokens in", "Tokens out", "Deep reason"):
-        assert header in section, f"{header!r} column header missing"
+        markup = f"<th>{header}</th>"
+        assert markup in section, f"{markup!r} column header markup missing"
 
     # Row template -- the JSON fields lanes_snapshot() puts on each lane
     # (agent_trace.py) must actually be read here, not just declared in a
