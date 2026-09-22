@@ -315,3 +315,196 @@ delta instead, against REVIEW.md's own coverage assessment:
    signed, after ten minutes at the lane view on an idle lab. W1's fields now
    render, so the screen can support the test. Until that line exists the
    sprint has four of five win conditions, not five.
+
+---
+
+# Re-test: the QA fix loop
+
+**Date:** 2026-09-22
+**Fix loop under test:** `61f34bd7`…`b81cd978` (7 commits) on top of the
+FAIL at `9d0e083f`
+**Re-test commits:** `416e49c4`…`2c35133a`
+**Verdict:** **WEAK_PASS**
+
+All five must-fix items are satisfied against the code, verified one step
+past each original finding rather than against the Re-review index. F3 was
+fixed rather than filed and the guard is the right one. The differential is
+clean: **zero tests fail only on this branch.**
+
+WEAK_PASS rather than PASS for one reason: the F7 fix is complete on the
+server and **absent on the screen**. `purge_jsonl_bodies` now reports
+`ok: false` honestly, and both `admin.html` purge handlers ignore it and log
+a failed purge at `info` level as *"0 on disk, 0 in memory"*. The operator is
+no longer told a lie; they are told nothing. Filed as debt with a strict
+xfail, not promoted to must-fix, because the legacy-bodies notice re-scans
+immediately afterwards and still shows its unchanged count — a second signal
+the flight-recorder purge does not have. Three lines of JS closes it.
+
+## Per must-fix item
+
+| Id | Status | Verified against | Evidence |
+|---|---|---|---|
+| **F7** — a failed purge reported success | **Satisfied (API), partially (UI)** | `jsonl_purge.py:31-97` — each path's count accumulates in a local `path_purged` and is folded into the total only after that path's `os.replace` returns; returns `{"purged", "ok", "errors"}` | `test_f7_a_failed_replace_reports_zero_purged_and_not_ok`, `test_f7_a_partial_failure_counts_only_the_path_that_landed` (rotated file lands, active file fails → `purged == 3`, `ok False`, active byte-identical), `test_f7_the_purge_contract_now_reports_ok_and_errors`, `test_f7_both_purge_endpoints_still_answer_200_on_a_failed_purge`. **UI gap:** `admin.html:1839`, `:1879` — new finding R1 below |
+| **F8** — memory cleared after a failed disk rewrite | **Satisfied** | `activity.py:287-297` and `agent_trace.py:586-596` — the in-memory pass is inside `if disk_result["ok"]`, in both twins | `test_f8_memory_is_cleared_only_once_disk_is_actually_clean` (both directions in one body: disk fails → buffer intact; disk succeeds → buffer cleared, 3 records), `test_f8_the_flight_recorder_twin_gates_its_ring_the_same_way` (the ring keeps its bodies while they are still on disk, then clears once the rewrite lands) |
+| **F2** — child's exception text in `error_class` | **Satisfied**, with a named residual | `goal_parser/__init__.py:37-47` (`_sanitize_error_class`, `^[A-Za-z_][A-Za-z0-9_]*$`, ≤ 64 chars, else `"SubprocessError"`) and `:276`. The free-text `error` field is **no longer read at all**, which is the real fix; `_subprocess_runner.py` now emits a real `error_class` on all four failure branches | 11 parameterised rows of hostile `error_class` values → all fall back to `SubprocessError` with no leak; `test_f2_the_childs_free_text_error_and_traceback_never_reach_a_record`; `test_f2_no_field_in_the_trace_schema_can_carry_an_exception_message` (no `error`/`message`/`trace`/`stderr`/`exception` key exists in `_FIELDS`, and `record()` drops them when a producer invents them); `test_f2_the_chokepoints_own_error_path_is_still_a_class_name`. **Residual R2 below** |
+| **F4 / F5** — unguarded import + call at the chokepoint | **Satisfied** | `router/core.py:289-292` and `:385-390` — the import and the `capture_body` call share one `try`, falling back to `bodies = None`, at both sites | `test_f4_a_broken_redact_import_still_leaves_a_metadata_record` and `test_f5_a_raising_capture_body_still_leaves_a_metadata_record` (the coordinator's ask: the record is still written, `outcome="ok"`, correct attribution and `tokens_out`, `bodies` null), `test_f4_f5_the_streaming_site_is_guarded_too_and_still_yields` (the stream still delivers its tokens and keeps `ttft_status="measured"`), `test_f4_a_broken_redact_import_does_not_break_the_stream`, and `test_f4_f5_the_guard_is_scoped_to_the_body_capture_only` — the guard did **not** swallow a backend failure, which would have been the obvious over-correction |
+| **F9** — un-isolated `cost_tracker`, 21-test regression | **Satisfied; does not mask a production bug** | `tests/conftest.py:358-363` — `cost_tracker._initialized = False; cost_tracker.__init__()` after `config.DATA_DIR` is patched | `test_f9_every_test_starts_from_a_zeroed_cost_tracker_under_tmp`, the `test_f9_a_…`/`test_f9_b_…` pair (one bills, the next sees zero), `test_f9_recap_cost_ceiling_reads_the_isolated_tracker`, `test_f9_the_real_lab_costs_json_is_not_recreated_by_the_suite`. **Production question answered:** `test_f9_the_binding_is_import_time_which_is_safe_per_world_in_production` parses `config.py` with `ast` and asserts `DATA_DIR` is assigned exactly once, and walks every module under `src/arail` asserting no `config.DATA_DIR` store. Each concurrent World is its own process with `ARAIL_DATA_DIR` set before import, so the import-time binding is correct for that World's whole life — same reasoning REVIEW.md applied to `ActivityLog`. **The hazard is test-only, which is exactly where the fix went.** `tests/test_recap_*`: 174 passed with no `ARAIL_DATA_DIR` set |
+| **F3** — scan raised on a non-dict JSON line (fixed, not filed) | **Satisfied; the right guard** | `activity.py:199-211` (`_has_legacy_body`), guard at `:208` — `isinstance(event, dict)` plus `isinstance(data, dict)` | 14 parameterised shapes (`[1,2,3]`, `123`, `12.5`, a bare string, `true`, `null`, `{"data": "oops"}`, `{"data": [1,2]}`, `{"data": {"prompt_trace": [1,2]}}`, …) all scan cleanly and still count the good line. **Judged, not assumed:** `test_f3_the_guard_is_isinstance_not_a_blanket_try` — a corrupt line must not abort or skew the rest of the scan (3 good records after a corrupt first line, correct `by_source`); a blanket `except` around the loop would have hidden a real `_has_legacy_body` bug, `isinstance` does not. **Endpoint, not just the function:** `test_f3_the_admin_endpoint_degrades_honestly_on_every_page_load` — `GET /api/admin/legacy-bodies` is 200 with the right count and `/admin` renders, for three corrupt shapes |
+
+### The harder F7 cases the coordinator asked for
+
+- **Tmp cleanup on the failure path:** asserted in every failure test —
+  `list(tmp_path.glob("*.purge_tmp")) == []` after an `OSError`.
+- **A crash between tmp-write and `os.replace`:**
+  `test_f7_a_crash_mid_purge_leaves_nothing_a_later_scan_misreads` throws a
+  `BaseException` (not an `Exception`), which no handler on the purge path
+  catches, so the cleanup `except` genuinely never runs and a
+  `activity.jsonl.purge_tmp` survives. **That is safe:** the original is
+  byte-identical, the scan reads only `LOG_FILE` and `LOG_FILE.jsonl.1` and
+  still counts 4 (not the stray), and the stray is strictly *less* sensitive
+  than the original because its bodies are already stripped. A stray temp
+  file is a cosmetic leftover, not a misread.
+- **Partial failure across two paths:** counts only the path that landed and
+  still sets `ok: false`, so no caller clears memory — the conservative
+  direction (memory may show more than disk, never less).
+
+## Rulings
+
+### B — my own two red tests: both ruled **debt**, both now `xfail(strict=True)`
+
+A permanently red test masks the next real failure, and the builder was
+right to refuse to resolve the contradiction silently. Commit `416e49c4`:
+
+- **QA F1** (`test_json_quoted_api_key_is_redacted_before_disk`) — **debt.**
+  The pattern list is ARCHITECTURE.md #5 implemented exactly as specified, so
+  this is a spec change rather than a build defect, and the exposure is
+  bounded by the flight recorder being admin-only and off by default. The
+  xfail reason names the BACKLOG entry verbatim.
+- **QA F6** (`test_malformed_json_on_a_mutating_admin_endpoint_is_not_a_500`)
+  — **debt.** Curl-only, lands after the tier gate, discloses nothing and
+  changes no state.
+
+`strict=True` in both cases, so the day either is fixed the test goes red and
+the debt entry gets retired deliberately rather than drifting.
+
+### C — the two load-dependent `test_qa_security_surface.py` tests: **hardened**, F11 stays debt
+
+Reproduced, root-caused to two distinct pieces of shared process state, and
+fixed in my own test code. Neither is a product defect and neither is this
+sprint's — `git diff main...HEAD -- src/arail/portal/app.py` touches no
+`on_event`, `start_all_auto`, `dream_daemon` or `job_daemon` line.
+
+1. **Reload aliasing (the real one, and not previously diagnosed).**
+   `tests/test_boot_security_scan.py:37` does
+   `importlib.reload(arail.activity)` in a fixture. After that,
+   `arail.portal.app.activity_log` and `arail.activity.activity_log` are
+   **different objects** for the rest of the process — verified directly:
+   `same object before reload: True | after reload: False`. The test emitted
+   through one and read the endpoint serving the other, so its own planted
+   event was invisible. This is also a reproduction of REVIEW.md's noted
+   second weakness of `_isolated_agent_observability_data_root`: its
+   `activity_log._buffer.clear()` stops isolating `app.py` after that reload.
+   Production is unaffected (`grep -rn "importlib.reload" src/` is empty), so
+   the purge's B2 half cannot miss its target in a real lab.
+2. **Ring pressure (F11).** The 200-event ring is shared with daemons left
+   running by earlier `TestClient(app)` startups; they evict — or, once the
+   ring is widened, bury past the endpoint's `n=30` default — the planted
+   event.
+
+Fixes (`0c86372d`, `13dc0d3c`, `2c35133a`): the researcher test now captures
+at the module-under-test's own `activity_log` binding and never touches the
+ring; the purge test binds emit, purge and both reads to the object the
+endpoint serves, widens the ring for its duration and asks for an explicit
+window. Both docstrings pin both mechanisms so neither is rediscovered as a
+mystery. **F11 stays filed as debt** — it is present on main, and promoting a
+pre-existing daemon-lifecycle issue mid-sprint would be scope creep; but it
+now has a named reproduction path.
+
+## New findings introduced by the fix loop
+
+| Id | Severity | Finding | file:line | Test |
+|---|---|---|---|---|
+| **R1** | debt (was the top candidate for must-fix) | Both purge handlers ignore the new `ok` flag and log a failed purge at `info` as *"0 on disk, 0 in memory"* — indistinguishable from "nothing to purge". F7 fixed the lie; the screen is now silent. | `admin.html:1839` (flight recorder), `:1879` (legacy bodies) | `test_f7_residual_the_admin_ui_must_surface_a_failed_purge` (xfail strict) |
+| **R2** | debt, low | `_sanitize_error_class` validates *shape* only, and several real credential formats are class-name-shaped: `hf_<24 alnum>`, `AKIAIOSFODNN7EXAMPLE`, an alphanumeric passphrase. No live producer sends one (the child sends `type(exc).__name__`), so this is a gap in the enforcement point, not in behaviour. Harden with a `redact.redact()` round-trip. | `goal_parser/__init__.py:37-47` | `test_f2_residual_a_class_name_shaped_secret_still_passes_the_allow_list` (xfail strict) |
+| **R3** | informational | `purge_legacy_bodies` does not forward the helper's `errors` list, so the API says *that* a purge failed but never *why*; and `errors` entries carry absolute filesystem paths (admin-gated, local-only, no secret). | `activity.py:293-297` | asserted at the layer that owns it in `test_f7_a_failed_replace_reports_zero_purged_and_not_ok` |
+| **R4** | informational | "Malformed lines pass through byte-identical" holds only for lines that *fail to parse*. A valid-JSON non-dict line (`[1,2,3]`) is re-serialised by `json.dumps`, so whitespace and non-ASCII escaping change. Line count and semantics are preserved; the docstring's wording is broader than the behaviour. | `jsonl_purge.py:33-37` | `test_f3_the_purge_also_survives_a_corrupt_line_byte_identically` |
+| **R5** | test-hygiene, worth a BACKLOG line | `monkeypatch.undo()` inside a test body reverts the **conftest autouse fixtures'** patches too — they share one function-scoped `monkeypatch` instance — so `config.DATA_DIR` silently returns to the developer's real `lab/data` mid-test. Three of my own uses had this; `tests/test_qa6_failclosed_and_bootstrap.py:130` has it benignly (its assertions use an explicit tmp root). | n/a — test convention | fixed in `416e49c4`; no product test asserts it |
+
+None of R1–R5 is a regression: R1/R2 are residuals of the fix loop's own
+changes, R3/R4 are documentation-vs-behaviour gaps in new code, R5 is a
+pre-existing pytest convention hazard this pass surfaced.
+
+## Regression differential (re-established, whole tree, both sides)
+
+| | Failed | Passed | Skipped | xfail |
+|---|---|---|---|---|
+| `qukaizen/arail-buddy-front-and-center` @ `2c35133a` | **40** | 6376 | 19 | 14 |
+| pristine `main` @ `236504ca` | **41** | 5753 | 18 | 7 |
+
+- **Fail on both: 40** — the unchanged pre-existing set.
+- **Fail only on this branch: 0.** Itemised: *(none)*.
+- **Fail only on main: 1** — `test_onboarding.py::test_dashboard_unblocks_after_onboarding`, which the branch legitimately fixes.
+
+Getting there took four whole-tree runs; the intermediate only-branch lists
+are recorded because they are the evidence for section C:
+
+| Run | Only-branch | Notes |
+|---|---|---|
+| 1 (`416e49c4`) | 3 | `test_f9_the_re_init_approach…` + the two `test_qa_security_surface.py` tests |
+| 2 (`0c86372d`) | 1 | F9 identity test retargeted; researcher test hardened |
+| 3 (`13dc0d3c`) | 1 | ring widened + explicit window — still failed; the widening turned eviction into burial |
+| 4 (`2c35133a`) | **0** | reload aliasing diagnosed and bound out |
+
+The QA-only slice is green: `tests/test_qa_*.py` (33 files) → **1364 passed,
+10 xfailed, 0 failed**. Order sweeps over 68 sprint + QA files (reverse and
+two seeded shuffles) → **1867 passed, 10 xfailed**; the single failure in one
+shuffle was `test_recap_core.py::TestCostCeiling::test_calls_by_recap_depth_populated`,
+which is in the fail-on-both 40 and fails on main too — order-dependent and
+pre-existing, not a branch regression.
+
+## W1–W4 and the hot path, on the fixed code
+
+W1–W4: **9 passed**, unchanged. W5 now has a home in the ledger (commit
+`c2410fdf`), so `test_w5_is_the_operators_line_and_is_not_faked_here` passes;
+**the line itself is still unwritten and is still the operator's alone.**
+
+| Measurement | Before the fix loop | After | Budget |
+|---|---|---|---|
+| `record()` p95 | 46.4 / 48.0 / 48.8 µs | **44.9 / 46.4 µs** | 1.0 ms (design), 5 ms (DE4 kill) |
+| `record()` p50 | 31.8–32.3 µs | 31.7 / 32.2 µs | — |
+| Builder's own bench | 46.8 µs | **41.0 µs** | 1.0 ms |
+| Full ring | 50–58 µs | 42.2 / 46.8 µs | 1.0 ms |
+| Rotating file | 46–64 µs | 42.3 / 46.3 µs | 1.0 ms |
+| ENOSPC | 7.2–7.8 µs | 7.8 / 7.8 µs | 1.0 ms |
+
+The numbers did not move — the small improvement is a quieter machine, not a
+code change (the fix loop added one `try` on the body-capture path, which is
+not executed with the recorder off). Still ~20× under the design budget and
+~100× under DE4's kill line.
+
+## Updated must-fix vs debt split
+
+**Must fix before ship: none.** All five of the previous pass's must-fix
+items are satisfied, and no new finding rises to that bar.
+
+**Debt (filed, each with a strict xfail or a BACKLOG entry):**
+R1 (purge UI silent on failure — the one I would fix first, three lines),
+R2 (class-name-shaped secret passes the allow-list),
+QA F1 (quoted-JSON `api_key`), QA F6 (malformed-JSON 500),
+QA F10 (`PKB_ROOT` un-isolated), F11 (daemon threads leak into
+`activity_log`; pre-existing, now with a reproduction path),
+R3/R4 (doc-vs-behaviour gaps), R5 (`monkeypatch.undo()` convention),
+plus the three already-filed items this pass re-confirmed: S3 (dream preview
+live and unredacted), R7 (purge-only POST turns the recorder off), and the
+abandoned-stream trace gap.
+
+**Still needs the operator:** W5's signed witness line — the only thing
+between this sprint and five of five win conditions. Nothing else.
+
+## Re-test inventory
+
+54 new tests in `tests/test_qa_retest_fix_loop.py` (317 QA tests across my
+eight files). Allocation for this pass was dictated by the brief rather than
+the standing 30/30/20/10/10: ~60% security (F7/F8/F2 and their residuals),
+~25% setup/robustness (F3, F9, failure injection), ~15% regression (the
+differential, order sweeps, W1–W4 and the bench re-run).
