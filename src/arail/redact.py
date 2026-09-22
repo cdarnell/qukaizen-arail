@@ -67,19 +67,38 @@ def _secrets_path() -> Path:
     return config.DATA_DIR / "secrets.env"
 
 
+class _SecretsUnreadable(Exception):
+    """Raised by :func:`_parse_secrets_env` when ``secrets.env`` *exists*
+    but could not be read (REVIEW.md R1) — a permissions failure, an IO
+    error, or any other read-time ``OSError``/``ValueError``. Deliberately
+    distinct from "file absent" (the caller already checked
+    ``path.exists()``) and from "file present and empty", both of which
+    are legitimately zero known values: "couldn't read it" must never
+    collapse into "found nothing", the same shape as the bug B1 closed.
+    Caught by :func:`redact` (lenient, degrades to shape-pass-only) and
+    deliberately NOT caught by :func:`_redact_strict` (propagates to
+    :func:`capture_body`'s fail-closed ``None``)."""
+
+
 def _parse_secrets_env(path: Path) -> list[str]:
     """Best-effort parse. ``errors="replace"`` so a ``secrets.env`` with one
     stray non-UTF-8 byte (a key pasted from a terminal, a file written by a
     non-Python tool) still yields every *other* line's value instead of
     raising ``UnicodeDecodeError`` (a ``ValueError`` subclass) and losing the
-    whole pass — see REVIEW.md B1. ``(OSError, ValueError)`` covers both the
-    filesystem failures this always caught and any decode failure that
-    ``errors="replace"`` doesn't already avoid."""
-    values: list[str] = []
+    whole pass — see REVIEW.md B1's other half, which this preserves: a
+    mangled-but-readable file still decodes here and still redacts every
+    other line's value.
+
+    R1's narrower case is a *read* failure, not a decode one — the file
+    exists but ``read_text()`` itself raises (permissions, IO). That is
+    signalled by raising :class:`_SecretsUnreadable` rather than
+    returning ``[]``, so it cannot be mistaken for "the file has no
+    usable lines"."""
     try:
         text = path.read_text(errors="replace")
-    except (OSError, ValueError):
-        return values
+    except (OSError, ValueError) as e:
+        raise _SecretsUnreadable(str(e)) from e
+    values: list[str] = []
     for line in text.splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:

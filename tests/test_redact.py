@@ -8,6 +8,7 @@ independently by QA from ARCHITECTURE.md's contract, not from this file.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -213,6 +214,99 @@ def test_b1_non_utf8_secrets_env_does_not_raise():
         path.write_bytes(b"KEY=bad\xffvalue0123456789\n")
         values = redact._parse_secrets_env(path)
         assert isinstance(values, list)  # never raises, always a list
+
+
+# ---------------------------------------------------------------------------
+# R1 (re-review of the B1 fix) — an *existing-but-unreadable* secrets.env
+# must not collapse into "no known values" the same way an absent or
+# genuinely empty one legitimately does. "Can't read it" and "found
+# nothing" must stay distinguishable, or capture_body silently returns a
+# shape-pass-only, under-redacted body with redactions: 0 -- identical to
+# the normal result for a clean prompt.
+# ---------------------------------------------------------------------------
+
+def test_r1_existing_but_unreadable_secrets_env_fails_capture_closed(tmp_path):
+    """The reviewer's own repro: secrets.env present, chmod 000, a prompt
+    containing the value that file would have redacted. Before the fix
+    this returned a body with the secret still in it and redactions: 0
+    -- indistinguishable from a clean prompt. Skips cleanly under root,
+    where chmod 000 does not actually block reads."""
+    if os.geteuid() == 0:
+        pytest.skip("running as root -- chmod 000 is still readable")
+    path = tmp_path / "secrets.env"
+    path.write_text("API_KEY=supersecretvalue123\n")
+    path.chmod(0o000)
+    try:
+        redact._reset_cache_for_tests()
+        body = redact.capture_body(
+            "a prompt containing supersecretvalue123 in it", "resp"
+        )
+        assert body is None
+    finally:
+        path.chmod(0o600)  # restore so tmp_path's own cleanup can remove it
+
+
+def test_r1_missing_secrets_env_still_captures():
+    """The state R1 must NOT be confused with "unreadable": a genuinely
+    absent secrets.env is not an error. capture_body still runs the shape
+    pass and returns a body."""
+    redact._reset_cache_for_tests()
+    body = redact.capture_body("a prompt with sk-shapepassonlyvalue012345", "resp")
+    assert body is not None
+    assert "sk-shapepassonlyvalue012345" not in body["prompt"]
+
+
+def test_r1_mangled_but_readable_secrets_env_still_redacts_other_lines(tmp_path):
+    """Guard against R1's fix over-tightening: B1's other half (a
+    *readable* file with one decode-noise line) must keep redacting every
+    other line's value -- this is the same scenario as
+    test_b1_non_utf8_secrets_env_still_redacts_other_values, re-asserted
+    here specifically alongside R1's new unreadable-file test so the two
+    cases (mangled-but-readable vs. genuinely unreadable) are pinned
+    side by side."""
+    path = tmp_path / "secrets.env"
+    path.write_bytes(
+        b"CLEAN_KEY=supersecretvalue123\n"
+        b"MANGLED_KEY=abc\xffdef01234567\n"
+    )
+    redact._reset_cache_for_tests()
+    body = redact.capture_body("here is supersecretvalue123 in a prompt", "resp")
+    assert body is not None
+    assert "supersecretvalue123" not in body["prompt"]
+
+
+def test_parse_secrets_env_raises_secrets_unreadable_on_permission_error(tmp_path):
+    """Direct unit test of the new signal, independent of capture_body's
+    own fail-closed wrapper."""
+    if os.geteuid() == 0:
+        pytest.skip("running as root -- chmod 000 is still readable")
+    path = tmp_path / "secrets.env"
+    path.write_text("API_KEY=supersecretvalue123\n")
+    path.chmod(0o000)
+    try:
+        with pytest.raises(redact._SecretsUnreadable):
+            redact._parse_secrets_env(path)
+    finally:
+        path.chmod(0o600)
+
+
+def test_redact_lenient_still_degrades_gracefully_on_unreadable_secrets_env(tmp_path):
+    """redact() (the lenient public function, used for display text) must
+    keep swallowing the new _SecretsUnreadable exactly like any other
+    _known_values() failure -- only capture_body's strict path (via
+    _redact_strict) fails closed."""
+    if os.geteuid() == 0:
+        pytest.skip("running as root -- chmod 000 is still readable")
+    path = tmp_path / "secrets.env"
+    path.write_text("API_KEY=supersecretvalue123\n")
+    path.chmod(0o000)
+    try:
+        redact._reset_cache_for_tests()
+        out, n = redact.redact("plain text, no secret shape")
+        assert out == "plain text, no secret shape"
+        assert n == 0
+    finally:
+        path.chmod(0o600)
 
 
 # ---------------------------------------------------------------------------
