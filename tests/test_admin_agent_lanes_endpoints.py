@@ -352,7 +352,11 @@ def test_flight_recorder_endpoint_purge_option(monkeypatch, tmp_path):
     assert r.status_code == 200
     body = r.json()
     assert body["enabled"] is False
-    assert body["purge"] == {"purged": 1, "purged_memory": 1}
+    # "ok" is additive (QA F7/F8) -- assert the pre-existing fields
+    # precisely rather than exact dict equality.
+    assert body["purge"]["purged"] == 1
+    assert body["purge"]["purged_memory"] == 1
+    assert body["purge"]["ok"] is True
     assert agent_trace.find("9" * 16)["bodies"] is None
 
 

@@ -408,7 +408,11 @@ def test_purge_flight_recorder_bodies_strips_ring_and_disk(tmp_path):
                        model="m", bodies={"prompt": "p", "response": "r"})
 
     result = agent_trace.purge_flight_recorder_bodies()
-    assert result == {"purged": 1, "purged_memory": 1}
+    # "ok" is additive (QA F7/F8) -- assert the pre-existing fields
+    # precisely rather than exact dict equality.
+    assert result["purged"] == 1
+    assert result["purged_memory"] == 1
+    assert result["ok"] is True
 
     # In-memory ring: stripped in place, other fields untouched.
     rec = agent_trace.find("f" * 16)
@@ -440,7 +444,9 @@ def test_purge_flight_recorder_bodies_count_is_zero_when_nothing_captured():
     agent_trace.set_recorder_enabled(False)
     agent_trace.record(trace_id="2" * 16, agent_id="researcher", kind="agent")
     result = agent_trace.purge_flight_recorder_bodies()
-    assert result == {"purged": 0, "purged_memory": 0}
+    assert result["purged"] == 0
+    assert result["purged_memory"] == 0
+    assert result["ok"] is True
 
 
 def test_purge_flight_recorder_bodies_leaves_bodyless_records_untouched(tmp_path):
@@ -448,7 +454,9 @@ def test_purge_flight_recorder_bodies_leaves_bodyless_records_untouched(tmp_path
     agent_trace.record(trace_id="3" * 16, agent_id="researcher", kind="agent",
                        model="m")
     result = agent_trace.purge_flight_recorder_bodies()
-    assert result == {"purged": 0, "purged_memory": 0}
+    assert result["purged"] == 0
+    assert result["purged_memory"] == 0
+    assert result["ok"] is True
     rec = agent_trace.find("3" * 16)
     # bodies_purged is an always-present field (like every other key in
     # _FIELDS) -- None here means "never had a body to purge", not "field

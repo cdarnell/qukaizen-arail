@@ -566,23 +566,34 @@ def purge_flight_recorder_bodies() -> dict:
     the in-memory ring, mirroring REVIEW.md B2's activity_log._buffer
     fix: a purge that leaves the live ring readable would look complete
     (``{"purged": N}``) while still serving the exact bodies it claimed
-    to have removed."""
+    to have removed.
+
+    QA F7/F8 (TEST_REPORT.md), fixed the same way as activity.py's
+    twin: jsonl_purge.purge_jsonl_bodies now only counts a path's
+    records once its os.replace has actually succeeded, and the ring is
+    only cleared once every path replaced successfully -- a failed disk
+    rewrite must not report success or hide behind a cleared ring."""
     from arail.jsonl_purge import purge_jsonl_bodies
 
     path = _trace_path()
-    purged_disk = purge_jsonl_bodies(
+    disk_result = purge_jsonl_bodies(
         [path.with_suffix(".jsonl.1"), path],
         _has_recorder_body,
         _strip_recorder_body,
     )
 
     purged_memory = 0
-    for rec in list(_get_ring()):
-        if _has_recorder_body(rec):
-            _strip_recorder_body(rec)
-            purged_memory += 1
+    if disk_result["ok"]:
+        for rec in list(_get_ring()):
+            if _has_recorder_body(rec):
+                _strip_recorder_body(rec)
+                purged_memory += 1
 
-    return {"purged": purged_disk, "purged_memory": purged_memory}
+    return {
+        "purged": disk_result["purged"],
+        "purged_memory": purged_memory,
+        "ok": disk_result["ok"],
+    }
 
 
 def _reset_recorder_for_tests() -> None:

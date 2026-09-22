@@ -252,19 +252,35 @@ def purge_legacy_bodies() -> Dict[str, Any]:
     Without this, a purge looked complete (`{"purged": N}`) while the exact
     bodies just removed from disk stayed readable from memory until the
     next restart.
+
+    QA F7/F8 (TEST_REPORT.md): the disk rewrite can fail (a full disk, a
+    read-only mount after a failed update) between the temp write and the
+    ``os.replace`` that actually lands it. Order matters: rewrite, then
+    replace, and only *then* clear memory. ``disk_result["purged"]``
+    already excludes any path whose replace failed, and ``purged_memory``
+    now stays 0 (the buffer untouched) whenever ``disk_result["ok"]`` is
+    False — so a failed purge reports 0 and `/api/activity/recent` keeps
+    telling the truth about what is still on disk, instead of the memory
+    copy going clean while the file the operator was told was purged
+    still isn't.
     """
     from arail.jsonl_purge import purge_jsonl_bodies
 
-    purged_disk = purge_jsonl_bodies(
+    disk_result = purge_jsonl_bodies(
         [LOG_FILE.with_suffix(".jsonl.1"), LOG_FILE],
         _has_legacy_body,
         _strip_legacy_body,
     )
 
     purged_memory = 0
-    for event in list(activity_log._buffer):
-        if _has_legacy_body(event):
-            _strip_legacy_body(event)
-            purged_memory += 1
+    if disk_result["ok"]:
+        for event in list(activity_log._buffer):
+            if _has_legacy_body(event):
+                _strip_legacy_body(event)
+                purged_memory += 1
 
-    return {"purged": purged_disk, "purged_memory": purged_memory}
+    return {
+        "purged": disk_result["purged"],
+        "purged_memory": purged_memory,
+        "ok": disk_result["ok"],
+    }
