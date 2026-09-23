@@ -129,6 +129,7 @@ def _register_verbs() -> None:
     from arail.nucleus import build as _build
     from arail.nucleus import certify as _certify
     from arail.nucleus import plan as _plan
+    from arail.nucleus import spike as _spike
     from arail.nucleus.cards import seal as _seal
     from arail.nucleus.corpus import stage as _stage
 
@@ -138,6 +139,7 @@ def _register_verbs() -> None:
     _IMPLEMENTED["status"] = _build.status
     _IMPLEMENTED["verify"] = _seal.run
     _IMPLEMENTED["certify"] = _certify.run
+    _IMPLEMENTED["spike"] = _spike.run
 
 
 _register_verbs()
