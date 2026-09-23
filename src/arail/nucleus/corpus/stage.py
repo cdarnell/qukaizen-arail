@@ -138,6 +138,16 @@ def stage(
     manifest_path = out_dir / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, sort_keys=True, indent=2))
 
+    # Non-canonical, unhashed sidecar: the operator's own local paths for
+    # same-machine reuse (evals/executable_kernel.py's patch_applies needs
+    # the actual git repo at build time -- staging intentionally never
+    # hashes a path, since paths aren't portable/reproducible, but a local
+    # build on the SAME machine that staged the corpus can still use one
+    # if it's there). Absent this file (or a missing/moved path inside
+    # it), executable checks degrade to not_run -- never an error.
+    local_paths = {name: str(path) for name, path in provided_sources.items()}
+    (out_dir / "local_paths.json").write_text(json.dumps(local_paths, sort_keys=True, indent=2))
+
     return StageResult(manifest=manifest, manifest_sha256=manifest_sha256,
                        items_path=items_path, manifest_path=manifest_path,
                        n_items=len(items))
@@ -156,6 +166,20 @@ def load_staged(domain_name: str, *, nucleus_data: Optional[Path] = None) -> Opt
     n_items = manifest.get("n_items", 0)
     return StageResult(manifest=manifest, manifest_sha256=manifest.get("sha256", ""),
                        items_path=items_path, manifest_path=manifest_path, n_items=n_items)
+
+
+def load_local_paths(domain_name: str, *, nucleus_data: Optional[Path] = None) -> Dict[str, str]:
+    """Best-effort same-machine convenience read; see the sidecar note in
+    stage() above. Never raises -- a missing or unreadable file just means
+    no local paths are known, and callers treat that as "not available"."""
+    out_dir = _corpus_dir(domain_name, nucleus_data=nucleus_data)
+    local_paths_file = out_dir / "local_paths.json"
+    if not local_paths_file.is_file():
+        return {}
+    try:
+        return json.loads(local_paths_file.read_text())
+    except (OSError, ValueError):
+        return {}
 
 
 def load_items(stage_result: StageResult) -> List[dict]:

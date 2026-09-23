@@ -126,11 +126,14 @@ _IMPLEMENTED: dict[str, Callable[[list], int]] = {}
 def _register_verbs() -> None:
     """Deferred import so `cli.py` stays importable even before every verb
     module exists yet (build order, ARCHITECTURE.md §10)."""
+    from arail.nucleus import build as _build
     from arail.nucleus import plan as _plan
     from arail.nucleus.corpus import stage as _stage
 
     _IMPLEMENTED["plan"] = _plan.run
     _IMPLEMENTED["stage"] = _stage.run
+    _IMPLEMENTED["build"] = _build.run
+    _IMPLEMENTED["status"] = _build.status
 
 
 _register_verbs()

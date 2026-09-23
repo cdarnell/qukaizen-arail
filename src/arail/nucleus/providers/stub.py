@@ -126,3 +126,32 @@ class StubJudge:
 
     def judge(self, item_id: str, text_a: str, text_b: str) -> str:
         return self.preferences.get(item_id, "A")
+
+
+class StubTrainer:
+    """Fake LoRA training: writes a marker file instead of running MLX,
+    and returns a `dev_proxy_composite` from a deterministic quality curve
+    (rises then plateaus) so arbitrage.py's stop rules are exercised for
+    real in CI. `quality` is the marker StubProvider reads to decide which
+    fixture answers the "student" role returns after this cycle — the
+    seam that makes end-to-end metrics exact rationals instead of noise.
+    """
+
+    def __init__(self, adapter_root, *, curve: Optional[List[float]] = None):
+        _require_stub_enabled()
+        self.adapter_root = adapter_root
+        # Default curve: improves for a few cycles, then plateaus below a
+        # perfect score -- exercises both target_reached (if target is set
+        # low enough) and fidelity_plateau_3_cycles (if not).
+        self.curve = curve or [0.3, 0.5, 0.62, 0.68, 0.70, 0.70, 0.70, 0.70]
+
+    def train_cycle(self, cycle_idx: int):
+        from arail.nucleus.arbitrage import CycleResult
+
+        idx = min(cycle_idx - 1, len(self.curve) - 1)
+        proxy = self.curve[idx]
+        adapter_dir = self.adapter_root / f"cycle-{cycle_idx}"
+        adapter_dir.mkdir(parents=True, exist_ok=True)
+        (adapter_dir / "adapter.marker").write_text(f"stub-adapter quality={proxy}\n")
+        return CycleResult(cycle=cycle_idx, dev_proxy_composite=proxy,
+                           adapter_path=str(adapter_dir), elapsed_hours=0.01)
