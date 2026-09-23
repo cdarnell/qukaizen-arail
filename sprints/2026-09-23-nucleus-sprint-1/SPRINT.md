@@ -15,7 +15,7 @@ Make Project Nucleus a first-class ARAIL surface ("Model Forge"): `src/arail/nuc
 |---|---|---|---|---|---|---|
 | think | visionary | VISION.md | done | 2026-09-23 | 2026-09-23 | proceed (narrower wedge; 3 operator questions before plan) |
 | plan | architect (design) | ARCHITECTURE.md | done | 2026-09-23 | 2026-09-23 | complete (58b754bc); operator questions Q1–Q9 open, Q1 blocks Gate B only |
-| build | builder | BUILD_LOG.md | pending | — | — | — |
+| build | builder | BUILD_LOG.md | in progress | 2026-09-23 | — | — |
 | review | architect (review) | REVIEW.md | pending | — | — | — |
 | test | qa | TEST_REPORT.md | pending | — | — | — |
 | ship | — | PR | pending | — | — | — |
@@ -30,6 +30,11 @@ Make Project Nucleus a first-class ARAIL surface ("Model Forge"): `src/arail/nuc
 | 2026-09-23 | Scope = narrow wedge: items 1, 2, 6–9 + read-only `/forge` DNA-card viewer; Gate A (stub tests) → Gate B (half-day M5 spike) → item 10. Items 3 (MCP tools) and 4 (Buddy skill) deferred to a follow-on sprint, with the "first-time user via Buddy" criterion | Operator, per VISION.md: no `arail-ops` server exists; Buddy brief sequences guard rails first |
 | 2026-09-23 | DNA card v2 `signed:` verifies with Nucleus's existing `qkz isotope verify` seal format — no new ARAIL key | Operator: continuity with certified models |
 | 2026-09-23 | `2026-07-22-distill-now` is superseded; the existing `/build` tab is retired, `/forge` is new and separate | Operator |
+| 2026-09-23 | Q1: logprobs via an opt-in local `aerollm-api` build with `unstable-api` (ARCHITECTURE commit 28); shipped bundle stays pinned. Logit mode = teacher-generated sequences with top-N logprobs | Operator |
+| 2026-09-23 | Q4: fallback composite formula and decision thresholds approved as designed (ARCHITECTURE §4); formula string is published in the card | Operator |
+| 2026-09-23 | Q5: `certify` writes a local ledger by default; tracked `docs/CERTIFIED_MODELS.md` is appended only with `--publish-row` | Operator |
+| 2026-09-23 | Q9: builder may update repo `CLAUDE.md` for the `/build` → `/forge` retirement | Operator |
+| 2026-09-23 | Q2, Q3, Q7 (lineage key, 24 GB cap, network prep) deferred to Gate B | Not needed for Gate A |
 | 2026-09-23 | Re-implement Nucleus against the brief; salvage `src/arail/build/preflight.py`, `world_corpus.py`, and the seal format selectively — do not port the old private pipeline wholesale | Operator; agrees with brief §1 and VISION.md |
 
 ## Skipped phases
