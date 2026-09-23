@@ -1414,3 +1414,125 @@ the Researcher a code-writing committer, `agent-loop.md` saying `git
 reset`, `tuning-loop.md` listing two whitelisted files — was fixed in the
 same branch. The remaining prose risk is that "autoresearch" still names
 two unrelated engines.
+
+---
+
+## Model Forge's logit path needs a non-bundled `unstable-api` runtime build
+
+**Filed by:** `sprints/2026-09-23-nucleus-sprint-1/ARCHITECTURE.md` §9
+"Added" #1 (F1).
+
+**The gap.** The pinned QueueLLM bundle ARAIL ships
+(`THIRD-PARTY-LICENSES/aerollm/BUNDLE.json`, `arail_release: v1.1.0`) is
+built with `--features extension-module` only — `Runtime.generate(logprobs=…)`
+and `Runtime.score()` are both `#[cfg(feature = "unstable-api")]` and raise
+`ValueError: logprobs is unstable per STABILITY.md` on the shipped binary.
+Logit-mode distillation (`nucleus build`'s Phase A) therefore cannot run
+against the default install at all; it needs a maintainer-local rebuild
+with `--features unstable-api` (ARCHITECTURE.md §10 commit 28, gated on
+operator decision Q1 = yes, out of this builder's scope per the task
+instructions).
+
+**What a future sprint needs to do:** either (a) re-pin ARAIL's bundle
+with `unstable-api` once QueueLLM promotes the R.2 logprobs path to
+stable — an outward-facing QueueLLM stability decision, not an ARAIL-side
+one — or (b) ship a second "forge" bundle alongside the default one,
+built with `unstable-api`, so `nucleus build` works out of the box
+without a maintainer-local cargo build. Until either lands, Gate B and
+item 10 (the real `qkz-linux-kernel` build) require commit 28's opt-in
+`ARAIL_AEROLLM_FEATURES=unstable-api ./arailctl deep rebuild` step.
+
+---
+
+## Nucleus's legacy-5 seal payload has no schema_version and is not JCS; the Python signer and Rust verifier already disagree
+
+**Filed by:** `sprints/2026-09-23-nucleus-sprint-1/ARCHITECTURE.md` §9
+"Added" #2 (F3) — also filed in `qukaizen-nucleus` per that doc's
+instruction.
+
+**The gap.** `arail.nucleus.cards.seal` signs exactly the 5-field legacy
+payload (`dna_id`, `pipeline_run_id`, `chain_hash`, `gate_results`,
+`timestamp`) because that's what the Nucleus Rust `qkz isotope verify`
+binary actually checks (confirmed live against the real binary at
+`qukaizen-nucleus/qkz/target/release/qkz`, T-SEAL-8). But Nucleus's OWN
+current Python signer (`NucleusDNAGenerator._build_signed_payload`,
+`nucleus/certifier/dna.py`) signs a **10-field** payload
+(`schema_version`, `lineage_id`, `model_version`, `base_model`,
+`regression_gate` added on top of the 5), so Nucleus's own current seals
+already fail its own Rust verifier — this is a pre-existing upstream
+defect, not something introduced by ARAIL's build against the contract.
+Neither payload format carries an RFC-8785 JCS guarantee; the Rust side's
+`PythonJsonFormatter` is a byte-for-byte reimplementation of CPython's
+`json.dumps(..., sort_keys=True)` default whitespace, which is fragile
+(any future change to either language's default JSON serialization
+breaks compatibility silently).
+
+**What a future sprint needs to do (in `qukaizen-nucleus`, per the
+architecture's own instruction):** move both the Python signer and the
+Rust verifier to a versioned payload (bump `SEAL_SCHEMA_VERSION`, have
+the verifier branch on it) using RFC-8785 JSON Canonicalization Scheme
+instead of a hand-matched formatter, then re-point ARAIL's `seal.py` at
+the new version once it's stable. Until then, ARAIL intentionally signs
+the narrower 5-field payload and does not attempt to also satisfy
+Nucleus's own 10-field Python verifier.
+
+---
+
+## Model Forge's worker duplicates a slice of the deep-runtime backend's init (thread pinning, KV budget)
+
+**Filed by:** `sprints/2026-09-23-nucleus-sprint-1/ARCHITECTURE.md` §9
+"Added" #3.
+
+**The gap.** `arail.nucleus.providers.queuellm.QueueLLMProvider`
+constructs `aerollm_api.Runtime(model_path, **kwargs)` directly, on a
+dedicated one-worker `ThreadPoolExecutor`, in a phase subprocess — the
+same "pin the unsendable Metal-backed handle to one worker thread"
+pattern the portal's own deep-mode backend
+(`src/arail/router/backends.py::AeroLLMBackend`) already implements, but
+duplicated rather than shared, because `AeroLLMBackend` is a process-wide
+singleton keyed by the `AEROLLM_MODEL` env var with no model parameter
+(F9) — it structurally cannot serve three different models (teacher,
+judge, student) in one Model Forge build.
+
+**What a future sprint should do:** extract a shared
+`queuellm_runtime_factory(model_path, **kw)` (thread-pinning + KV-budget
+construction logic only, no env-var-keyed singleton state) that both
+`AeroLLMBackend.__init__` and `QueueLLMProvider.__init__` call into, so
+the "unsendable handle, one pinned worker thread" invariant has one
+implementation instead of two that could drift.
+
+---
+
+## Model Forge's real MLX training-cycle wiring (build.py's PB phase) is a stub for the M5
+
+**Filed by:** builder session, sprints/2026-09-23-nucleus-sprint-1
+BUILD_LOG.md "Deviations from the architecture" — not itself named in
+ARCHITECTURE.md §9, but a real gap discovered during commit 18.
+
+**The gap.** `train/mlx_kd.py` (commit 17) implements the per-step MLX
+loss/grad computation (`kd_train_step`) and model loading
+(`load_student_for_training`), matching train/kd_loss.py's numpy
+reference exactly. `build.py`'s `_phase_train` (commit 18) wires
+`arbitrage.run()` to a real trainer only for the stub path
+(`providers.stub.StubTrainer`) — the real-runtime branch
+(`_mlx_train_cycle_fn`) currently always refuses with a clear message
+rather than actually driving a multi-cycle loop that reads `.npz`
+extract shards, builds MLX batches, calls `kd_train_step`, applies an
+optimizer step, and reports a real `dev_proxy_composite`. This was a
+deliberate scope decision under the builder's time budget, not an
+oversight discovered late: the stub path is what Gate A (CI) needs, and
+wiring a full MLX training loop is real additional integration work
+(optimizer choice/schedule, batch construction from sharded `.npz`
+files, checkpointing) beyond what commit 17's single-step primitives
+provide on their own.
+
+**What a future sprint needs to do:** complete `_mlx_train_cycle_fn` in
+`build.py` — read train shards from `run_dir/extract/*.npz` in batches,
+call `train.mlx_kd.load_student_for_training` once per build (not once
+per cycle), run `kd_train_step` + an `mlx.optimizers.Adam` (or similar)
+step per batch, checkpoint the adapter each cycle, and run a lightweight
+MLX-served dev-only proxy eval (per ARCHITECTURE.md §3's
+"arbitrage.dev_eval_runtime: mlx") to produce a real
+`dev_proxy_composite`. This is required before Gate B / item 10 can run
+for real (`ARAIL_NUCLEUS_STUB` unset) — verify on the M5 alongside the
+`requires_mlx` markers.
