@@ -13,7 +13,7 @@ Make Project Nucleus a first-class ARAIL surface ("Model Forge"): `src/arail/nuc
 
 | Phase | Subagent | Artifact | Status | Started | Finished | Verdict |
 |---|---|---|---|---|---|---|
-| think | visionary | VISION.md | pending | — | — | — |
+| think | visionary | VISION.md | done | 2026-09-23 | 2026-09-23 | proceed (narrower wedge; 3 operator questions before plan) |
 | plan | architect (design) | ARCHITECTURE.md | pending | — | — | — |
 | build | builder | BUILD_LOG.md | pending | — | — | — |
 | review | architect (review) | REVIEW.md | pending | — | — | — |
@@ -34,4 +34,5 @@ Make Project Nucleus a first-class ARAIL surface ("Model Forge"): `src/arail/nuc
 |---|---|
 
 ## Notes
+- VISION.md (c8b1cefc): proceed on items 1, 2, 6–9 + read-only card viewer; defer 3–4 (no `arail-ops` MCP server exists; Buddy brief says guard rails first). Operator questions pending: scope, seal continuity (`qkz isotope verify` vs new ARAIL key), supersede distill-now / fold or retire `/build`.
 - Open question from brief §1 (move old private Nucleus code wholesale vs re-implement against the brief): brief recommends re-implement. Architect should surface if this needs the operator before build.
