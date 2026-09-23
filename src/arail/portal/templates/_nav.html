@@ -80,6 +80,11 @@
      title="Model Building — build, distill, and register models via the Nucleus pipeline.">Model Building</a>
   {% endif %}
 
+  {% if 'forge' in _ts %}
+  <a href="/forge"{% if active == 'forge' %} class="active"{% endif %}
+     title="Model Forge — signed DNA cards from local arailctl nucleus builds.">Model Forge</a>
+  {% endif %}
+
   {% if 'admin' in _ts %}
   <a href="/admin"{% if active in ['admin', 'plugins', 'notebooks'] %} class="active"{% endif %}>Admin</a>
   {% endif %}

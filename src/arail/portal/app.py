@@ -190,10 +190,10 @@ _METRICS_LOCK = _threading.Lock()
 # Two tiers: minimalist (everyday) and maximus (full bench). Upgrade with
 # ./arailctl upgrade maximus.
 _TIER_SURFACES: dict[str, set[str]] = {
-    "minimalist": {"dashboard", "chat", "research", "dac", "agents", "docs", "study"},
+    "minimalist": {"dashboard", "chat", "research", "dac", "agents", "docs", "study", "forge"},
     "maximus": {"dashboard", "chat", "research", "dac", "agents",
                 "admin", "docs", "notebooks", "terminal", "tuning", "plugins",
-                "build", "study"},
+                "build", "study", "forge"},
 }
 
 # v1.0.0 tier rename + the LAB_TIER lookup now live in arail.tier, the single
@@ -720,6 +720,9 @@ app.include_router(models_router)
 
 from arail.portal.build_api import build_router  # noqa: E402
 app.include_router(build_router)
+
+from arail.portal.forge_api import forge_router  # noqa: E402
+app.include_router(forge_router)
 
 from arail.portal.chat_sessions_api import chat_sessions_router  # noqa: E402
 app.include_router(chat_sessions_router)
@@ -12049,6 +12052,41 @@ async def build_page(request: Request):
         return gate
     return templates.TemplateResponse(request, "build.html", {
         "active": "build",
+        **_identity_ctx(),
+    })
+
+
+@app.get("/forge", response_class=HTMLResponse)
+async def forge_list_page(request: Request):
+    """Model Forge — read-only DNA-card viewer (ARCHITECTURE.md §4.13)."""
+    if (gate := _require_surface("forge")) is not None:
+        return gate
+    from arail.portal import forge_api
+
+    return templates.TemplateResponse(request, "forge.html", {
+        "active": "forge", "mode": "list",
+        "cards": forge_api.list_cards(), "in_progress": forge_api.list_in_progress_runs(),
+        **_identity_ctx(),
+    })
+
+
+@app.get("/forge/{shard}/{version}", response_class=HTMLResponse)
+async def forge_detail_page(request: Request, shard: str, version: str):
+    if (gate := _require_surface("forge")) is not None:
+        return gate
+    from arail.portal import forge_api
+
+    card_dir = forge_api.safe_card_dir(shard, version)
+    if card_dir is None:
+        return HTMLResponse(status_code=404, content="not found")
+    card = forge_api.load_card_safely(card_dir / "dna-card.yaml")
+    if card is None:
+        return HTMLResponse(status_code=404, content="not found")
+
+    return templates.TemplateResponse(request, "forge.html", {
+        "active": "forge", "mode": "detail", "shard": shard, "version": version,
+        "card": card, "verify_badge": forge_api.verify_badge(card),
+        "report_html": forge_api.render_report_html(card_dir / "build-report.md"),
         **_identity_ctx(),
     })
 
