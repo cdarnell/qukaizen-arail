@@ -128,12 +128,14 @@ def _register_verbs() -> None:
     module exists yet (build order, ARCHITECTURE.md §10)."""
     from arail.nucleus import build as _build
     from arail.nucleus import plan as _plan
+    from arail.nucleus.cards import seal as _seal
     from arail.nucleus.corpus import stage as _stage
 
     _IMPLEMENTED["plan"] = _plan.run
     _IMPLEMENTED["stage"] = _stage.run
     _IMPLEMENTED["build"] = _build.run
     _IMPLEMENTED["status"] = _build.status
+    _IMPLEMENTED["verify"] = _seal.run
 
 
 _register_verbs()
