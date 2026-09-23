@@ -95,6 +95,19 @@ def _bundle_metadata() -> dict:
         return {}
 
 
+def buddy_deep_model_env_value() -> Optional[str]:
+    """Read Buddy's configured deep-mode model dir, if any.
+
+    Only this module may spell the frozen env var name (T-RT-2) — this
+    is a READ, not a write (arail.nucleus never writes env vars; see the
+    module docstring), used by preflight.py's declared-Buddy-reserve
+    estimate. Honors QUEUELLM_MODEL first, then the frozen AEROLLM_MODEL
+    alias, mirroring the workspace's AeroLLM -> QueueLLM deprecation
+    order (queuellm repo CLAUDE.md: QUEUELLM_* wins when both are set).
+    """
+    return os.getenv("QUEUELLM_MODEL") or os.getenv("AEROLLM_MODEL")
+
+
 def runtime_provenance(module, *, features: Optional[list] = None) -> dict:
     """Provenance dict recorded on the DNA card for a QueueLLM-backed role.
 
