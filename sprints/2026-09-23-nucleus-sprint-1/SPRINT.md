@@ -14,7 +14,7 @@ Make Project Nucleus a first-class ARAIL surface ("Model Forge"): `src/arail/nuc
 | Phase | Subagent | Artifact | Status | Started | Finished | Verdict |
 |---|---|---|---|---|---|---|
 | think | visionary | VISION.md | done | 2026-09-23 | 2026-09-23 | proceed (narrower wedge; 3 operator questions before plan) |
-| plan | architect (design) | ARCHITECTURE.md | pending | — | — | — |
+| plan | architect (design) | ARCHITECTURE.md | in progress | 2026-09-23 | — | — |
 | build | builder | BUILD_LOG.md | pending | — | — | — |
 | review | architect (review) | REVIEW.md | pending | — | — | — |
 | test | qa | TEST_REPORT.md | pending | — | — | — |
@@ -27,6 +27,10 @@ Make Project Nucleus a first-class ARAIL surface ("Model Forge"): `src/arail/nuc
 | 2026-09-23 | Sprint runs in a fresh worktree on a branch cut from origin/main | Main arail checkout is on `qukaizen/arail-ingress-spine` with uncommitted work; keep the sprint clean |
 | 2026-09-23 | Brief decisions D1–D8 are locked inputs, not up for re-litigation | Operator set them in the brief; visionary validates the wedge and win, not the decisions |
 | 2026-09-23 | Item 10 (real M5 build) is sequenced last, gated on stub-provider tests passing | Operator instruction |
+| 2026-09-23 | Scope = narrow wedge: items 1, 2, 6–9 + read-only `/forge` DNA-card viewer; Gate A (stub tests) → Gate B (half-day M5 spike) → item 10. Items 3 (MCP tools) and 4 (Buddy skill) deferred to a follow-on sprint, with the "first-time user via Buddy" criterion | Operator, per VISION.md: no `arail-ops` server exists; Buddy brief sequences guard rails first |
+| 2026-09-23 | DNA card v2 `signed:` verifies with Nucleus's existing `qkz isotope verify` seal format — no new ARAIL key | Operator: continuity with certified models |
+| 2026-09-23 | `2026-07-22-distill-now` is superseded; the existing `/build` tab is retired, `/forge` is new and separate | Operator |
+| 2026-09-23 | Re-implement Nucleus against the brief; salvage `src/arail/build/preflight.py`, `world_corpus.py`, and the seal format selectively — do not port the old private pipeline wholesale | Operator; agrees with brief §1 and VISION.md |
 
 ## Skipped phases
 
