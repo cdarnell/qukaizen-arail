@@ -127,6 +127,7 @@ def _register_verbs() -> None:
     """Deferred import so `cli.py` stays importable even before every verb
     module exists yet (build order, ARCHITECTURE.md §10)."""
     from arail.nucleus import build as _build
+    from arail.nucleus import certify as _certify
     from arail.nucleus import plan as _plan
     from arail.nucleus.cards import seal as _seal
     from arail.nucleus.corpus import stage as _stage
@@ -136,6 +137,7 @@ def _register_verbs() -> None:
     _IMPLEMENTED["build"] = _build.run
     _IMPLEMENTED["status"] = _build.status
     _IMPLEMENTED["verify"] = _seal.run
+    _IMPLEMENTED["certify"] = _certify.run
 
 
 _register_verbs()

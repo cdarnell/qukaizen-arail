@@ -82,6 +82,10 @@ class CertAccess:
         self._manifest = manifest
         self._open_count = 0
 
+    @property
+    def manifest(self) -> dict:
+        return self._manifest
+
     def open(self) -> List[dict]:
         self._open_count += 1
         cert_path = self._cert_dir / "cert.jsonl"

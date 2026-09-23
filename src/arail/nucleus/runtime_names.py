@@ -95,6 +95,15 @@ def _bundle_metadata() -> dict:
         return {}
 
 
+def chat_env_hint(abs_fused_dir: str) -> str:
+    """The build report's closing line ('To chat with this shard: ...')
+    needs to spell the frozen chat env var name -- only this module may
+    (T-RT-2's grep test excludes this file by name), so build_report.py
+    calls here instead of embedding the literal name itself.
+    """
+    return f"To chat with this shard: `AEROLLM_MODEL={abs_fused_dir}`"
+
+
 def buddy_deep_model_env_value() -> Optional[str]:
     """Read Buddy's configured deep-mode model dir, if any.
 
