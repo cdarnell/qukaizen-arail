@@ -32,6 +32,12 @@ dependencies = [
     "tomli>=2.0.1; python_version < '3.11'",
     "lancedb>=0.13.0",
     "faster-whisper>=1.2.0",
+    # Model Forge (arail.nucleus): jsonschema validates domain configs and
+    # DNA cards; numpy is the reference KD-loss/renormalization math. Both
+    # are needed by the `plan` verb and the /forge viewer on minimalist,
+    # so they are core, not maximus-gated.
+    "numpy>=1.26",
+    "jsonschema>=4.18",
 ]
 
 [project.optional-dependencies]
@@ -61,6 +67,11 @@ maximus = [
     "langchain>=0.2.0",
     "langgraph>=0.2.0",
     "pip-audit>=2.7.0,<3",
+    # Model Forge (arail.nucleus) certify/verify: ed25519 signing of the
+    # legacy-5 Nucleus seal payload. Declared here (not core) because
+    # signing is a maximus-only verb; minimalist `verify` prints a plain
+    # "install maximus" message instead of importing this.
+    "cryptography>=42",
     # NOTE: AeroLLM (the deep-mode "2nd inference") is intentionally NOT a
     # hard pip dependency here. `aerollm-api` is a cargo-built native
     # extension (crates/aerollm-api in the sibling repo), not a wheel on
@@ -120,7 +131,7 @@ vector    = ["lancedb>=0.13.0"]
 langchain = ["langchain>=0.2.0", "langgraph>=0.2.0"]
 
 # ── Dev / test ────────────────────────────────────────────────────────────
-dev   = ["pytest>=7.4.0"]
+dev   = ["pytest>=7.4.0", "cryptography>=42"]
 
 [project.urls]
 Repository = "https://github.com/cdarnell/qukaizen-arail"
@@ -284,5 +295,9 @@ markers = [
     "live_stt: tests needing real audio + a local Whisper model / afconvert; skipped in CI (run with -m live_stt)",
     "live_ocr: tests needing real Apple Vision + swiftc compile + a real image; skipped in CI (run with -m live_ocr)",
     "requires_ollama: tests needing a reachable local Ollama with the spec's embedding model pulled; auto-skipped when arail.dbspec.embed.probe() fails (FM18)",
+    "requires_mlx: tests needing a real mlx/mlx-lm install and Apple Silicon; skipped in CI",
+    "requires_aerollm: tests needing a real aerollm_api extension build; skipped in CI",
+    "requires_kernel: tests needing a real Linux kernel + vulns clone (item 10 only); skipped in CI",
+    "requires_qkz_bin: tests needing the real Nucleus Rust qkz binary (NUCLEUS_QKZ_BIN); skipped in CI",
 ]
 
