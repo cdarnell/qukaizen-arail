@@ -328,6 +328,10 @@ def run(argv: Sequence[str]) -> int:
     parsed = _parse_build_args(argv)
     domain = _resolve_domain({"domain_name": parsed["slug"]})
 
+    from arail.nucleus.providers.gateway import profile_gate
+
+    profile_gate(domain.teacher_profile)
+
     # run_preflight() itself raises PreflightRefusal (mapped to exit 3 by
     # cli.py) for any red PHASE row (A/A2/B/C). It does NOT raise for a red
     # CAPABILITY row (deep runtime missing, mlx_lm out of range, ...) --

@@ -37,3 +37,23 @@ class RefusedByPolicy(NucleusError):
 
 class CapabilityMissing(NucleusError):
     """A required runtime capability (e.g. logprobs) is absent."""
+
+
+class ProfileRefused(RefusedByPolicy):
+    """teacher.profile is gateway/mixed under a profile that forbids it
+    (airgapped -> always; hybrid -> "lands in nucleus-sprint-2" this
+    sprint). Also raised by GatewayClient construction itself in
+    airgapped mode, before any socket is opened."""
+
+
+class GatewayError(RefusedByPolicy):
+    """A gateway HTTP call failed (401/403/429/3xx/other)."""
+
+
+class BudgetExhausted(GatewayError):
+    """402 — the build token's budget ran out. Arbitrage checkpoints and
+    pauses; never falls back to a weaker teacher."""
+
+
+class ContractViolation(GatewayError):
+    """A 200 response is missing a required provenance field."""
