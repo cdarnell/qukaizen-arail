@@ -46,6 +46,7 @@ from arail.portal import scheduler
 
 from arail.brand import load_brand
 from arail.identity import effective_identity
+from arail.airgap import AIRGAPPED_NOTICE
 from arail.experiments import branch_browser as _branch_browser
 from arail.router.backends import ModelResponse
 from arail.ui_theme import list_ui_themes, load_ui_theme, theme_css
@@ -1860,10 +1861,7 @@ async def providers_status():
         "available": known,
         "lab_mode": mode,
         "cloud_enabled": not _is_airgapped(),
-        "airgapped_notice": (
-            "Lab is in airgapped mode. Only My Machine is usable. "
-            "To enable cloud providers, set LAB_MODE=hybrid in .env and restart."
-        ) if _is_airgapped() else "",
+        "airgapped_notice": AIRGAPPED_NOTICE if _is_airgapped() else "",
         "providers": [
             {
                 "id": pid,
