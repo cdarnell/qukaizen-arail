@@ -14,7 +14,7 @@ Make Project Nucleus a first-class ARAIL surface ("Model Forge"): `src/arail/nuc
 | Phase | Subagent | Artifact | Status | Started | Finished | Verdict |
 |---|---|---|---|---|---|---|
 | think | visionary | VISION.md | done | 2026-09-23 | 2026-09-23 | proceed (narrower wedge; 3 operator questions before plan) |
-| plan | architect (design) | ARCHITECTURE.md | in progress | 2026-09-23 | — | — |
+| plan | architect (design) | ARCHITECTURE.md | done | 2026-09-23 | 2026-09-23 | complete (58b754bc); operator questions Q1–Q9 open, Q1 blocks Gate B only |
 | build | builder | BUILD_LOG.md | pending | — | — | — |
 | review | architect (review) | REVIEW.md | pending | — | — | — |
 | test | qa | TEST_REPORT.md | pending | — | — | — |
@@ -38,5 +38,6 @@ Make Project Nucleus a first-class ARAIL surface ("Model Forge"): `src/arail/nuc
 |---|---|
 
 ## Notes
+- ARCHITECTURE.md (58b754bc): 27-commit build order. Findings that change the plan: (a) pinned v1.1.0 bundle is AeroLLM 1.0.0 without `unstable-api` — no logprobs, so logit mode = teacher-generated sequences with top-N logprobs; (b) `qkz isotope verify` accepts only the 5-field ASCII/no-float seal and trusts the embedded key — design signs 5-field + trusted-key check in `arailctl nucleus verify`; (c) teacher `auto` = Qwen3-30B-A3B (MoE, tokenizer-matched to Qwen2.5 student); Llama-70B excluded. Buddy-voice 10 % reallocated +5 security / +5 happy.
 - VISION.md (c8b1cefc): proceed on items 1, 2, 6–9 + read-only card viewer; defer 3–4 (no `arail-ops` MCP server exists; Buddy brief says guard rails first). Operator questions pending: scope, seal continuity (`qkz isotope verify` vs new ARAIL key), supersede distill-now / fold or retire `/build`.
 - Open question from brief §1 (move old private Nucleus code wholesale vs re-implement against the brief): brief recommends re-implement. Architect should surface if this needs the operator before build.
