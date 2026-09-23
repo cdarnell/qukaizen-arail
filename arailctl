@@ -261,6 +261,8 @@ EOF
     logs [comp]     tail activity log — filter by component
     reset [mode]    wipe state — models|data|pkb|plugins|env|full|destroy
     world <op>      DaC WorldBundle: list | mount <dir> [--apply-face] | verify <dir> | verify-shipped [--examples] | swap <dir> | unmount
+    nucleus <verb>  Model Forge (local domain distillation): plan | stage | build | spike |
+                    eval | certify | verify | status | list — see docs/nucleus.md
     pkb <op>        ARAIL lab content: ingest | compile | browse | prune | bootstrap
     wiki <op>       ARAIL docs-as-code: build | info | new <title>
     kb <op>         QuKaiZen Karpathy Wiki: status | compile | lint | query
@@ -1278,6 +1280,16 @@ TEMPLATE
                 ;;
             *) die "wiki op must be one of: build | info | new <title> | serve" ;;
         esac
+        ;;
+    nucleus)
+        # Model Forge — see docs/nucleus.md. `python -m arail.nucleus` owns
+        # its own tier gate and exit-code contract (0 ok / 1 internal error /
+        # 2 usage / 3 refused by policy); this case is a thin exec, same
+        # pattern as `world` and `pkb` above.
+        [[ -d .venv ]] || die "missing .venv — run ./arailctl setup"
+        # shellcheck disable=SC1091
+        source .venv/bin/activate
+        exec python -m arail.nucleus "$@"
         ;;
     world)
         [[ -d .venv ]] || die "missing .venv — run ./arailctl setup"
