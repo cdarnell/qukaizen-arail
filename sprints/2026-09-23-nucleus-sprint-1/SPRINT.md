@@ -16,7 +16,7 @@ Make Project Nucleus a first-class ARAIL surface ("Model Forge"): `src/arail/nuc
 | think | visionary | VISION.md | done | 2026-09-23 | 2026-09-23 | proceed (narrower wedge; 3 operator questions before plan) |
 | plan | architect (design) | ARCHITECTURE.md | done | 2026-09-23 | 2026-09-23 | complete (58b754bc); operator questions Q1–Q9 open, Q1 blocks Gate B only |
 | build | builder | BUILD_LOG.md | done | 2026-09-23 | 2026-09-23 | Gate A reached (commits 1-27, 14dd54aa); commit 28 / Gate B / item 10 out of scope per operator instruction |
-| review | architect (review) | REVIEW.md | in progress | 2026-09-23 | — | — |
+| review | architect (review) | REVIEW.md | BLOCK → loop 1 | 2026-09-23 | 2026-09-23 | BLOCK (10 BLOCK / 10 ASK / 4 INFO) — back to build |
 | test | qa | TEST_REPORT.md | pending | — | — | — |
 | ship | — | PR | pending | — | — | — |
 
@@ -43,6 +43,7 @@ Make Project Nucleus a first-class ARAIL surface ("Model Forge"): `src/arail/nuc
 |---|---|
 
 ## Notes
+- REVIEW.md round 1: BLOCK. Core defect: `build.py`/`certify.py` seal placeholder or hardcoded values as measured (B1 stub build certifiable as real — reproduced; B2 `verify` reports unrun checks; B3 hardcoded lc_win_rate/base_composite; B4 eval_hash hashes scores; B5 broken eval tasks; B6 tautological Buddy guard; B7 non-stub build not refused up front; B8 git runner honours repo config `gpg.program` — reproduced; B9 certified cards never reach `$ARAIL_MODELS_DIR/forge/`; B10 Gate A e2e asserts no metric values). Naming freeze, seal format, cert-set/contamination/F1 tests, airgapped refusal, secrets handling, `/build` retirement all checked out.
 - BUILD_LOG.md (803d7d99): real MLX multi-cycle training loop (`build.py::_mlx_train_cycle_fn`) is a deliberate stub — must be completed before Gate B; T-SEAL-8 passed against the real Rust `qkz` verifier. Four pre-existing failures outside `tests/nucleus` (test_models_api health refresh, 3× test_docs_routes) confirmed pre-existing, not touched by this sprint.
 - ARCHITECTURE.md (58b754bc): 27-commit build order. Findings that change the plan: (a) pinned v1.1.0 bundle is AeroLLM 1.0.0 without `unstable-api` — no logprobs, so logit mode = teacher-generated sequences with top-N logprobs; (b) `qkz isotope verify` accepts only the 5-field ASCII/no-float seal and trusts the embedded key — design signs 5-field + trusted-key check in `arailctl nucleus verify`; (c) teacher `auto` = Qwen3-30B-A3B (MoE, tokenizer-matched to Qwen2.5 student); Llama-70B excluded. Buddy-voice 10 % reallocated +5 security / +5 happy.
 - VISION.md (c8b1cefc): proceed on items 1, 2, 6–9 + read-only card viewer; defer 3–4 (no `arail-ops` MCP server exists; Buddy brief says guard rails first). Operator questions pending: scope, seal continuity (`qkz isotope verify` vs new ARAIL key), supersede distill-now / fold or retire `/build`.
