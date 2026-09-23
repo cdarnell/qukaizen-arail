@@ -1,6 +1,11 @@
-"""arail.build.world_corpus: field mapping, category/approval filtering,
-mount-swap survival, chunking, tagging, and the full orchestration against a
-fake NucleusClient.
+"""arail.build.world_corpus: field mapping, chunking, tagging, and the full
+KICE-synthesis orchestration against a fake NucleusClient.
+
+The pull/category-breakdown tests moved to tests/test_world_catalog.py
+(sprints/2026-09-23-nucleus-sprint-1, ARCHITECTURE.md §8) — this module now
+only owns the build-specific orchestration on top of the
+arail.world_catalog re-export shim. Deleted when /build is retired
+(commit 26).
 """
 
 from __future__ import annotations
@@ -82,13 +87,13 @@ def test_tag_source_mutates_and_returns():
     assert all(r["source"] == "tier2" for r in records)
 
 
-# ── pull_approved_terms (synthetic World + approval fixtures) ─────────
+# ── build_world_corpus orchestration (fake client + job store) ────────
 
 @pytest.fixture
 def synthetic_world(tmp_path):
-    """A tiny 2-craft-category + 1-business-category World, mirroring the
-    real photography bundle's on-disk shape closely enough to exercise
-    pull_approved_terms end to end."""
+    """Same shape as tests/test_world_catalog.py's fixture — kept local here
+    (rather than imported) so this file can be deleted independently when
+    /build is retired without leaving a dangling cross-file dependency."""
     worlds_dir = tmp_path / "worlds"
     slug = "testworld"
     bundle_dir = worlds_dir / slug
@@ -113,7 +118,6 @@ def synthetic_world(tmp_path):
     pkb_root = tmp_path / "pkb"
     kb_dir = pkb_root / "compiled" / "kb"
     kb_dir.mkdir(parents=True)
-    # Approve everything except "not-approved-yet".
     approved = [
         {"path": f"sources/world-{slug}/terms/wide-aperture.md"},
         {"path": f"sources/world-{slug}/terms/golden-hour.md"},
@@ -122,58 +126,6 @@ def synthetic_world(tmp_path):
     (kb_dir / "approved.json").write_text(json.dumps(approved))
     return {"worlds_dir": worlds_dir, "pkb_root": pkb_root, "slug": slug}
 
-
-def test_pull_approved_terms_category_and_approval_filter(synthetic_world):
-    terms = wc.pull_approved_terms(
-        synthetic_world["slug"], categories=("exposure", "light"),
-        worlds_dir=synthetic_world["worlds_dir"],
-        pkb_root=synthetic_world["pkb_root"])
-    slugs = [t["slug"] for t in terms]
-    assert slugs == ["wide-aperture", "golden-hour"]   # sorted by spec order
-    # not-approved-yet excluded despite matching category (correction: the
-    # approval gate governs retrieval eligibility, independent of DaC's
-    # own curation confidence).
-    assert "not-approved-yet" not in slugs
-    # wix-thing excluded by category filter even though it IS approved.
-    assert "wix-thing" not in slugs
-
-
-def test_pull_approved_terms_business_category_when_requested(synthetic_world):
-    terms = wc.pull_approved_terms(
-        synthetic_world["slug"], categories=("web-platform",),
-        worlds_dir=synthetic_world["worlds_dir"],
-        pkb_root=synthetic_world["pkb_root"])
-    assert [t["slug"] for t in terms] == ["wix-thing"]
-
-
-def test_pull_survives_simulated_remount_sweep(synthetic_world, monkeypatch):
-    """Regression for the mount-swap correction: world_mount._sweep_other_worlds
-    deletes STAGED markdown (sources/world-<slug>/) when a different World is
-    mounted, but the catalog copy (WORLDS_DIR/<slug>/) and approved.json are
-    untouched — pull_approved_terms must keep working after that sweep."""
-    staged = synthetic_world["pkb_root"] / "sources" / f"world-{synthetic_world['slug']}"
-    staged.mkdir(parents=True)
-    (staged / "terms").mkdir()
-    (staged / "terms" / "wide-aperture.md").write_text("---\ntitle: x\n---\n")
-    assert staged.exists()
-
-    import shutil
-    shutil.rmtree(staged)   # simulate _sweep_other_worlds
-    assert not staged.exists()
-
-    terms = wc.pull_approved_terms(
-        synthetic_world["slug"], categories=("exposure",),
-        worlds_dir=synthetic_world["worlds_dir"],
-        pkb_root=synthetic_world["pkb_root"])
-    assert [t["slug"] for t in terms] == ["wide-aperture"]
-
-
-def test_resolve_world_bundle_missing_raises(tmp_path):
-    with pytest.raises(FileNotFoundError):
-        wc.resolve_world_bundle("nope", worlds_dir=tmp_path)
-
-
-# ── build_world_corpus orchestration (fake client + job store) ────────
 
 class _FakeJobStore:
     def __init__(self):
@@ -218,10 +170,6 @@ def test_build_world_corpus_end_to_end(synthetic_world):
     assert all(r["source"] == "tier1" for r in dataset)
 
     phases = [f["phase"] for _, f in store.updates if "phase" in f]
-    # "synthesize_tier1" fires once before the batch loop plus once per
-    # batch's on_progress callback (one batch here) — assert the invariant
-    # (pull first, train/training last, synthesize_tier1 present) rather
-    # than an exact count that would be brittle to batch_size changes.
     assert phases[0] == "pull"
     assert phases[-2:] == ["train", "training"]
     assert "synthesize_tier1" in phases
@@ -243,46 +191,6 @@ def test_build_world_corpus_tier2_split(synthetic_world):
     tier1 = [r for r in dataset if r["source"] == "tier1"]
     tier2 = [r for r in dataset if r["source"] == "tier2"]
     assert len(tier1) == 1 and len(tier2) == 1
-
-
-# ── all_categories / category_breakdown ────────────────────────────────
-
-def test_all_categories_returns_spec_order(synthetic_world):
-    cats = wc.all_categories(
-        synthetic_world["slug"], worlds_dir=synthetic_world["worlds_dir"])
-    assert cats == ["exposure", "light", "web-platform", "empty-cat"]
-
-
-def test_category_breakdown_counts_and_labels(synthetic_world):
-    breakdown = wc.category_breakdown(
-        synthetic_world["slug"],
-        worlds_dir=synthetic_world["worlds_dir"],
-        pkb_root=synthetic_world["pkb_root"])
-    by_id = {row["id"]: row for row in breakdown}
-
-    assert by_id["exposure"]["label"] == "Exposure"
-    assert by_id["exposure"]["term_count"] == 2      # wide-aperture + not-approved-yet
-    assert by_id["exposure"]["approved_count"] == 1  # only wide-aperture approved
-
-    assert by_id["light"]["term_count"] == 1
-    assert by_id["light"]["approved_count"] == 1
-
-    assert by_id["web-platform"]["term_count"] == 1
-    assert by_id["web-platform"]["approved_count"] == 1
-
-    # zero-approved-count / disabled-row case: declared in spec.json but no
-    # terms.json entries and nothing approved.
-    assert by_id["empty-cat"]["label"] == "Empty Category"
-    assert by_id["empty-cat"]["term_count"] == 0
-    assert by_id["empty-cat"]["approved_count"] == 0
-
-    assert [row["id"] for row in breakdown] == \
-        ["exposure", "light", "web-platform", "empty-cat"]
-
-
-def test_category_breakdown_missing_world_raises(tmp_path):
-    with pytest.raises(FileNotFoundError):
-        wc.category_breakdown("nonexistent", worlds_dir=tmp_path / "worlds")
 
 
 def test_build_world_corpus_raises_when_nothing_approved(tmp_path):
