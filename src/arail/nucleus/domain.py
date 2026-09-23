@@ -16,6 +16,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
+import os
 from typing import Any, Callable, Optional, Tuple
 
 import jsonschema
@@ -28,7 +29,13 @@ _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 _MAX_DOMAIN_BYTES = 64 * 1024
 
 _SCHEMA_PATH = Path(__file__).resolve().parents[3] / "spec" / "nucleus-domain-v1.schema.json"
-_DOMAINS_DIR = Path(__file__).resolve().parents[3] / "configs" / "domains"
+# ARAIL_NUCLEUS_DOMAINS_DIR is an escape hatch for a real subprocess CLI
+# integration test (Gate A, commit 22) to point every independently
+# spawned `python -m arail.nucleus <verb>` invocation at an isolated tmp
+# domains dir, without ever writing into the real repo's configs/domains/.
+# Unset in normal operation -- the default is unchanged.
+_DOMAINS_DIR = Path(os.getenv("ARAIL_NUCLEUS_DOMAINS_DIR") or
+                    (Path(__file__).resolve().parents[3] / "configs" / "domains"))
 
 _DEFAULTS = {
     "runtime": "queuellm",

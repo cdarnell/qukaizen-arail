@@ -126,6 +126,15 @@ class RunLedger:
                     )
 
 
+def _emit_activity(message: str, *, level: str = "info") -> None:
+    try:
+        from arail.activity import activity_log
+
+        activity_log.emit(source="nucleus", message=message, level=level)
+    except Exception:  # noqa: BLE001 — progress tracking must never abort a build
+        pass
+
+
 def worker_offline_env() -> Dict[str, str]:
     """Every worker subprocess gets this environment — this is HOW zero
     egress is achieved, not just asserted (T-EGR-2)."""
@@ -156,6 +165,7 @@ def run_phase(
 
     proc = subprocess.Popen(args, cwd=str(repo_root) if repo_root else None, env=env)
     ledger.start_phase(phase, proc.pid)
+    _emit_activity(f"phase {phase} started (build {build_id}, pid {proc.pid})")
 
     try:
         returncode = proc.wait(timeout=timeout)
@@ -173,6 +183,8 @@ def run_phase(
 
     status = "done" if returncode == 0 else "failed"
     ledger.finish_phase(phase, status=status)
+    _emit_activity(f"phase {phase} {status} (build {build_id})",
+                   level="success" if status == "done" else "error")
 
     if returncode != 0:
         raise RefusedByPolicy(f"phase {phase} exited {returncode}")

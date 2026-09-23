@@ -144,7 +144,7 @@ def run_certify(build_id: str, *, publish_row: bool = False, context: dict = Non
                               training_hash=training_hash),
         gate_results=gate_results,
     )
-    sealed = sign(payload)
+    sealed = sign(payload, ephemeral=_is_stub())
     card["signed"] = sealed.signed
 
     shard_root = Path(context.get("shard_output_dir") or (rd / "forge_out"))
@@ -175,6 +175,14 @@ def run_certify(build_id: str, *, publish_row: bool = False, context: dict = Non
     except RefusedByPolicy as exc:
         ledger_path = None
         sys.stderr.write(f"certify: not ledgered: {exc}\n")
+
+    try:
+        from arail.activity import activity_log
+
+        activity_log.emit(source="nucleus", message=f"certify: {decision} ({domain.shard})",
+                          level="success" if decision in ("CERTIFIED", "COMPATIBLE") else "warn")
+    except Exception:  # noqa: BLE001 — progress tracking must never abort a build
+        pass
 
     return {"decision": decision, "card_dir": str(shard_root), "ledger_path": ledger_path,
            "contamination_overlap": contamination_report.overlap}

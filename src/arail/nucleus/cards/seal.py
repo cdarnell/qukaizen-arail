@@ -182,16 +182,31 @@ class SealedCard:
     seal_json: dict
 
 
-def sign(payload: dict, *, key_path: Optional[Path] = None) -> SealedCard:
-    private_key = load_or_generate_key(key_path)
+def sign(payload: dict, *, key_path: Optional[Path] = None, ephemeral: bool = False) -> SealedCard:
+    """``ephemeral=True`` (stub builds only) generates an in-memory key
+    that is never written to disk and is never the lab's real signing
+    key — the seal is still a real, self-consistent Ed25519 signature
+    (so `qkz isotope verify` and this module's own verify_signature()
+    both pass), but `key_fingerprint` is the literal marker
+    "ephemeral-stub" instead of a real fingerprint, so verify() can tell
+    the two apart and a stub card can never read as `trusted`."""
+    if ephemeral:
+        Ed25519PrivateKey, _ = _require_cryptography()
+        private_key = Ed25519PrivateKey.generate()
+    else:
+        private_key = load_or_generate_key(key_path)
+
     data = signed_bytes(payload)
     signature = private_key.sign(data)
     public_key_hex = private_key.public_key().public_bytes_raw().hex()
     signature_hex = signature.hex()
 
-    import hashlib
+    if ephemeral:
+        key_fingerprint = "ephemeral-stub"
+    else:
+        import hashlib
 
-    key_fingerprint = hashlib.sha256(bytes.fromhex(public_key_hex)).hexdigest()[:16]
+        key_fingerprint = hashlib.sha256(bytes.fromhex(public_key_hex)).hexdigest()[:16]
 
     dna_seal = {
         "format": SEAL_FORMAT,
