@@ -1,0 +1,10 @@
+Explain what this commit changes and why, in two sentences: <PLACEHOLDER_COMMIT_1>.
+Which kernel subsystem does drivers/net/ethernet/intel/ixgbe/ixgbe_main.c belong to, per MAINTAINERS?
+Write a one-paragraph changelog entry for a fix to a use-after-free in a network driver's cleanup path.
+Given a commit that adds a NULL check before a pointer dereference, is this most likely a security fix, a robustness fix, or neither? Explain.
+What does CONFIG_KASAN do, and why would a maintainer ask a patch author to test with it enabled?
+Summarize the purpose of the MAINTAINERS file's "L:" (mailing list) field for a subsystem entry.
+A patch touches both fs/ext4/inode.c and fs/ext4/extents.c. Which subsystem maintainer(s) should be Cc'd?
+What is the difference between a kernel "regression" and a kernel "CVE", in terms of how each is typically triaged?
+Explain why kernel patches are checked with checkpatch.pl before submission, and name two classes of issues it catches.
+Given a commit message referencing a CVE by number, what should the corresponding "Fixes:" trailer reference?

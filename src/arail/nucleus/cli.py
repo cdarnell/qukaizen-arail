@@ -123,6 +123,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 _IMPLEMENTED: dict[str, Callable[[list], int]] = {}
 
 
+def _register_verbs() -> None:
+    """Deferred import so `cli.py` stays importable even before every verb
+    module exists yet (build order, ARCHITECTURE.md §10)."""
+    from arail.nucleus import plan as _plan
+
+    _IMPLEMENTED["plan"] = _plan.run
+
+
+_register_verbs()
+
+
 def _dispatch(verb: str, rest: list) -> int:
     if verb in _IMPLEMENTED:
         return _IMPLEMENTED[verb](rest)
