@@ -193,7 +193,7 @@ _TIER_SURFACES: dict[str, set[str]] = {
     "minimalist": {"dashboard", "chat", "research", "dac", "agents", "docs", "study", "forge"},
     "maximus": {"dashboard", "chat", "research", "dac", "agents",
                 "admin", "docs", "notebooks", "terminal", "tuning", "plugins",
-                "build", "study", "forge"},
+                "study", "forge"},
 }
 
 # v1.0.0 tier rename + the LAB_TIER lookup now live in arail.tier, the single
@@ -717,9 +717,6 @@ app.include_router(librarian_router)
 
 from arail.portal.models_api import models_router  # noqa: E402
 app.include_router(models_router)
-
-from arail.portal.build_api import build_router  # noqa: E402
-app.include_router(build_router)
 
 from arail.portal.forge_api import forge_router  # noqa: E402
 app.include_router(forge_router)
@@ -12045,15 +12042,14 @@ async def knowledge_redirect(request: Request):
     return RedirectResponse(url="/dac" + q, status_code=307)
 
 
-@app.get("/build", response_class=HTMLResponse)
-async def build_page(request: Request):
-    """Nucleus MODEL BUILDING tab — thin shell; hydrates from /api/build/*."""
-    if (gate := _require_surface("build")) is not None:
-        return gate
-    return templates.TemplateResponse(request, "build.html", {
-        "active": "build",
-        **_identity_ctx(),
-    })
+@app.get("/build")
+async def build_redirect(request: Request):
+    # /build is retired (2026-09-23, sprints/2026-09-23-nucleus-sprint-1) --
+    # replaced by Model Forge. 308 preserves the request method/body
+    # semantics (there are none here, but it's the correct permanent-
+    # redirect status for a route that no longer exists at all) (T-FORGE-4).
+    q = ("?" + str(request.query_params)) if request.query_params else ""
+    return RedirectResponse(url="/forge" + q, status_code=308)
 
 
 @app.get("/forge", response_class=HTMLResponse)

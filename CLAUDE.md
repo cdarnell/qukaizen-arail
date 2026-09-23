@@ -132,12 +132,21 @@ and (more deeply) `docs/agents-explained.md`:
    `lab/pkb/agents/<id>/` with `AGENT.md` + `<id>.py`.
 
 `maximus` adds **Admin** (system health, plugin manager, diagnostics),
-**Notebooks/Workbench**, **Tuning**, **Plugins**, and **Model Building** (`/build`).
-**Docs** and the **Knowledge (`/dac`)** and **Worlds** surfaces are every-tier
-(both minimalist and maximus — the source of truth is `_TIER_SURFACES` in
-`src/arail/portal/app.py`). These maximus-only surfaces are now server-side
-tier-gated (a minimalist user who types the URL gets a 404), not just hidden in
-the nav.
+**Notebooks/Workbench**, **Tuning**, and **Plugins**.
+**Docs**, the **Knowledge (`/dac`)** and **Worlds** surfaces, and
+**Model Forge (`/forge`)** are every-tier (both minimalist and maximus —
+the source of truth is `_TIER_SURFACES` in `src/arail/portal/app.py`).
+These maximus-only surfaces are now server-side tier-gated (a minimalist
+user who types the URL gets a 404), not just hidden in the nav.
+
+**Model Forge** (`arailctl nucleus <verb>`; read-only viewer at `/forge`)
+replaced the old **Model Building** `/build` tab 2026-09-23
+(sprints/2026-09-23-nucleus-sprint-1) — a local, in-repo distillation
+pipeline (`plan` → `stage` → `build` → `certify`) instead of a thin
+client for a separate `qukaizen-nucleus` process. `stage`/`build`/
+`eval`/`certify`/`spike` need the maximus deep runtime; `plan`/`verify`/
+`status`/`list` and the `/forge` viewer work on minimalist. See
+`docs/nucleus.md`.
 
 ## Repo layout (orientation)
 

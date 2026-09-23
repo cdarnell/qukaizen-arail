@@ -118,3 +118,16 @@ def test_eyeball_script_tag_escaped_in_report(client, tmp_path):
     resp = client.get("/forge/qkz-x/0.1.0")
     assert "<script>alert(1)</script>" not in resp.text
     assert "&lt;script&gt;" in resp.text
+
+
+# ── T-FORGE-4: /build -> 308 /forge; /api/build/* -> 404 ─────────────
+
+def test_build_redirects_to_forge(client):
+    resp = client.get("/build", follow_redirects=False)
+    assert resp.status_code == 308
+    assert resp.headers["location"].startswith("/forge")
+
+
+def test_api_build_jobs_404(client):
+    resp = client.get("/api/build/jobs")
+    assert resp.status_code == 404

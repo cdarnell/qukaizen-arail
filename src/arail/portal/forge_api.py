@@ -18,7 +18,7 @@ import yaml
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
-# JSON-only router (mirrors build_api.py's build_router convention). The
+# JSON-only router. The
 # two HTML page routes (/forge, /forge/{shard}/{version}) live directly in
 # app.py instead, next to build_page() -- that's this codebase's actual
 # convention (app.py owns `templates`/`_identity_ctx()`/`_require_surface()`
