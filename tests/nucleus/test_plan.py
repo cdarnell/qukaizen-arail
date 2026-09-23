@@ -49,10 +49,18 @@ def test_run_preflight_mode_loads_existing_domain(tmp_path, monkeypatch, capsys)
     path.write_text(text)
 
     # run() resolves domains via arail.nucleus.domain's module-level
-    # _DOMAINS_DIR constant, so point it at our tmp dir for this call.
+    # _DOMAINS_DIR constant, so point it at our tmp dir for this call, and
+    # validates student.base via arail.nucleus.models.resolve_model, so a
+    # fake model dir needs to exist under ARAIL_MODELS_DIR.
     from arail.nucleus import domain as domain_mod
 
     monkeypatch.setattr(domain_mod, "_DOMAINS_DIR", d)
+    models_dir = tmp_path / "models"
+    student_dir = models_dir / "Qwen2.5-3B-Instruct-4bit"
+    student_dir.mkdir(parents=True)
+    (student_dir / "config.json").write_text('{"num_parameters": 3000000000}')
+    monkeypatch.setattr("arail.config.MODELS_DIR", str(models_dir))
+
     code = plan.run(["existing"])
     assert code == 0
     assert "loads cleanly" in capsys.readouterr().out

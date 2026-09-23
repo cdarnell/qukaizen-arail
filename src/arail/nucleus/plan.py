@@ -104,7 +104,9 @@ def run(argv: Sequence[str]) -> int:
         )
         return 0
 
-    domain = load_domain(parsed["slug"])
+    from arail.nucleus.models import resolve_model
+
+    domain = load_domain(parsed["slug"], model_resolver=resolve_model)
     sys.stdout.write(f"domain {domain.name!r} loads cleanly (shard {domain.shard}).\n")
     sys.stdout.write(
         "preflight memory-plan output lands with the preflight module "
