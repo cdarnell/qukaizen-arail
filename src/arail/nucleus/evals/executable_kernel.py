@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from arail.nucleus.corpus._git_env import hardened_env
+from arail.nucleus.corpus._git_env import HARDENED_CONFIG_ARGS, hardened_env
 
 _MAX_PATCH_BYTES = 64 * 1024
 _TIMEOUT_S = 30.0
@@ -84,8 +84,7 @@ def patch_applies(patch_text: str, *, base_repo: Path, base_commit: str) -> Chec
         env["GIT_INDEX_FILE"] = str(index_file)
 
         read_tree = subprocess.run(
-            ["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false",
-             "-c", "protocol.allow=never", "read-tree", base_commit],
+            ["git", *HARDENED_CONFIG_ARGS, "read-tree", base_commit],
             cwd=str(base_repo), env=env, capture_output=True, timeout=_TIMEOUT_S,
         )
         if read_tree.returncode != 0:
@@ -94,8 +93,7 @@ def patch_applies(patch_text: str, *, base_repo: Path, base_commit: str) -> Chec
 
         try:
             apply_check = subprocess.run(
-                ["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false",
-                 "-c", "protocol.allow=never", "apply", "--check", "--cached", "-"],
+                ["git", *HARDENED_CONFIG_ARGS, "apply", "--check", "--cached", "-"],
                 cwd=str(base_repo), env=env, input=patch_bytes,
                 capture_output=True, timeout=_TIMEOUT_S,
             )

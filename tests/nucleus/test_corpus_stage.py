@@ -133,6 +133,68 @@ def test_hostile_repo_hooks_and_fsmonitor_never_fire(tmp_path):
     assert not marker.exists(), "hook or fsmonitor fired during a hardened git log"
 
 
+# B8 (2026-09-23 review): T-SEC-GIT-1 above never actually exercises the
+# repo-local-config exec vector -- `git log` never runs post-checkout or
+# fsmonitor regardless of hardening. This test reproduces the review's
+# repro exactly: a repo with `log.showSignature=true` and `gpg.program`
+# pointed at a script, plus a commit carrying a (fabricated, unverifiable
+# is fine -- log.showSignature invokes the program regardless) `gpgsig`
+# header. Without HARDENED_CONFIG_ARGS's `-c gpg.program=...`/
+# `-c log.showSignature=false` overrides (and LOG_SAFETY_ARGS'
+# `--no-show-signature`), this fires the script during a plain `git log`.
+def test_hostile_repo_gpg_program_never_executes_during_log(tmp_path):
+    from arail.nucleus.corpus.sources import git_kernel
+
+    repo = tmp_path / "hostile-gpg"
+    repo.mkdir()
+    marker = tmp_path / "gpg-pwned"
+    import subprocess
+
+    env = {"GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null",
+          "HOME": str(tmp_path), "PATH": "/usr/bin:/bin"}
+    subprocess.run(["git", "init", "-q"], cwd=str(repo), env=env, check=True)
+    subprocess.run(["git", "config", "user.email", "a@b.invalid"], cwd=str(repo), env=env, check=True)
+    subprocess.run(["git", "config", "user.name", "a"], cwd=str(repo), env=env, check=True)
+
+    (repo / "MAINTAINERS").write_text("X\n")
+    subprocess.run(["git", "add", "MAINTAINERS"], cwd=str(repo), env=env, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=str(repo), env=env, check=True)
+
+    tree_sha = subprocess.run(["git", "rev-parse", "HEAD^{tree}"], cwd=str(repo), env=env,
+                              check=True, capture_output=True).stdout.decode().strip()
+
+    # A malicious "gpg" that just proves it ran.
+    fake_gpg = tmp_path / "fake-gpg.sh"
+    fake_gpg.write_text(f"#!/bin/sh\ntouch {marker}\necho 'gpg: Good signature' >&2\nexit 0\n")
+    fake_gpg.chmod(0o755)
+    subprocess.run(["git", "config", "gpg.program", str(fake_gpg)], cwd=str(repo), env=env, check=True)
+    subprocess.run(["git", "config", "log.showSignature", "true"], cwd=str(repo), env=env, check=True)
+
+    # Fabricate a signed commit object by hand -- a fake (unverifiable, but
+    # present) gpgsig header is all `log.showSignature` needs to invoke
+    # gpg.program; it doesn't need to actually verify.
+    author = "a <a@b.invalid> 1700000000 +0000"
+    raw_commit = (
+        f"tree {tree_sha}\n"
+        f"author {author}\n"
+        f"committer {author}\n"
+        f"gpgsig -----BEGIN PGP SIGNATURE-----\n"
+        f" not a real signature, just present\n"
+        f" -----END PGP SIGNATURE-----\n"
+        f"\nsigned commit\n"
+    )
+    hash_obj = subprocess.run(["git", "hash-object", "-t", "commit", "-w", "--stdin"],
+                              cwd=str(repo), env=env, input=raw_commit.encode(),
+                              check=True, capture_output=True)
+    signed_sha = hash_obj.stdout.decode().strip()
+    subprocess.run(["git", "update-ref", "refs/heads/master", signed_sha], cwd=str(repo), env=env, check=True)
+
+    marker.unlink(missing_ok=True)
+
+    git_kernel.extract(repo)
+    assert not marker.exists(), "gpg.program executed during a hardened git log"
+
+
 def test_git_kernel_extract_rejects_non_git_dir(tmp_path):
     plain = tmp_path / "notgit"
     plain.mkdir()
