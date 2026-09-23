@@ -255,6 +255,78 @@ def _probe_lab_mode() -> Requirement:
     return Requirement("effective LAB_MODE", "airgapped (recommended)", mode, "green", "")
 
 
+# ── protected (Buddy) model resolution (B6, 2026-09-23 review) ────────
+#
+# `protected` used to be the literal string "Buddy" — compared against a
+# `drop` list that only ever holds real model directory names, so the
+# "never evict Buddy" invariant was structurally untestable (the
+# intersection was always empty, whatever the code did). `protected` must
+# instead be Buddy's ACTUAL, resolved model identities, so a candidate
+# that happens to be the same model Buddy uses (e.g. the `ai-engineer`
+# judge alias resolving to the same directory as Buddy's configured deep
+# model) is correctly recognized and never proposed as a drop candidate.
+
+def _resolve_protected_model_names() -> List[str]:
+    """Buddy's configured model names: the minimalist-tier chat model
+    (Ollama tag, MODEL_NAME) and the deep-mode model directory name (the
+    frozen runtime env var, read via runtime_names.buddy_deep_model_env_value()
+    -- this module never spells that name itself). Best-effort — an unset
+    or unresolvable value is simply omitted, never guessed."""
+    names: List[str] = []
+    try:
+        from arail.config import MODEL_NAME
+        if MODEL_NAME:
+            names.append(MODEL_NAME)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        from arail.nucleus.runtime_names import buddy_deep_model_env_value
+        deep = buddy_deep_model_env_value()
+        if deep:
+            names.append(deep)
+    except Exception:  # noqa: BLE001
+        pass
+    return names
+
+
+def _model_identity_key(model: Any) -> str:
+    """The identity a candidate/protected model is compared by:
+    models.model_identity() (content-derived) when the model is a real,
+    on-disk LocalModel; otherwise its `.name` (or its bare string form)
+    as a best-effort fallback for callers that pass lighter test doubles
+    or a bare protected-name string."""
+    if isinstance(model, str):
+        return model
+    path = getattr(model, "path", None)
+    if path is not None:
+        try:
+            from arail.nucleus.models import model_identity
+
+            return model_identity(model)
+        except Exception:  # noqa: BLE001
+            pass
+    return getattr(model, "name", str(model))
+
+
+def _resolve_protected_identities(protected_names: List[str]) -> Dict[str, str]:
+    """Maps each protected name to the identity key it should be compared
+    by — resolved to a real on-disk model's content identity when that
+    name is actually present under ARAIL_MODELS_DIR, otherwise the bare
+    name itself (still correct: it stops matching a placeholder literal
+    like "Buddy" and starts matching the real configured name)."""
+    resolved: Dict[str, str] = {}
+    for name in protected_names:
+        key = name
+        try:
+            from arail.nucleus.models import model_identity, resolve_model
+
+            key = model_identity(resolve_model(name))
+        except Exception:  # noqa: BLE001
+            pass
+        resolved[name] = key
+    return resolved
+
+
 # ── main entry point ────────────────────────────────────────────────
 
 def run_preflight(
@@ -290,7 +362,10 @@ def run_preflight(
     report = PreflightReport(budget_gb=round(budget_gb, 2),
                              buddy_reserve_gb=round(buddy_reserve.reserve_gb, 2))
 
-    protected = ["Buddy"]
+    protected_names = _resolve_protected_model_names()
+    protected_identity_map = _resolve_protected_identities(protected_names)
+    protected = list(protected_identity_map.keys())
+    protected_identities = set(protected_identity_map.values())
 
     # Phase A / A2: teacher resident, or streamed window if it doesn't fit
     # and QueueLLM is present.
@@ -311,7 +386,7 @@ def run_preflight(
         report.rows.append(Requirement("Phase A/A2 (teacher)", f"{phase_a_gb:.1f} GB",
                                        f"{budget_gb:.1f} GB", status, note))
         if status == "red":
-            _refuse("A", phase_a_gb, budget_gb, teacher_model, protected)
+            _refuse("A", phase_a_gb, budget_gb, [teacher_model], protected, protected_identities)
 
     # Phase B: student LoRA estimate.
     if student_model is not None:
@@ -322,21 +397,21 @@ def run_preflight(
                                        f"{budget_gb:.1f} GB", status,
                                        "weights + adapter optimizer + activations, +20%"))
         if status == "red":
-            _refuse("B", phase_b_gb, budget_gb, student_model, protected)
+            _refuse("B", phase_b_gb, budget_gb, [student_model], protected, protected_identities)
 
     # Phase C: student, base_student, judge — loaded sequentially, so the
     # requirement is the MAX of the three, not the sum.
     phase_c_candidates = [m for m in (student_model, base_student_model, judge_model) if m is not None]
     if phase_c_candidates:
         sized = [(_weights_gb(m) * 1.10 + 1.0, m) for m in phase_c_candidates]
-        phase_c_gb, largest = max(sized, key=lambda pair: pair[0])
+        phase_c_gb, _largest = max(sized, key=lambda pair: pair[0])
         report.phase_requirements_gb["C"] = round(phase_c_gb, 2)
         status = _status(phase_c_gb, budget_gb)
         report.rows.append(Requirement("Phase C (eval, sequential)", f"{phase_c_gb:.1f} GB",
                                        f"{budget_gb:.1f} GB", status,
                                        "max(student, base_student, judge) — loaded one at a time"))
         if status == "red":
-            _refuse("C", phase_c_gb, budget_gb, largest, protected)
+            _refuse("C", phase_c_gb, budget_gb, phase_c_candidates, protected, protected_identities)
 
     # Capability rows.
     probes = capability_probes if capability_probes is not None else _default_capability_probes()
@@ -354,6 +429,17 @@ def run_preflight(
     return report
 
 
-def _refuse(phase: str, needed_gb: float, budget_gb: float, model, protected: List[str]) -> None:
-    drop = [] if model is None else [getattr(model, "name", str(model))]
+def _refuse(phase: str, needed_gb: float, budget_gb: float, candidates: List[Any],
+           protected: List[str], protected_identities: "set[str]") -> None:
+    """Picks the largest candidate that is NOT one of Buddy's protected
+    model identities (B6) — never the model that merely happens to be the
+    one that overflowed, if that model is protected. If every candidate
+    for this phase is protected, there is no safe drop candidate at all."""
+    droppable = [m for m in candidates if m is not None
+                and _model_identity_key(m) not in protected_identities]
+    if droppable:
+        chosen = max(droppable, key=lambda m: getattr(m, "weights_bytes", 0))
+        drop = [getattr(chosen, "name", str(chosen))]
+    else:
+        drop = []
     raise PreflightRefusal([], phase, needed_gb, budget_gb, drop, protected)

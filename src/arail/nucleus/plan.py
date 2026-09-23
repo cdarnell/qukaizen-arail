@@ -108,8 +108,20 @@ def run(argv: Sequence[str]) -> int:
 
     domain = load_domain(parsed["slug"], model_resolver=resolve_model)
     sys.stdout.write(f"domain {domain.name!r} loads cleanly (shard {domain.shard}).\n")
-    sys.stdout.write(
-        "preflight memory-plan output lands with the preflight module "
-        "(ARCHITECTURE.md §10 commit 8) — not yet available.\n"
-    )
+
+    from arail.nucleus import preflight as preflight_mod
+    from arail.nucleus.build import _resolve_preflight_models
+
+    preflight_models = _resolve_preflight_models(domain)
+    try:
+        report = preflight_mod.run_preflight(domain, runtime_streams=(domain.runtime == "queuellm"),
+                                             **preflight_models)
+    except preflight_mod.PreflightRefusal as exc:
+        sys.stdout.write(f"preflight: WOULD REFUSE — {exc}\n")
+        return 0
+
+    sys.stdout.write(f"preflight: budget {report.budget_gb:.1f} GB "
+                     f"(Buddy reserve {report.buddy_reserve_gb:.1f} GB), overall {report.overall}\n")
+    for row in report.rows:
+        sys.stdout.write(f"  {row.name}: {row.status} ({row.required} vs {row.available}) {row.note}\n")
     return 0

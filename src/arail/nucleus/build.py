@@ -48,6 +48,37 @@ def _run_dir(context: dict) -> Path:
     return run_dir(context["build_id"])
 
 
+def _resolve_preflight_models(domain) -> Dict[str, Any]:
+    """Best-effort resolution of student/teacher/base/judge for the
+    preflight memory plan (B6, 2026-09-23 review: `build.run` used to call
+    `run_preflight()` with no models at all, so the memory plan never ran
+    for a real build). Any role that can't be resolved yet (model not
+    downloaded, teacher left as "auto" -- auto-select isn't wired this
+    sprint, see BACKLOG) is simply omitted; preflight treats a missing
+    role as "not sized this run", not an error -- resolution failures
+    surface for real at PA/PC time instead (B7)."""
+    from arail.nucleus.models import resolve_model
+
+    models: Dict[str, Any] = {}
+    for key, name in (
+        ("student_model", domain.student_base),
+        ("base_student_model", domain.student_base),
+        ("judge_model", "ai-engineer"),
+    ):
+        try:
+            models[key] = resolve_model(name)
+        except Exception:  # noqa: BLE001 — unresolved roles are sized as "unknown", not fatal here
+            models[key] = None
+    if domain.teacher_model and domain.teacher_model != "auto":
+        try:
+            models["teacher_model"] = resolve_model(domain.teacher_model)
+        except Exception:  # noqa: BLE001
+            models["teacher_model"] = None
+    else:
+        models["teacher_model"] = None
+    return models
+
+
 def _provider_for_role(role: str, model_name: str, *, run_dir: Path, top_n: int):
     if _is_stub():
         from arail.nucleus.providers.stub import StubProvider
@@ -337,8 +368,10 @@ def run(argv: Sequence[str]) -> int:
     # CAPABILITY row (deep runtime missing, mlx_lm out of range, ...) --
     # those are reported but non-fatal at the API level, so this function
     # is the one that turns report.has_red into a refusal for that case.
+    preflight_models = _resolve_preflight_models(domain)
     report = preflight_mod.run_preflight(domain, memory_budget_gb=parsed["memory_budget_gb"],
-                                         runtime_streams=(domain.runtime == "queuellm"))
+                                         runtime_streams=(domain.runtime == "queuellm"),
+                                         **preflight_models)
     if report.has_red:
         bad = [r.name for r in report.rows if r.status == "red"]
         raise RefusedByPolicy(f"preflight capability check(s) failed: {', '.join(bad)}")

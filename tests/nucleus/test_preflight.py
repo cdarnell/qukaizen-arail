@@ -37,6 +37,11 @@ def test_status_green_amber_red():
 # ── T-PRE-1: refusal names the teacher, needs > budget ───────────────
 
 def test_teacher_refusal_names_model(monkeypatch):
+    # No Buddy model configured in this test -> protected is empty, and
+    # the oversized teacher itself is the (only, droppable) candidate.
+    monkeypatch.setattr("arail.config.MODEL_NAME", "")
+    monkeypatch.delenv("QUEUELLM_MODEL", raising=False)
+    monkeypatch.delenv("AEROLLM_MODEL", raising=False)
     capacity = {"ram_gb": 24.0, "vram_gb": 18.0, "disk_gb": 500.0}
     buddy = pf.BuddyReserve(measured_gb=0.0, declared_gb=0.0)
     teacher = _model("Qwen3-235B-A22B-4bit", 235.0, 130.0)  # far too big, not streamable
@@ -47,7 +52,49 @@ def test_teacher_refusal_names_model(monkeypatch):
     refusal = exc_info.value
     assert refusal.phase == "A"
     assert "Qwen3-235B-A22B-4bit" in refusal.drop
-    assert "Buddy" in refusal.protected
+    assert refusal.protected == []
+
+
+# ── B6 (2026-09-23 review): `protected` is Buddy's RESOLVED model
+# identity, not the literal string "Buddy" -- and the oversized model
+# itself is never proposed as a drop candidate when it IS that model ──
+
+def test_teacher_refusal_never_drops_buddys_own_deep_model(monkeypatch):
+    monkeypatch.setattr("arail.config.MODEL_NAME", "")
+    monkeypatch.setenv("AEROLLM_MODEL", "Qwen2.5-7B-Instruct-4bit")
+    monkeypatch.delenv("QUEUELLM_MODEL", raising=False)
+    capacity = {"ram_gb": 24.0, "vram_gb": 18.0, "disk_gb": 500.0}
+    buddy = pf.BuddyReserve(measured_gb=0.0, declared_gb=0.0)
+    # The judge alias `ai-engineer` resolves to this exact directory name
+    # (models.ALIASES) -- the review's concrete collision scenario. The
+    # teacher IS Buddy's deep model here, and it's the only candidate.
+    teacher = _model("Qwen2.5-7B-Instruct-4bit", 7.0, 130.0)
+    with pytest.raises(pf.PreflightRefusal) as exc_info:
+        pf.run_preflight(_domain(), capacity=capacity, buddy=buddy,
+                         memory_budget_gb=24, teacher_model=teacher,
+                         runtime_streams=False, capability_probes=_no_capability_probes())
+    refusal = exc_info.value
+    assert refusal.drop == []  # no safe candidate -- the only one is protected
+    assert "Qwen2.5-7B-Instruct-4bit" in refusal.protected
+
+
+def test_phase_c_never_drops_buddys_model_even_when_largest(monkeypatch):
+    monkeypatch.setattr("arail.config.MODEL_NAME", "")
+    monkeypatch.setenv("AEROLLM_MODEL", "Qwen2.5-7B-Instruct-4bit")
+    monkeypatch.delenv("QUEUELLM_MODEL", raising=False)
+    capacity = {"ram_gb": 4.0, "vram_gb": 3.0, "disk_gb": 500.0}
+    buddy = pf.BuddyReserve(measured_gb=0.0, declared_gb=0.0)
+    student = _model("student", 1.0, 0.5)
+    base = _model("base", 1.0, 0.5)
+    # judge is both the largest Phase-C candidate AND Buddy's deep model.
+    judge = _model("Qwen2.5-7B-Instruct-4bit", 7.0, 20.0)
+    with pytest.raises(pf.PreflightRefusal) as exc_info:
+        pf.run_preflight(_domain(), capacity=capacity, buddy=buddy,
+                         memory_budget_gb=4, student_model=student, base_student_model=base,
+                         judge_model=judge, capability_probes=_no_capability_probes())
+    refusal = exc_info.value
+    assert "Qwen2.5-7B-Instruct-4bit" not in refusal.drop
+    assert refusal.drop and refusal.drop[0] in ("student", "base")
 
 
 # ── T-PRE-2: streamed window chosen when runtime streams ─────────────
@@ -65,10 +112,21 @@ def test_streamed_window_chosen_when_runtime_streams():
 
 
 # ── T-PRE-3: property test — drop never includes a protected model ───
+# Half the combos make the (single) candidate model Buddy's own deep
+# model by name, so the "never drops the protected model" assertion is
+# actually exercised, not vacuously true because "Buddy" never appears
+# as a directory name (the original bug).
 
-def test_drop_never_includes_protected_over_200_combos():
+def test_drop_never_includes_protected_over_200_combos(monkeypatch):
     rng = random.Random(1234)
-    for _ in range(200):
+    for i in range(200):
+        if i % 2 == 0:
+            monkeypatch.setenv("AEROLLM_MODEL", "teacher-x")
+        else:
+            monkeypatch.delenv("AEROLLM_MODEL", raising=False)
+        monkeypatch.setattr("arail.config.MODEL_NAME", "")
+        monkeypatch.delenv("QUEUELLM_MODEL", raising=False)
+
         ram = rng.uniform(8, 64)
         capacity = {"ram_gb": ram, "vram_gb": ram * 0.75, "disk_gb": 500.0}
         buddy = pf.BuddyReserve(measured_gb=rng.uniform(0, 8), declared_gb=rng.uniform(0, 4))
@@ -80,7 +138,9 @@ def test_drop_never_includes_protected_over_200_combos():
                              capability_probes=_no_capability_probes())
         except pf.PreflightRefusal as refusal:
             assert not (set(refusal.drop) & set(refusal.protected))
-            assert "Buddy" not in refusal.drop
+            if i % 2 == 0:
+                assert "teacher-x" not in refusal.drop
+                assert refusal.drop == []
 
 
 # ── T-PRE-4: Buddy not running -> declared reserve used ──────────────
