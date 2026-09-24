@@ -86,6 +86,22 @@ def run_certify(build_id: str, *, publish_row: bool = False, context: dict = Non
             f"No card was written. Top offenders: {contamination_report.top_offenders}"
         )
 
+    # B9 (2026-09-23 review): the shard/version/output directory a
+    # certified card belongs under is whatever `fuse` actually minted
+    # under FORGE_ROOT (recorded in its phase output) — never re-derived
+    # here. Re-deriving with paths.shard_dir() would either disagree with
+    # what fuse actually wrote, or refuse outright ("already exists"),
+    # since fuse already created that directory.
+    fuse_output_path = rd / "phase_output" / "fuse.json"
+    if not fuse_output_path.is_file():
+        raise RefusedByPolicy(
+            f"certify refused: no fuse phase output at {fuse_output_path} "
+            f"— run `nucleus build` through the fuse phase before certify"
+        )
+    fuse_output = json.loads(fuse_output_path.read_text())
+    shard_root = Path(fuse_output["shard_dir"])
+    fused_version = fuse_output["version"]
+
     eval_dir = rd / "eval"
     metrics = json.loads((eval_dir / "metrics.json").read_text())
 
@@ -121,12 +137,13 @@ def run_certify(build_id: str, *, publish_row: bool = False, context: dict = Non
 
     from arail.nucleus.evals.hash import write_eval_config_lock
 
-    write_eval_config_lock(eval_inputs, rd / "eval-config.lock")
+    shard_root.mkdir(parents=True, exist_ok=True)
+    write_eval_config_lock(eval_inputs, shard_root / "eval-config.lock")
 
     from datetime import datetime, timezone
 
     card = build_card(
-        shard=domain.shard, version=context.get("version") or "0.1.0",
+        shard=domain.shard, version=fused_version,
         built=datetime.now(timezone.utc).isoformat(),
         pipeline_hash=context.get("pipeline_hash", "sha256:not_computed"),
         eval_hash=this_eval_hash, runtime=("stub" if is_stub else domain.runtime),
@@ -176,7 +193,6 @@ def run_certify(build_id: str, *, publish_row: bool = False, context: dict = Non
     sealed = sign(payload, ephemeral=is_stub)
     card["signed"] = sealed.signed
 
-    shard_root = Path(context.get("shard_output_dir") or (rd / "forge_out"))
     shard_root.mkdir(parents=True, exist_ok=True)
     write_card(card, shard_root / "dna-card.yaml")
     (shard_root / "seal.json").write_text(json.dumps(sealed.seal_json))

@@ -12,6 +12,16 @@ import pytest
 
 from arail.nucleus import build as build_mod
 
+
+def _run_phase(context, phase):
+    """run_phase_body() + persist_phase_output() — mirrors what
+    worker.py does for a real subprocess phase (B9: certify reads
+    fuse.json from phase_output/), for tests that call phase bodies
+    in-process rather than through a spawned worker."""
+    output = build_mod.run_phase_body(phase, context)
+    build_mod.persist_phase_output(context, phase, output)
+    return output
+
 FIXTURE_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "nucleus" / "linux-kernel-mini"
 
 
@@ -82,20 +92,20 @@ distill:
 
 
 def test_phase_extract_train(staged_context):
-    out = build_mod.run_phase_body("PA", staged_context)
+    out = _run_phase(staged_context, "PA")
     assert out["n_extracted_this_run"] > 0
     assert out["n_train_total"] > 0
 
 
 def test_resume_skips_already_indexed(staged_context):
-    out1 = build_mod.run_phase_body("PA", staged_context)
-    out2 = build_mod.run_phase_body("PA", staged_context)
+    out1 = _run_phase(staged_context, "PA")
+    out2 = _run_phase(staged_context, "PA")
     assert out2["n_extracted_this_run"] == 0  # nothing new -- everything was already indexed
     assert out1["n_extracted_this_run"] == out1["n_train_total"]
 
 
 def test_phase_extract_cert(staged_context):
-    out = build_mod.run_phase_body("PA2", staged_context)
+    out = _run_phase(staged_context, "PA2")
     assert out["n_cert"] == 5
 
     from arail.nucleus.build import _run_dir
@@ -106,24 +116,24 @@ def test_phase_extract_cert(staged_context):
 
 
 def test_phase_train_stub(staged_context):
-    out = build_mod.run_phase_body("PB", staged_context)
+    out = _run_phase(staged_context, "PB")
     assert out["stop_metric"] in ("target_reached", "fidelity_plateau_3_cycles", "budget")
     assert out["n_cycles"] > 0
     assert out["best_adapter_path"]
 
 
 def test_phase_fuse_stub(staged_context):
-    build_mod.run_phase_body("PB", staged_context)
-    out = build_mod.run_phase_body("fuse", staged_context)
+    _run_phase(staged_context, "PB")
+    out = _run_phase(staged_context, "fuse")
     output_dir = Path(out["output_dir"])
     assert output_dir.is_dir()
     assert (output_dir / "FUSED_STUB_MARKER").is_file()
 
 
 def test_phase_eval_stub(staged_context):
-    build_mod.run_phase_body("PB", staged_context)
-    build_mod.run_phase_body("fuse", staged_context)
-    out = build_mod.run_phase_body("PC", staged_context)
+    _run_phase(staged_context, "PB")
+    _run_phase(staged_context, "fuse")
+    out = _run_phase(staged_context, "PC")
     assert out["n_cert"] == 5
     assert 0.0 <= out["closed_mean_f1"] <= 1.0
 
@@ -138,7 +148,7 @@ def test_unknown_phase_refused(staged_context):
     from arail.nucleus.errors import RefusedByPolicy
 
     with pytest.raises(RefusedByPolicy):
-        build_mod.run_phase_body("nonexistent", staged_context)
+        _run_phase(staged_context, "nonexistent")
 
 
 # ── B7 (2026-09-23 review): a non-stub build refuses up front, before

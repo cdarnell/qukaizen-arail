@@ -81,7 +81,7 @@ distill:
            "domains_dir": domains_dir, "tmp_path": tmp_path}
 
 
-def test_gate_a_stub_pipeline_end_to_end(gate_a_env):
+def test_gate_a_stub_pipeline_end_to_end(gate_a_env, monkeypatch):
     env = gate_a_env["env"]
     built = gate_a_env["built"]
     tmp_path = gate_a_env["tmp_path"]
@@ -129,8 +129,14 @@ def test_gate_a_stub_pipeline_end_to_end(gate_a_env):
     assert cert_sha_before == cert_sha_after
     assert cert_jsonl_before == cert_jsonl_after
 
-    # The card validates and the report has 10 eyeball sections.
-    forge_out = gate_a_env["data_dir"] / "nucleus" / "runs" / build_id / "forge_out"
+    # B9 (2026-09-23 review): the card lands under FORGE_ROOT/<shard>/<ver>,
+    # not the run dir's own "forge_out" scratch path -- so /forge and
+    # `verify <shard>@<ver>` can actually find it.
+    fuse_output = json.loads(
+        (gate_a_env["data_dir"] / "nucleus" / "runs" / build_id / "phase_output" / "fuse.json").read_text())
+    shard, fused_version = fuse_output["shard"], fuse_output["version"]
+    forge_out = gate_a_env["models_dir"] / "forge" / shard / fused_version
+    assert forge_out == Path(fuse_output["shard_dir"])
     card_path = forge_out / "dna-card.yaml"
     assert card_path.is_file()
 
@@ -139,17 +145,33 @@ def test_gate_a_stub_pipeline_end_to_end(gate_a_env):
     card = load_card(card_path)
     validate_card(card)  # no raise
     assert card["runtime"] == "stub"
+    assert card["shard"] == shard
+    assert card["version"] == fused_version
 
     report_text = (forge_out / "build-report.md").read_text()
     import re
 
     assert len(re.findall(r"^### \d+\. ", report_text, flags=re.MULTILINE)) == 10
 
-    # verify: valid + ephemeral-stub.
+    # verify: valid + ephemeral-stub, both by directory and by <shard>@<ver>.
     result = _run_cli(["verify", str(forge_out), "--fast"], env)
     out = result.stdout.decode()
     assert "signature: valid" in out
     assert "key: ephemeral-stub" in out
+
+    result = _run_cli(["verify", f"{shard}@{fused_version}", "--fast"], env)
+    out = result.stdout.decode()
+    assert "signature: valid" in out
+    assert "key: ephemeral-stub" in out
+
+    # /api/forge/cards lists it (forge_api._list_cards() scans FORGE_ROOT).
+    # In-process, so point THIS process's arail.config.MODELS_DIR at the
+    # same models dir the subprocess CLI calls above used.
+    monkeypatch.setattr("arail.config.MODELS_DIR", str(gate_a_env["models_dir"]))
+    from arail.portal import forge_api
+
+    cards = forge_api.list_cards()
+    assert any(c["shard"] == shard and c["version"] == fused_version for c in cards)
 
     # egress.jsonl is absent or byte-identical (zero egress across the
     # whole run) -- absent is the expected state here since nothing in

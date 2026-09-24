@@ -8,6 +8,18 @@ import json
 import pytest
 
 from arail.nucleus import build as build_mod
+
+
+def _run_phase(context, phase):
+    """run_phase_body() + persist_phase_output() — mirrors what
+    worker.py does for a real subprocess phase (B9: certify reads
+    fuse.json from phase_output/), for tests that call phase bodies
+    in-process rather than through a spawned worker."""
+    output = build_mod.run_phase_body(phase, context)
+    build_mod.persist_phase_output(context, phase, output)
+    return output
+
+
 from arail.nucleus import certify as certify_mod
 from arail.nucleus.errors import RefusedByPolicy
 
@@ -18,11 +30,11 @@ from tests.nucleus.test_build_phases import staged_context  # noqa: F401
 def test_certify_end_to_end_produces_signed_card(staged_context, tmp_path, monkeypatch):
     monkeypatch.setenv("NUCLEUS_SIGNING_KEY_PATH", str(tmp_path / "signing.ed25519"))
 
-    build_mod.run_phase_body("PA", staged_context)
-    build_mod.run_phase_body("PA2", staged_context)
-    build_mod.run_phase_body("PB", staged_context)
-    build_mod.run_phase_body("fuse", staged_context)
-    build_mod.run_phase_body("PC", staged_context)
+    _run_phase(staged_context, "PA")
+    _run_phase(staged_context, "PA2")
+    _run_phase(staged_context, "PB")
+    _run_phase(staged_context, "fuse")
+    _run_phase(staged_context, "PC")
 
     result = certify_mod.run_certify(staged_context["build_id"], context=staged_context)
 
@@ -57,11 +69,11 @@ def test_certify_refuses_when_env_disagrees_with_build_record(staged_context, tm
     # The build ran with ARAIL_NUCLEUS_STUB=1 (staged_context's fixture
     # sets it) -- context.json records stub=True. Reproduce the review's
     # exact repro: certify the same build_id with the env var unset.
-    build_mod.run_phase_body("PA", staged_context)
-    build_mod.run_phase_body("PA2", staged_context)
-    build_mod.run_phase_body("PB", staged_context)
-    build_mod.run_phase_body("fuse", staged_context)
-    build_mod.run_phase_body("PC", staged_context)
+    _run_phase(staged_context, "PA")
+    _run_phase(staged_context, "PA2")
+    _run_phase(staged_context, "PB")
+    _run_phase(staged_context, "fuse")
+    _run_phase(staged_context, "PC")
 
     rd = build_mod._run_dir(staged_context)
     (rd / "context.json").write_text(json.dumps(staged_context, sort_keys=True))
@@ -80,11 +92,11 @@ def test_certify_refuses_when_env_disagrees_with_build_record(staged_context, tm
 
 def test_certify_refuses_on_build_record_missing_stub_field(staged_context, tmp_path, monkeypatch):
     monkeypatch.setenv("NUCLEUS_SIGNING_KEY_PATH", str(tmp_path / "signing.ed25519"))
-    build_mod.run_phase_body("PA", staged_context)
-    build_mod.run_phase_body("PA2", staged_context)
-    build_mod.run_phase_body("PB", staged_context)
-    build_mod.run_phase_body("fuse", staged_context)
-    build_mod.run_phase_body("PC", staged_context)
+    _run_phase(staged_context, "PA")
+    _run_phase(staged_context, "PA2")
+    _run_phase(staged_context, "PB")
+    _run_phase(staged_context, "fuse")
+    _run_phase(staged_context, "PC")
 
     legacy_context = dict(staged_context)
     del legacy_context["stub"]
@@ -96,11 +108,11 @@ def test_certify_refuses_on_build_record_missing_stub_field(staged_context, tmp_
 def test_certify_refuses_on_contamination(staged_context, tmp_path, monkeypatch):
     monkeypatch.setenv("NUCLEUS_SIGNING_KEY_PATH", str(tmp_path / "signing.ed25519"))
 
-    build_mod.run_phase_body("PA", staged_context)
-    build_mod.run_phase_body("PA2", staged_context)
-    build_mod.run_phase_body("PB", staged_context)
-    build_mod.run_phase_body("fuse", staged_context)
-    build_mod.run_phase_body("PC", staged_context)
+    _run_phase(staged_context, "PA")
+    _run_phase(staged_context, "PA2")
+    _run_phase(staged_context, "PB")
+    _run_phase(staged_context, "fuse")
+    _run_phase(staged_context, "PC")
 
     # Force contamination by monkeypatching the checker (imported lazily
     # inside run_certify, so patch it at its source module) to always

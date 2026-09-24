@@ -329,6 +329,20 @@ def run_phase_body(phase: str, context: dict) -> dict:
     return _PHASE_FUNCS[phase](context)
 
 
+def persist_phase_output(context: dict, phase: str, output: dict) -> Path:
+    """Writes run_dir/phase_output/<phase>.json — the same file worker.py
+    writes after a real subprocess phase, and what certify.py reads (e.g.
+    fuse.json's shard/version/shard_dir, B9). Exposed here so in-process
+    callers (tests, and any future non-subprocess phase runner) that call
+    run_phase_body() directly can keep that file in sync without
+    duplicating worker.py's write logic."""
+    out_dir = _run_dir(context) / "phase_output"
+    out_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    out_path = out_dir / f"{phase}.json"
+    out_path.write_text(json.dumps(output or {}, sort_keys=True, default=str))
+    return out_path
+
+
 # ── CLI verb: build ──────────────────────────────────────────────────
 
 def _parse_build_args(argv: Sequence[str]) -> dict:

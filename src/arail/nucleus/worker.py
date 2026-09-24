@@ -47,11 +47,9 @@ def main(argv: Sequence[str] = None) -> int:
         sys.stderr.write(f"worker: phase {phase} failed: {exc}\n")
         return 1
 
-    from arail.nucleus.paths import run_dir
+    from arail.nucleus.build import persist_phase_output
 
-    out_dir = run_dir(build_id) / "phase_output"
-    out_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-    (out_dir / f"{phase}.json").write_text(json.dumps(output or {}, sort_keys=True, default=str))
+    persist_phase_output(context, phase, output)
     return 0
 
 
