@@ -710,6 +710,19 @@ the builder should make **only with the operator's OK** (Q9).
    provenance. Found during review-loop-1 (2026-09-23); filed as a single umbrella ticket, "Model Forge real-runtime
    wiring", in `sprints/BACKLOG.md` (expands the existing MLX-training-cycle entry). Required before Gate B / item
    10, not before Gate A.
+10. **Found in review round 3 (2026-09-23), not anticipated at design time:**
+    - The LC estimator (`open_lc_judge.score`) degenerates. With a zero-variance Δlen (all equal lengths or a
+      constant delta), the 2×2 Newton-Raphson Hessian is singular and `lc_win_rate` returns 0.5 whatever the
+      outcomes. The correct fallback is the intercept-only fit, which equals the raw win rate. Under
+      quasi-separation at n = 10 it returns 0 or 1. The stub fixture sidesteps this with per-item length padding.
+      Required before Gate B.
+    - Preflight's protected Buddy model is read from `QUEUELLM_MODEL` first, but arail's `AeroLLMBackend` loads
+      only `AEROLLM_MODEL` (or its built-in default when unset). The protected set can therefore miss the model
+      Buddy actually runs.
+    - `run_certify` has grown to 428 lines across three review loops. Extract `_eval_hash_inputs`,
+      `_assemble_card`, `_provenance_hashes`.
+
+    Ticketed in the BACKLOG umbrella per REVIEW.md round 3 (R3-A3, R3-A4, R3-A10).
 
 **Repaid**
 

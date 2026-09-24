@@ -580,3 +580,261 @@ Then re-request architect review (round 3), which should be a short pass over R1
 4. Stub-laundering variants: environment mismatch, a forged `context.json`, and a missing `fuse.json`.
 5. `verify` exit-code semantics.
 6. Changed-line coverage on `build.py` and `certify.py`.
+
+---
+
+# Round 3
+
+**Date:** 2026-09-23
+**Build:** [BUILD_LOG.md](./BUILD_LOG.md) "Review loop 2" at `d56bc9a9` (fix commits `ae98f8c8..edc164a6`, diff base `4987392d`)
+**Architecture:** [ARCHITECTURE.md](./ARCHITECTURE.md). §9 "Added" item 10 was filed in this round's commit.
+**Reviewer:** architect (review mode, round 3)
+
+## Verdict: WEAK_PASS
+
+All three round-2 BLOCKs are fixed in the code, and I confirmed each by re-running it myself. The v1-open cap works as specified. Gate A's signed card now matches its own numbers.
+
+It is not a clean PASS because two of the proving tests are weaker than the loop claims:
+- **The R3 test is vacuous.** It refuses at Phase B, before Phase C's protection logic ever runs. With the R3 fix reverted, it still passes.
+- **The R1 unit invariant test** skips `formula_id` and only asserts `!= 0.5` on the LC value.
+
+Round 3 also found a real latent defect in the LC estimator. It cannot fire at Gate A.
+
+None of this blocks Gate A: I verified the code by reproduction, and the real-runtime paths stay refused by B7. **QA may proceed now.** "Required actions before merge" (below) must land before ship. They are test and ticket work only, with no production-code change.
+
+**Test run on this worktree:**
+- `.venv/bin/pytest tests/nucleus tests/portal/test_forge_viewer.py -q` gave **368 passed, 2 skipped**, which matches the orchestrator's count.
+- I touched a sentinel before the run and ran `find lab models -newer <sentinel>` after it. Result: **nothing written**. `git status` shows only the pre-existing untracked `.venv`/`logs/`.
+- All my probes ran in the session scratchpad, outside the repo.
+
+## The seven items
+
+### R1 (card self-consistency): Resolved in code. The unit test needs tightening (ASK R3-A2)
+
+**Recompute from the signed card alone.** I ran the Gate A e2e with `--basetemp` in scratch, loaded `models/forge/qkz-kernel/0.1.0/dna-card.yaml`, and recomputed from the card's own blocks:
+- `closed.mean_f1` from `closed_ended` rows = 0.6103175.
+- `open_ended.eyeball_explanation.lc_win_rate_vs_base` = 0.8676.
+- `executable` is all `not_run`, so `select_formula_id` gives `composite/v1-open`, which matches the card.
+- `composite.compute(...)` = **0.713231**, equal to `composite.value`.
+- `beats_base` = 0.6103 > `baselines.base_student."closed.mean_f1"` 0.4293, so it is True.
+- `decide(..., formula_id="composite/v1-open")` = **COMPATIBLE**, equal to `fidelity.decision`.
+
+The card now carries every input its composite and decision consume.
+
+**Is the LC golden discriminating?** Yes at the Gate A level, weakly at the unit level. I mutated `open_lc_judge.randomize_and_judge` to skip the position un-swap (`model_won = verdict == "A"`), then called `build._score_open_lc` on the fixture eyeball file:
+
+| | `lc_win_rate` | `ci95` |
+|---|---|---|
+| Correct | 0.8676 | [0.5, 1.0] |
+| Inverted | **0.0** | [0.0, 0.6] |
+
+Consequences:
+- The Gate A exact golden (composite 0.713231) would move to about 0.366, so the e2e catches a broken un-swap. My first attempt to prove this through the e2e itself was a no-op: `gate_a_env` overwrites `PYTHONPATH`, so an injected patch never reaches the subprocess. The arithmetic is unambiguous, though.
+- The unit test `test_card_composite_and_decision_recompute_from_the_card_alone` only asserts `!= approx(0.5)`, so **0.0 passes it**. The value 0.8676 is not pinned anywhere in the suite.
+- That same test calls `decide()` **without `formula_id`**. It only agrees with the card because the unit fixture's decision is `KNOWN_ISSUE`, where the cap is irrelevant. On the Gate A card, the same recompute gives `CERTIFIED` against the card's `COMPATIBLE`. The invariant, as written, does not hold for the one card that matters most.
+
+**The builder's "constant length delta makes the LC regression singular" finding.** The fixture fix is legitimate. It also exposes a **real latent defect in `open_lc_judge.score`** that the fix does not address.
+
+The fixture side:
+- Real completions have varying character lengths, so padding the stub texts makes the fixture look like real input.
+- Padding is hashed from salt + item_id, independent of the winner table, so it does not manufacture the result.
+
+The estimator side, probed directly with 10 judged pairs:
+
+| Input | raw win rate | `lc_win_rate` returned |
+|---|---|---|
+| Equal lengths | 0.8 | **0.5** |
+| Constant delta +7 | 0.8 | **0.5** |
+| All wins, equal lengths | 1.0 | **0.5** |
+| Deltas 0..9, both losses on the longest two (quasi-separation) | 0.8 | **1.0** |
+
+Why it happens: when every `x = tanh(Δ/σ)` is identical (σ falls back to 1.0 when `std == 0`), the 2×2 Hessian is rank-deficient. `_fit_length_controlled_logit` hits `abs(det) < 1e-12` on the first iteration and breaks with `b0 = 0`, so it returns 0.5 whatever the outcomes. The correct degenerate answer is the intercept-only fit, `σ(logit(raw))` = the raw win rate. Separation with n = 10 is the second failure: there is no regularisation, so β diverges and LC lands at 0 or 1.
+
+Could real completions hit this?
+- Exact zero variance is unlikely with character lengths, but possible. Examples: fixed-format or refusal outputs, or fused and base producing the same length on every item. A near-zero σ is fine; only exact zero breaks.
+- Quasi-separation at n = 10 is **likely** on real runs.
+
+The code handles neither case: it silently returns 0.5 or 1.0, with a CI that looks normal.
+
+This does not block Gate A. The real judge path is unwired and B7 refuses non-stub builds, so no signed card can currently carry a real LC value. It is filed as ARCHITECTURE §9 item 10 and ASK R3-A3, and it is **required before Gate B**.
+
+INFO: `baselines.base_student."closed.mean_f1"` is written unrounded (`0.42930900000000005`), while every other card float is rounded to 6 dp. It is cosmetic. `beats_base` is computed from unrounded values, whereas a card-only recompute uses 6 dp rows. They could disagree only within 1e-6 of a tie.
+
+### R2 (`eval_hash` covers the open yardstick): Resolved
+
+I read the Gate A `eval-config.lock` back and checked each field:
+- `scoring.judge_model_identity` = `stub-judge/v1:7e2b…8282`, the sha256 of the canonical winner table. It equals the card's `open_ended…judge`.
+- `scoring.judge_rubric` = the full rubric text (`_STUB_JUDGE_RUBRIC`).
+- `prompts` hex contains the tag `open_eval=` followed by bytes **byte-identical** to `domains/kernel.eyeball.txt`.
+- `eval_hash(lock)` equals the card's `eval_hash`.
+- The lock contains none of 0.8676, 0.713231, 0.6103, 0.4293 or the build id, so metrics do not enter it.
+
+The tests are genuine iff tests:
+- `test_eval_hash_changes_when_eyeball_file_changes` edits one line.
+- `test_eval_hash_changes_when_judge_winner_table_changes` swaps the table.
+- The existing metric-invariance test still passes.
+
+INFO:
+- The eyeball bytes are read at **certify** time, but PC judged them at **PC** time. If the file is edited between the two, the hash describes a prompt set PC never judged. Hashing the bytes into `metrics.json` at PC and reading them from there would close this.
+- `decision_rule_id` stays `decision_rule/v1` although `decide()` gained the v1-open cap. That is acceptable, because the cap is keyed on `composite_formula_id`, which is hashed, so equal inputs still give an equal decision. Say so in the §4.9 decision-rule text next time it is touched.
+
+### R3 (Buddy guard by identity): Resolved in code. The proving test is vacuous (ASK R3-A1)
+
+**My reproduction on real temp model dirs.** Setup:
+- `ARAIL_ENV_FILE` pointed at an empty file.
+- The judge is `resolve_model("ai-engineer")`.
+- `student_model=None`, so Phase C is the phase that refuses.
+- Phase C candidates: base (0.4 MB) and the Buddy model (5 MB).
+
+| Buddy configured as | Result with the fix | Result with the R3 fix reverted |
+|---|---|---|
+| bare name | `drop=['base']` | ok |
+| absolute path | `drop=['base']` | **drops Buddy** |
+| absolute path + trailing `/` | `drop=['base']` | **drops Buddy** |
+| symlink absolute path | `drop=['base']` | **drops Buddy** |
+| byte-identical copy in models dir (bare name) | `drop=['base']` | ok |
+| byte-identical copy outside models dir (absolute path) | `drop=['base']` | **drops Buddy** |
+| `QUEUELLM_MODEL` = absolute path | `drop=['base']` | **drops Buddy** |
+
+The fix is correct. `model_identity` is name-independent (config, tokenizer, index, plus shard name/size/first MiB), so copies match. `local_model_at` resolves symlinks.
+
+**The proving test does not prove it.** `test_buddy_protected_matches_bare_name_absolute_path_and_byte_identical_copy` passes `student_model=student` with `memory_budget_gb=0.001`. Phase B (student LoRA, about 2.5 GB) goes red first, and `_refuse("B", …, [student_model], …)` is called with **only the student as a candidate**. So `drop == ['student']` whatever the protection logic does.
+
+I loaded a pytest plugin that restores the round-2 `_resolve_protected_identities`: the test **still passes**. The 200-combo property test has the same exposure only if it also sizes a student; QA should check.
+
+Also not done: round-2 R3 fix item 2, "check the invariant by identity". `PreflightRefusal.__init__` still asserts `set(drop) & set(protected)` on display names against raw env strings. Correctness today comes only from `_refuse`'s identity filter.
+
+**Two gaps outside R3's stated scope (ASK R3-A4):**
+- **Env-var precedence mismatch.** `runtime_names.buddy_deep_model_env_value()` prefers `QUEUELLM_MODEL`, but arail's `AeroLLMBackend` (`router/backends.py:1580`) reads **only `AEROLLM_MODEL`**. With `QUEUELLM_MODEL=base` and `AEROLLM_MODEL=<Buddy>`, preflight protects `base` and advises **`Drop: Qwen2.5-7B-Instruct-4bit`**, which is Buddy's actual model. It becomes likely once users start migrating `.env` to `QUEUELLM_*` after PR #298's deprecation warnings. Protect **both** values.
+- **Unset env var.** With the variable unset, the backend defaults to `Qwen2.5-7B-Instruct-4bit`, which is also the `ai-engineer` judge alias target. Preflight protects nothing, so it advises dropping it.
+  - This matters only when the deep backend is actually Buddy's live backend (maximus with a blank `default_b`). `setup.sh capture_tier` normally writes the variable.
+  - Fix: protect the backend's default when the configured tier uses the deep backend.
+  - This is user-visible this sprint through `nucleus plan` ("WOULD REFUSE — Drop: …"), which runs preflight on real models even in stub mode. It is advisory text only; nothing is evicted, so it is an ASK and not a BLOCK.
+
+### Judge ≠ teacher/student-base identity wired into PC: Resolved
+
+`_score_open_lc` calls `assert_judge_identity_distinct` before either provider is constructed, and `best_effort_identity` is now one shared helper.
+
+INFO:
+- `fused_student_identity` is not passed, although the function supports it.
+- The test's "no output on disk" assertion checks `tmp_path/"fused"`, which the stub never writes to anyway. Asserting `run_dir/eval/eyeball_outputs.json` is absent would be the real before-generation check.
+
+### Forged `context.json` cross-check: Resolved as specified. Residual ASK R3-A5
+
+I ran each variant with CLI subprocesses on the Gate A run dir, with the stub variable unset:
+- **(a) `context.json` set to `stub: false, provider: queuellm`, stamps intact:** exit **3**, message lists all 5 phases, no card written, as intended.
+- **(b) as (a), plus every `phase_output/*.json` stamp forged to `queuellm`:** exit 0. The card is signed with the lab key and ledgered (COMPATIBLE, thanks to the cap).
+- **(c) as (a), plus PA, PA2, PB and PC stamps deleted and fuse's stamp forged:** exit 0, card and ledger written. The cross-check `continue`s past missing stamps.
+
+(b) is the key-owner-can-sign-anything case round 2 already ruled not a boundary. (c) is cheaper to close:
+- A completed build has every `_WORKER_PHASES` stamp, so a missing stamp should refuse.
+- The second half of round-2 A1 was not implemented: while B7 stands, refuse `stub: false` outright, since no non-stub build path exists.
+Either change closes both (b) and (c) for this sprint.
+
+### Real eyeball outputs in `build-report.md`: Resolved
+
+The Gate A report shows `[stub:open:fused-v1] explanation for eyeball-N` and `[stub:open:base-v1] …` per prompt. The placeholder text is gone. The shard-dir snapshot for "previous version" works.
+
+INFO: `_previous_version_student_outputs` skips non-numeric version dirs (for example `0.2.0-rc1`). That is fine for now.
+
+### v1-open COMPATIBLE cap: Resolved
+
+`decide()` applies the cap after `NOT_EVALUATED`, `KNOWN_ISSUE`, `BETA` and the residency rule. Checked two ways:
+- **Unit tests:** above target gives COMPATIBLE, BETA and KNOWN_ISSUE are not masked, and other formulas are unaffected.
+- **The Gate A card itself:** achieved 0.713 > target 0.5, `beats_base` True, formula `v1-open`, decision **COMPATIBLE**.
+
+The ARCHITECTURE §4.9 Gate B precondition is now enforced in code, so it no longer depends on B7 alone.
+
+## Remaining round-1/round-2 ASKs: status
+
+| ASK | Status |
+|---|---|
+| A1 forged context | Partially done: stamps are cross-checked. Missing-stamp and B7-outright-refusal are open (R3-A5). |
+| A3 eyeball outputs | **Resolved.** |
+| Judge-identity wiring (round-1 T-JUDGE-1) | **Resolved** for PC. The literal-string half of T-JUDGE-1 is resolved by R2. |
+| A4 `pipeline_hash` hyperparams / `training_hash` streaming | **Open.** `training_hyperparams={"target": …}` is unchanged. Required before Gate B. |
+| A5 decoding derived from phases | **Open.** Required before Gate B. |
+| A6 false "score IDENTICALLY" comments in `test_certify.py` | **Open** (lines 43, 135). |
+| A7 executable `not_run` reason text | **Open.** Still reads "not available in this generic certify path". |
+| A9 `verify` exit semantics docs, `tampered` CSS | **Open.** |
+| A10 BACKLOG refresh | **Open.** The umbrella entry is unchanged since `3d3faed8` and is still stale. **Required before merge.** |
+| Round-1: `runtime_names` hashes `__init__.py`; `runtime_provenance` uncalled | Open. Gate B. |
+| Round-1: contamination scope, memory, boundary test, date compare | Open. Gate B. |
+| Round-1: T-EGR-1 scope | Open. |
+| Round-1: `/forge` badge `invalid` without `cryptography` | Open (`forge_api.py:127`). |
+| Round-1: `--new-cert-version` undocumented | Open. `docs/nucleus.md` has 0 mentions. |
+| Round-1: `seal.py` key-owner check, malformed hex | Open. |
+| Round-1: `spike.py` real path, residency "passes" when unmeasured | Open. Not yet in BACKLOG. |
+| Round-1: `run_certify` length | **Worse again: 428 lines** (342 in round 2, about 170 in round 1). Not a correctness issue, but every loop has grown it. Filed in ARCHITECTURE §9 item 10. |
+
+None of these is promoted. None affects Gate A's stub pipeline correctness or the signed card's honesty, now that the cap and R1 are in place.
+
+## Security findings (round 3, what I checked)
+
+- **Stub laundering:** CLI variants (a), (b) and (c) above. The environment-mismatch and forged-flag paths are closed. The forged-and-deleted-stamps path is open (R3-A5), and it is not a key boundary.
+- **Buddy guard:** 7 configuration forms on real directories, plus a revert control (R3 above). Two precedence and default gaps remain (R3-A4). Both are advisory text only.
+- **New file reads:** `local_model_at` reads operator-controlled env paths and follows symlinks by design. It only reads `config.json` and stats weight files, so no write or exec surface. `_previous_version_student_outputs` reads JSON from `FORGE_ROOT` siblings and handles parse errors.
+- **Frozen surface:** the diff adds no `aerollm`/`AERO_` spelling and no `os.environ` write under `src/`.
+- **Writes during tests:** none outside tmp (sentinel).
+
+## Test coverage assessment (round 3)
+
+- 368 passed, 2 skipped, which is +10 since round 2.
+- Changed-line coverage is still not measured, and QA must report it.
+- Tests that do not prove what they claim:
+  - the R3 test (Phase B short-circuit);
+  - the R1 unit invariant (no `formula_id`, LC only `!= 0.5`);
+  - the judge-identity "no output" assertion (wrong directory).
+- Genuine tests:
+  - R2 iff tests;
+  - forged-context test;
+  - eyeball report test;
+  - v1-open cap tests;
+  - Gate A exact composite golden (discriminating by arithmetic).
+
+## Tech debt delta (round 3)
+
+- Filed ARCHITECTURE §9 **item 10**, with three parts:
+  - the LC estimator's degenerate cases (zero-variance Δlen and separation), a latent defect found through the builder's fixture note;
+  - the preflight protected-name source mismatch (`QUEUELLM_MODEL` vs arail's `AEROLLM_MODEL`-only backend, and the unset default);
+  - `run_certify` growth to 428 lines.
+- Net debt is still **positive (significant)**. It is fully homed once the BACKLOG refresh (A10) lands.
+
+## Required actions before merge (after QA, before ship)
+
+These are test and ticket work only. QA can proceed in parallel.
+
+1. **R3-A1:** make the R3 test reach Phase C: pass `student_model=None` or size Phase B green. Assert `refusal.phase == "C"`. The test must fail with the round-2 `_resolve_protected_identities`. Check `drop ∩ protected` by identity in `PreflightRefusal`, or remove the misleading name-based assert.
+2. **R3-A2:** the unit card-alone invariant must pass `formula_id=card["composite"]["formula_id"]` to `decide()` and run against a COMPATIBLE-by-cap card too. Pin the unit LC golden to its exact value (0.8676) so a broken un-swap (which gives 0.0) fails at unit level.
+3. **R3-A10 (= A10):** refresh the BACKLOG umbrella entry:
+   - drop the stale lines;
+   - add §9 item 10's three parts;
+   - add R3-A4 and R3-A5;
+   - add the residency-unmeasured-permits-CERTIFIED item, the spike harness, contamination scope, and A4, A5, A7 and A9.
+
+Tickets (BACKLOG, before Gate B; not merge-gating):
+- **R3-A3:** LC estimator fallback to intercept-only when Δlen has zero variance, plus regularisation (Firth/ridge) or an explicit `unreliable` flag under separation. Include tests for the four probe cases above.
+- **R3-A4:** protect both Buddy env values, plus the backend default when the deep backend is live.
+- **R3-A5:** refuse missing phase stamps, and refuse `stub: false` while B7 stands.
+
+## What QA should target first
+
+Weights follow ARCHITECTURE §7 (brief §8 adjusted, Buddy-voice deferred): **Security 35 / Regression 25 / Happy 25 / Setup 15**.
+
+1. **Security (35):**
+   1. **Stub laundering:** variants (a), (b) and (c) above, plus a missing `fuse.json` or `metrics.json`, and `stub` flipped the other way (`true` over real-looking stamps). Confirm exit codes and that no card or ledger row is written.
+   2. **Buddy guard on real directories, reaching Phase C:** bare name, absolute path, symlink, byte-identical copy in and out of the models dir, `QUEUELLM_MODEL` vs `AEROLLM_MODEL` divergence, unset env with the maximus tier. Include `nucleus plan` output text. Re-run T-PRE-3 and confirm it actually exercises Phase C.
+   3. **Tamper:** hand-edit card metrics, `open_ended`, `baselines` and the eyeball file after certify, against `verify` (fast and non-fast) and the `/forge` badge.
+2. **Happy (25):**
+   1. **Card self-consistency:** recompute the composite and the decision (**with** `formula_id`) from the card alone, for the Gate A card and the unit-fixture card.
+   2. **LC estimator:** the four degenerate probes above as characterisation tests. They document the current wrong outputs; do not fix them in QA.
+   3. **Mutation checks:** break the un-swap and confirm the Gate A golden fails. Revert R3 and confirm the fixed R3 test fails.
+3. **Regression (25):**
+   1. **`eval_hash` iff** over templates, eyeball bytes, judge table, rubric, decoding and cert set. Metrics, paths and build id must leave it unchanged.
+   2. The frozen-name grep (T-RT-2).
+   3. The seal against the real `qkz` binary.
+   4. **Changed-line coverage** on `build.py`, `certify.py`, `preflight.py`, `models.py`, `composite.py`.
+4. **Setup (15):**
+   1. `nucleus plan` on a clean machine with Buddy in each configuration form: is the refusal text plain and correct?
+   2. `verify` exit-code semantics while `chain: not_checked`.
+   3. The undocumented `--new-cert-version` path.
