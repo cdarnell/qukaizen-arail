@@ -214,17 +214,11 @@ def run_certify(build_id: str, *, publish_row: bool = False, context: dict = Non
     # teacher/student identity fall back to the plain configured name
     # (never a fake hash) when the model doesn't resolve to real files on
     # disk -- true for every stub-mode run, since the fixture corpus
-    # doesn't ship real teacher weights.
-    def _best_effort_identity(name: str) -> str:
-        if not name or name == "auto":
-            return "unresolved:auto"
-        try:
-            from arail.nucleus.models import model_identity, resolve_model
-
-            return model_identity(resolve_model(name))
-        except Exception:  # noqa: BLE001 — identity falls back to the name, never crashes certify
-            return f"unresolved:{name}"
-
+    # doesn't ship real teacher weights. models.best_effort_identity is
+    # the SAME helper build.py's PC-phase judge-identity check now uses
+    # (ASK judge-identity, 2026-09-23 review round 2) -- previously
+    # duplicated here as a private nested function.
+    from arail.nucleus.models import best_effort_identity as _best_effort_identity
     from arail.nucleus.evals.hash import pipeline_hash as compute_pipeline_hash
 
     pipeline_hash_value = compute_pipeline_hash(

@@ -443,6 +443,24 @@ def _score_open_lc(domain, *, fused_model_dir, run_dir: Path):
     prompts = [Prompt(item_id=f"eyeball-{i}", text=ln, role="open") for i, ln in enumerate(lines)]
 
     winner_table = _open_winner_table(prompts, wrong_every=4)
+
+    # ASK judge-identity check (2026-09-23 review round 2): the judge's
+    # content identity must be checked against the teacher and student-
+    # base identities BEFORE any generation happens (ARCHITECTURE.md
+    # §4.9), the same rule a real judge would be held to -- wired here for
+    # the stub judge too, using the identical models.best_effort_identity
+    # helper certify.py's pipeline_hash/teacher_hash provenance already
+    # uses, so a judge that (by content, never by name/alias) resolves to
+    # the teacher or the student base is refused up front.
+    from arail.nucleus.evals.open_lc_judge import assert_judge_identity_distinct
+    from arail.nucleus.models import best_effort_identity
+
+    judge_identity = _stub_judge_identity(winner_table)
+    assert_judge_identity_distinct(
+        judge_identity, teacher_identity=best_effort_identity(domain.teacher_model),
+        student_base_identity=best_effort_identity(domain.student_base),
+    )
+
     fused_answers = _open_answer_table(prompts, salt="fused-v1")
     base_answers = _open_answer_table(prompts, salt="base-v1")
 
@@ -485,7 +503,7 @@ def _score_open_lc(domain, *, fused_model_dir, run_dir: Path):
     len_baseline = {g.item_id: len(g.text) for g in base_gens}
     result = open_lc_judge.score(judged, len_model=len_model, len_baseline=len_baseline, seed=42)
     return {"lc_win_rate": result.lc_win_rate, "n": result.n, "invalid_rate": result.invalid_rate,
-           "ci95": list(result.ci95), "judge_identity": _stub_judge_identity(winner_table),
+           "ci95": list(result.ci95), "judge_identity": judge_identity,
            "judge_rubric": _STUB_JUDGE_RUBRIC}
 
 

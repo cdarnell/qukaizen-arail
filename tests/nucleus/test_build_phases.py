@@ -221,3 +221,34 @@ def test_status_missing_build_refuses(tmp_path, monkeypatch):
     monkeypatch.setattr("arail.config.DATA_DIR", str(tmp_path / "data"))
     code = build_mod.status(["kernel-20260101T000000Z-dead"])
     assert code == 3
+
+
+# ── ASK judge-identity check (2026-09-23 review round 2): the PC phase
+# must call the judge != teacher/student-base identity check BEFORE any
+# generation happens, wired for the stub judge too ─────────────────────
+
+def test_score_open_lc_refuses_when_judge_identity_matches_teacher(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from arail.nucleus.evals import open_lc_judge
+
+    monkeypatch.setenv("ARAIL_NUCLEUS_STUB", "1")
+    eyeball = tmp_path / "eyeball.txt"
+    eyeball.write_text("\n".join(f"p{i}" for i in range(10)) + "\n")
+    domain = SimpleNamespace(eval_eyeball_prompts=eyeball, student_base="qwen2.5-3b-instruct",
+                             teacher_model="some-teacher")
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+
+    # Force a collision at the wiring level: the judge's computed content
+    # identity resolves to the SAME value the teacher's does (in reality
+    # this happens when the judge model IS the teacher, by content, not
+    # name/alias).
+    monkeypatch.setattr("arail.nucleus.models.best_effort_identity", lambda name: "sha-collision")
+    monkeypatch.setattr(build_mod, "_stub_judge_identity", lambda winner_table: "sha-collision")
+
+    with pytest.raises(open_lc_judge.JudgeIsTeacher):
+        build_mod._score_open_lc(domain, fused_model_dir=tmp_path / "fused", run_dir=run_dir)
+
+    # Refused BEFORE any generation -- no provider output on disk.
+    assert not any((tmp_path / "fused").rglob("*"))
