@@ -115,44 +115,107 @@ def _write_real_model_dir(path, *, num_parameters=None, weight_bytes=1024):
     return path
 
 
-def test_buddy_protected_matches_bare_name_absolute_path_and_byte_identical_copy(tmp_path, monkeypatch):
+def _phase_c_models(tmp_path, monkeypatch):
+    """Real on-disk models for a Phase-C-only refusal: base (small) and
+    the judge alias `ai-engineer`, which resolves to the same directory
+    name Buddy's deep model uses (5 MB, the LARGEST candidate -- so an
+    identity-blind guard picks it as the drop)."""
     models_dir = tmp_path / "models"
     models_dir.mkdir()
     buddy_dir = _write_real_model_dir(models_dir / "Qwen2.5-7B-Instruct-4bit",
                                       num_parameters=7_000_000_000, weight_bytes=5_000_000)
-    _write_real_model_dir(models_dir / "student", num_parameters=1_000_000_000, weight_bytes=500_000)
     _write_real_model_dir(models_dir / "base", num_parameters=1_000_000_000, weight_bytes=500_000)
-
     monkeypatch.setattr("arail.config.MODELS_DIR", str(models_dir))
+    monkeypatch.setattr("arail.config.MODEL_NAME", "")
+    monkeypatch.delenv("QUEUELLM_MODEL", raising=False)
+    monkeypatch.delenv("AEROLLM_MODEL", raising=False)
     from arail.nucleus.models import resolve_model
 
-    student = resolve_model("student")
-    base = resolve_model("base")
-    # The judge alias `ai-engineer` resolves to the exact same directory
-    # Buddy's deep model uses -- the review's concrete collision scenario.
-    judge = resolve_model("ai-engineer")
+    return models_dir, buddy_dir, resolve_model("base"), resolve_model("ai-engineer")
 
+
+def _refuse_at_phase_c(base, judge):
+    """student_model=None and no teacher: Phases A/A2/B never run, so the
+    refusal can ONLY come from Phase C's protection-aware candidate
+    choice (REVIEW round 3, R3-A1: the old test passed student_model and
+    was refused at Phase B with only the student as a candidate, so it
+    never reached the logic it claimed to prove)."""
     capacity = {"ram_gb": 4.0, "vram_gb": 3.0, "disk_gb": 500.0}
-    buddy_reserve = pf.BuddyReserve(measured_gb=0.0, declared_gb=0.0)
+    with pytest.raises(pf.PreflightRefusal) as exc_info:
+        pf.run_preflight(_domain(), capacity=capacity, buddy=pf.BuddyReserve(),
+                         memory_budget_gb=0.001, student_model=None, base_student_model=base,
+                         judge_model=judge, capability_probes=_no_capability_probes())
+    return exc_info.value
 
-    def _assert_buddy_never_dropped(buddy_env_value, label):
-        monkeypatch.setattr("arail.config.MODEL_NAME", "")
-        monkeypatch.setenv("AEROLLM_MODEL", buddy_env_value)
+
+def _assert_drop_disjoint_from_protected_by_identity(refusal, candidates):
+    """The invariant by IDENTITY, not display name (REVIEW round 3 R3-A1:
+    PreflightRefusal's own assert compares display names against raw
+    env strings, which can't see an absolute-path config)."""
+    from arail.nucleus.models import local_model_at, model_identity, resolve_model
+
+    protected_ids = set()
+    for name in refusal.protected:
+        try:
+            m = local_model_at(name) if name.startswith("/") else resolve_model(name)
+            protected_ids.add(model_identity(m))
+        except Exception:  # noqa: BLE001 -- unresolvable protected names can't collide by content
+            pass
+    by_name = {c.name: c for c in candidates}
+    for dropped in refusal.drop:
+        assert model_identity(by_name[dropped]) not in protected_ids, (
+            f"drop {dropped!r} is, by content, one of Buddy's protected models {refusal.protected}")
+
+
+def _buddy_config_forms(models_dir, buddy_dir, tmp_path):
+    """(label, env var, value) -- every way an operator can point Buddy's
+    deep runtime at the same model."""
+    link = tmp_path / "buddy-link"
+    link.symlink_to(buddy_dir, target_is_directory=True)
+    copy_in = models_dir / "buddy-copy"
+    shutil.copytree(buddy_dir, copy_in)
+    copy_out = tmp_path / "elsewhere" / "buddy-copy-outside"
+    shutil.copytree(buddy_dir, copy_out)
+    return [
+        ("bare name", "AEROLLM_MODEL", "Qwen2.5-7B-Instruct-4bit"),
+        ("absolute path", "AEROLLM_MODEL", str(buddy_dir)),
+        ("absolute path + trailing slash", "AEROLLM_MODEL", str(buddy_dir) + "/"),
+        ("symlink absolute path", "AEROLLM_MODEL", str(link)),
+        ("byte-identical copy in models dir (bare name)", "AEROLLM_MODEL", "buddy-copy"),
+        ("byte-identical copy outside models dir (absolute)", "AEROLLM_MODEL", str(copy_out)),
+        ("QUEUELLM_MODEL absolute path", "QUEUELLM_MODEL", str(buddy_dir)),
+    ]
+
+
+def test_buddy_protected_at_phase_c_in_every_config_form(tmp_path, monkeypatch):
+    """R3 proving test (REVIEW round 3 R3-A1). Reaches Phase C, asserts
+    phase == "C", and fails with 51ac4728 reverted (the four absolute-path
+    forms drop Buddy's model)."""
+    models_dir, buddy_dir, base, judge = _phase_c_models(tmp_path, monkeypatch)
+    failures = []
+    for label, var, value in _buddy_config_forms(models_dir, buddy_dir, tmp_path):
         monkeypatch.delenv("QUEUELLM_MODEL", raising=False)
-        with pytest.raises(pf.PreflightRefusal) as exc_info:
-            pf.run_preflight(_domain(), capacity=capacity, buddy=buddy_reserve,
-                             memory_budget_gb=0.001, student_model=student, base_student_model=base,
-                             judge_model=judge, capability_probes=_no_capability_probes())
-        refusal = exc_info.value
-        assert judge.name not in refusal.drop, label
-        assert refusal.drop and refusal.drop[0] in ("student", "base"), label
+        monkeypatch.delenv("AEROLLM_MODEL", raising=False)
+        monkeypatch.setenv(var, value)
+        refusal = _refuse_at_phase_c(base, judge)
+        assert refusal.phase == "C", label
+        if refusal.drop != ["base"]:
+            failures.append((label, refusal.drop))
+            continue
+        _assert_drop_disjoint_from_protected_by_identity(refusal, [base, judge])
+    assert not failures, f"Buddy's model proposed for eviction: {failures}"
 
-    _assert_buddy_never_dropped("Qwen2.5-7B-Instruct-4bit", "bare name")
-    _assert_buddy_never_dropped(str(buddy_dir), "absolute path")
 
-    copy_dir = models_dir / "buddy-copy"
-    shutil.copytree(buddy_dir, copy_dir)
-    _assert_buddy_never_dropped("buddy-copy", "byte-identical copy under another name")
+def test_phase_c_control_unprotected_judge_is_the_drop(tmp_path, monkeypatch):
+    """Control for the test above: with NO Buddy model configured, the
+    largest Phase-C candidate (the judge) IS the drop -- proving the
+    fixture really makes the judge the identity-blind choice, so the
+    protected-form test is not passing for a size reason."""
+    _models_dir, _buddy_dir, base, judge = _phase_c_models(tmp_path, monkeypatch)
+    refusal = _refuse_at_phase_c(base, judge)
+    assert refusal.phase == "C"
+    assert refusal.drop == [judge.name]
+    assert refusal.protected == []
 
 
 # ── T-PRE-2: streamed window chosen when runtime streams ─────────────
