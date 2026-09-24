@@ -51,6 +51,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from arail import agent_context
 from arail.scheduler import jobs_halted
 
 log = logging.getLogger("arail.job_daemon")
@@ -122,37 +123,47 @@ async def _run_job(job: Job) -> dict:
     dream_daemon's per-agent try/except, one level stronger because these
     jobs are arbitrary world scripts, not trusted first-party agent code.
     """
-    started = datetime.now(timezone.utc)
-    cmd = ["python3", job.script, *job.args]
-    receipt = {
-        "job_id": job.id,
-        "name": job.name,
-        "started_at": started.isoformat(),
-        "cmd": cmd,
-        "cwd": job.world,
-    }
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd, cwd=job.world,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
-        )
-        stdout, _ = await proc.communicate()
-        finished = datetime.now(timezone.utc)
-        output = stdout.decode(errors="replace")
-        receipt.update(
-            finished_at=finished.isoformat(),
-            exit_code=proc.returncode,
-            status="ok" if proc.returncode == 0 else "error",
-            output_tail=output[-4000:],
-        )
-    except (OSError, FileNotFoundError) as exc:
-        finished = datetime.now(timezone.utc)
-        receipt.update(
-            finished_at=finished.isoformat(),
-            exit_code=None,
-            status="error",
-            output_tail=f"failed to launch: {exc}",
-        )
+    # L2 (ARCHITECTURE.md): the job daemon calls this from outside any
+    # agent's own loop, per scheduled job rather than per agent. A job's
+    # script runs as its own subprocess with no JSON attribution protocol
+    # today (unlike the goal-parser's), so this context has no visible
+    # effect on the trace store yet — it is here so a future job that
+    # *does* call the router in-process (rather than shelling out) inherits
+    # attribution for free rather than needing its own edit. system_call,
+    # not agent_call: a scheduled world script is not one of the FIXED_LANES
+    # agents and should not render as a user-defined agent lane.
+    with agent_context.system_call(job.id):
+        started = datetime.now(timezone.utc)
+        cmd = ["python3", job.script, *job.args]
+        receipt = {
+            "job_id": job.id,
+            "name": job.name,
+            "started_at": started.isoformat(),
+            "cmd": cmd,
+            "cwd": job.world,
+        }
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, cwd=job.world,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+            )
+            stdout, _ = await proc.communicate()
+            finished = datetime.now(timezone.utc)
+            output = stdout.decode(errors="replace")
+            receipt.update(
+                finished_at=finished.isoformat(),
+                exit_code=proc.returncode,
+                status="ok" if proc.returncode == 0 else "error",
+                output_tail=output[-4000:],
+            )
+        except (OSError, FileNotFoundError) as exc:
+            finished = datetime.now(timezone.utc)
+            receipt.update(
+                finished_at=finished.isoformat(),
+                exit_code=None,
+                status="error",
+                output_tail=f"failed to launch: {exc}",
+            )
 
     out_path = _receipt_dir(job.id) / f"{started.strftime('%Y%m%dT%H%M%SZ')}.json"
     out_path.write_text(json.dumps(receipt, indent=1))
@@ -227,8 +238,8 @@ class JobDaemon:
             return
 
     async def _tick(self) -> None:
-        # Same guard dream_daemon uses: if the user hit "Halt jobs" on the
-        # dashboard, background work — including scheduled jobs — stops too.
+        # Same guard dream_daemon uses: if the user hit "Hold all agents" on
+        # the dashboard, background work — including scheduled jobs — stops too.
         if jobs_halted():
             return
         now = _time.monotonic()

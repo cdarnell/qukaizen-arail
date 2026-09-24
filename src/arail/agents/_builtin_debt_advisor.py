@@ -796,12 +796,18 @@ class DebtAdvisorAgent:
         self._last_run_at = time.time()
         self._save_state()
 
-        _host.emit(
-            AGENT_ID,
-            "Debt Advisor produced a new finding — see "
-            f"{_relative_pointer(_findings_file())}",
-            "info",
-        )
+        # F9 (ARCHITECTURE.md): this is the proactive-speech moment (the
+        # finding's framing sentence went through the model funnel above);
+        # gated separately from inference — the finding is still written,
+        # only the announcement is silenced while held.
+        from arail import agent_context
+        if agent_context.speech_gate(AGENT_ID):
+            _host.emit(
+                AGENT_ID,
+                "Debt Advisor produced a new finding — see "
+                f"{_relative_pointer(_findings_file())}",
+                "info",
+            )
 
 
 debt_advisor = DebtAdvisorAgent()

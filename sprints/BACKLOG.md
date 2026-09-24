@@ -1414,3 +1414,290 @@ the Researcher a code-writing committer, `agent-loop.md` saying `git
 reset`, `tuning-loop.md` listing two whitelisted files — was fixed in the
 same branch. The remaining prose risk is that "autoresearch" still names
 two unrelated engines.
+
+---
+
+## Portal authentication
+
+**Filed by:** `sprints/2026-09-20-buddy-front-and-center/ARCHITECTURE.md`
+("The portal has no authentication — stated plainly").
+
+**The gap.** `onboarding_gate` middleware (`app.py:395`) is not auth: it
+blocks every surface only until a passphrase exists, then every request
+passes with no per-request credential check — no `Depends(`, no token
+compare, anywhere in `portal/app.py`. Default bind is `127.0.0.1`;
+`BIND_ADDR=0.0.0.0` is supported and explicitly accepted as an
+operator-opted-in exposure. `local_trust_boundary` gives DNS-rebinding and
+cross-site protection for *mutating* methods only. **Any process running
+as any user on the machine — and, on a widened bind, any host on the
+LAN — can read every portal GET.**
+
+**Why it wasn't done now.** The buddy-front-and-center sprint reduces the
+*amount of sensitive content* behind that surface (flight-recorder bodies
+off by default, redacted, capped, admin-gated) but does not add
+authentication — a materially larger, cross-cutting change (session
+tokens or equivalent, every route, every existing integration that assumes
+no auth) that deserves its own VISION/ARCHITECTURE pass, not a rider on an
+observability sprint.
+
+**What a future sprint needs to decide:** session-based auth vs. a
+bearer-token model; whether `LAB_MODE=hybrid` cloud-key flows need a
+different trust boundary than local-only; how a forked/renamed lab
+(`examples/peanut_farmer/`) inherits whatever the answer is without a
+hardcoded assumption about the product name.
+
+---
+
+## Seventeen `/api/admin/*` endpoints are not tier-gated at the API layer
+
+**Filed by:** `sprints/2026-09-20-buddy-front-and-center/BUILD_LOG.md`
+(S5's deviation #1), discovered while wiring the sprint's own new admin
+endpoints.
+
+**The gap.** `ARCHITECTURE.md`'s contract #6 cites `/api/admin/security`
+as existing precedent for "gated by `_require_surface('admin')`, which
+404s on minimalist." That citation does not match the code: grepping every
+`@app.get("/api/admin/...")` / `@app.post("/api/admin/...")` route in
+`portal/app.py` (17 of them, predating this sprint — components,
+check-updates, perf, cleanup, security, scheduler, models, ...) finds zero
+calls to `_require_surface("admin")`. Only the `/admin` **page** route
+itself is gated; its JSON API siblings are wide open regardless of tier.
+A minimalist user who knows or guesses a URL can call any of them.
+
+**Why it wasn't done now.** Out of this sprint's scope — this sprint's
+job was to instrument the chokepoint and gate its *own* four new
+endpoints correctly (done: `agent-lanes`, `agent-trace-stream`,
+`agent-trace/{id}`, `agents/hold`, `flight-recorder`, plus the three
+legacy-bodies endpoints), not to retrofit 17 unrelated, already-shipped
+endpoints. Fixing it now would have been exactly the scope expansion the
+sprint's own ledger warns against.
+
+**What a future sprint needs to decide:** whether all 17 get
+`_require_surface("admin")` in one pass (likely low-risk — they're
+already conceptually admin-only, just not enforced) or whether some are
+deliberately meant to be readable pre-tier-check for a reason not
+currently documented; a regression test parameterised over the full
+existing list (mirroring this sprint's own F13 pattern) would catch any
+future admin endpoint shipped without the gate too.
+
+---
+
+## The agent-inference gateway — gated on this sprint's own overlap measurement
+
+**Filed by:** `sprints/2026-09-20-buddy-front-and-center/VISION.md` (DE1),
+cut from P1's scope per the ledger.
+
+**The gap.** Agent calls never enter `inference_slot` — they run outside
+the queue that serialises chat/world-forge/etc. work. The brief originally
+asked for a single admission gateway that would also *order* agent calls
+behind interactive chat. VISION.md's V8 finding showed the real blast
+radius is ~11 sites (not ~5), 4 of them non-agent, 1 cross-process — the
+riskiest refactor in the whole three-phase programme — and cut it in favor
+of first building the read-only overlap counter this sprint actually
+shipped (`slot.overlap_pct`/`slot.samples` in
+`GET /api/admin/agent-lanes`, fed by `held_by_other` recorded at every
+agent call).
+
+**Why it wasn't done now.** Building the gateway before the
+instrumentation that tells you whether it's needed inverts D18 (the whole
+reason this sprint was ordered first). The overlap counter is that
+instrumentation; it now exists.
+
+**What a future sprint needs to decide, using DE1's pre-committed
+thresholds** (from a week of the operator's ordinary use, once
+`overlap_pct` has real samples): **< 5%** → defer the gateway indefinitely,
+the contention risk was theoretical; **5-25%** → build it after P2's brain
+bake-off, as originally planned; **> 25%** → promote it ahead of the
+Buddy panel (P3) and revisit the deferral itself as having been wrong.
+
+---
+
+## Pre-existing, flagged not fixed by the buddy-front-and-center sprint
+
+**Filed by:** `sprints/2026-09-20-buddy-front-and-center/ARCHITECTURE.md`
+("Where the spec is wrong or unbuildable as scoped", items 7 and 8) —
+found while reading the router/backend and cost-tracking code this sprint
+touched, explicitly not fixed because each is a behaviour change on a path
+this sprint does not otherwise touch.
+
+- **`MLXBackend.stream_complete` signature bug** (`router/backends.py:
+  330-332`): does not accept `system=`/`messages=`, but
+  `ModelRouter.stream_complete` (`router/core.py`) always passes both →
+  `TypeError` on any MLX streaming call through the router. Currently
+  unreachable in production (chat resolves through the registry to
+  Ollama/OpenAICompat), but this sprint's own S3 work
+  (`ARAIL_AGENT_STREAM_FAST`) makes agent-path streaming a live feature
+  for the first time — worth fixing before an MLX-backed agent path is
+  ever wired to stream.
+- **Concurrent `costs.json` write race**: the goal-parser child process
+  runs its own `cost_tracker` singleton against the *same* `costs.json`
+  as the parent, and `CostTracker._save()` is a non-atomic `write_text`.
+  Parent and child can race. Not introduced by this sprint and not
+  widened by it — `agent_trace.jsonl`'s append-only, one-writer-per-
+  process design (contract #9) is strictly safer than what `costs.json`
+  already does, which is why the trace store didn't repeat the mistake
+  rather than a reason to leave `costs.json` unfixed forever.
+
+**What a future sprint needs to decide:** whether the MLX signature bug
+gets a defensive fix now (cheap: accept and ignore the two kwargs, or
+route them through) or waits for an actual MLX-backed streaming caller to
+surface it; whether `costs.json`'s write path moves to the same
+temp-file-plus-`os.replace` pattern `agent_trace.py`/`activity.py`
+already use.
+
+---
+
+## `/api/agents/status`'s deprecated `tokens` alias — removal window
+
+**Filed by:** `sprints/2026-09-20-buddy-front-and-center/ARCHITECTURE.md`
+(contract #8, the V7 fix) and `BUILD_LOG.md` (S6).
+
+**The gap.** `GET /api/agents/status` now emits both `tokens_out` (new,
+correct — real usage from the trace ring) and `tokens` (deprecated alias,
+now carrying the *same corrected* value) because `agents.html` still reads
+`.tokens` in four places. The alias is meant to live for **one release**,
+not indefinitely.
+
+**What a future sprint needs to do:** once `agents.html` is confirmed to
+read `tokens_out` everywhere `tokens` was read (four `fmtTokens(...)`
+call sites plus the Researcher meta-line, already switched to prefer
+`tokens_out` this sprint but still falling back to `tokens`), drop the
+`tokens` key from the endpoint response and the fallback reads in the
+template.
+
+---
+
+## Buddy-front-and-center's BLOCK-review fix loop — filed as debt, not fixed
+
+**Filed by:** `sprints/2026-09-20-buddy-front-and-center/REVIEW.md`
+("Required actions before merge" → "File as debt (BACKLOG, not this
+sprint)"), during the fix loop that resolved B1–B6, D6, D8, F9, F13, and
+S1 (S1 was explicitly promoted to must-fix by the operator; the rest
+below were not).
+
+- **S2 — RESOLVED, see below.** ~~`src/arail/skills/goal_parser/__init__.py:250`:
+  `error_class=str(payload.get("error", "unknown"))[:80]` persists up to 80
+  chars of arbitrary child-process exception text to `agent_traces.jsonl`,
+  outside `redact.capture_body`'s reach, regardless of the flight recorder.~~
+  QA's TEST_REPORT.md demonstrated this live (an `Authorization: Bearer …`
+  fragment reaching disk with the recorder off, its finding **F2**) and it
+  was fixed, not filed again, in the QA fix loop that followed: an
+  allow-list on the parent (`_sanitize_error_class`,
+  `^[A-Za-z_][A-Za-z0-9_]*$`) plus a real `error_class` on the child for
+  every failure branch. See that sprint's BUILD_LOG.md Re-review index
+  for the commit and proving tests. Left here, struck through, so this
+  entry's own history is legible rather than silently deleted.
+- **S3** — Buddy's dream announcement (`_builtin_buddy.py`'s `dream()`)
+  puts up to 160 chars of raw model output into `activity.jsonl` via
+  `data={"preview": reflection[:160]}`, ungated by redaction and
+  independent of the flight recorder. **This is now LIVE, not merely
+  gated.** REVIEW.md R5 (re-review): the fix loop's own `dream()`
+  NameError fix (adding the missing `from arail.activity import
+  activity_log` import) was correct and in scope, but it activates a
+  path that had never once run to completion in production — on
+  pristine main, every call to `dream()` raised `NameError` before
+  reaching this emit, and `dream_daemon._dream_once` caught that
+  exception and logged a warn instead. After the fix loop, on an
+  unheld lab, `dream()` reaches this line and writes the preview every
+  night. The speech_gate added this same fix loop only silences it
+  while **held** — an unheld lab (the default) now has this line firing
+  for the first time ever. Not a `prompt_trace` body, so
+  `_has_legacy_body`/the legacy-bodies purge will never find it.
+  **QA must be told this directly, and must exercise the dream path
+  specifically**: (1) a "grep the whole DATA_DIR tree" pass can
+  legitimately hit a planted string here, and that is a real, now-live
+  finding, not a false positive; (2) everything in `dream()` after the
+  emit (`_recent_actions.append`, `_sync_workflow`, `return reflection`)
+  is also newly-reachable code that has never executed in production
+  and is therefore untested in practice, independent of this specific
+  leak.
+- **D1** — `ARAIL_AGENT_STREAM_FAST` removes the 120s total-generation
+  ceiling from Buddy's fast streamed calls (a `requests` per-read socket
+  timeout, not a total-duration timeout, once `stream=True`); undocumented.
+  Needs a bound plus a doc note on the behaviour change.
+- **D2** — no structural test asserts Ollama's streamed vs non-streamed
+  request bodies agree on everything except `stream`; add one so a future
+  edit to one path can't silently diverge from the other.
+- **D3** — `lanes_snapshot()` returns `user_defined`, `dropped_writes`,
+  `overlap_pct` that `admin.html` never renders; the trace drill-in
+  (`GET /api/admin/agent-trace/{id}`) has no UI entry point; `SYS_LANES`
+  is defined but neither emitted nor deleted.
+- **D5** — `_builtin_presence.py:127`'s thread should use whatever
+  `spawn_thread`/context-carrying helper the rest of the agents use (F3's
+  static guard would have caught this); document in `docs/agents.md` and
+  the Admin copy that a call which lost its attribution context is
+  visible in the trace but **not** covered by Hold.
+- **D7** — the admin SSE stream (`agent-trace-stream`) has no
+  backpressure/debounce behaviour defined for a fast-emitting lane; decide
+  how DE4's "kill line" number is measured against it.
+- **F2** — a disk-rotation failure in `_append_disk` is silently dropped;
+  should increment `dropped_writes` the same way a write failure does.
+- **W1's wall-clock SSE test** — promote the "within 2s" structural guard
+  (no `setInterval` near the lanes markup, pinned this fix loop) to an
+  actual timed `@pytest.mark.timing` test, plus a stronger `q.qsize()`
+  assertion on the subscriber queue than currently exists.
+- **conftest split** — the shared fixture doing both hermeticity
+  (DATA_DIR redirection) and ambient defaults (tier, etc.) should split
+  into two, so a test that only needs one doesn't have to reason about
+  the other.
+- **D8's remainder** — the `/api/agents/status` fallback loop bug, the
+  `calls_by_source` cardinality cap, streamed-response `model` provenance,
+  a missing trace on an abandoned stream, the purged-event UI string, and
+  registering `pytest.mark.perf` in `pyproject.toml` (currently an
+  unregistered marker warning).
+
+**What a future sprint needs to do:** S2 is resolved (see above); pick
+the rest up in order of the security/exposure gradient — S3 first (no
+code fix required, but it is a live leak, not a theoretical one — see
+above), then D1 (undocumented timeout-semantics change, already
+shipped), then the rest as capacity allows. QA must be briefed on S3
+before the next sprint's QA pass (both that the leak is real and now
+live, and that the dream path itself is newly-reachable and untested in
+practice), or a planted-string hit there will keep looking like a false
+positive.
+
+---
+
+## QA fix loop (TEST_REPORT.md, commit `9d0e083f`) — filed as debt, not fixed
+
+**Filed by:** `sprints/2026-09-20-buddy-front-and-center/TEST_REPORT.md`
+("Fix or file as debt (builder's call, not ship-blocking)"), during the
+fix loop that resolved F7, F8, F2 (TEST_REPORT.md's own numbering — a
+different finding from REVIEW.md's F2 above; disambiguated as "QA F2" in
+that fix loop's commits), F4, F5, F9 and, as a judgment call, F3. Three
+of TEST_REPORT.md's four "fix or file" items are filed here; F3 was
+fixed instead (see BUILD_LOG.md for why).
+
+- **QA F1** — `src/arail/redact.py:52-54`: a JSON-quoted
+  `{"api_key": "<16 chars>"}` value is not redacted. The assignment
+  pattern requires the key name to be followed by optional whitespace
+  then `:`/`=`; a quoted JSON key never is. A spec gap, not a build
+  defect — ARCHITECTURE.md #5's pattern list is implemented exactly as
+  specified. Fix: one `["']?` in the pattern.
+- **QA F6** — `src/arail/portal/app.py:6326`, `:6344`: malformed JSON on
+  `POST /api/admin/agents/hold` (and the recorder toggle) is a 500 —
+  `await request.json()` is unguarded. Curl-only, after the tier gate,
+  no information disclosed. Low severity. Fix: wrap the parse and
+  return 400 on `json.JSONDecodeError`.
+- **QA F10** — `config.PKB_ROOT` is not isolated by the conftest, so
+  tests write the developer's real `lab/pkb`, and
+  `dream_daemon._dream_once`'s "already dreamed today" check reads it —
+  meaning any test of `_dream_once` that does not patch
+  `_dream_file_for` silently no-ops on a machine that has dreamed today.
+  Same class of bug as `cost_tracker` (QA F9, fixed) and `activity_log`
+  — a process-global singleton/module constant bound before any fixture
+  runs. QA's own tests isolate it locally; the shared conftest fixture
+  should too.
+
+**What a future sprint needs to do:** QA F1 first (it is the only
+remaining redaction gap with a recorder-on, disk-write consequence — one
+regex character), then QA F10 (the next candidate in the same
+un-isolated-singleton family `_isolated_agent_observability_data_root`'s
+own docstring already names as recurring), then QA F6 (low severity,
+curl-only). QA's own TEST_REPORT.md notes worth carrying forward
+regardless of which item is picked up first: "un-isolated process-global
+singletons are this repo's recurring defect class" (three found in one
+sprint: `DATA_DIR`, `cost_tracker._data_path`, `PKB_ROOT`) and
+"'never raises' docstrings are a claim" (grep for the phrase, test each
+one with a non-`OSError` exception — this is exactly how QA F3 was
+found).

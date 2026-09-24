@@ -547,6 +547,15 @@
   .pr-table th, .pr-table td { text-align: left; padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--border); }
   .pr-table th { color: var(--text-muted); font-weight: 500; }
   .pr-hint { font-size: 0.65rem; color: var(--text-muted); margin-top: 0.15rem; }
+  .pr-warning {
+    font-size: 0.72rem;
+    color: var(--warn);
+    border: 1px solid var(--warn-a28);
+    background: color-mix(in srgb, var(--warn) 6%, transparent);
+    border-radius: var(--radius-m);
+    padding: 0.5rem 0.65rem;
+    margin-bottom: 0.5rem;
+  }
   .pr-err  { font-size: 0.7rem; color: var(--danger);  margin-top: 0.4rem; }
   .pr-vuln-row { font-size: 0.72rem; color: var(--text-muted); margin-bottom: 0.2rem; }
   .pr-vuln-row .pr-sev-crit { color: var(--danger); font-weight: 700; }
@@ -710,6 +719,24 @@
   <div class="admin-section">
     <h2>Scheduler</h2>
     <div id="scheduler-list" class="pr-card">Loading…</div>
+  </div>
+
+  <!-- ═══ Agent lanes (sprint 2026-09-20-buddy-front-and-center) ═══ -->
+  <div class="admin-section">
+    <h2>Agent lanes</h2>
+    <!-- Operator decision (b): LAN-bind x live-recorder warning banner --
+         hidden unless BIND_ADDR is non-loopback AND the recorder is on. -->
+    <div id="agent-lan-warning" class="pr-hint pr-warning" style="display:none"></div>
+    <!-- F12 legacy-bodies notice (S1 / operator decision (c)): populated by
+         a boot-time scan; hidden once count is 0 or the operator dismisses
+         it. Three endpoints already existed with zero UI before this. -->
+    <div id="legacy-bodies-notice" class="pr-hint pr-warning" style="display:none"></div>
+    <div class="pr-card">
+      <div id="agent-hold-control" class="pr-hint">Loading…</div>
+      <div id="agent-recorder-control" class="pr-hint">Loading…</div>
+    </div>
+    <div id="agent-lanes-list" class="pr-card">Loading…</div>
+    <div id="agent-lanes-unattributed" class="pr-hint"></div>
   </div>
 
   <!-- ═══ Push to TEAM ═══ -->
@@ -1642,6 +1669,232 @@ async function runSchedulerJob(jobId) {
     adminLog('Run failed: ' + e.message, 'error');
   }
 }
+
+// ── Agent lanes (sprint 2026-09-20-buddy-front-and-center) ──────────────
+// Live via SSE (/api/admin/agent-trace-stream), not a poll interval — a
+// poll here is the only way W1's "within 2s" bound could be missed.
+let AGENT_LANES_ES = null;
+
+function renderHoldControl(snap) {
+  const el = document.getElementById('agent-hold-control');
+  const hold = snap.hold || {held: false, in_flight: 0};
+  // R2 (re-review): operator decision (a)'s exact sentence used to be
+  // applied only to the held branch -- the un-flipped state is what the
+  // operator reads *at the moment of decision*, and it still overclaimed
+  // ("proactive speech" instead of naming findings/suggestions/
+  // announcements, and it didn't say diagnostics/SRE continue). Both
+  // branches now carry the same clauses.
+  const copy = hold.held
+    ? `Hold all agents — agents stop calling models and stop posting ` +
+      `findings, suggestions and announcements. Operational/error lines ` +
+      `and SRE crash alerts continue. Calls already running finish ` +
+      `(${hold.in_flight} in flight). This World only; survives a restart.`
+    : `Agents are not held. Flip this and agents stop calling models and ` +
+      `stop posting findings, suggestions and announcements. ` +
+      `Operational/error lines and SRE crash alerts continue.`;
+  el.innerHTML = `
+    <label class="admin-toggle">
+      <input type="checkbox" ${hold.held ? 'checked' : ''} onchange="setAgentHold(this.checked)">
+      Hold all agents
+    </label>
+    <div class="pr-hint">${esc(copy)}</div>`;
+}
+
+let _RECORDER_ENABLED = false;
+
+function renderRecorderControl(snap) {
+  const el = document.getElementById('agent-recorder-control');
+  const rec = snap.recorder || {enabled: false, lan_exposed: false};
+  _RECORDER_ENABLED = !!rec.enabled;
+  let copy = rec.enabled
+    ? 'Flight recorder is ON — prompt/response bodies are captured, redacted, and capped.'
+    : 'Flight recorder is OFF (default) — only metadata is captured, no prompt/response bodies.';
+  // Operator decision (b), SPRINT.md 2026-09-20-buddy-front-and-center:
+  // warn right on the toggle too, not only in the banner above the lanes
+  // table, since this is the control an operator is looking at when they
+  // flip the recorder on.
+  if (rec.enabled && rec.lan_exposed) {
+    copy += ' This lab is bound to a non-loopback address — captured bodies ' +
+            'are reachable from other machines on the LAN, not just this one.';
+  }
+  el.innerHTML = `
+    <label class="admin-toggle">
+      <input type="checkbox" ${rec.enabled ? 'checked' : ''} onchange="setFlightRecorder(this.checked)">
+      Flight recorder
+    </label>
+    <div class="pr-hint">${esc(copy)}</div>
+    <button class="pr-btn" onclick="purgeFlightRecorderBodies()" style="margin-top:0.3rem;">Purge captured bodies</button>`;
+}
+
+function renderLanRecorderWarning(snap) {
+  const el = document.getElementById('agent-lan-warning');
+  if (!el) return;
+  const rec = snap.recorder || {enabled: false, lan_exposed: false};
+  if (rec.enabled && rec.lan_exposed) {
+    el.style.display = '';
+    el.textContent = '⚠ This lab is bound to a non-loopback address and the ' +
+      'flight recorder is ON — captured prompt/response bodies are reachable ' +
+      'from other machines on the LAN. Turn off the recorder or bind to ' +
+      'loopback (BIND_ADDR=127.0.0.1) if that is not intended.';
+  } else {
+    el.style.display = 'none';
+    el.textContent = '';
+  }
+}
+
+function renderAgentLanes(snap) {
+  // B6 (REVIEW.md): W1 requires all seven fields on screen -- agent id,
+  // model, backend, brain+effort, TTFT-or-n/a, tokens in/out, reason code
+  // verbatim. Model/backend/tokens in were in the JSON (lanes_snapshot())
+  // but never rendered; effort was in the JSON but also never rendered.
+  const list = document.getElementById('agent-lanes-list');
+  let html = '<table class="pr-table"><tr><th>Agent</th><th>Calls</th>' +
+             '<th>Model</th><th>Backend</th><th>Brain</th><th>Effort</th>' +
+             '<th>TTFT</th><th>Tokens in</th><th>Tokens out</th><th>Deep reason</th></tr>';
+  for (const lane of (snap.lanes || [])) {
+    const ttft = lane.ttft_ms != null ? Math.round(lane.ttft_ms) + 'ms'
+                : (lane.ttft_status || 'n/a');
+    const reason = lane.deep_reason_detail || lane.deep_reason_code || '';
+    const empty = lane.empty_reason ? ` <span class="pr-hint">(${esc(lane.empty_reason)})</span>` : '';
+    html += `<tr><td>${esc(lane.display)}${empty}</td><td>${lane.calls}</td>` +
+            `<td>${esc(lane.model || '—')}</td><td>${esc(lane.backend || '—')}</td>` +
+            `<td>${esc(lane.brain || '—')}</td><td>${esc(lane.effort || '—')}</td>` +
+            `<td>${esc(ttft)}</td>` +
+            `<td>${lane.tokens_in != null ? lane.tokens_in : '—'}</td>` +
+            `<td>${lane.tokens_out != null ? lane.tokens_out : '—'}</td>` +
+            `<td>${esc(reason)}</td></tr>`;
+  }
+  html += '</table>';
+  list.innerHTML = html;
+
+  const unattr = document.getElementById('agent-lanes-unattributed');
+  const u = snap.unattributed || {calls: 0, call_sites: []};
+  unattr.innerHTML = u.calls > 0
+    ? `Unattributed: ${u.calls} call(s) — ` +
+      u.call_sites.map(s => `${esc(s.call_site)} (${s.calls})`).join(', ')
+    : 'Unattributed: 0 calls';
+}
+
+async function loadAgentLanes() {
+  try {
+    const r = await fetch('/api/admin/agent-lanes');
+    if (r.status === 404) return;  // minimalist tier — surface not present
+    const snap = await r.json();
+    renderLanRecorderWarning(snap);
+    renderHoldControl(snap);
+    renderRecorderControl(snap);
+    renderAgentLanes(snap);
+  } catch (e) {
+    adminLog('Agent lanes fetch failed: ' + e.message, 'error');
+  }
+}
+
+function connectAgentLanesStream() {
+  if (AGENT_LANES_ES) AGENT_LANES_ES.close();
+  try {
+    AGENT_LANES_ES = new EventSource('/api/admin/agent-trace-stream');
+    AGENT_LANES_ES.onmessage = () => loadAgentLanes();
+    AGENT_LANES_ES.onerror = () => { /* browser auto-reconnects */ };
+  } catch (e) { /* SSE unavailable — the initial load above still rendered */ }
+}
+
+async function setAgentHold(held) {
+  try {
+    await fetch('/api/admin/agents/hold', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({hold: held}),
+    });
+    loadAgentLanes();
+  } catch (e) {
+    adminLog('Hold toggle failed: ' + e.message, 'error');
+  }
+}
+
+async function setFlightRecorder(enabled) {
+  try {
+    await fetch('/api/admin/flight-recorder', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({enabled: enabled}),
+    });
+    loadAgentLanes();
+  } catch (e) {
+    adminLog('Flight recorder toggle failed: ' + e.message, 'error');
+  }
+}
+
+async function purgeFlightRecorderBodies() {
+  // S1 / operator decision (c), SPRINT.md 2026-09-20-buddy-front-and-center:
+  // the permanent half -- deletes captured bodies from disk and the live
+  // ring, via the same shared purge mechanism as legacy-bodies below.
+  // Preserves the current on/off setting; only adds purge:true.
+  if (!confirm('Delete all captured prompt/response bodies from disk and '
+             + 'memory? This cannot be undone.')) return;
+  try {
+    const r = await fetch('/api/admin/flight-recorder', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({enabled: _RECORDER_ENABLED, purge: true}),
+    });
+    const data = await r.json();
+    const p = data.purge || {purged: 0, purged_memory: 0};
+    adminLog(`Flight recorder purge: ${p.purged} on disk, ${p.purged_memory} in memory`, 'info');
+    loadAgentLanes();
+  } catch (e) {
+    adminLog('Flight recorder purge failed: ' + e.message, 'error');
+  }
+}
+
+async function loadLegacyBodiesNotice() {
+  // S1 / operator decision (c): boot-time scan populating the notice --
+  // three endpoints (status/purge/dismiss) existed with no UI before this.
+  const el = document.getElementById('legacy-bodies-notice');
+  if (!el) return;
+  try {
+    const r = await fetch('/api/admin/legacy-bodies');
+    if (r.status === 404) { el.style.display = 'none'; return; }  // minimalist
+    const data = await r.json();
+    if (data.dismissed || !data.count) {
+      el.style.display = 'none';
+      el.innerHTML = '';
+      return;
+    }
+    const bySource = Object.entries(data.by_source || {})
+      .map(([src, n]) => `${esc(src)} (${n})`).join(', ');
+    el.style.display = '';
+    el.innerHTML =
+      `⚠ ${data.count} pre-flight-recorder activity line(s) still carry a ` +
+      `captured prompt/response body${bySource ? ' — ' + esc(bySource) : ''}. ` +
+      `<button class="pr-btn" onclick="purgeLegacyBodies()">Purge</button> ` +
+      `<button class="pr-btn" onclick="dismissLegacyBodiesNotice()">Keep</button>`;
+  } catch (e) {
+    el.style.display = 'none';
+  }
+}
+
+async function purgeLegacyBodies() {
+  if (!confirm('Delete all captured prompt/response bodies from '
+             + 'activity.jsonl? This cannot be undone.')) return;
+  try {
+    const r = await fetch('/api/admin/legacy-bodies/purge', {method: 'POST'});
+    const data = await r.json();
+    adminLog(`Legacy bodies purge: ${data.purged} on disk, ${data.purged_memory} in memory`, 'info');
+    loadLegacyBodiesNotice();
+  } catch (e) {
+    adminLog('Legacy bodies purge failed: ' + e.message, 'error');
+  }
+}
+
+async function dismissLegacyBodiesNotice() {
+  try {
+    await fetch('/api/admin/legacy-bodies/dismiss', {method: 'POST'});
+    loadLegacyBodiesNotice();
+  } catch (e) {
+    adminLog('Legacy bodies dismiss failed: ' + e.message, 'error');
+  }
+}
+
+loadAgentLanes();
+loadLegacyBodiesNotice();
+connectAgentLanesStream();
 
 async function loadTeamPush() {
   const el = document.getElementById('team-push-card');

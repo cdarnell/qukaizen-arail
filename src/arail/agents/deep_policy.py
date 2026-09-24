@@ -24,6 +24,8 @@ import os
 import threading
 from typing import Any, Optional
 
+from arail.agent_context import AgentHeldError
+
 # Gentle background pressure ceiling — well under the 0.75 hard chat guard in
 # mlx_guard, so background deep work bows out long before the foreground would.
 _BG_PRESSURE_DEFAULT = 0.60
@@ -195,6 +197,35 @@ def _get_fast_router():
             return None
 
 
+def _agent_stream_fast_enabled() -> bool:
+    """The only way to get a real (not honest-n/a) TTFT for any agent call
+    today (ARCHITECTURE.md finding 1) — the fast branch streams from
+    Ollama's native /api/chat with stream:true instead of stream:false,
+    joining the deltas back into the identical string complete() would
+    return. Default on; ``ARAIL_AGENT_STREAM_FAST=0`` reverts to the old
+    non-streaming call and every agent's TTFT becomes an honest ``n/a``
+    (F20) — one env var, not a revert of this function."""
+    return os.getenv("ARAIL_AGENT_STREAM_FAST", "1").strip().lower() not in (
+        "0", "false", "no")
+
+
+def _join_stream(router: Any, prompt: str, *, max_tokens: int,
+                 temperature: float, system: Optional[str]) -> Optional[str]:
+    """Consume ``stream_complete`` and return the same string ``complete()``
+    would — the terminal ``ModelResponse.text`` is the ground truth when
+    present, deltas joined otherwise. Raises on any failure; the caller
+    falls back to ``complete()`` unconditionally (F20)."""
+    parts: list[str] = []
+    final_text: Optional[str] = None
+    for item in router.stream_complete(prompt, max_tokens=max_tokens,
+                                       temperature=temperature, system=system):
+        if isinstance(item, str):
+            parts.append(item)
+        else:
+            final_text = getattr(item, "text", None)
+    return final_text if final_text is not None else "".join(parts)
+
+
 def complete_preferring_deep(
     prompt: str,
     *,
@@ -220,6 +251,11 @@ def complete_preferring_deep(
                 text = (resp.text or "").strip() if resp else ""
                 if text:
                     return text
+            except AgentHeldError:
+                # F8 (ARCHITECTURE.md): agents are held -- do not also try
+                # fast, which would hit the chokepoint a second time and
+                # emit a second refused_halted trace for one decision.
+                return None
             except Exception as exc:  # noqa: BLE001
                 # Fall through to fast — never crash, never OOM — but make
                 # the degradation VISIBLE via the registry health state.
@@ -232,10 +268,22 @@ def complete_preferring_deep(
     fr = fast_router or _get_fast_router()
     if fr is None:
         return None
+    if _agent_stream_fast_enabled():
+        try:
+            text = _join_stream(fr, prompt, max_tokens=max_tokens,
+                                temperature=temperature, system=system)
+            return (text or "").strip() or None
+        except AgentHeldError:
+            # F8: one refusal is enough -- do not also try .complete().
+            return None
+        except Exception:  # noqa: BLE001 - unconditional fallback (F20)
+            pass
     try:
         resp = fr.complete(prompt, max_tokens=max_tokens,
                            temperature=temperature, system=system)
         return ((resp.text or "").strip() or None) if resp else None
+    except AgentHeldError:
+        return None
     except Exception:  # noqa: BLE001
         return None
 

@@ -73,6 +73,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from arail import agent_context
 from arail.activity import activity_log
 from arail.pkb import _pkb_root
 from arail.skills_loader import parse_frontmatter
@@ -358,7 +359,16 @@ def start_all_auto(agents: Dict[str, Any], pkb_root: Path | None = None) -> None
 
         if should_start and hasattr(instance, "start"):
             try:
-                instance.start()
+                # L1 — the loader contract's "cannot be forgotten" layer
+                # (ARCHITECTURE.md, sprint 2026-09-20-buddy-front-and-
+                # center): attribute the whole agent loop to agent_id here,
+                # once. asyncio.create_task copies the calling context, so
+                # an agent that spawns its loop inside start() (every
+                # built-in does) is attributed for the life of that loop —
+                # no per-agent edit required, including for a user-defined
+                # agent the loader has never seen before.
+                with agent_context.agent_call(agent_id):
+                    instance.start()
             except Exception as e:  # noqa: BLE001
                 activity_log.emit(
                     "agents",

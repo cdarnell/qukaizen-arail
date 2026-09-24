@@ -39,6 +39,18 @@ def fresh_lab(monkeypatch, tmp_path):
     # Point HOME at the tmp dir so the code-server write doesn't touch
     # the real ~/.config.
     monkeypatch.setenv("HOME", str(tmp_path))
+    # Override the autouse _isolated_agent_observability_data_root
+    # fixture's "already seen" default (conftest.py) the same way
+    # tests/test_world_first_impression.py does: this suite's own
+    # test_dashboard_unblocks_after_onboarding is specifically about the
+    # one-shot World-prompt marker being ABSENT after a fresh onboarding,
+    # so it needs a guaranteed-never-touched path, not whatever ambient
+    # default the global fixture picked for everyone else.
+    from arail.portal import app as portal_app
+    monkeypatch.setattr(
+        portal_app, "_world_prompt_marker",
+        lambda: tmp_path / ".world-prompt-seen-fresh-lab-override",
+    )
     yield tmp_path
 
 

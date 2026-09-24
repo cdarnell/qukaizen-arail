@@ -42,6 +42,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Protocol
 
+from arail import agent_context
 from arail.activity import activity_log
 from arail.scheduler import current_window, jobs_halted
 
@@ -92,7 +93,12 @@ async def _dream_once(agent_id: str, agent: Dreamer) -> None:
         data={"agent": agent_id, "date": today.strftime("%Y-%m-%d")},
     )
     try:
-        reflection = await agent.dream()
+        # L2 (ARCHITECTURE.md): the daemon calls agent.dream() from outside
+        # start()'s loop, so without setting the context here a nightly
+        # dream would be attributed to whatever the daemon's own task
+        # happens to carry instead of the dreaming agent.
+        with agent_context.agent_call(agent_id):
+            reflection = await agent.dream()
     except Exception as e:  # noqa: BLE001
         activity_log.emit(
             "dream",
@@ -157,7 +163,7 @@ class DreamDaemon:
 
     async def _tick(self) -> None:
         """One poll cycle. Decide whether to dream, and which agents."""
-        # Respect the global halt flag — if the user hit 'Halt jobs'
+        # Respect the global halt flag — if the user hit 'Hold all agents'
         # on the dashboard they don't want background model calls.
         if jobs_halted():
             return

@@ -67,6 +67,7 @@ FAST_PATH_PREFIXES: tuple[str, ...] = (
     "/api/admin/perf",
     "/api/admin/cleanup",
     "/api/admin/security",
+    "/api/admin/agent-lanes",
     "/api/pkb/",
     "/api/research/",
     "/static/",
@@ -278,6 +279,30 @@ def snapshot() -> dict:
         "wait_ms": _label_stats(_WAIT_SAMPLES),
         "run_ms": _label_stats(_RUN_SAMPLES),
         "fast_path_ms": fast_stats,
+    }
+
+
+def slot_pressure() -> dict:
+    """Cheap read for the agent-trace chokepoint: capacity/in_flight/pending
+    only, no percentile computation.
+
+    ``snapshot()`` sorts up to 256 floats per label per call — ~50-200 µs,
+    the wrong cost to add to every agent inference. This reads three module
+    globals instead. ``held_by_other = in_flight > 0`` is the caller's job
+    (agent calls are never themselves *in* the slot — V3 — so any non-zero
+    ``in_flight`` here is necessarily someone else's chat/world-forge/etc.
+    call).
+
+    Known imprecision, stated not hidden: ``_INFLIGHT`` is a plain int
+    mutated from the event-loop thread and read here, possibly from a
+    ``to_thread`` worker — an individual sample may be stale by
+    microseconds. Acceptable for a percentage over hundreds of samples; a
+    lock on this hot path would be the wrong trade.
+    """
+    return {
+        "capacity": _capacity(),
+        "in_flight": _INFLIGHT,
+        "pending": _PENDING,
     }
 
 

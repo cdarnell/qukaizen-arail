@@ -25,6 +25,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Red
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from arail import activity
 from arail.activity import activity_log
 from arail.agent_redirects import clear_agent_redirect, get_agent_redirect, set_agent_redirect
 from arail.agent_workflows import get_agent_workflow, list_agent_workflows
@@ -5075,19 +5076,25 @@ async def agents_status():
     workflow_rows = {row.get("agent_id"): row for row in list_agent_workflows()}
     researcher_redirect = get_agent_redirect("researcher")
 
-    # Walk the activity log once and bucket per-agent tokens + recent
-    # action snippets. Keeping it to a single pass means adding new
-    # agents later doesn't multiply the log scans.
+    # Walk the activity log once and bucket recent action snippets. Keeping
+    # it to a single pass means adding new agents later doesn't multiply
+    # the log scans. Token usage (V7, ARCHITECTURE.md contract #8) sources
+    # from the trace ring instead — real usage, not the requested ceiling
+    # activity_log's prompt_trace.max_tokens used to report — with a
+    # fallback to the legacy activity_log field for compatibility on a lab
+    # that has traces predating this sprint's chokepoint change.
+    from arail import agent_trace
     recent = activity_log.recent(200)
-    per_agent_tokens: dict[str, int] = {}
+    per_agent_tokens: dict[str, int] = dict(agent_trace.tokens_out_by_agent())
     per_agent_recent: dict[str, list[dict]] = {}
     for ev in recent:
         src = ev.get("source")
         if not src:
             continue
-        trace = ev.get("data", {}).get("prompt_trace")
-        if trace:
-            per_agent_tokens[src] = per_agent_tokens.get(src, 0) + int(trace.get("max_tokens", 0) or 0)
+        if src not in per_agent_tokens:
+            trace = ev.get("data", {}).get("prompt_trace")
+            if trace and trace.get("tokens_out"):
+                per_agent_tokens[src] = per_agent_tokens.get(src, 0) + int(trace.get("tokens_out") or 0)
         per_agent_recent.setdefault(src, []).append({
             "ts": ev.get("ts"),
             "level": ev.get("level", "info"),
@@ -5114,6 +5121,10 @@ async def agents_status():
         "workflow": researcher_workflow,
         "redirect": researcher_redirect,
         "has_goal": bool(goal and goal.get("goal_text")),
+        # V7: tokens_out is real usage; tokens is a deprecated alias now
+        # carrying the *corrected* value for one release (agents.html
+        # still reads "tokens" — filed to sprints/BACKLOG.md for removal).
+        "tokens_out": per_agent_tokens.get("researcher", 0),
         "tokens": per_agent_tokens.get("researcher", 0),
         "recent_actions": per_agent_recent.get("researcher", []),
     }
@@ -5127,14 +5138,17 @@ async def agents_status():
     c_status = {
         "pending": len(consent_store.list_pending()),
         "allowed": len(consent_store.list_allowed()),
+        "tokens_out": per_agent_tokens.get("curator", 0),
         "tokens": per_agent_tokens.get("curator", 0),
         "recent_actions": per_agent_recent.get("curator", []),
     }
 
     buddy_workflow = dict(workflow_rows.get("buddy") or {})
+    buddy_workflow["tokens_out"] = per_agent_tokens.get("buddy", 0)
     buddy_workflow["tokens"] = per_agent_tokens.get("buddy", 0)
     buddy_workflow["recent_actions"] = per_agent_recent.get("buddy", [])
     sre_workflow = dict(workflow_rows.get("sre") or {})
+    sre_workflow["tokens_out"] = per_agent_tokens.get("sre", 0)
     sre_workflow["tokens"] = per_agent_tokens.get("sre", 0)
     sre_workflow["recent_actions"] = per_agent_recent.get("sre", [])
 
@@ -5148,6 +5162,7 @@ async def agents_status():
     b_status = {
         "captures": captures,
         "last_task": last_task,
+        "tokens_out": per_agent_tokens.get("browser", 0),
         "tokens": per_agent_tokens.get("browser", 0),
         "recent_actions": per_agent_recent.get("browser", []),
     }
@@ -5163,16 +5178,56 @@ async def agents_status():
 
 @app.get("/api/agents/prompts")
 async def agents_prompts(agent: str = "", limit: int = 30):
-    """Return recent prompt-trace events for the Prompt Inspector."""
-    traces = []
-    for ev in reversed(activity_log.recent(200)):
-        if agent and ev.get("source") != agent:
+    """Recent model-call traces for the Prompt Inspector.
+
+    CHANGED SHAPE (sprint 2026-09-20-buddy-front-and-center, contract #7,
+    breaking): sourced from the agent_trace ring, not activity_log's
+    prompt_trace convention — bodies only appear when the flight recorder
+    is on, and even then only ``prompt``/``response`` keys are added, never
+    present-but-empty. This is a strict reduction in exposure: every tier,
+    unauthenticated, up to 5000 chars of unredacted body before this
+    sprint; metadata-only (admin-toggle-gated for bodies) after it.
+    """
+    from arail import agent_trace
+
+    recorder = agent_trace.recorder_state()
+    traces: list[dict] = []
+    for rec in reversed(agent_trace.ring(200)):
+        if rec.get("kind") not in ("agent", "system"):
             continue
-        if ev.get("data", {}).get("prompt_trace"):
-            traces.append(ev)
-            if len(traces) >= limit:
-                break
-    return list(reversed(traces))
+        source = rec.get("agent_id") or rec.get("label")
+        if agent and source != agent:
+            continue
+        entry = {
+            "ts": rec.get("iso"),
+            "source": source,
+            "trace_id": rec.get("trace_id"),
+            "model": rec.get("model"),
+            "backend": rec.get("backend"),
+            "tokens_out": rec.get("tokens_out"),
+            "latency_ms": rec.get("latency_ms"),
+            "ttft_ms": rec.get("ttft_ms"),
+            "ttft_status": rec.get("ttft_status"),
+        }
+        bodies = rec.get("bodies")
+        if recorder["enabled"] and isinstance(bodies, dict):
+            entry["prompt"] = bodies.get("prompt")
+            entry["response"] = bodies.get("response")
+        traces.append(entry)
+        if len(traces) >= limit:
+            break
+    return {
+        "recorder": {
+            "enabled": recorder["enabled"],
+            "reason": "off_by_default" if not recorder["enabled"] else "on",
+        },
+        "empty_state": (
+            "flight recorder off — flip to capture prompt bodies"
+            if not recorder["enabled"] else
+            "no prompt traces yet — run the researcher or a browser task"
+        ),
+        "traces": list(reversed(traces)),
+    }
 
 
 @app.post("/api/agents/instruct")
@@ -6167,6 +6222,130 @@ async def admin_security_run_scan():
     started_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     result = await _sc.run_and_persist(trigger="manual")
     return {"ok": True, "status": result, "started_at": started_at}
+
+
+# -- Legacy bodies (F12, sprint 2026-09-20-buddy-front-and-center) ---------
+# Disclosed, never auto-purged. Explicitly _require_surface("admin")-gated —
+# unlike the pre-existing /api/admin/* endpoints above, which (verified
+# while wiring these) do not call _require_surface at all despite
+# ARCHITECTURE.md's citation that they do. Not fixed here (a pre-existing
+# gap, out of this sprint's scope); these three new endpoints are gated
+# correctly regardless.
+
+@app.get("/api/admin/legacy-bodies")
+async def admin_legacy_bodies_status():
+    """How many activity.jsonl lines still carry a pre-flight-recorder
+    body, and whether the operator already dismissed the notice."""
+    if (gate := _require_surface("admin")) is not None:
+        return gate
+    return activity.scan_for_legacy_bodies()
+
+
+@app.post("/api/admin/legacy-bodies/purge")
+async def admin_legacy_bodies_purge():
+    """Operator-initiated only — strips bodies, stamps body_purged=true,
+    preserves everything else. Never called automatically."""
+    if (gate := _require_surface("admin")) is not None:
+        return gate
+    return activity.purge_legacy_bodies()
+
+
+@app.post("/api/admin/legacy-bodies/dismiss")
+async def admin_legacy_bodies_dismiss():
+    """[Keep] — remembered so the notice does not return every boot."""
+    if (gate := _require_surface("admin")) is not None:
+        return gate
+    activity.dismiss_legacy_notice()
+    return {"dismissed": True}
+
+
+# -- Agent lanes (S6, sprint 2026-09-20-buddy-front-and-center) ------------
+# The four endpoints contract #6 names, each explicitly
+# _require_surface("admin")-gated. GET /api/admin/agent-lanes is in
+# FAST_PATH_PREFIXES (portal/scheduler.py) so it never queues behind an
+# inference; GET /api/admin/agent-trace-stream deliberately is NOT — see
+# that route's own docstring for why.
+
+@app.get("/api/admin/agent-lanes")
+async def admin_agent_lanes():
+    """Every agent as a living lane. Schema ``arail.agent_lanes/v1``."""
+    if (gate := _require_surface("admin")) is not None:
+        return gate
+    from arail import agent_trace
+    return agent_trace.lanes_snapshot()
+
+
+@app.get("/api/admin/agent-trace-stream")
+async def admin_agent_trace_stream():
+    """SSE, one frame per new trace record.
+
+    Deliberately a different route prefix from ``/api/admin/agent-lanes``:
+    ``FAST_PATH_PREFIXES`` matches with ``startswith``, so nesting this
+    under that prefix (e.g. ``/api/admin/agent-lanes/stream``) would make
+    the fast-path meter time this long-lived stream and inflate
+    ``fast_path_ms`` p95 — the exact bug ``_METRICS_EXCLUDED_PREFIXES``
+    already documents for a different endpoint. The awkward, unrelated-
+    looking name is the fix.
+    """
+    if (gate := _require_surface("admin")) is not None:
+        return gate
+    from arail import agent_trace
+
+    async def _generate():
+        async for rec in agent_trace.subscribe():
+            yield f"data: {json.dumps(rec, default=str)}\n\n"
+
+    return StreamingResponse(
+        _generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.get("/api/admin/agent-trace/{trace_id}")
+async def admin_agent_trace_detail(trace_id: str):
+    """One record, the "why?" drill-in. 404 on an unknown id. Bodies
+    present only if the flight recorder captured them."""
+    if (gate := _require_surface("admin")) is not None:
+        return gate
+    from arail import agent_trace
+    rec = agent_trace.find(trace_id)
+    if rec is None:
+        return JSONResponse(status_code=404, content={"error": "unknown_trace_id"})
+    return rec
+
+
+@app.post("/api/admin/agents/hold")
+async def admin_agents_hold(request: Request):
+    """{hold: bool} -> halt_all_jobs()/resume_all_jobs(). CSRF comes free
+    from local_trust_boundary (app.py's middleware, mutating methods only)
+    -- no new CSRF code."""
+    if (gate := _require_surface("admin")) is not None:
+        return gate
+    from arail import agent_context, scheduler as _job_scheduler
+    body = await request.json()
+    if bool(body.get("hold")):
+        _job_scheduler.halt_all_jobs()
+    else:
+        _job_scheduler.resume_all_jobs()
+    return agent_context.hold_state()
+
+
+@app.post("/api/admin/flight-recorder")
+async def admin_flight_recorder(request: Request):
+    """{enabled: bool, purge: bool} -> writes DATA_DIR/flight_recorder.json
+    and, when ``purge`` is true, also strips every captured body from disk
+    and the live ring (REVIEW.md S1 / operator decision (c): the same
+    purge mechanism as the legacy-bodies purge, not a second one).
+    Admin-only, so a minimalist lab can never turn bodies on."""
+    if (gate := _require_surface("admin")) is not None:
+        return gate
+    from arail import agent_trace
+    body = await request.json()
+    result = agent_trace.set_recorder_enabled(bool(body.get("enabled")))
+    if bool(body.get("purge")):
+        result["purge"] = agent_trace.purge_flight_recorder_bodies()
+    return result
 
 
 # -- Scheduler endpoints (admin Scheduler section) -------------------------
@@ -11603,8 +11782,8 @@ def _toggle_audit_path() -> Path:
 
 
 def _toggle_bind_is_loopback() -> bool:
-    bind = os.getenv("BIND_ADDR", "127.0.0.1").strip().lower()
-    return bind in {"127.0.0.1", "::1", "localhost"}
+    from arail import config
+    return config.bind_is_loopback()
 
 
 def _check_local_mutation_request(request: Request):
