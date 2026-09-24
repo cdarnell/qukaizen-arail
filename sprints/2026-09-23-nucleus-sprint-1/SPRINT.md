@@ -17,7 +17,7 @@ Make Project Nucleus a first-class ARAIL surface ("Model Forge"): `src/arail/nuc
 | plan | architect (design) | ARCHITECTURE.md | done | 2026-09-23 | 2026-09-23 | complete (58b754bc); operator questions Q1–Q9 open, Q1 blocks Gate B only |
 | build | builder | BUILD_LOG.md | done | 2026-09-23 | 2026-09-23 | Gate A reached (commits 1-27, 14dd54aa); commit 28 / Gate B / item 10 out of scope per operator instruction |
 | review | architect (review) | REVIEW.md | done | 2026-09-23 | 2026-09-23 | round 1 BLOCK → loop 1 (12 commits); round 2 BLOCK → loop 2 (8 commits); round 3 WEAK_PASS |
-| test | qa | TEST_REPORT.md | FAIL → loop 4 | 2026-09-23 | 2026-09-24 | round 1: FAIL — Gate A pipeline holds (460 passed / 14 strict xfail); full suite regresses 44 → 57 failures vs merge-base 236504ca. Loop 3 fixed F1/F2. Loop 4 (F3): time-boxed root-cause attempt traced the exception to non-nucleus modules (arail.portal.app/arail.model_defaults bare os.environ writes + the arail.registry singleton); fallback (a) landed — tests/nucleus isolated as its own CI invocation (ARCHITECTURE.md §7.2), BACKLOG ticket filed with evidence, commit 66e1924f |
+| test | qa | TEST_REPORT.md | round 2 in progress | 2026-09-23 | 2026-09-24 | round 1: FAIL — Gate A pipeline holds (460 passed / 14 strict xfail); full suite regresses 44 → 57 failures vs merge-base 236504ca. Loop 3 fixed F1/F2. Loop 4 (F3): time-boxed root-cause attempt traced the exception to non-nucleus modules (arail.portal.app/arail.model_defaults bare os.environ writes + the arail.registry singleton); fallback (a) landed — tests/nucleus isolated as its own CI invocation (ARCHITECTURE.md §7.2), BACKLOG ticket filed with evidence, commit 66e1924f |
 | ship | — | PR | pending | — | — | — |
 
 ## Decisions log
