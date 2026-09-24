@@ -156,6 +156,14 @@ def run_certify(build_id: str, *, publish_row: bool = False, context: dict = Non
     from arail.nucleus.evals.tasks.linux_kernel import PROMPT_TEMPLATES
 
     prompts_bytes = "\x1e".join(f"{name}={PROMPT_TEMPLATES[name]}" for name in sorted(PROMPT_TEMPLATES)).encode()
+
+    # R2 (2026-09-23 review round 2): the open-eval prompt set PC actually
+    # judges -- the domain's eyeball file -- was NOT part of `prompts`, so
+    # editing it changed lc_win_rate -> composite -> decision without
+    # changing eval_hash. The eyeball file's raw bytes now go in too,
+    # tagged so they're distinguishable from the closed-task templates.
+    open_eval_bytes = domain.eval_eyeball_prompts.read_bytes()
+    prompts_bytes += b"\x1e" + b"open_eval=" + open_eval_bytes
     prompts_hex = prompts_bytes.hex()
 
     # `composite_formula` is the CONSTANT formula string for this run's
@@ -178,8 +186,10 @@ def run_certify(build_id: str, *, publish_row: bool = False, context: dict = Non
             "metric_defs": ["f1", "macro_f1"], "positive_classes": {"cve_detection": "cve"},
             "composite_formula_id": composite_result.formula_id,
             "composite_formula": composite_formula_str,
-            "decision_rule_id": "decision_rule/v1", "judge_rubric": "not_run",
-            "judge_model_identity": "not_run", "lc_method": "alpacaeval2-lc", "lc_params": {"n": 1000},
+            "decision_rule_id": "decision_rule/v1",
+            "judge_rubric": metrics["open"].get("judge_rubric", "not_run"),
+            "judge_model_identity": metrics["open"].get("judge_identity", "not_run"),
+            "lc_method": "alpacaeval2-lc", "lc_params": {"n": 1000},
             "bootstrap_n": 1000, "bootstrap_seed": 42, "position_seed": 7,
             "executable_checks": ["patch_applies", "checkpatch_clean"],
             "checkpatch_sha256": "not_run", "git_version": "not_run",
@@ -262,6 +272,7 @@ def run_certify(build_id: str, *, publish_row: bool = False, context: dict = Non
         open_ended_block = {
             "eyeball_explanation": {
                 "lc_win_rate_vs_base": open_metrics["lc_win_rate"],
+                "judge": open_metrics.get("judge_identity", "unknown"),
                 "n": open_metrics.get("n", 0),
                 "ci95": list(open_metrics.get("ci95", [0.0, 0.0])),
             }

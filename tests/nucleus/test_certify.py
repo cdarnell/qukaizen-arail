@@ -221,6 +221,37 @@ def test_eval_hash_changes_when_decoding_changes(staged_context, tmp_path, monke
     assert hash_2 != hash_1
 
 
+# ── R2 (2026-09-23 review round 2): eval_hash must cover the open-ended
+# yardstick now that it's measured -- the judge's identity/rubric and the
+# eyeball prompt bytes it actually judges, not just the closed templates ──
+
+def test_eval_hash_changes_when_eyeball_file_changes(staged_context, tmp_path, monkeypatch):
+    hash_1, ctx1 = _certify_and_read_card_eval_hash(staged_context, tmp_path, monkeypatch, version_suffix=6)
+
+    domains_dir = Path(ctx1["domains_dir"])
+    eyeball_path = domains_dir / "kernel.eyeball.txt"
+    lines = eyeball_path.read_text().splitlines()
+    lines[0] = "an edited eyeball prompt"  # still exactly 10 lines, different bytes
+    eyeball_path.write_text("\n".join(lines) + "\n")
+
+    hash_2, _ctx2 = _certify_and_read_card_eval_hash(staged_context, tmp_path, monkeypatch, version_suffix=7)
+    assert hash_2 != hash_1
+
+
+def test_eval_hash_changes_when_judge_winner_table_changes(staged_context, tmp_path, monkeypatch):
+    hash_1, _ctx1 = _certify_and_read_card_eval_hash(staged_context, tmp_path, monkeypatch, version_suffix=8)
+
+    # A different (still deterministic) judge behavior -- as if the stub
+    # judge's fixture preferences were reconfigured -- changes its content
+    # identity, which must change eval_hash even though no prompt TEMPLATE
+    # or metric value changed.
+    monkeypatch.setattr(build_mod, "_open_winner_table",
+                        lambda prompts, *, wrong_every: {p.item_id: "baseline" for p in prompts})
+
+    hash_2, _ctx2 = _certify_and_read_card_eval_hash(staged_context, tmp_path, monkeypatch, version_suffix=9)
+    assert hash_2 != hash_1
+
+
 def test_certify_refuses_on_contamination(staged_context, tmp_path, monkeypatch):
     monkeypatch.setenv("NUCLEUS_SIGNING_KEY_PATH", str(tmp_path / "signing.ed25519"))
 

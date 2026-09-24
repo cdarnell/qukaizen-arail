@@ -396,6 +396,27 @@ def _open_winner_table(prompts, *, wrong_every: int) -> dict:
     return table
 
 
+_STUB_JUDGE_RUBRIC = (
+    "stub-judge-rubric/v1: prefer whichever completion is the response "
+    "actually produced by the item's ground-truth winner (fused or base), "
+    "as recorded in this run's open-eval winner table"
+)
+
+
+def _stub_judge_identity(winner_table: dict) -> str:
+    """A content identity for the stub LC judge -- "stub-judge/v1:" plus a
+    hash of the deterministic winner table that defines its behavior
+    (R2, 2026-09-23 review round 2: this is the ``scoring.judge_model_
+    identity`` eval_hash input, and it must change if the judge's actual
+    behavior would change, the same way a real judge's model_identity
+    would)."""
+    import hashlib
+
+    from arail.nucleus.evals.hash import canonical_json
+
+    return "stub-judge/v1:" + hashlib.sha256(canonical_json(winner_table)).hexdigest()
+
+
 def _score_open_lc(domain, *, fused_model_dir, run_dir: Path):
     """Pairwise LC-judged fused-vs-base on the domain's eyeball prompts
     (B3 item 7: wired for the stub path; the real-runtime judge path is
@@ -464,7 +485,8 @@ def _score_open_lc(domain, *, fused_model_dir, run_dir: Path):
     len_baseline = {g.item_id: len(g.text) for g in base_gens}
     result = open_lc_judge.score(judged, len_model=len_model, len_baseline=len_baseline, seed=42)
     return {"lc_win_rate": result.lc_win_rate, "n": result.n, "invalid_rate": result.invalid_rate,
-           "ci95": list(result.ci95)}
+           "ci95": list(result.ci95), "judge_identity": _stub_judge_identity(winner_table),
+           "judge_rubric": _STUB_JUDGE_RUBRIC}
 
 
 def _phase_eval(context: dict) -> dict:
