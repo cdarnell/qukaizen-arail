@@ -132,14 +132,22 @@ DECISION_NOT_EVALUATED = "NOT_EVALUATED"
 _BETA_MARGIN = 0.05
 
 
-def decide(achieved, target: float, *, beats_base, residency_status: str) -> str:
+def decide(achieved, target: float, *, beats_base, residency_status: str,
+          formula_id: "str | None" = None) -> str:
     """Evaluated in order — the first rule that fires wins (ARCHITECTURE.md
     §4.9 decision_rule/v1, extended by NOT_EVALUATED).
 
     ``beats_base`` is ``True``/``False`` when a real base-student score was
     produced, or ``None`` for "unknown" (no comparable base score) — unknown
     is treated the same as "did not beat its base": it must never let a
-    build reach CERTIFIED/COMPATIBLE on an unverified claim (B3)."""
+    build reach CERTIFIED/COMPATIBLE on an unverified claim (B3).
+
+    ``formula_id`` enforces the v1-open Gate B precondition the architect
+    recorded in review round 2 (ARCHITECTURE.md §4.9, §9 item 7): a card
+    scored under composite/v1-open has NO executable evidence at all (no
+    patch-generation task exists this sprint), so it can never read
+    CERTIFIED — only COMPATIBLE at most — until Gate B wires
+    patch_applies/checkpatch_clean and v1-open is retired."""
     if achieved == NOT_COMPUTED:
         return DECISION_NOT_EVALUATED
     if beats_base is not True:
@@ -147,5 +155,7 @@ def decide(achieved, target: float, *, beats_base, residency_status: str) -> str
     if achieved < target - _BETA_MARGIN:
         return DECISION_BETA
     if achieved < target or residency_status == "violated":
+        return DECISION_COMPATIBLE
+    if formula_id == "composite/v1-open":
         return DECISION_COMPATIBLE
     return DECISION_CERTIFIED

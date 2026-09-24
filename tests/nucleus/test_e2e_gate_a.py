@@ -164,7 +164,10 @@ def test_gate_a_stub_pipeline_end_to_end(gate_a_env, monkeypatch):
     assert card["composite"]["formula"] == "0.6*closed.mean_f1+0.4*open.lc_win_rate"
     assert card["composite"]["value"] == pytest.approx(0.713231, abs=1e-5)
     assert card["fidelity"]["achieved"] == pytest.approx(0.713231, abs=1e-5)
-    assert card["fidelity"]["decision"] == "CERTIFIED"
+    # v1-open cap (2026-09-23 review round 2, ARCHITECTURE §4.9/§9 item
+    # 7): no executable evidence at all -> COMPATIBLE at most, never
+    # CERTIFIED, until Gate B wires patch_applies/checkpatch_clean.
+    assert card["fidelity"]["decision"] == "COMPATIBLE"
     for name in ("compiles", "patch_applies", "checkpatch_clean"):
         assert card["executable"][name]["status"] == "not_run"
 

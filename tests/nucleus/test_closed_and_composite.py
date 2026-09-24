@@ -150,3 +150,26 @@ def test_decision_certified_when_achieved_and_residency_ok():
 
 def test_decision_order_known_issue_wins_even_if_would_be_certified():
     assert composite.decide(0.99, 0.5, beats_base=False, residency_status="ok") == "KNOWN_ISSUE"
+
+
+# ── v1-open Gate B cap (2026-09-23 review round 2, ARCHITECTURE §4.9/§9
+# item 7): a composite/v1-open card has NO executable evidence at all, so
+# it can never read CERTIFIED, only COMPATIBLE at most, until Gate B ────
+
+def test_v1_open_formula_caps_at_compatible_even_when_achieved_beats_target():
+    assert composite.decide(0.9, 0.5, beats_base=True, residency_status="ok",
+                            formula_id="composite/v1-open") == "COMPATIBLE"
+
+
+def test_v1_open_formula_does_not_mask_beta_or_known_issue():
+    assert composite.decide(0.5, 0.75, beats_base=True, residency_status="ok",
+                            formula_id="composite/v1-open") == "BETA"
+    assert composite.decide(0.9, 0.5, beats_base=False, residency_status="ok",
+                            formula_id="composite/v1-open") == "KNOWN_ISSUE"
+
+
+def test_other_formulas_unaffected_by_the_v1_open_cap():
+    assert composite.decide(0.8, 0.75, beats_base=True, residency_status="ok",
+                            formula_id="composite/v1") == "CERTIFIED"
+    assert composite.decide(0.8, 0.75, beats_base=True, residency_status="ok",
+                            formula_id=None) == "CERTIFIED"

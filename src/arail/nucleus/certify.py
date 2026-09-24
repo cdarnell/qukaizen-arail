@@ -195,7 +195,8 @@ def run_certify(build_id: str, *, publish_row: bool = False, context: dict = Non
         base_composite_value = base_composite_result.value
 
     decision = composite_mod.decide(achieved, domain.fidelity_target, beats_base=beats_base,
-                                    residency_status="unmeasured")
+                                    residency_status="unmeasured",
+                                    formula_id=composite_result.formula_id)
 
     if achieved == composite_mod.NOT_COMPUTED:
         # B3 item 2's other allowed resolution: refuse rather than write a
