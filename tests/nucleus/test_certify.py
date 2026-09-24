@@ -39,7 +39,13 @@ def test_certify_end_to_end_produces_signed_card(staged_context, tmp_path, monke
 
     result = certify_mod.run_certify(staged_context["build_id"], context=staged_context)
 
-    assert result["decision"] in ("CERTIFIED", "COMPATIBLE", "BETA", "KNOWN_ISSUE")
+    # B3 item 3 ("KNOWN_ISSUE can not be reached"): the fused and base
+    # students score IDENTICALLY here (both use the default StubProvider
+    # with the same deterministic fallback text -- the fixture never
+    # differentiates the fused shard from base), so a real, non-tied-break
+    # beats_base comparison correctly reads False and KNOWN_ISSUE is the
+    # genuinely reached decision -- not hardcoded, not unreachable.
+    assert result["decision"] == "KNOWN_ISSUE"
     from pathlib import Path
 
     card_path = Path(result["card_dir"]) / "dna-card.yaml"
@@ -89,6 +95,49 @@ def test_certify_refuses_when_env_disagrees_with_build_record(staged_context, tm
     from arail.nucleus.cards import certified_models
     ledger = certified_models._default_local_path(build_mod._nucleus_data(staged_context))
     assert not ledger.exists() or "kernel" not in ledger.read_text()
+
+
+# ── B3 (2026-09-23 review): no hardcoded metric/provenance value in a
+# signed card; PC scores the fused student AND the base; beats_base and
+# pipeline_hash/training_hash are real ─────────────────────────────
+
+def test_certify_card_has_no_placeholder_values(staged_context, tmp_path, monkeypatch):
+    monkeypatch.setenv("NUCLEUS_SIGNING_KEY_PATH", str(tmp_path / "signing.ed25519"))
+
+    _run_phase(staged_context, "PA")
+    _run_phase(staged_context, "PA2")
+    _run_phase(staged_context, "PB")
+    _run_phase(staged_context, "fuse")
+    _run_phase(staged_context, "PC")
+
+    result = certify_mod.run_certify(staged_context["build_id"], context=staged_context)
+    from arail.nucleus.cards.dna_v2 import load_card
+
+    card = load_card(Path(result["card_dir"]) / "dna-card.yaml")
+
+    # executable checks are honestly not_run, never a fake 0.0/1.0 rate.
+    for name in ("compiles", "patch_applies", "checkpatch_clean"):
+        assert card["executable"][name]["status"] == "not_run"
+
+    # pipeline_hash is a real sha256, not the "sha256:not_computed" literal.
+    assert card["pipeline_hash"] != "sha256:not_computed"
+    assert card["pipeline_hash"].startswith("sha256:")
+    assert len(card["pipeline_hash"]) == len("sha256:") + 64
+
+    # composite/v1-open is selected (no executable measured this sprint),
+    # and its formula is the constant string, never a metric-value dump.
+    assert card["composite"]["formula_id"] == "composite/v1-open"
+    assert card["composite"]["formula"] == "0.6*closed.mean_f1+0.4*open.lc_win_rate"
+    assert isinstance(card["composite"]["value"], float)
+
+    # A real signature over the (non-zero, non-placeholder) training_hash.
+    # B3 item 3 ("KNOWN_ISSUE can not be reached"): the fused and base
+    # students score IDENTICALLY here (both use the default StubProvider
+    # with the same deterministic fallback text -- the fixture never
+    # differentiates the fused shard from base), so a real, non-tied-break
+    # beats_base comparison correctly reads False and KNOWN_ISSUE is the
+    # genuinely reached decision -- not hardcoded, not unreachable.
+    assert result["decision"] == "KNOWN_ISSUE"
 
 
 def test_certify_refuses_on_build_record_missing_stub_field(staged_context, tmp_path, monkeypatch):

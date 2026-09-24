@@ -86,14 +86,23 @@ def _resolve_preflight_models(domain) -> Dict[str, Any]:
     return models
 
 
-def _provider_for_role(role: str, model_name: str, *, run_dir: Path, top_n: int):
+def _provider_for_role(role: str, model_name: str, *, run_dir: Path, top_n: int,
+                       model_path: "Path | str | None" = None):
+    """``model_path``, when given, is used directly instead of resolving
+    ``model_name`` under ARAIL_MODELS_DIR (B3, 2026-09-23 review) — PC's
+    fused-student role passes fuse's own recorded output_dir here, since
+    the fused shard has no ARAIL_MODELS_DIR alias/name of its own."""
     if _is_stub():
         from arail.nucleus.providers.stub import StubProvider
 
         return StubProvider(role=role)
 
-    from arail.nucleus.models import resolve_model
     from arail.nucleus.providers.queuellm import QueueLLMProvider
+
+    if model_path is not None:
+        return QueueLLMProvider(str(model_path), run_dir=run_dir)
+
+    from arail.nucleus.models import resolve_model
 
     model = resolve_model(model_name)
     return QueueLLMProvider(str(model.path), run_dir=run_dir)
@@ -264,25 +273,27 @@ def _phase_fuse(context: dict) -> dict:
 
 # ── PC: eval (student, base, judge on cert) ────────────────────────────
 
-def _phase_eval(context: dict) -> dict:
-    domain = _resolve_domain(context)
-    from arail.nucleus.evals import closed, composite
-    from arail.nucleus.evals.splits import CertStore
+_CLOSED_TASKS = None  # populated lazily inside _phase_eval (avoids a module-load-order import)
+
+
+def _score_closed_tasks(cert_items, *, run_dir: Path, model_name: str = "", model_path=None):
+    """Runs every closed task against ONE resolved model (fused shard or
+    unfused base — caller picks via model_name/model_path) and returns
+    (rows, mean_f1). Shared by the fused-student and base-student passes
+    so `beats_base` in certify.py is a real comparison (B3), not a
+    hardcoded 0.0 baseline."""
+    from arail.nucleus.evals import closed
     from arail.nucleus.evals.tasks.linux_kernel import (
         cve_detection_task, parse_closed_answer, subsystem_routing_task,
     )
 
-    run_dir = _run_dir(context)
-    cert_access = CertStore(nucleus_data=_nucleus_data(context)).open(domain.name)
-    cert_items = cert_access.open()
-
-    closed_rows = []
-    for task_name, task_fn, valid in (
-        ("cve_detection", cve_detection_task, ("cve", "not")),
-        ("subsystem_routing", subsystem_routing_task, None),
+    rows = []
+    for task_fn, valid in (
+        (cve_detection_task, ("cve", "not")),
+        (subsystem_routing_task, None),
     ):
         prompts, gold = task_fn(cert_items)
-        provider = _provider_for_role("student", domain.student_base, run_dir=run_dir, top_n=1)
+        provider = _provider_for_role("student", model_name, run_dir=run_dir, top_n=1, model_path=model_path)
         try:
             generations = provider.generate(prompts, Decoding())
         finally:
@@ -290,29 +301,105 @@ def _phase_eval(context: dict) -> dict:
 
         if valid is not None:
             pred = [parse_closed_answer(g.text, valid=valid) for g in generations]
-            closed_rows.append(closed.binary_prf1(gold, pred, positive="cve"))
+            rows.append(closed.binary_prf1(gold, pred, positive="cve"))
         else:
             pred = [g.text.strip().split(":")[0].strip() or "unknown" for g in generations]
-            closed_rows.append(closed.macro_f1(gold, pred))
+            rows.append(closed.macro_f1(gold, pred))
+    return rows, closed.mean_f1(rows)
 
-    closed_mean_f1 = closed.mean_f1(closed_rows)
 
-    # Open judge + executable checks are wired at the module level
-    # (open_lc_judge.py, executable_kernel.py); this phase reports
-    # not_run for them in the generic (no fixture judge/repo wiring)
-    # case -- the Gate A end-to-end test (commit 22) supplies both via
-    # its own fixture and exercises the real path.
+def _score_open_lc(domain, *, fused_model_dir, run_dir: Path):
+    """Pairwise LC-judged fused-vs-base on the domain's eyeball prompts
+    (B3 item 7: wired for the stub path, which has a fixture judge --
+    StubJudge -- available; the real-runtime judge path is unwired this
+    sprint, same as every other real-mode gap tracked in the "Model Forge
+    real-runtime wiring" BACKLOG entry, and B7 already refuses non-stub
+    builds up front). Genuinely computed from generated text through
+    evals/open_lc_judge.py's real position-randomization + LC-regression
+    math — never a constant."""
+    from arail.nucleus.evals import open_lc_judge
+    from arail.nucleus.providers.base import Prompt
+
+    if not _is_stub():
+        return {"lc_win_rate": "not_run", "reason": "real-runtime judge not wired this sprint"}
+
+    from arail.nucleus.providers.stub import StubJudge
+
+    lines = [ln for ln in domain.eval_eyeball_prompts.read_text().splitlines() if ln.strip()][:10]
+    prompts = [Prompt(item_id=f"eyeball-{i}", text=ln, role="open") for i, ln in enumerate(lines)]
+
+    provider_fused = _provider_for_role("student", "", run_dir=run_dir, top_n=1, model_path=fused_model_dir)
+    try:
+        fused_gens = provider_fused.generate(prompts, Decoding())
+    finally:
+        provider_fused.close()
+    provider_base = _provider_for_role("student", domain.student_base, run_dir=run_dir, top_n=1)
+    try:
+        base_gens = provider_base.generate(prompts, Decoding())
+    finally:
+        provider_base.close()
+
+    pairs = [
+        open_lc_judge.PairItem(item_id=p.item_id, text_model=fg.text, text_baseline=bg.text)
+        for p, fg, bg in zip(prompts, fused_gens, base_gens)
+    ]
+    judge = StubJudge()
+    judged = open_lc_judge.randomize_and_judge(pairs, seed=7, judge_fn=judge.judge)
+    len_model = {g.item_id: len(g.text) for g in fused_gens}
+    len_baseline = {g.item_id: len(g.text) for g in base_gens}
+    result = open_lc_judge.score(judged, len_model=len_model, len_baseline=len_baseline, seed=42)
+    return {"lc_win_rate": result.lc_win_rate, "n": result.n, "invalid_rate": result.invalid_rate}
+
+
+def _phase_eval(context: dict) -> dict:
+    domain = _resolve_domain(context)
+    from arail.nucleus.evals import composite
+    from arail.nucleus.evals.splits import CertStore
+
+    run_dir = _run_dir(context)
+    cert_access = CertStore(nucleus_data=_nucleus_data(context)).open(domain.name)
+    cert_items = cert_access.open()
+
+    # B3 (2026-09-23 review): PC evaluates the FUSED student (fuse's
+    # recorded output_dir) -- never the base weights under a different
+    # name -- and separately scores the unfused base student for a real
+    # `beats_base` comparison downstream in certify.py.
+    fuse_output_path = run_dir / "phase_output" / "fuse.json"
+    if not fuse_output_path.is_file():
+        raise RefusedByPolicy(
+            f"PC refused: no fuse phase output at {fuse_output_path} — fuse must run before PC"
+        )
+    fuse_output = json.loads(fuse_output_path.read_text())
+    fused_model_dir = fuse_output["output_dir"]
+
+    fused_rows, fused_mean_f1 = _score_closed_tasks(cert_items, run_dir=run_dir, model_path=fused_model_dir)
+    base_rows, base_mean_f1 = _score_closed_tasks(cert_items, run_dir=run_dir, model_name=domain.student_base)
+
+    open_metrics = _score_open_lc(domain, fused_model_dir=fused_model_dir, run_dir=run_dir)
+
+    # `compiles`/`patch_applies`/`checkpatch_clean` need a model-generated
+    # PATCH against a real base repo -- no patch-generation task exists in
+    # this sprint's task-adapter seam (only cve_detection/subsystem_routing/
+    # open explanation), so these stay honestly not_run rather than a
+    # hardcoded number. Filed in the "Model Forge real-runtime wiring"
+    # BACKLOG entry; composite/v1-open (composite.py) is selected instead
+    # of v1/v1-nc whenever executable is wholly not_run, so the composite
+    # is computed from what was actually measured (closed + open), not
+    # blocked on an unmeasured input.
     metrics = {
-        "closed": {"mean_f1": closed_mean_f1, "rows": closed_rows},
-        "open": {"lc_win_rate": 0.5},
-        "executable": {"compiles": composite.NOT_RUN, "patch_applies": 0.0, "checkpatch_clean": 0.0},
+        "closed": {"mean_f1": fused_mean_f1, "rows": fused_rows},
+        "base_closed": {"mean_f1": base_mean_f1, "rows": base_rows},
+        "open": open_metrics,
+        "executable": {"compiles": composite.NOT_RUN, "patch_applies": composite.NOT_RUN,
+                       "checkpatch_clean": composite.NOT_RUN},
     }
 
     eval_dir = run_dir / "eval"
     eval_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     (eval_dir / "metrics.json").write_text(json.dumps(metrics, sort_keys=True, default=str))
 
-    return {"closed_mean_f1": closed_mean_f1, "n_cert": len(cert_items), "provider": _provider_label(domain)}
+    return {"closed_mean_f1": fused_mean_f1, "base_closed_mean_f1": base_mean_f1,
+           "n_cert": len(cert_items), "provider": _provider_label(domain)}
 
 
 # ── dispatch ──────────────────────────────────────────────────────────

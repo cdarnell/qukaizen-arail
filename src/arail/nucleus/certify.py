@@ -102,6 +102,7 @@ def run_certify(build_id: str, *, publish_row: bool = False, context: dict = Non
     fuse_output = json.loads(fuse_output_path.read_text())
     shard_root = Path(fuse_output["shard_dir"])
     fused_version = fuse_output["version"]
+    fused_model_dir_for_hash = Path(fuse_output["output_dir"])
 
     eval_dir = rd / "eval"
     metrics = json.loads((eval_dir / "metrics.json").read_text())
@@ -111,10 +112,42 @@ def run_certify(build_id: str, *, publish_row: bool = False, context: dict = Non
 
     composite_result = composite_mod.compute(metrics)
     achieved = composite_result.value
-    base_composite = 0.0  # base_student baseline composite — wired for real once PC scores base_student separately
-    beats_base = achieved >= base_composite
+
+    # B3 (2026-09-23 review): `beats_base` is a REAL comparison of the
+    # fused student's closed-task score against the unfused base
+    # student's (PC now scores both — build.py's _score_closed_tasks).
+    # `None` ("unknown") when PC didn't record a base score, and
+    # composite.decide() treats unknown the same as "did not beat its
+    # base" — it must never let a build reach CERTIFIED/COMPATIBLE on an
+    # unverified claim.
+    base_closed = metrics.get("base_closed")
+    if base_closed is None:
+        beats_base = None
+        base_composite_value: object = "unknown"
+    else:
+        beats_base = metrics["closed"]["mean_f1"] > base_closed["mean_f1"]
+        base_metrics_for_composite = {"closed": base_closed, "open": metrics["open"],
+                                      "executable": metrics["executable"]}
+        base_composite_result = composite_mod.compute(base_metrics_for_composite,
+                                                       formula_id=composite_result.formula_id)
+        base_composite_value = base_composite_result.value
+
     decision = composite_mod.decide(achieved, domain.fidelity_target, beats_base=beats_base,
                                     residency_status="unmeasured")
+
+    if achieved == composite_mod.NOT_COMPUTED:
+        # B3 item 2's other allowed resolution: refuse rather than write a
+        # NOT_EVALUATED card. dna-card-v2.schema.json's `fidelity.achieved`
+        # is `type: number` (a frozen wire contract per ARCHITECTURE.md
+        # §4.10) and has no NOT_EVALUATED member in its decision enum —
+        # widening that schema is an architecture-level change this fix
+        # doesn't authorize, so certify refuses instead of writing a card
+        # the schema itself would reject.
+        raise RefusedByPolicy(
+            f"certify refused: composite could not be computed (formula "
+            f"{composite_result.formula_id!r} has a not_run input) — no "
+            f"card was written. decision would have been NOT_EVALUATED."
+        )
 
     # B4 (2026-09-23 review): `prompts` is the actual task template BYTES
     # (hex-encoded), not a hand-maintained version label -- editing a
@@ -165,10 +198,63 @@ def run_certify(build_id: str, *, publish_row: bool = False, context: dict = Non
 
     from datetime import datetime, timezone
 
+    # B3 (2026-09-23 review): pipeline_hash is computed for real via
+    # evals/hash.py::pipeline_hash (implemented, tested, never called
+    # before this fix) instead of the literal "sha256:not_computed".
+    # teacher/student identity fall back to the plain configured name
+    # (never a fake hash) when the model doesn't resolve to real files on
+    # disk -- true for every stub-mode run, since the fixture corpus
+    # doesn't ship real teacher weights.
+    def _best_effort_identity(name: str) -> str:
+        if not name or name == "auto":
+            return "unresolved:auto"
+        try:
+            from arail.nucleus.models import model_identity, resolve_model
+
+            return model_identity(resolve_model(name))
+        except Exception:  # noqa: BLE001 — identity falls back to the name, never crashes certify
+            return f"unresolved:{name}"
+
+    from arail.nucleus.evals.hash import pipeline_hash as compute_pipeline_hash
+
+    pipeline_hash_value = compute_pipeline_hash(
+        nucleus_src_root=Path(__file__).resolve().parent,
+        domain_canonical_bytes=domain.canonical_bytes(),
+        corpus_manifest_sha=stage_result.manifest_sha256,
+        teacher_identity=_best_effort_identity(domain.teacher_model),
+        student_base_identity=_best_effort_identity(domain.student_base),
+        distill_params={"top_n": domain.distill_top_n},
+        training_hyperparams={"target": domain.fidelity_target},
+    )
+
+    # B3 (2026-09-23 review): tokenizer_parity is REAL (tokenizer_parity.py,
+    # implemented and tested, just never called) when both the student and
+    # a concretely-named teacher resolve to on-disk models; a teacher left
+    # as "auto" (auto-select isn't wired this sprint — BACKLOG) or any
+    # resolution failure defaults to False with a detail explaining why,
+    # never the previous hardcoded True. captured_mass/dropped_mass need
+    # reading back the .npz top-N shards PA wrote and are not computed
+    # this sprint either — omitted (both are optional in the schema)
+    # rather than published as a fake 1.0/0.0.
+    tokenizer_parity_ok = False
+    tokenizer_parity_detail = "teacher left as 'auto' — auto-select is not wired this sprint (BACKLOG)"
+    if domain.teacher_model and domain.teacher_model != "auto":
+        try:
+            from arail.nucleus.models import resolve_model
+            from arail.nucleus.tokenizer_parity import parity as compute_parity
+
+            student_model = resolve_model(domain.student_base)
+            teacher_model = resolve_model(domain.teacher_model)
+            parity_result = compute_parity(student_model.path, teacher_model.path)
+            tokenizer_parity_ok = parity_result.kind in ("exact", "superset")
+            tokenizer_parity_detail = f"{parity_result.kind}: {parity_result.detail}"
+        except Exception as exc:  # noqa: BLE001 — a failed parity check is False, not a certify crash
+            tokenizer_parity_detail = f"parity check failed: {exc}"
+
     card = build_card(
         shard=domain.shard, version=fused_version,
         built=datetime.now(timezone.utc).isoformat(),
-        pipeline_hash=context.get("pipeline_hash", "sha256:not_computed"),
+        pipeline_hash=pipeline_hash_value,
         eval_hash=this_eval_hash, runtime=("stub" if is_stub else domain.runtime),
         lab_mode=__import__("arail.airgap", fromlist=["lab_mode"]).lab_mode(),
         distillation={
@@ -176,9 +262,9 @@ def run_certify(build_id: str, *, publish_row: bool = False, context: dict = Non
             "teacher": {"profile": domain.teacher_profile, "model": domain.teacher_model,
                        "tokenizer": "unknown"},
             "student": {"base": domain.student_base, "tokenizer": "unknown", "method": "lora"},
-            "tokenizer_parity": True, "tokenizer_parity_detail": "not_run this sprint's certify path",
+            "tokenizer_parity": tokenizer_parity_ok, "tokenizer_parity_detail": tokenizer_parity_detail,
             "logit_source": "teacher_generated_topn", "top_n": domain.distill_top_n,
-            "renorm": "topn_softmax", "captured_mass": 1.0, "dropped_mass": 0.0,
+            "renorm": "topn_softmax",
         },
         splits={"corpus_cutoff": domain.corpus_cutoff,
                "dev": {"n": len(splits.dev), "seen_by_arbitrage": True},
@@ -205,11 +291,30 @@ def run_certify(build_id: str, *, publish_row: bool = False, context: dict = Non
 
     gate_results = build_gate_results(card_sha256=this_card_sha256, eval_hash=this_eval_hash,
                                       decision=decision, contamination_overlap=contamination_report.overlap)
-    training_hash = "sha256:" + "0" * 64  # content_hash of adapter+fused weights -- wired once fuse() is real
+
+    # B3 (2026-09-23 review): training_hash is a REAL content hash of the
+    # fuse output directory (the stub fuse marker, for a stub build; the
+    # real fused weights once Gate B wires a real fuse) -- computed here,
+    # never a placeholder all-zero hash. teacher_hash is the best-effort
+    # identity computed above (falls back to the configured name when the
+    # teacher doesn't resolve to real files on disk, same as pipeline_hash).
+    def _dir_content_hash(path: Path) -> str:
+        import hashlib
+
+        h = hashlib.sha256()
+        base = Path(path)
+        for f in sorted(base.rglob("*")):
+            if f.is_file():
+                h.update(f.relative_to(base).as_posix().encode())
+                h.update(f.read_bytes())
+        return "sha256:" + h.hexdigest()
+
+    training_hash = _dir_content_hash(fused_model_dir_for_hash)
     payload = build_payload(
         pipeline_run_id=build_id,
-        chain_hash=chain_hash(corpus_hash=stage_result.manifest_sha256, teacher_hash="teacher-hash-not-wired",
-                              config_hash=context.get("pipeline_hash", "not_computed"),
+        chain_hash=chain_hash(corpus_hash=stage_result.manifest_sha256,
+                              teacher_hash=_best_effort_identity(domain.teacher_model),
+                              config_hash=pipeline_hash_value,
                               training_hash=training_hash),
         gate_results=gate_results,
     )
@@ -222,7 +327,7 @@ def run_certify(build_id: str, *, publish_row: bool = False, context: dict = Non
 
     eyeball_prompts = domain.eval_eyeball_prompts.read_text().splitlines()
     report_text = build_report.render(
-        decision=decision, beats_base=beats_base, achieved=achieved, base_composite=base_composite,
+        decision=decision, beats_base=beats_base, achieved=achieved, base_composite=base_composite_value,
         composite_formula_id=composite_result.formula_id, composite_value=composite_result.value,
         closed_ended=card["closed_ended"], open_ended=card["open_ended"], executable=card["executable"],
         eyeball_prompts=eyeball_prompts[:10] + [""] * max(0, 10 - len(eyeball_prompts)),

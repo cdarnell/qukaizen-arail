@@ -9,25 +9,31 @@ from dataclasses import dataclass
 from typing import Callable, Dict
 
 NOT_RUN = "not_run"
+# B3 (2026-09-23 review): the composite must never silently coerce a
+# not_run input into a number (0.5, 0.0, ...) -- if ANY input this
+# formula needs is not_run, the composite itself is not_computed, and
+# `decide()` must treat that as a non-shipping decision, not compute a
+# misleadingly-precise number from partial data.
+NOT_COMPUTED = "not_computed"
 
 
 @dataclass(frozen=True)
 class CompositeResult:
     formula_id: str
-    value: float
-    inputs: Dict[str, float]
+    value: object  # float, or the NOT_COMPUTED sentinel string
+    inputs: Dict[str, object]
 
 
 def _composite_v1(metrics: dict) -> CompositeResult:
     closed_mean_f1 = metrics["closed"]["mean_f1"]
     lc_win_rate = metrics["open"]["lc_win_rate"]
     compiles = metrics["executable"]["compiles"]
-    if compiles == NOT_RUN:
-        raise ValueError("composite/v1 requires executable.compiles to be a number; got not_run")
+    inputs = {"closed.mean_f1": closed_mean_f1, "open.lc_win_rate": lc_win_rate,
+             "executable.compiles": compiles}
+    if NOT_RUN in (closed_mean_f1, lc_win_rate, compiles):
+        return CompositeResult("composite/v1", NOT_COMPUTED, inputs)
     value = 0.4 * closed_mean_f1 + 0.3 * lc_win_rate + 0.3 * compiles
-    return CompositeResult("composite/v1", round(value, 6),
-                           {"closed.mean_f1": closed_mean_f1, "open.lc_win_rate": lc_win_rate,
-                            "executable.compiles": compiles})
+    return CompositeResult("composite/v1", round(value, 6), inputs)
 
 
 def _composite_v1_nc(metrics: dict) -> CompositeResult:
@@ -35,17 +41,36 @@ def _composite_v1_nc(metrics: dict) -> CompositeResult:
     lc_win_rate = metrics["open"]["lc_win_rate"]
     patch_applies = metrics["executable"]["patch_applies"]
     checkpatch_clean = metrics["executable"]["checkpatch_clean"]
+    inputs = {"closed.mean_f1": closed_mean_f1, "open.lc_win_rate": lc_win_rate,
+             "executable.patch_applies": patch_applies, "executable.checkpatch_clean": checkpatch_clean}
+    if NOT_RUN in (closed_mean_f1, lc_win_rate, patch_applies, checkpatch_clean):
+        return CompositeResult("composite/v1-nc", NOT_COMPUTED, inputs)
     mean_exec = (patch_applies + checkpatch_clean) / 2.0
     value = 0.4 * closed_mean_f1 + 0.3 * lc_win_rate + 0.3 * mean_exec
-    return CompositeResult("composite/v1-nc", round(value, 6),
-                           {"closed.mean_f1": closed_mean_f1, "open.lc_win_rate": lc_win_rate,
-                            "executable.patch_applies": patch_applies,
-                            "executable.checkpatch_clean": checkpatch_clean})
+    return CompositeResult("composite/v1-nc", round(value, 6), inputs)
+
+
+def _composite_v1_open(metrics: dict) -> CompositeResult:
+    """No executable checks at all -- selected automatically (never by
+    hand) when `executable` is wholly not_run (B3, 2026-09-23 review):
+    this sprint's task-adapter seam has no patch-generation task, so
+    compiles/patch_applies/checkpatch_clean are honestly not_run every
+    run, not just "sometimes". Requiring composite/v1-nc's executable
+    inputs in that case would make the composite permanently
+    not_computed even though closed + open WERE genuinely measured."""
+    closed_mean_f1 = metrics["closed"]["mean_f1"]
+    lc_win_rate = metrics["open"]["lc_win_rate"]
+    inputs = {"closed.mean_f1": closed_mean_f1, "open.lc_win_rate": lc_win_rate}
+    if NOT_RUN in (closed_mean_f1, lc_win_rate):
+        return CompositeResult("composite/v1-open", NOT_COMPUTED, inputs)
+    value = 0.6 * closed_mean_f1 + 0.4 * lc_win_rate
+    return CompositeResult("composite/v1-open", round(value, 6), inputs)
 
 
 _FORMULAS: Dict[str, Callable[[dict], CompositeResult]] = {
     "composite/v1": _composite_v1,
     "composite/v1-nc": _composite_v1_nc,
+    "composite/v1-open": _composite_v1_open,
 }
 
 # B4 (2026-09-23 review): a CONSTANT formula string per formula id, used
@@ -58,6 +83,7 @@ FORMULA_STRINGS: Dict[str, str] = {
     "composite/v1": "0.4*closed.mean_f1+0.3*open.lc_win_rate+0.3*executable.compiles",
     "composite/v1-nc": "0.4*closed.mean_f1+0.3*open.lc_win_rate"
                        "+0.3*mean(executable.patch_applies,executable.checkpatch_clean)",
+    "composite/v1-open": "0.6*closed.mean_f1+0.4*open.lc_win_rate",
 }
 
 
@@ -69,9 +95,16 @@ def formula_string(formula_id: str) -> str:
 
 
 def select_formula_id(metrics: dict) -> str:
-    """`compiles` is `not_run` in sprint 1 (no Linux build host) -> the
-    no-compiles formula is selected automatically, never by hand."""
-    if metrics.get("executable", {}).get("compiles", NOT_RUN) == NOT_RUN:
+    """Selected automatically from what was actually measured this run,
+    never by hand: all three executable checks not_run -> no-executable
+    formula (composite/v1-open); only `compiles` not_run (no Linux build
+    host) -> the no-compiles formula (composite/v1-nc); everything
+    measured -> the full formula (composite/v1)."""
+    executable = metrics.get("executable", {})
+    exec_keys = ("compiles", "patch_applies", "checkpatch_clean")
+    if all(executable.get(k, NOT_RUN) == NOT_RUN for k in exec_keys):
+        return "composite/v1-open"
+    if executable.get("compiles", NOT_RUN) == NOT_RUN:
         return "composite/v1-nc"
     return "composite/v1"
 
@@ -89,14 +122,27 @@ DECISION_KNOWN_ISSUE = "KNOWN_ISSUE"
 DECISION_BETA = "BETA"
 DECISION_COMPATIBLE = "COMPATIBLE"
 DECISION_CERTIFIED = "CERTIFIED"
+# B3 (2026-09-23 review): added to decision_rule/v1 -- the composite
+# genuinely could not be computed (some required input is not_run). This
+# is distinct from KNOWN_ISSUE (computed, and it lost to its base): it
+# means "no verdict was possible", and must never be confused with a
+# real decision by a caller pattern-matching on the four original values.
+DECISION_NOT_EVALUATED = "NOT_EVALUATED"
 
 _BETA_MARGIN = 0.05
 
 
-def decide(achieved: float, target: float, *, beats_base: bool, residency_status: str) -> str:
+def decide(achieved, target: float, *, beats_base, residency_status: str) -> str:
     """Evaluated in order — the first rule that fires wins (ARCHITECTURE.md
-    §4.9 decision_rule/v1)."""
-    if not beats_base:
+    §4.9 decision_rule/v1, extended by NOT_EVALUATED).
+
+    ``beats_base`` is ``True``/``False`` when a real base-student score was
+    produced, or ``None`` for "unknown" (no comparable base score) — unknown
+    is treated the same as "did not beat its base": it must never let a
+    build reach CERTIFIED/COMPATIBLE on an unverified claim (B3)."""
+    if achieved == NOT_COMPUTED:
+        return DECISION_NOT_EVALUATED
+    if beats_base is not True:
         return DECISION_KNOWN_ISSUE
     if achieved < target - _BETA_MARGIN:
         return DECISION_BETA

@@ -109,8 +109,21 @@ def test_composite_v1_formula_value():
 
 
 def test_composite_v1_requires_numeric_compiles():
-    with pytest.raises(ValueError):
-        composite.compute(_metrics(), formula_id="composite/v1")
+    # B3 (2026-09-23 review): a not_run required input makes the
+    # composite not_computed, not a raised ValueError -- the caller
+    # (certify.py) decides what to do with that (refuse), rather than
+    # this pure function crashing.
+    result = composite.compute(_metrics(), formula_id="composite/v1")
+    assert result.value == composite.NOT_COMPUTED
+
+
+def test_decide_returns_not_evaluated_when_composite_not_computed():
+    assert composite.decide(composite.NOT_COMPUTED, 0.5, beats_base=True,
+                            residency_status="ok") == "NOT_EVALUATED"
+
+
+def test_decide_treats_unknown_beats_base_as_not_beating():
+    assert composite.decide(0.9, 0.5, beats_base=None, residency_status="ok") == "KNOWN_ISSUE"
 
 
 # ── decision_rule/v1 ────────────────────────────────────────────────

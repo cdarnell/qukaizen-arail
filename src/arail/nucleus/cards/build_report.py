@@ -22,13 +22,28 @@ def _fence(text: str) -> str:
     return f"```\n{body}\n```"
 
 
-def _summary_lines(*, decision: str, beats_base: bool, achieved: float, base_composite: float) -> List[str]:
-    delta = achieved - base_composite
-    beat_text = (f"beats its base by {delta:+.3f} composite points" if beats_base
-                else f"does NOT beat its base ({delta:+.3f} composite points)")
+def _fmt(value) -> str:
+    """B3 (2026-09-23 review): achieved/base_composite can now legitimately
+    be the string "not_computed" (composite.NOT_COMPUTED) when an input
+    metric is not_run -- format it as-is instead of crashing on a `:.3f`
+    applied to a string."""
+    return f"{value:.3f}" if isinstance(value, (int, float)) else str(value)
+
+
+def _summary_lines(*, decision: str, beats_base: Optional[bool], achieved, base_composite) -> List[str]:
+    if isinstance(achieved, (int, float)) and isinstance(base_composite, (int, float)):
+        delta = achieved - base_composite
+        if beats_base is True:
+            beat_text = f"beats its base by {delta:+.3f} composite points"
+        elif beats_base is False:
+            beat_text = f"does NOT beat its base ({delta:+.3f} composite points)"
+        else:
+            beat_text = "— whether it beats its base is UNKNOWN (no comparable base score)"
+    else:
+        beat_text = "— composite not computed (one or more required metrics is not_run)"
     return [
         f"**Decision: {decision}.** The student {beat_text}.",
-        f"Composite achieved: {achieved:.3f}.",
+        f"Composite achieved: {_fmt(achieved)}.",
     ]
 
 
@@ -40,8 +55,8 @@ def _metric_table(rows: List[dict], *, headers: List[str]) -> str:
 
 
 def render(
-    *, decision: str, beats_base: bool, achieved: float, base_composite: float,
-    composite_formula_id: str, composite_value: float, closed_ended: dict, open_ended: dict,
+    *, decision: str, beats_base: Optional[bool], achieved, base_composite,
+    composite_formula_id: str, composite_value, closed_ended: dict, open_ended: dict,
     executable: dict, eyeball_prompts: List[str], student_outputs: List[str],
     base_outputs: List[str], previous_outputs: Optional[List[str]] = None,
     fused_dir_abs: Optional[str] = None,
@@ -73,7 +88,8 @@ def render(
 
     parts.append("## Metrics")
     parts.append("")
-    parts.append(f"Composite formula: `{composite_formula_id}` = **{composite_value:.4f}**")
+    formatted_composite = f"{composite_value:.4f}" if isinstance(composite_value, (int, float)) else str(composite_value)
+    parts.append(f"Composite formula: `{composite_formula_id}` = **{formatted_composite}**")
     parts.append("")
 
     closed_rows = [{"cells": [name, row.get("f1", row.get("macro_f1", "—")), row.get("n", "—")]}
