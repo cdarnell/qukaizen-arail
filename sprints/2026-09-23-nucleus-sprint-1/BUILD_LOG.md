@@ -265,3 +265,36 @@ flagged gap is preferred to stalling all ten findings):
   of ever writing a card with it, per B3 fix item 2's explicit "or
   refuse certify" alternative. Flagged in case the architect intended
   the schema to grow a fifth decision value instead.
+
+## Review loop 2 (2026-09-23, REVIEW.md "Round 2" at commit `4987392d`, verdict BLOCK)
+
+R1–R3 fixed, plus the three pressing ASKs the round flagged, plus the
+architect's own accepted-with-conditions item (the `composite/v1-open`
+Gate B cap, recorded in ARCHITECTURE §4.9/§9 item 7). One atomic commit
+per item, in the order requested:
+
+| Item | Commit | What changed | Proving test |
+|---|---|---|---|
+| R1 | `ae98f8c8` | `certify.py` assembles `open_ended.eyeball_explanation` (`lc_win_rate_vs_base`/`judge`/`n`/`ci95`) and `baselines.base_student` from `metrics.json` instead of a permanent hardcoded `not_run`/`{}`; `build.py`'s stub LC path gives the fused and base stub providers distinct, per-item-length-varying completions (`_open_answer_table`) judged against a known ground-truth winner table (`_open_winner_table`) via a content-based `judge_fn`, so the golden `lc_win_rate` is a real non-trivial rational (0.8676 on the unit fixture, 0.713231-composite on the Gate A fixture) instead of the old structurally-fixed 0.5 | `test_card_composite_and_decision_recompute_from_the_card_alone` (recomputes `composite.value`/`fidelity.decision` from the card's own headline blocks and asserts equality with the signed values); Gate A e2e golden updated to the new composite value |
+| R2 | `102032c5` | `build.py` computes a real content identity for the stub judge (`_stub_judge_identity`, hashed from its winner table) and a constant rubric id (`_STUB_JUDGE_RUBRIC`); `certify.py` threads both into `EvalHashInputs.scoring` (`judge_rubric`/`judge_model_identity`) and the card's `open_ended...judge` field, and appends the eyeball file's raw bytes to `prompts` (tagged `open_eval=`) | `test_eval_hash_changes_when_eyeball_file_changes`, `test_eval_hash_changes_when_judge_winner_table_changes`; existing metric-invariance test re-confirmed unchanged |
+| R3 | `51ac4728` | `models.local_model_at()` builds a `LocalModel` from an absolute path without going through `resolve_model()`'s path ban; `preflight._resolve_protected_identities` routes an absolute-path protected name through it before taking content identity, so bare name / absolute path / byte-identical copy under another name all resolve to the same protected identity | `test_buddy_protected_matches_bare_name_absolute_path_and_byte_identical_copy` on real tmp model dirs (replaces the `SimpleNamespace`-only B6 coverage for this scenario) |
+| ASK judge-identity check | `4f218ce5` | `build.py`'s `_score_open_lc` calls `open_lc_judge.assert_judge_identity_distinct` against the teacher/student-base identities (via the new shared `models.best_effort_identity`, extracted from `certify.py`'s previously-duplicated private helper of the same name) before either provider generates anything | `test_score_open_lc_refuses_when_judge_identity_matches_teacher` — forces a content-identity collision and asserts `JudgeIsTeacher` fires before any provider output reaches disk |
+| ASK forged `context.json` | `9e14c3eb` | `certify.py` cross-checks every already-run phase's own `"provider"` stamp (`run_dir/phase_output/<phase>.json`, written by the subprocess that ran it) against what `context.json` currently claims, and refuses (exit 3, no card, no ledger) on any disagreement | `test_certify_refuses_on_forged_context_stub_flag` — forges `stub: false` with the env var correspondingly unset (so B1's own check alone would pass) while phase output still says `provider: stub` |
+| ASK eyeball outputs | `dc5cb150` | `build.py`'s `_score_open_lc` persists its real generated texts to `run_dir/eval/eyeball_outputs.json`; `certify.py` reads that file to render real student/base outputs (falling back to the placeholder only when it's genuinely absent) and snapshots them into the shard's own directory so the next version's certify can show them as "previous version" | `test_build_report_carries_real_eyeball_outputs` — asserts the placeholder string is gone and the report contains the fixture's actual per-role-distinguishable text |
+| `composite/v1-open` cap | `edc164a6` | `composite.decide()` takes an optional `formula_id` and downgrades what would otherwise be `CERTIFIED` to `COMPATIBLE` when `formula_id == "composite/v1-open"`; every earlier rule (`NOT_EVALUATED`/`KNOWN_ISSUE`/`BETA`/residency-violated `COMPATIBLE`) still fires first; `certify.py` passes `composite_result.formula_id` through | `test_v1_open_formula_caps_at_compatible_even_when_achieved_beats_target`, `test_v1_open_formula_does_not_mask_beta_or_known_issue`, `test_other_formulas_unaffected_by_the_v1_open_cap`; Gate A e2e golden's decision updated from `CERTIFIED` to `COMPATIBLE` |
+
+**Full suite at the end of the loop:** `.venv/bin/pytest tests/nucleus
+tests/portal/test_forge_viewer.py -q` → **368 passed, 2 skipped**, 0
+failed (up from 358 passed, 2 skipped at round-2 review time; +10 new
+tests across the seven items). Re-ran with a sentinel touched
+beforehand: `find lab models -newer <sentinel>` found nothing written
+under `lab/` or `models/`, confirming the conftest isolation still
+holds.
+
+### Architect feedback required
+
+None. Every item had a clean, in-scope implementation; no fix conflicted
+with ARCHITECTURE.md, and the one prior open question (the
+`composite/v1-open` formula itself) was already resolved by the
+architect in round 2 — this loop only implements the Gate B cap
+condition that resolution recorded.
