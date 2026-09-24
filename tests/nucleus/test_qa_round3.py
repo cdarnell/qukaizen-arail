@@ -1103,12 +1103,11 @@ def test_signing_key_is_0600_and_its_bytes_never_leave_the_key_file(staged_conte
     assert code == 0
 
     assert key_path.stat().st_mode & 0o777 == 0o600
+    import base64
+
     raw = key_path.read_bytes()
-    needles = [raw.hex()]
-    try:
-        from cryptography.hazmat.primitives.serialization import load_pem_private_key  # noqa: F401
-    except ImportError:
-        pass
+    assert len(raw) == 32
+    needles = [raw.hex(), raw.hex().upper(), base64.b64encode(raw).decode()]
     haystacks = [out, err]
     from arail.config import DATA_DIR
 
@@ -1122,8 +1121,12 @@ def test_signing_key_is_0600_and_its_bytes_never_leave_the_key_file(staged_conte
         assert raw.decode("latin-1") not in hay
 
 
-def test_gateway_token_from_secrets_env_never_echoed(tmp_path, monkeypatch):
-    from arail.nucleus.errors import GatewayError
+def test_gateway_token_from_secrets_env_never_echoed(tmp_path, monkeypatch, caplog):
+    """Token sourced from secrets.env (the real path, not token=): it must
+    not appear in repr, in the exception a failed call raises, in logs,
+    or in egress.jsonl. DNS and connect are both blocked -- no network."""
+    import logging
+
     from arail.nucleus.providers import gateway
 
     token = "qkz-build-TOKEN-5f3c9a"
@@ -1132,18 +1135,24 @@ def test_gateway_token_from_secrets_env_never_echoed(tmp_path, monkeypatch):
     monkeypatch.setattr("arail.config.DATA_DIR", tmp_path)
     monkeypatch.setenv("LAB_MODE", "hybrid")
     monkeypatch.setenv("NUCLEUS_GATEWAY_URL", "https://gw.example.invalid")
-    monkeypatch.setattr(socket.socket, "connect",
-                        lambda *a, **k: (_ for _ in ()).throw(OSError("network disabled in tests")))
-    try:
-        client = gateway.GatewayClient("https://gw.example.invalid", build_id="b1")
-    except GatewayError as exc:
-        assert token not in str(exc)
-        return
+
+    def _no_network(*a, **k):
+        raise OSError("network disabled in tests")
+
+    monkeypatch.setattr(socket, "getaddrinfo", _no_network)
+    monkeypatch.setattr(socket.socket, "connect", _no_network)
+    caplog.set_level(logging.DEBUG)
+
+    client = gateway.GatewayClient("https://gw.example.invalid", build_id="b1")
+    assert client._token == token          # really read from secrets.env
     assert token not in repr(client)
-    assert token not in str(vars(client).get("_base_url", ""))
     with pytest.raises(Exception) as exc_info:
-        client.teach([], top_n=1) if hasattr(client, "teach") else (_ for _ in ()).throw(OSError("x"))
+        client.teach(domain="kernel", prompt="p")
     assert token not in str(exc_info.value)
+    assert token not in repr(exc_info.value)
+    assert token not in caplog.text
+    egress = tmp_path / "egress.jsonl"
+    assert not egress.exists() or token not in egress.read_text()
 
 
 # ═════════════════════════════════════════════════════════════════════
