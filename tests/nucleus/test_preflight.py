@@ -3,7 +3,9 @@ capability rows (T-PRE-1..5, T-SETUP-3)."""
 
 from __future__ import annotations
 
+import json
 import random
+import shutil
 from types import SimpleNamespace
 
 import pytest
@@ -95,6 +97,62 @@ def test_phase_c_never_drops_buddys_model_even_when_largest(monkeypatch):
     refusal = exc_info.value
     assert "Qwen2.5-7B-Instruct-4bit" not in refusal.drop
     assert refusal.drop and refusal.drop[0] in ("student", "base")
+
+
+# ── R3 (2026-09-23 review round 2): B6's guard missed Buddy's model when
+# it's configured by an ABSOLUTE PATH -- resolve_model() refuses any name
+# containing "/" (its '/' ban exists so domain.yaml can never carry a
+# path), so the protected key fell back to the raw path string, which
+# never matches a candidate's content-derived identity. Real tmp model
+# dirs, not SimpleNamespace doubles -- content identity is the whole
+# point being tested here.
+
+def _write_real_model_dir(path, *, num_parameters=None, weight_bytes=1024):
+    path.mkdir(parents=True)
+    config = {"num_parameters": num_parameters} if num_parameters else {}
+    (path / "config.json").write_text(json.dumps(config))
+    (path / "model.safetensors").write_bytes(b"\x00" * weight_bytes)
+    return path
+
+
+def test_buddy_protected_matches_bare_name_absolute_path_and_byte_identical_copy(tmp_path, monkeypatch):
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    buddy_dir = _write_real_model_dir(models_dir / "Qwen2.5-7B-Instruct-4bit",
+                                      num_parameters=7_000_000_000, weight_bytes=5_000_000)
+    _write_real_model_dir(models_dir / "student", num_parameters=1_000_000_000, weight_bytes=500_000)
+    _write_real_model_dir(models_dir / "base", num_parameters=1_000_000_000, weight_bytes=500_000)
+
+    monkeypatch.setattr("arail.config.MODELS_DIR", str(models_dir))
+    from arail.nucleus.models import resolve_model
+
+    student = resolve_model("student")
+    base = resolve_model("base")
+    # The judge alias `ai-engineer` resolves to the exact same directory
+    # Buddy's deep model uses -- the review's concrete collision scenario.
+    judge = resolve_model("ai-engineer")
+
+    capacity = {"ram_gb": 4.0, "vram_gb": 3.0, "disk_gb": 500.0}
+    buddy_reserve = pf.BuddyReserve(measured_gb=0.0, declared_gb=0.0)
+
+    def _assert_buddy_never_dropped(buddy_env_value, label):
+        monkeypatch.setattr("arail.config.MODEL_NAME", "")
+        monkeypatch.setenv("AEROLLM_MODEL", buddy_env_value)
+        monkeypatch.delenv("QUEUELLM_MODEL", raising=False)
+        with pytest.raises(pf.PreflightRefusal) as exc_info:
+            pf.run_preflight(_domain(), capacity=capacity, buddy=buddy_reserve,
+                             memory_budget_gb=0.001, student_model=student, base_student_model=base,
+                             judge_model=judge, capability_probes=_no_capability_probes())
+        refusal = exc_info.value
+        assert judge.name not in refusal.drop, label
+        assert refusal.drop and refusal.drop[0] in ("student", "base"), label
+
+    _assert_buddy_never_dropped("Qwen2.5-7B-Instruct-4bit", "bare name")
+    _assert_buddy_never_dropped(str(buddy_dir), "absolute path")
+
+    copy_dir = models_dir / "buddy-copy"
+    shutil.copytree(buddy_dir, copy_dir)
+    _assert_buddy_never_dropped("buddy-copy", "byte-identical copy under another name")
 
 
 # ── T-PRE-2: streamed window chosen when runtime streams ─────────────

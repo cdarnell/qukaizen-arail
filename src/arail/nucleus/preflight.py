@@ -311,16 +311,25 @@ def _model_identity_key(model: Any) -> str:
 def _resolve_protected_identities(protected_names: List[str]) -> Dict[str, str]:
     """Maps each protected name to the identity key it should be compared
     by — resolved to a real on-disk model's content identity when that
-    name is actually present under ARAIL_MODELS_DIR, otherwise the bare
-    name itself (still correct: it stops matching a placeholder literal
-    like "Buddy" and starts matching the real configured name)."""
+    name is actually present under ARAIL_MODELS_DIR, or (R3, 2026-09-23
+    review round 2) at an absolute path — a supported Buddy deep-runtime
+    configuration that resolve_model() deliberately refuses (its '/' ban
+    exists so a domain.yaml can never carry a path, §4.4, and that ban
+    must not silently demote an absolute-path Buddy config back down to a
+    bare-string comparison that can never match a real candidate's content
+    identity). Falls back to the bare name itself when neither resolves
+    (still correct: it stops matching a placeholder literal like "Buddy"
+    and starts matching the real configured name)."""
     resolved: Dict[str, str] = {}
     for name in protected_names:
         key = name
         try:
-            from arail.nucleus.models import model_identity, resolve_model
+            from arail.nucleus.models import local_model_at, model_identity, resolve_model
 
-            key = model_identity(resolve_model(name))
+            if os.path.isabs(name):
+                key = model_identity(local_model_at(name))
+            else:
+                key = model_identity(resolve_model(name))
         except Exception:  # noqa: BLE001
             pass
         resolved[name] = key
