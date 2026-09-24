@@ -499,3 +499,144 @@ HEAD.
   architect direction on the CI-isolation question or a dedicated
   QA/builder session with budget for iterative ~15-minute full-suite
   bisection.
+
+## Review loop 4 (2026-09-24, F3 — architect direction: root-cause first, time-boxed)
+
+Followed the architect's plan (SPRINT.md decisions log, 2026-09-24): get the
+real exception, snapshot what `tests/nucleus` leaves behind, fix at the
+source if the leak is nucleus-owned, verify with one full run, else fall
+back to CI isolation. Time-boxed to this one session.
+
+### Step 1 — the real exception
+
+A scratch-only pytest plugin (scratchpad, never committed) wrapped
+`arail.portal.app._get_primary_router` to print the traceback on any raise,
+then one full run with the exact failing ordering (`tests/dbspec tests/eval
+tests/nucleus tests/portal tests/registry tests/router tests/setup_ladder`
++ every root `tests/test_*.py` in sorted order):
+
+```
+ModelRouter.__init__ -> BACKEND_MAP["mlx"]() -> AeroLLMBackend-equivalent
+MLX loader -> os.getenv("MODEL_NAME", "mlx-community/Qwen2.5-3B-Instruct-4bit")
+  returns "ai-engineer:latest" (an Ollama tag, not a HF repo id)
+-> mlx_lm.utils._download -> huggingface_hub.errors.HFValidationError:
+   "Repo id must use alphanumeric chars, '-', '_' or '.' ... :
+   'ai-engineer:latest'."
+```
+
+`api_chat_models`'s `except Exception` fallback then returns the 3-key
+payload every victim test's assertion is missing keys from. Not a
+"dropped keys" bug in the endpoint — the router construction itself is
+raising, only under this specific prior-suite state.
+
+### Step 2 — what `tests/nucleus` leaves behind
+
+Two isolated-run diagnostics, both `tests/nucleus`-only (~3m40s each):
+
+1. A hookwrapper on `pytest_runtest_call`/`pytest_runtest_teardown`
+   snapshotting `MODEL_NAME`/`MODEL_BACKEND`/`AEROLLM_MODEL`/
+   `QUEUELLM_MODEL`/`ARAIL_MODELS_DIR`/`ARAIL_DATA_DIR` — this initially
+   looked like a leak (ARAIL_MODELS_DIR/ARAIL_DATA_DIR "still set after
+   teardown") but that was a hook-ordering artifact (my plugin's
+   non-hookwrapper `pytest_runtest_teardown` ran before the real fixture
+   finalizers, not after).
+2. Corrected: a `pytest_runtest_setup` **hookwrapper** (`tryfirst=True`)
+   snapshotting the same six vars **before** each test's own fixtures
+   run — i.e., only a genuine leak from the *previous* test would show
+   up here. **Zero** hits across the full `tests/nucleus` run (443
+   passed, 4 skipped, 14 xfailed). `tests/nucleus` does not leave
+   `MODEL_NAME`/`MODEL_BACKEND`/`AEROLLM_MODEL`/`ARAIL_MODELS_DIR`/
+   `ARAIL_DATA_DIR` set for the next test, ever, in isolation.
+
+### Step 3 — fix at the source, or explain why not
+
+`arail.nucleus` and `tests/nucleus` never import `arail.portal`,
+`arail.registry`, or `arail.router` (grep, zero hits except one unrelated
+docstring — confirmed again, matching loop 3), and never write
+`MODEL_NAME`/`MODEL_BACKEND`/`AEROLLM_MODEL` anywhere. Given step 2, there
+is no fix to make *inside* `tests/nucleus` or its conftest — the
+architect's lead (env vars set before `arail.config` is monkeypatched,
+captured by a module imported mid-test) does not reproduce: `MLXBackend`
+reads `os.getenv("MODEL_NAME", ...)` live, not a captured module
+attribute, and nothing in `tests/nucleus` ever sets that env var.
+
+Grepping for the real, non-monkeypatch writers of `MODEL_NAME`/
+`AEROLLM_MODEL` found exactly two, both **outside** `arail.nucleus`, both
+**documented, intentional** bare `os.environ[...] =` writes that bypass
+`monkeypatch` by design:
+
+- `arail.model_defaults.apply()` (`src/arail/model_defaults.py:76,82,85`)
+  — `tests/test_model_defaults.py`'s own `_clean_env` fixture docstring
+  says this exact failure signature ("this exact leak once made
+  test_aerollm_model_ready.py fail only when run after this file")
+  happened before and was fixed there, in that one file, by hand.
+- `arail.portal.app._export_registry_env()`
+  (`src/arail/portal/app.py:6899,6903`) — called from the FastAPI startup
+  handler, so it runs on every `TestClient(app)` lifespan start anywhere
+  in the suite, and stamps `MODEL_NAME` from whatever the process-lifetime
+  `arail.registry` singleton's tier0 entry currently says.
+
+Neither of these is a file this sprint touches or should touch — fixing
+them means changing `arail.portal.app`/`arail.registry`/
+`arail.model_defaults` test-isolation hygiene, a pre-existing,
+cross-cutting defect independent of Model Forge. Landing that fix here
+would be exactly the scope drift the protocol says to surface instead of
+absorb.
+
+### Step 4/5 — time-box reached; fallback (a) taken
+
+Two full-suite runs and multiple `tests/nucleus`-only runs (see above) is
+the budget the architect's plan allowed. **Fallback (a) taken**: CI
+isolation, documented and filed, not a redesign.
+
+- `ARCHITECTURE.md` §7.2 (new): `tests/nucleus` must always be its own
+  pytest invocation; `.github/workflows/nucleus-tests.yml` already only
+  ever runs it that way (there is no CI job anywhere that runs the
+  combined full `pytest tests -q` suite as one process); the combined
+  local run is a diagnostic tool, not a merge gate.
+- `sprints/BACKLOG.md`: new ticket "`tests/nucleus` combined with the
+  full root test suite in one pytest process is order-dependent",
+  carrying all of the above evidence and a concrete next-step (a
+  monkeypatch-safe/restore-by-hand wrapper around the two bare-write
+  call sites, and/or a root-level `reset_registry()` autouse fixture)
+  for a correctly-scoped future session.
+- Commit `66e1924f` (docs only — `ARCHITECTURE.md` + `BACKLOG.md`).
+
+**Verification:**
+
+- CI's exact command (`tests/nucleus tests/portal/test_forge_viewer.py
+  tests/portal/test_models_api.py tests/test_qa6_security_gate.py -m
+  "not requires_mlx and not requires_aerollm and not requires_kernel and
+  not requires_qkz_bin"`) still green at the documented pre-existing
+  baseline: **508 passed, 4 deselected, 15 xfailed, 1 failed**
+  (`test_health_refresh_probes_without_constructing_aerollm`, pre-existing
+  per TEST_REPORT.md, unchanged by this loop).
+- One more full `pytest tests -q` run (dbspec/eval/nucleus/portal/
+  registry/router/setup_ladder + all root `tests/test_*.py`, sorted;
+  19m01s): **55 failed, 6204 passed, 9 skipped, 21 xfailed**. F1
+  (`test_tier_route_guards`) and F2's `docs/cli.md` gap do **not**
+  appear in the failure list (both stay fixed, from loop 3). All 18 F3
+  victims reproduce exactly as named in TEST_REPORT.md (grep-confirmed:
+  `test_aerollm_model_ready.py` x3, `test_b1_cloud_gallery_contract.py`
+  x1, `test_cli_qa_edge.py::test_qa_edge_driver_scenarios` x1 [the
+  environmental one that appeared in only one of TEST_REPORT's two paired
+  runs], `test_deep_default_and_tier.py` x2,
+  `test_model_ux_phase0_warmth_probe.py` x2,
+  `test_qa_model_ux_memory_and_eject_fidelity.py` x2,
+  `test_qa_provider_dropdown_paranoid.py` x2, `test_r1_r3_chat_models.py`
+  x4, `test_runtime_profile_api.py` x1 — 18 total). The remaining 37
+  failures are consistent with TEST_REPORT.md's previously-documented 44
+  pre-existing merge-base failures (not re-run against a fresh
+  `236504ca` checkout this loop — that diff already exists in
+  TEST_REPORT.md and re-deriving it without a code fix to test against
+  would not add new information proportional to its ~19-minute cost).
+  **Under the fallback, this combined-suite run is explicitly not a merge
+  gate** (§7.2) — the merge gate is CI's isolated nucleus job, verified
+  clean above.
+
+### Architect feedback required
+
+None — this loop executed the architect's own contingency plan (step 5,
+the time-boxed fallback) rather than raising a new gap. The BACKLOG
+ticket above is the artifact a future session should read before
+attempting the real fix.

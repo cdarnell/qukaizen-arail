@@ -17,7 +17,7 @@ Make Project Nucleus a first-class ARAIL surface ("Model Forge"): `src/arail/nuc
 | plan | architect (design) | ARCHITECTURE.md | done | 2026-09-23 | 2026-09-23 | complete (58b754bc); operator questions Q1–Q9 open, Q1 blocks Gate B only |
 | build | builder | BUILD_LOG.md | done | 2026-09-23 | 2026-09-23 | Gate A reached (commits 1-27, 14dd54aa); commit 28 / Gate B / item 10 out of scope per operator instruction |
 | review | architect (review) | REVIEW.md | done | 2026-09-23 | 2026-09-23 | round 1 BLOCK → loop 1 (12 commits); round 2 BLOCK → loop 2 (8 commits); round 3 WEAK_PASS |
-| test | qa | TEST_REPORT.md | FAIL → loop 3 | 2026-09-23 | 2026-09-24 | round 1: FAIL — Gate A pipeline holds (460 passed / 14 strict xfail); full suite regresses 44 → 57 failures vs merge-base 236504ca |
+| test | qa | TEST_REPORT.md | FAIL → loop 4 | 2026-09-23 | 2026-09-24 | round 1: FAIL — Gate A pipeline holds (460 passed / 14 strict xfail); full suite regresses 44 → 57 failures vs merge-base 236504ca. Loop 3 fixed F1/F2. Loop 4 (F3): time-boxed root-cause attempt traced the exception to non-nucleus modules (arail.portal.app/arail.model_defaults bare os.environ writes + the arail.registry singleton); fallback (a) landed — tests/nucleus isolated as its own CI invocation (ARCHITECTURE.md §7.2), BACKLOG ticket filed with evidence, commit 66e1924f |
 | ship | — | PR | pending | — | — | — |
 
 ## Decisions log
@@ -36,6 +36,7 @@ Make Project Nucleus a first-class ARAIL surface ("Model Forge"): `src/arail/nuc
 | 2026-09-23 | Q9: builder may update repo `CLAUDE.md` for the `/build` → `/forge` retirement | Operator |
 | 2026-09-23 | Q2, Q3, Q7 (lineage key, 24 GB cap, network prep) deferred to Gate B | Not needed for Gate A |
 | 2026-09-24 | F3: root-cause fix required before ship, time-boxed to one builder session; fallback = `tests/nucleus` in its own CI invocation (like `requires_qkz_bin`), documented in ARCHITECTURE §7 + CI, with a BACKLOG ticket carrying the bisection evidence | Architect (round 3 agent): QA showed the prefix without `tests/nucleus` is green, so it is nucleus-owned; lead is `conftest::_isolated_lab_data` env vars set before `arail.config` patch → import-time capture of tmp paths (`arail.activity.LOG_FILE`) |
+| 2026-09-24 | F3 loop 4: fallback (a) taken — `tests/nucleus` isolated as its own CI invocation (already true in `nucleus-tests.yml`; formalized in `ARCHITECTURE.md` §7.2), evidence filed in `sprints/BACKLOG.md`. The architect's `arail.config`-capture lead did not reproduce (a hookwrapper leak-check found zero leaks from `tests/nucleus` in isolation); the real exception traces to non-nucleus bare `os.environ` writes in `arail.model_defaults.apply()`/`arail.portal.app._export_registry_env()` plus the `arail.registry` singleton — out of this sprint's scope to fix | Builder, time-boxed per the prior decision |
 | 2026-09-23 | Re-implement Nucleus against the brief; salvage `src/arail/build/preflight.py`, `world_corpus.py`, and the seal format selectively — do not port the old private pipeline wholesale | Operator; agrees with brief §1 and VISION.md |
 
 ## Skipped phases
