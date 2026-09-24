@@ -47,6 +47,52 @@ def test_certify_end_to_end_produces_signed_card(staged_context, tmp_path, monke
     assert result["ledger_path"] is None
 
 
+# ── B1 (2026-09-23 review): a stub build can never be laundered into a
+# trusted, ledgered, "real" card by running `certify` in a different
+# environment than the build ran in ─────────────────────────────────
+
+def test_certify_refuses_when_env_disagrees_with_build_record(staged_context, tmp_path, monkeypatch):
+    monkeypatch.setenv("NUCLEUS_SIGNING_KEY_PATH", str(tmp_path / "signing.ed25519"))
+
+    # The build ran with ARAIL_NUCLEUS_STUB=1 (staged_context's fixture
+    # sets it) -- context.json records stub=True. Reproduce the review's
+    # exact repro: certify the same build_id with the env var unset.
+    build_mod.run_phase_body("PA", staged_context)
+    build_mod.run_phase_body("PA2", staged_context)
+    build_mod.run_phase_body("PB", staged_context)
+    build_mod.run_phase_body("fuse", staged_context)
+    build_mod.run_phase_body("PC", staged_context)
+
+    rd = build_mod._run_dir(staged_context)
+    (rd / "context.json").write_text(json.dumps(staged_context, sort_keys=True))
+
+    monkeypatch.delenv("ARAIL_NUCLEUS_STUB", raising=False)
+
+    with pytest.raises(RefusedByPolicy, match="stub"):
+        certify_mod.run_certify(staged_context["build_id"])  # context=None -> reads context.json from disk
+
+    # No card was laundered as "real", trusted, and ledgered.
+    assert not any(rd.rglob("dna-card.yaml"))
+    from arail.nucleus.cards import certified_models
+    ledger = certified_models._default_local_path(build_mod._nucleus_data(staged_context))
+    assert not ledger.exists() or "kernel" not in ledger.read_text()
+
+
+def test_certify_refuses_on_build_record_missing_stub_field(staged_context, tmp_path, monkeypatch):
+    monkeypatch.setenv("NUCLEUS_SIGNING_KEY_PATH", str(tmp_path / "signing.ed25519"))
+    build_mod.run_phase_body("PA", staged_context)
+    build_mod.run_phase_body("PA2", staged_context)
+    build_mod.run_phase_body("PB", staged_context)
+    build_mod.run_phase_body("fuse", staged_context)
+    build_mod.run_phase_body("PC", staged_context)
+
+    legacy_context = dict(staged_context)
+    del legacy_context["stub"]
+
+    with pytest.raises(RefusedByPolicy, match="stub"):
+        certify_mod.run_certify(staged_context["build_id"], context=legacy_context)
+
+
 def test_certify_refuses_on_contamination(staged_context, tmp_path, monkeypatch):
     monkeypatch.setenv("NUCLEUS_SIGNING_KEY_PATH", str(tmp_path / "signing.ed25519"))
 

@@ -30,6 +30,13 @@ def _is_stub() -> bool:
     return os.getenv("ARAIL_NUCLEUS_STUB", "").strip() == "1"
 
 
+def _provider_label(domain) -> str:
+    """The provider that actually ran THIS phase, for the phase's own
+    output dict (B1: an auditable stamp per phase, in addition to the
+    build-level record in context.json)."""
+    return "stub" if _is_stub() else domain.runtime
+
+
 def _resolve_domain(context: dict):
     from arail.nucleus.domain import load_domain
     from arail.nucleus.models import resolve_model
@@ -130,7 +137,7 @@ def _phase_extract_train(context: dict) -> dict:
         provider.close()
 
     return {"n_train_total": len(splits.train), "n_extracted_this_run": len(pending),
-           "n_dev": len(splits.dev), "index_path": str(index_path)}
+           "n_dev": len(splits.dev), "index_path": str(index_path), "provider": _provider_label(domain)}
 
 
 def _write_shard(extract_dir: Path, gen) -> None:
@@ -174,7 +181,7 @@ def _phase_extract_cert(context: dict) -> dict:
     finally:
         provider.close()
 
-    return {"n_cert": len(cert_items)}
+    return {"n_cert": len(cert_items), "provider": _provider_label(domain)}
 
 
 # ── PB: train (Arbitrage, dev-only) ───────────────────────────────────
@@ -202,7 +209,8 @@ def _phase_train(context: dict) -> dict:
 
     return {"stop_metric": result.stop_metric, "n_cycles": len(result.cycles),
            "best_adapter_path": result.best_cycle.adapter_path,
-           "best_dev_proxy_composite": result.best_cycle.dev_proxy_composite}
+           "best_dev_proxy_composite": result.best_cycle.dev_proxy_composite,
+           "provider": _provider_label(domain)}
 
 
 def _mlx_train_cycle_fn(domain, run_dir: Path, train_dir: Path):
@@ -231,7 +239,13 @@ def _phase_fuse(context: dict) -> dict:
     from arail.nucleus.paths import shard_dir, next_patch_version
 
     version = context.get("version") or next_patch_version(domain.shard)
-    output_dir = shard_dir(domain.shard, version) / "weights" / "mlx"
+    # B9 (2026-09-23 review): shard_root is the directory `certify` must
+    # later write dna-card.yaml/seal.json/build-report.md/eval-config.lock
+    # into -- the SAME shard/version directory this phase mints under
+    # FORGE_ROOT, recorded here (not re-derived by certify calling
+    # shard_dir() a second time, which would refuse with "already exists").
+    shard_root = shard_dir(domain.shard, version)
+    output_dir = shard_root / "weights" / "mlx"
 
     if _is_stub():
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -244,7 +258,8 @@ def _phase_fuse(context: dict) -> dict:
         student = resolve_model(domain.student_base)
         mlx_fuse(str(student.path), train_dir / "adapter", output_dir)
 
-    return {"version": version, "output_dir": str(output_dir)}
+    return {"shard": domain.shard, "version": version, "shard_dir": str(shard_root),
+           "output_dir": str(output_dir), "provider": _provider_label(domain)}
 
 
 # ── PC: eval (student, base, judge on cert) ────────────────────────────
@@ -297,7 +312,7 @@ def _phase_eval(context: dict) -> dict:
     eval_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     (eval_dir / "metrics.json").write_text(json.dumps(metrics, sort_keys=True, default=str))
 
-    return {"closed_mean_f1": closed_mean_f1, "n_cert": len(cert_items)}
+    return {"closed_mean_f1": closed_mean_f1, "n_cert": len(cert_items), "provider": _provider_label(domain)}
 
 
 # ── dispatch ──────────────────────────────────────────────────────────
@@ -408,9 +423,17 @@ def run(argv: Sequence[str]) -> int:
     from arail.nucleus.domain import _DOMAINS_DIR
     from arail.nucleus.paths import nucleus_data as _nucleus_data_fn
 
+    # B1 (2026-09-23 review): record whether THIS build actually ran on the
+    # stub provider at build time, on disk, in the one place certify reads
+    # from — never re-derived from whatever ARAIL_NUCLEUS_STUB happens to
+    # be set to when `certify` is invoked later (possibly a different
+    # process, a different shell, minutes or days later). Without this, a
+    # stub build could be certified as a trusted, ledgered "real" card
+    # simply by running certify with the env var unset.
     context = {
         "domain_name": domain.name, "build_id": build_id, "version": parsed["version"],
         "domains_dir": str(_DOMAINS_DIR), "nucleus_data": str(_nucleus_data_fn()),
+        "stub": _is_stub(), "provider": ("stub" if _is_stub() else domain.runtime),
     }
     (rd / "context.json").write_text(json.dumps(context, sort_keys=True))
 

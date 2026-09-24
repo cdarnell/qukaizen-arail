@@ -76,7 +76,8 @@ distill:
 
     build_id = "kernel-20260101T000000Z-abcd"
     context = {"domain_name": "kernel", "build_id": build_id,
-              "domains_dir": str(domains_dir), "nucleus_data": str(data_dir / "nucleus")}
+              "domains_dir": str(domains_dir), "nucleus_data": str(data_dir / "nucleus"),
+              "stub": True, "provider": "stub"}
     return context
 
 

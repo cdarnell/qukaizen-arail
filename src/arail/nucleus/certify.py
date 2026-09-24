@@ -33,6 +33,35 @@ def run_certify(build_id: str, *, publish_row: bool = False, context: dict = Non
     context = context or json.loads((rd / "context.json").read_text())
     domain = build_mod._resolve_domain(context)
 
+    # B1 (2026-09-23 review): whether this card is a stub card is decided
+    # from what the BUILD actually recorded at build time (context.json's
+    # "stub" field, written by build.run() before any phase ran), never
+    # from whatever ARAIL_NUCLEUS_STUB happens to be set to right now in
+    # the certify process. A build record written before this fix (no
+    # "stub" key) refuses rather than silently defaulting either way.
+    # A build/certify environment mismatch also refuses -- certifying a
+    # stub build's results as if they were real (or vice versa) is
+    # exactly the "stub laundered into a trusted, ledgered card" gap this
+    # finding reproduced.
+    if "stub" not in context:
+        raise RefusedByPolicy(
+            f"certify refused: {rd / 'context.json'} has no recorded 'stub' "
+            f"provenance (build predates stub-provenance tracking) — rebuild "
+            f"this run before certifying it"
+        )
+    build_was_stub = bool(context["stub"])
+    certify_env_is_stub = _is_stub()
+    if build_was_stub != certify_env_is_stub:
+        raise RefusedByPolicy(
+            f"certify refused: this build ran with stub={build_was_stub} "
+            f"(recorded at build time) but the current environment has "
+            f"ARAIL_NUCLEUS_STUB={'1' if certify_env_is_stub else '<unset>'} "
+            f"— certify must run in the same stub/real mode as the build "
+            f"it is certifying, or the resulting card's runtime/signature "
+            f"would not reflect what actually ran"
+        )
+    is_stub = build_was_stub
+
     from arail.nucleus.corpus.stage import load_items, load_staged
     from arail.nucleus.evals.splits import CertStore, split
 
@@ -100,7 +129,7 @@ def run_certify(build_id: str, *, publish_row: bool = False, context: dict = Non
         shard=domain.shard, version=context.get("version") or "0.1.0",
         built=datetime.now(timezone.utc).isoformat(),
         pipeline_hash=context.get("pipeline_hash", "sha256:not_computed"),
-        eval_hash=this_eval_hash, runtime=("stub" if _is_stub() else domain.runtime),
+        eval_hash=this_eval_hash, runtime=("stub" if is_stub else domain.runtime),
         lab_mode=__import__("arail.airgap", fromlist=["lab_mode"]).lab_mode(),
         distillation={
             "mode": "logit",
@@ -144,7 +173,7 @@ def run_certify(build_id: str, *, publish_row: bool = False, context: dict = Non
                               training_hash=training_hash),
         gate_results=gate_results,
     )
-    sealed = sign(payload, ephemeral=_is_stub())
+    sealed = sign(payload, ephemeral=is_stub)
     card["signed"] = sealed.signed
 
     shard_root = Path(context.get("shard_output_dir") or (rd / "forge_out"))
