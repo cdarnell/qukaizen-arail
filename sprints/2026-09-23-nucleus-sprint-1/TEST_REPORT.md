@@ -251,3 +251,147 @@ Notable lines still unexecuted:
 - **"Pre-existing failures" claims need the full suite and a paired base run.** The builder's four came from a curated file list; three of them don't reproduce, and 19 real new failures were outside that list. Run `pytest tests` at the merge-base and at HEAD in fresh trees, side by side, and diff.
 - **Under-tested areas:** `_declared_buddy_reserve` (0 coverage); the real tokenizer-parity path in certify; `status`/`list` verbs; `/forge` detail rendering of a tampered report; resume after a crash mid-PC.
 - **Commit attribution:** the orchestrator asked for `Co-Authored-By: Claude Fable 5.1`. QA's commits carry this session's actual model attribution instead (`Claude Opus 5.5 (1M context)`), per the session's attribution instruction.
+
+---
+---
+
+# Round 2
+
+**Date:** 2026-09-24
+**Build:**
+- Builder loop 3: `0df31d25` (F1), `53f9e88b` (F2), `b8b0e93a` (nucleus env hygiene), `79f22ed4` (log).
+- Builder loop 4: `66e1924f`, `ea6b3bf5` (F3 CI-isolation fallback, ARCHITECTURE §7.2).
+
+**QA round-2 commits:** `dd0f1159` (F3 pin test plus the BACKLOG correction) and this report. Tests and docs only; no production code.
+**Verdict:** **WEAK_PASS**
+
+## Why WEAK_PASS
+
+- **F1 and F2 are fixed.**
+- **The merge gate is green.** The exact `nucleus-tests.yml` invocation passes with 0 failures.
+- **F3 is no longer merge-gating,** per the architect's 2026-09-24 decision. I verified the isolation it relies on: CI runs `tests/nucleus` alone, on ubuntu, where the trigger cannot fire.
+- **The builder's F3 root-cause explanation has a hole.** There *is* a nucleus-owned trigger, and it lives in **production code**: `preflight._probe_mlx_lm_version()` imports `mlx_lm` in-process. It is small, LOW severity, pinned by a strict xfail, and ticketed with two alternative one-function fixes.
+
+All round-1 security findings remain LOW and ticketed. That is the "documented follow-up" WEAK_PASS allows.
+
+## Step 1: F1 and F2 re-verified
+
+| # | Check | Result |
+|---|---|---|
+| F1 | `tests/test_tier_route_guards.py` (includes the new 308 test on both tiers) | **Fixed.** 6/6 pass. |
+| F2 | The `verbs_driver.sh` F33 block (`docs/cli.md` must list every `arailctl` case arm), extracted and run alone | **Fixed.** At HEAD: `F33 OK`. Against `docs/cli.md` from `53f9e88b~1`: `FAIL: F33: docs/cli.md is missing these arailctl verbs: nucleus`. |
+| — | `tests/test_cli_verbs.py` as a whole | Still red **in this worktree**, but on a later, environmental scenario: "doctor healthy" exits 3 because `relational_store: MISSING — __root__ has no database`. `lab/data/arail.db` is absent (untracked, never created in this worktree). The same scenario failed at the merge-base in round 1's paired run. It is not attributable to this sprint. |
+
+## Step 2: F3 independently re-checked
+
+**Reproduction.** Prefix = every test file collected before `tests/test_r1_r3_chat_models.py` (326 files), plus that file, one process:
+
+| Prefix | r1_r3 victims failed |
+|---|---|
+| Full prefix (includes `tests/nucleus`) | **4/4** |
+| Same prefix minus `tests/nucleus/` | **0/4** |
+
+That matches round 1. So yes: with `tests/nucleus` excluded, the prefix runs clean for the victims.
+
+**Does the builder's `MODEL_NAME` explanation hold? Only half of it.**
+
+- **Correct:** the bare `os.environ["MODEL_NAME"] = …` writers (`model_defaults.apply()`, `portal.app._export_registry_env()`) sit outside nucleus, and the victims fail because `ModelRouter` constructs an MLX backend from an Ollama tag.
+- **The hole:** it doesn't explain why `tests/nucleus` has to be present, and the loop-4 diagnostic could not have found out: it snapshotted **env vars only**. I added a scratch plugin (session scratchpad, not committed) that also records `sys.modules`, recording state after every test and at the first victim, in both orderings:
+
+| At first r1_r3 victim | With `tests/nucleus` | Without |
+|---|---|---|
+| `MODEL_NAME` | `llama-ai-eng` | `llama-ai-eng` |
+| `AEROLLM_MODEL` | `Same-Model-7B-4bit` | `Same-Model-7B-4bit` |
+| `"mlx_lm" in sys.modules` | **True** | **False** |
+
+- **The stray `MODEL_NAME="ai-engineer:latest"` write happens identically in both orderings.** It comes after `tests/test_aerollm_compute_source.py::test_select_aerollm_allowed_airgapped_when_built`, and `tests/test_models_boot_endpoint.py` resets it to `llama-ai-eng` later in both orderings. It is not the differentiator.
+- **`mlx_lm` is the differentiator.** It enters `sys.modules` during `tests/nucleus/test_build_phases.py::test_build_run_end_to_end`, via `build.run()` → `preflight.run_preflight()` default capability probes → `preflight._probe_mlx_lm_version()` → `import mlx_lm`. That is a **production-code side effect**, not a test fixture.
+
+**Decisive experiment.** Non-nucleus prefix plus the victim file, with one extra test first:
+- A no-op test → **0/4** victims fail.
+- A test that only calls `arail.nucleus.preflight._probe_mlx_lm_version()` → **4/4** fail.
+
+So the preloaded `mlx_lm` is sufficient on its own. Loop 4's point 4 ("`tests/nucleus` only exposes a wall-clock/thread/GC race") is not what happens.
+
+**Mechanism:**
+
+1. A preloaded `mlx_lm` makes `router.core._is_importable("mlx_lm")` a no-op success.
+2. `_auto_detect()` returns `mlx`.
+3. The MLX backend is built from `MODEL_NAME` (an Ollama tag either way) and raises.
+4. `api_chat_models` falls back to its 3-key payload.
+
+That also explains why the builder's traceback showed `ai-engineer:latest`: victims that sort right after `test_aerollm_compute_source` (e.g. `test_aerollm_model_ready.py`) see that value; the r1_r3 victims see `llama-ai-eng`, and fail the same way.
+
+**Not determined:** why a *fresh* `import mlx_lm` at victim time in the non-nucleus ordering doesn't lead to the same result. Most likely a root-suite test poisons a dependency, or a router is already cached. That part is outside nucleus.
+
+**Consequences:**
+
+- The fallback (a) is **valid for the merge gate.** `nucleus-tests.yml` runs `tests/nucleus` alone, on `ubuntu-latest`, where `_auto_detect` never picks `mlx`. No other workflow (`blueprint-smoke`, `dac-feature-tests`, `db-ensure-ci`) runs `tests/nucleus`.
+- The "not nucleus-owned" framing is **wrong**, and the defect is also user-facing in a small way: `nucleus plan` (minimalist) and `build` pay ~1.5 s to import `mlx_lm` and initialise Metal, just to read a version string.
+- **Pinned:** `tests/nucleus/test_qa_round3.py::test_mlx_lm_version_probe_does_not_import_mlx_lm_into_the_process`. It is a strict xfail; I verified with `--runxfail` that it fails on the intended assertion. It is **skipped where `mlx_lm` isn't installed**, so CI stays green.
+- **BACKLOG:** the builder's ticket now carries a "QA round 2 correction" with this evidence and two alternative fixes:
+  - (a) probe via `importlib.util.find_spec` plus `importlib.metadata.version`, with no import (recommended; it also speeds up `plan`);
+  - (b) have `build.run` tests inject `capability_probes`.
+
+## Step 3: CI merge-gate command, exact counts
+
+**Discrepancy.** The builder's "CI's exact command" is ARCHITECTURE §7's four-path list. The workflow file actually runs **`tests/nucleus` only**, with `ARAIL_NONINTERACTIVE=1` and `ARAIL_NUCLEUS_STUB=1` set for the step. I ran both:
+
+| Command | Result at `dd0f1159` |
+|---|---|
+| **Workflow, verbatim:** `ARAIL_NONINTERACTIVE=1 ARAIL_NUCLEUS_STUB=1 python -m pytest tests/nucleus -m "not requires_mlx and not requires_aerollm and not requires_kernel and not requires_qkz_bin" -p no:cacheprovider -q` | **443 passed, 4 deselected, 15 xfailed, 0 failed** |
+| ARCHITECTURE §7 list (plus `test_forge_viewer.py`, `test_models_api.py`, `test_qa6_security_gate.py`), same env and markers, run before the new pin test | **1 failed, 508 passed, 4 deselected, 15 xfailed.** The failure is `test_models_api.py::test_health_refresh_probes_without_constructing_aerollm`, pre-existing (fails at the merge-base too; round 1). |
+| Nucleus scope with the real `qkz` (`tests/nucleus tests/portal/test_forge_viewer.py`, `NUCLEUS_QKZ_BIN` set) | **460 passed, 1 skipped (`requires_mlx`), 15 xfailed** |
+
+- The first four-path attempt **hung** with the main thread in `pthread_cond_wait` and 0 % CPU for over 20 minutes. The rerun completed normally in 3m34s, and I couldn't reproduce the hang. Recorded as a one-off.
+- The 15th xfail is the new F3 pin test. On ubuntu CI it is skipped instead.
+- Recommendation for the architect: either widen the workflow to the §7 list or amend §7, since they currently disagree. Also, `test_models_api.py` writes into the checkout's real `lab/data` (below).
+
+## Step 4: hygiene
+
+- **Nucleus scope:** mtime sentinel, then the exact CI command → **0** files written under `lab/` or `models/`, with or without `qkz`.
+- **`tests/portal/test_models_api.py`** (in the §7 list, not in the workflow) writes the checkout's real `lab/data/activity.jsonl`, `agent_workflows.json` and LanceDB versions. It is **pre-existing**: at the merge-base it writes those plus ~40 `lab/pkb/**` seed files. Not a sprint regression.
+- **Orphans:** the full-suite runs (round 1, the builder's loop-4 runs, and my round-2 prefix runs) had leaked **124 processes**. They were `tests/cli` driver servers (`real-boot/scripts/start.sh`, the `s1`/`s2b`/`s2c`/`s3`/`s4` stub portals and their memory services) under pytest temp dirs, all reparented to PID 1. I stopped them by temp-dir path pattern. I did **not** touch the user's own Sep-18 portal (`/Users/netsushi/ProJects/arail/.venv`, pids 53229/53288). Now: 0 test-temp servers, 0 `opencode serve`.
+- **Checkout `lab/` artifacts** from full-suite runs since my round-1 cleanup were removed again, by birth time: `lab/instances/finance`, `egress.jsonl`, `hardware.json`, `model_registry.json`, `.opencode/opencode.json`, `logs/opencode.log`, and a Buddy dream file. Pre-existing LanceDB tables were left alone.
+- **Repo:** `git status` shows only the pre-existing untracked `.venv` and `logs/`. The scratch worktree is removed and pruned. All probes and plugins live in the session scratchpad, outside the repo.
+
+## Updated brief §7 acceptance-criteria matrix
+
+Unchanged from round 1 except where noted.
+
+| Criterion | Status at Gate A | Evidence |
+|---|---|---|
+| `build linux-kernel --profile local` completes on the M5, airgapped, 0 egress lines | **Not provable at Gate A** (B7 refuses real builds); stub analogue proven | Gate A e2e; zero-egress guard over every phase and certify |
+| Buddy SLM RSS ±5 % across phases | **Not provable at Gate A** (sampler never runs; `unmeasured`) | T-RES-1..3; `test_decide_unmeasured_residency_does_not_cap` |
+| Preflight refuses over-budget and names the offender | **Proven, with R3-A4 gaps** | T-PRE-1, Phase-C proving test, 200-combo Phase-C property, `plan` wording; xfails R3-A4 |
+| Card validates; eval_hash changes iff the yardstick changes | **Proven**, except the eyeball-timing gap | Schema validation, T-HASH-*, certify-level iff tests; xfail |
+| Contamination blocks at ≥ 1 % | **Proven** (8/800 boundary) | T-CONT-*, boundary tests; date-compare xfail |
+| Cert set byte-identical around Arbitrage | **Proven** | T-CERT-1..3, Gate A |
+| F1 reported; no `accuracy` in the headline | **Proven** | T-CLOSED-1,2 |
+| Judge ≠ teacher; position randomization and LC on | **Proven (stub path)**; LC degenerate cases xfailed | T-JUDGE-*, LC golden 0.8676 plus un-swap mutation; R3-A3 xfails |
+| Gateway contract tests; `gateway` in airgapped refused with banner | **Proven** | T-GW-1..5; CLI-level refusal tests |
+| `CERTIFIED_MODELS.md` gains a row with the correct status | **Proven at unit level only** (stub cards never ledgered) | T-LEDGER-1..4 |
+| `build-report.md` has 10 eyeball prompts with outputs | **Proven** | T-REPORT-1, Gate A |
+| From `/forge`, Buddy walks a user to a running build | **Not in scope** (item 4 deferred) | SPRINT.md decisions |
+| Deep runtime installed → all local inference via QueueLLM; card `runtime: queuellm` | **Selection proven (unit); card field not provable at Gate A** | T-PROV-1..3 |
+| *(regression)* The sprint adds no failing test to the merge gate | **Proven (new in round 2)**: F1/F2 fixed; F3 isolated from the gate by §7.2 | Step 1, Step 3 |
+
+## Gate B readiness list (updated)
+
+1. **F3's nucleus half** (new in round 2): make `preflight._probe_mlx_lm_version()` import-free. Flip the pin xfail. Cheap, and recommended even before merge.
+2. **F3's root half** (outside nucleus): restore-by-hand around `model_defaults.apply()` / `_export_registry_env()` env writes, plus a root-level registry reset fixture. Separate hygiene sprint, together with the `tests/cli` driver server leaks (124 orphans) and `test_models_api.py`'s real-`lab/data` writes.
+3. **CI and architecture alignment:** the `nucleus-tests.yml` path list vs ARCHITECTURE §7 (see Step 3).
+4. **R3-A5:** refuse missing phase stamps and `stub: false` while B7 stands.
+5. **R3-A4:** protect both Buddy env values plus the backend default; identity-based invariant in `PreflightRefusal`.
+6. **R3-A3:** LC estimator fallback and regularisation.
+7. **Real-runtime wiring** (BACKLOG umbrella): teacher select, logprob probe, MLX cycle, residency sampler (plus the `unmeasured` decision), real judge, patch generation and executable checks, retire `v1-open`.
+8. **Hash precision:** A4, A5, eyeball bytes at PC, runtime provenance `.so` hash.
+9. **Contamination:** scope, O(cert) memory, date compare.
+10. **Spike harness:** real provider; B3 must not pass on `unmeasured`.
+11. **Seal hygiene:** key owner, malformed `public_key_hex`, F-QA-4/5/6.
+12. **Docs:** `--new-cert-version` plus a preflight cert-set row; A9 verify exit semantics; `/forge` `unchecked` badge.
+13. **Environment:** re-point the shared venv's editable install (`__editable__.arail-1.0.0.pth` → this worktree's `src`) back at the main checkout after merge.
+
+## Notes
+
+- **Commit attribution:** this round's commits again carry this session's own model trailer, `Co-Authored-By: Claude Opus 5.5 (1M context)`, not the requested `Claude Fable 5.1`. The coordinator described Fable 5.1 as "the sprint's configured attribution", but it isn't configured in any CLAUDE.md, memory, settings, agent or skill file. It only appears in agent messages, and the session's attribution instruction takes precedence over those. If the operator wants a different trailer, they can say so directly.
