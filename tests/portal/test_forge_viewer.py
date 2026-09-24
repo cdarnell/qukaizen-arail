@@ -77,6 +77,48 @@ def test_forge_detail_shows_stub_badge(client, tmp_path):
     assert "STUB" in resp.text or "ephemeral-stub" in resp.text
 
 
+# ── B2 (2026-09-23 review): a card whose metrics were hand-edited after
+# signing must never show a "trusted" badge ──────────────────────────
+
+def test_verify_badge_reports_tampered_on_card_hash_mismatch(tmp_path, monkeypatch):
+    pytest.importorskip("cryptography")
+    monkeypatch.setattr("arail.config.DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr("arail.config.MODELS_DIR", str(tmp_path / "models"))
+
+    from arail.nucleus.cards import seal as seal_mod
+    from arail.nucleus.cards.dna_v2 import card_sha256
+    from arail.portal import forge_api
+
+    card = {
+        "shard": "qkz-x", "version": "0.1.0", "built": "2026-01-01T00:00:00+00:00",
+        "pipeline_hash": "sha256:a", "eval_hash": "sha256:b", "runtime": "queuellm",
+        "lab_mode": "airgapped",
+        "distillation": {"mode": "logit", "teacher": {}, "student": {}, "tokenizer_parity": True},
+        "splits": {}, "contamination": {}, "corpus": {},
+        "closed_ended": {"cve_detection": {"f1": 0.9}}, "open_ended": {}, "executable": {},
+        "composite": {"formula_id": "composite/v1-nc", "formula": "x", "value": 0.6},
+        "fidelity": {"target": 0.6, "achieved": 0.6, "decision": "CERTIFIED"},
+    }
+    key_path = tmp_path / "keys" / "signing.ed25519"
+    card_hash = card_sha256(card)
+    gate_results = seal_mod.build_gate_results(card_sha256=card_hash, eval_hash=card["eval_hash"],
+                                               decision="CERTIFIED", contamination_overlap=0.0)
+    payload = seal_mod.build_payload(pipeline_run_id="build-1", chain_hash="c" * 64, gate_results=gate_results)
+    sealed = seal_mod.sign(payload, key_path=key_path)
+    card["signed"] = sealed.signed
+
+    trusted = key_path.parent / "trusted_keys.txt"
+    trusted.write_text(sealed.signed["public_key_hex"] + "\n")
+    monkeypatch.setenv("NUCLEUS_SIGNING_KEY_PATH", str(key_path))
+
+    assert forge_api.verify_badge(card) == "trusted"
+
+    tampered = dict(card)
+    tampered["closed_ended"] = {"cve_detection": {"f1": 0.999}}  # edited after signing
+    assert forge_api.verify_badge(tampered) != "trusted"
+    assert forge_api.verify_badge(tampered) == "tampered"
+
+
 def test_api_forge_cards_json(client, tmp_path):
     _write_card(tmp_path)
     resp = client.get("/api/forge/cards")

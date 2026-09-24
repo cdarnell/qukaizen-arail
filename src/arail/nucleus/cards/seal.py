@@ -226,13 +226,22 @@ class VerifyResult:
     key: str          # "trusted" | "untrusted" | "ephemeral-stub"
     card_hash: str     # "match" | "mismatch"
     eval_hash: str      # "match" | "mismatch" | "skipped"
-    chain: str          # "match" | "mismatch" | "skipped"
+    chain: str          # "match" | "mismatch" | "not_checked" | "skipped"
+    fast: bool = False  # was this VerifyResult produced by a --fast verify?
 
     @property
     def all_ok(self) -> bool:
-        return (self.signature == "valid" and self.key in ("trusted",) and
-               self.card_hash == "match" and self.eval_hash in ("match", "skipped") and
-               self.chain in ("match", "skipped"))
+        """B2 (2026-09-23 review): a `--fast` verify legitimately never
+        attempts eval_hash/chain, so "skipped" is fine there — that's what
+        --fast MEANS. A non-fast verify that never actually recomputed
+        something (chain re-derivation isn't implemented yet; eval_hash
+        without a recompute value) must NOT read as ok just because the
+        field says "skipped"/"not_checked" instead of "mismatch" — a
+        skipped check is not a passed check."""
+        base_ok = self.signature == "valid" and self.key == "trusted" and self.card_hash == "match"
+        if self.fast:
+            return base_ok and self.eval_hash in ("match", "skipped") and self.chain in ("match", "skipped")
+        return base_ok and self.eval_hash == "match" and self.chain == "match"
 
 
 def verify_signature(signed: dict) -> bool:
@@ -256,7 +265,7 @@ def verify(
     signed = card.get("signed")
     if not signed:
         return VerifyResult(signature="invalid", key="untrusted", card_hash="mismatch",
-                            eval_hash="skipped", chain="skipped")
+                            eval_hash="skipped", chain="skipped", fast=fast)
 
     sig_ok = verify_signature(signed)
     is_stub_key = signed.get("key_fingerprint") == "ephemeral-stub"
@@ -279,10 +288,15 @@ def verify(
         else:
             eval_hash_status = "match" if eval_gate["value"] == eval_hash_recompute else "mismatch"
 
-    chain_status = "skipped" if fast else "match"  # chain re-derivation needs weight hashing; --fast skips it always
+    # B2 (2026-09-23 review): chain re-derivation needs weight hashing,
+    # which isn't implemented yet -- a non-fast verify must say so
+    # honestly ("not_checked") rather than claiming "match" for a check
+    # that was never actually performed.
+    chain_status = "skipped" if fast else "not_checked"
 
     return VerifyResult(signature="valid" if sig_ok else "invalid", key=key_status,
-                        card_hash=card_hash_status, eval_hash=eval_hash_status, chain=chain_status)
+                        card_hash=card_hash_status, eval_hash=eval_hash_status, chain=chain_status,
+                        fast=fast)
 
 
 # ── CLI: `arailctl nucleus verify <shard>@<ver>|<dir>` ────────────────
@@ -314,7 +328,27 @@ def run(argv) -> int:
         return 3
 
     card = load_card(card_path)
-    result = verify(card, fast=fast)
+
+    # B2 (2026-09-23 review): a non-fast verify must actually attempt the
+    # eval_hash recompute -- load eval-config.lock next to the card and
+    # recompute from it, rather than silently reporting "skipped". A
+    # missing lock is a mismatch (something is missing that should be
+    # there), never a free pass.
+    eval_hash_recompute = None
+    if not fast:
+        from arail.nucleus.evals.hash import eval_hash as _compute_eval_hash
+        from arail.nucleus.evals.hash import read_eval_config_lock
+
+        lock_path = card_dir / "eval-config.lock"
+        if lock_path.is_file():
+            try:
+                eval_hash_recompute = _compute_eval_hash(read_eval_config_lock(lock_path))
+            except (OSError, ValueError, TypeError):
+                eval_hash_recompute = ""  # unreadable/malformed lock -> forces a mismatch below
+        else:
+            eval_hash_recompute = ""  # no lock at all -> forces a mismatch below
+
+    result = verify(card, eval_hash_recompute=eval_hash_recompute, fast=fast)
     sys.stdout.write(
         f"signature: {result.signature}\nkey: {result.key}\n"
         f"card_hash: {result.card_hash}\neval_hash: {result.eval_hash}\n"

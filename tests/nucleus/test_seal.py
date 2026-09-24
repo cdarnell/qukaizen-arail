@@ -194,6 +194,107 @@ def test_real_qkz_binary_verifies_our_seal(tmp_path):
     assert result.returncode == 0, result.stderr.decode() + result.stdout.decode()
 
 
+# ── B2 (2026-09-23 review): verify must not report checks it never
+# performed, and a non-fast verify must recompute eval_hash for real ──
+
+def test_non_fast_verify_never_reports_chain_match(tmp_path):
+    key_path = tmp_path / "signing.ed25519"
+    card = _minimal_card()
+    card_hash = card_sha256(card)
+    gate_results = seal_mod.build_gate_results(card_sha256=card_hash, eval_hash=card["eval_hash"],
+                                               decision="CERTIFIED", contamination_overlap=0.0)
+    payload = seal_mod.build_payload(pipeline_run_id="build-1", chain_hash="c" * 64, gate_results=gate_results)
+    sealed = seal_mod.sign(payload, key_path=key_path)
+    card["signed"] = sealed.signed
+    trusted = tmp_path / "trusted_keys.txt"
+    trusted.write_text(sealed.signed["public_key_hex"] + "\n")
+
+    result = seal_mod.verify(card, eval_hash_recompute=card["eval_hash"], fast=False, trusted_keys_path=trusted)
+    assert result.chain == "not_checked"
+    assert result.chain != "match"
+    # A "not_checked" field must not count as a passed check.
+    assert not result.all_ok
+
+
+def test_non_fast_all_ok_true_only_when_eval_hash_and_chain_are_real_matches():
+    # chain can never be "match" today (no re-derivation implemented) --
+    # all_ok for a non-fast result must therefore be unreachable-true
+    # until that lands, never silently true because "skipped" was treated
+    # as passing.
+    result = seal_mod.VerifyResult(signature="valid", key="trusted", card_hash="match",
+                                   eval_hash="match", chain="match", fast=False)
+    assert result.all_ok
+    result_not_checked = seal_mod.VerifyResult(signature="valid", key="trusted", card_hash="match",
+                                               eval_hash="match", chain="not_checked", fast=False)
+    assert not result_not_checked.all_ok
+
+
+def test_cli_verify_non_fast_recomputes_eval_hash_from_lock(tmp_path, monkeypatch, capsys):
+    from arail.nucleus import cli
+    from arail.nucleus.cards.dna_v2 import write_card
+    from arail.nucleus.evals.hash import EvalHashInputs, eval_hash as compute_eval_hash, write_eval_config_lock
+
+    key_path = tmp_path / "keys" / "signing.ed25519"
+    eval_inputs = EvalHashInputs(
+        harness_version="1", prompts="p", few_shot={"bytes_hex": "", "k": 0},
+        scoring={"x": 1}, decoding={"student": {"temperature": 0.0}}, cert_set_version="deadbeef",
+    )
+    real_eval_hash = compute_eval_hash(eval_inputs)
+
+    card = _minimal_card(eval_hash=real_eval_hash)
+    card_hash = card_sha256(card)
+    gate_results = seal_mod.build_gate_results(card_sha256=card_hash, eval_hash=real_eval_hash,
+                                               decision="CERTIFIED", contamination_overlap=0.0)
+    payload = seal_mod.build_payload(pipeline_run_id="build-1", chain_hash="c" * 64, gate_results=gate_results)
+    sealed = seal_mod.sign(payload, key_path=key_path)
+    card["signed"] = sealed.signed
+
+    card_dir = tmp_path / "forge" / "qkz-x" / "0.1.0"
+    card_dir.mkdir(parents=True)
+    write_card(card, card_dir / "dna-card.yaml")
+    write_eval_config_lock(eval_inputs, card_dir / "eval-config.lock")
+
+    trusted = key_path.parent / "trusted_keys.txt"
+    trusted.write_text(sealed.signed["public_key_hex"] + "\n")
+    monkeypatch.setenv("NUCLEUS_SIGNING_KEY_PATH", str(key_path))
+    monkeypatch.setenv("LAB_TIER", "minimalist")
+
+    code = cli.main(["verify", str(card_dir)])  # non-fast
+    out = capsys.readouterr().out
+    assert "eval_hash: match" in out
+    assert "chain: not_checked" in out
+    assert code == 3  # chain not_checked -> all_ok is honestly false
+
+
+def test_cli_verify_non_fast_missing_lock_is_a_mismatch(tmp_path, monkeypatch, capsys):
+    from arail.nucleus import cli
+    from arail.nucleus.cards.dna_v2 import write_card
+
+    key_path = tmp_path / "keys" / "signing.ed25519"
+    card = _minimal_card()
+    card_hash = card_sha256(card)
+    gate_results = seal_mod.build_gate_results(card_sha256=card_hash, eval_hash=card["eval_hash"],
+                                               decision="CERTIFIED", contamination_overlap=0.0)
+    payload = seal_mod.build_payload(pipeline_run_id="build-1", chain_hash="c" * 64, gate_results=gate_results)
+    sealed = seal_mod.sign(payload, key_path=key_path)
+    card["signed"] = sealed.signed
+
+    card_dir = tmp_path / "forge" / "qkz-x" / "0.1.0"
+    card_dir.mkdir(parents=True)
+    write_card(card, card_dir / "dna-card.yaml")
+    # No eval-config.lock written next to the card.
+
+    trusted = key_path.parent / "trusted_keys.txt"
+    trusted.write_text(sealed.signed["public_key_hex"] + "\n")
+    monkeypatch.setenv("NUCLEUS_SIGNING_KEY_PATH", str(key_path))
+    monkeypatch.setenv("LAB_TIER", "minimalist")
+
+    code = cli.main(["verify", str(card_dir)])  # non-fast, no lock on disk
+    out = capsys.readouterr().out
+    assert "eval_hash: mismatch" in out
+    assert code == 3
+
+
 # ── CLI verify verb wiring ─────────────────────────────────────────
 
 def test_cli_verify_verb_reports_trusted(tmp_path, monkeypatch, capsys):

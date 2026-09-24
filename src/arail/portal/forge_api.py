@@ -120,17 +120,23 @@ def _verify_badge(card: Dict[str, Any]) -> str:
     signed = card.get("signed")
     if not signed:
         return "invalid"
-    if signed.get("key_fingerprint") == "ephemeral-stub":
-        return "STUB"
     try:
         from arail.nucleus.cards.seal import verify as seal_verify
 
         result = seal_verify(card, fast=True)
     except Exception:  # noqa: BLE001 — a broken verify path must render "invalid", not 500
         return "invalid"
+    # B2 (2026-09-23 review): a card whose metrics were hand-edited after
+    # signing must never render "trusted" just because its signature is
+    # otherwise self-consistent -- card_sha256 mismatch means SOMETHING
+    # in the card doesn't match what was signed, regardless of key trust.
+    if result.card_hash != "match":
+        return "tampered"
     if result.signature != "valid":
         return "invalid"
-    return result.key  # "trusted" | "untrusted" | "ephemeral-stub"
+    if signed.get("key_fingerprint") == "ephemeral-stub":
+        return "STUB"
+    return result.key  # "trusted" | "untrusted"
 
 
 def list_cards() -> List[Dict[str, Any]]:
