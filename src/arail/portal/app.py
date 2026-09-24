@@ -13812,7 +13812,7 @@ async def api_tuning_autoresearch_schedule_set(request: Request):
 # the tuning.html "AirLLM vs AeroLLM" cards consume.
 #
 # Result location: $AEROLLM_PERF_RESULTS_DIR if set, otherwise the
-# sibling aerollm checkout (../qukaizen-aerollm/scripts/perf/results/). Missing
+# sibling aerollm checkout (../qukaizen-queuellm/scripts/perf/results/). Missing
 # dir or no measurements → rows=[] with a `reason` so the page keeps
 # showing the projected numbers.
 #
@@ -13829,7 +13829,7 @@ def _perf_results_dir() -> Path:
     # arail/src/arail/portal/app.py → arail/ is parents[3]; aerollm
     # lives as a sibling checkout.
     arail_root = Path(__file__).resolve().parents[3]
-    return arail_root / "qukaizen-aerollm" / "scripts" / "perf" / "results"
+    return arail_root / "qukaizen-queuellm" / "scripts" / "perf" / "results"
 
 
 def _detect_perf_hw_id() -> str:

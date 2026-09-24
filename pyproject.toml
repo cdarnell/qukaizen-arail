@@ -241,7 +241,7 @@ coder_cpu    = "Qwen/Qwen2.5-Coder-3B-Instruct-GGUF"
 [tool.arail.package-sources]
 # AeroLLM (the deep "2nd inference") is installed by scripts/build-aerollm.sh:
 #   • DEV     — if the local sibling repo ($ARAIL_AEROLLM_REPO, default
-#               ~/ProJects/qukaizen-aerollm) is present, it's built from source via cargo
+#               ~/ProJects/qukaizen-queuellm) is present, it's built from source via cargo
 #               (`./arailctl deep rebuild`) so in-progress changes flow in.
 #   • RELEASE — otherwise the published wheel is pulled from the self-hosted
 #               index below (`./arailctl deep update`), public PyPI as fallback.

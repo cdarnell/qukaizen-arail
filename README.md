@@ -65,7 +65,7 @@ Two tiers. Pick one; upgrade later.
 | Tier  | What you get                                                                                                            | Good for                                         |
 | ----- | ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
 | `minimalist` | Dashboard · Chat · Autoresearch · Knowledge Base · Agents · LanceDB vectors · **Llama AI Engineer** — an AI engineering assistant **built with Llama** (Llama-3.2-1B-Instruct, ~0.9 GB, runs on 16 GB) | The everyday lab. One default model. No bloat. |
-| `maximus`    | + Admin · Docs · Notebooks · **AeroLLM** deep-mode runtime · Anthropic SDK · LangChain · full cloud SDKs · **AI Engineer (deep, 7B)** — a deep AI engineer persona (offered, not forced; ~4.7 GB) | The full bench. The heaviest model that runs *well* on your machine — with cloud frontier models one click away in the Chat Compute Source. |
+| `maximus`    | + Admin · Docs · Notebooks · **QueueLLM** deep-mode runtime · Anthropic SDK · LangChain · full cloud SDKs · **AI Engineer (deep, 7B)** — a deep AI engineer persona (offered, not forced; ~4.7 GB) | The full bench. The heaviest model that runs *well* on your machine — with cloud frontier models one click away in the Chat Compute Source. |
 
 > **Same expert, two sizes.** Both tiers give you the *same* AI-engineer persona; they differ only in
 > the model behind it. `minimalist` runs it on Llama-3.2-1B (fast, fits 16 GB). `maximus` additionally
@@ -92,17 +92,18 @@ Two tiers. Pick one; upgrade later.
 includes ~20 other models (Qwen, Gemma, Phi, DeepSeek-R1, etc.) you can
 browse and pull on demand. AirLLM is opt-in via `ARAIL_INSTALL_AIRLLM=1`.
 
-> **AeroLLM (renaming to QueueLLM) deep mode is Apple-Silicon-only today (CUDA in progress).**
-> The `maximus` deep-mode "2nd inference" runtime, [AeroLLM/QueueLLM](https://github.com/cdarnell/qukaizen-queuellm)
-> (Apache-2.0, now open source), runs on **MLX / Apple Silicon** only — the
+> **QueueLLM deep mode is Apple-Silicon-only today (CUDA in progress).**
+> The `maximus` deep-mode "2nd inference" runtime, [QueueLLM](https://github.com/cdarnell/qukaizen-queuellm)
+> (formerly AeroLLM — commands, env vars and the `aerollm-api` package keep the
+> old name for now; Apache-2.0, now open source), runs on **MLX / Apple Silicon** only — the
 > published wheel is `macosx_arm64`. The **CUDA backend is in active
 > development** and not built yet, so on Linux/x86 `maximus` the deep runtime
-> is skipped and AirLLM (opt-in) is the fallback. AeroLLM is **not** a setup
+> is skipped and AirLLM (opt-in) is the fallback. QueueLLM is **not** a setup
 > dependency — `./arailctl setup` never blocks on it. Install or refresh it
 > out-of-band with `./arailctl deep install` (a checksummed prebuilt binary
 > from ARAIL's own GitHub Releases — no source repo or credentials needed;
 > this is what `./arailctl setup` at tier `maximus` uses), or, if you're a
-> maintainer, `./arailctl deep rebuild` (source build from a local aerollm
+> maintainer, `./arailctl deep rebuild` (source build from a local QueueLLM
 > checkout) or `./arailctl deep update` (release wheel from the private
 > index); all three fail soft, so the lab runs fine without the 2nd
 > inference until one succeeds. **`deep install`'s binary is unsigned,
@@ -205,7 +206,7 @@ The Chat tab is built for crappy machines and beefy ones alike. A
 **Settling "My Machine."** The first time a lab boots, a banner under the
 statusbar (every page, not just Chat) asks two questions in plain
 language: which model should load into GPU/memory right now, and which
-model should AeroLLM reference for deep answers. Each candidate shows its
+model should QueueLLM reference for deep answers. Each candidate shows its
 download size, whether it's actually on this machine's disk/Ollama store
 yet, and whether it fits — with the exact `ollama pull` / `hf download`
 command (plus an HF link) when it isn't installed. Confirm once and the
@@ -296,7 +297,7 @@ leaving the local UI.
 
 By default `LAB_MODE=airgapped` — agents in the lab cannot collect
 information from the public internet. Calls to loopback and your private
-network still work, so a LAN GPU box (Ollama, vLLM, an aerollm node)
+network still work, so a LAN GPU box (Ollama, vLLM, a QueueLLM node)
 keeps inferring without changes. Cloud-provider APIs are blocked at the
 HTTP layer. The dashboard's **Airgapped** badge is clickable — it shows
 what is and isn't enforced, the recent blocks, and the known gaps
@@ -337,7 +338,7 @@ so imports don't break — only the display rebrands.
 - [docs/WSL.md](docs/WSL.md) — Windows via WSL2 with GPU passthrough.
 - [docs/PRIVACY.md](docs/PRIVACY.md) — exactly what data leaves the box.
 - [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — first-run gotchas.
-- [docs/world-forge.md](docs/world-forge.md) — *(design)* dream a World with the local model, then let AeroLLM forever curate it into sourced truth — speculative authoring.
+- [docs/world-forge.md](docs/world-forge.md) — *(design)* dream a World with the local model, then let QueueLLM forever curate it into sourced truth — speculative authoring.
 - [docs/agents-explained.md](docs/agents-explained.md) — the quick tour of Buddy, SRE, Researcher, and custom agents.
 - [docs/agents.md](docs/agents.md) — the agent architecture and loader contract.
 - [AGENTS.md](AGENTS.md) — the platform-porting manifest for coding agents.
