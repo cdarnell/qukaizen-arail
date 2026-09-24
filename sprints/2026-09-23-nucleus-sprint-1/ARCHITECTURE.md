@@ -343,6 +343,17 @@ build:  P0 preflight → PA extract(teacher, train prompts) → PA2 teacher-on-c
 - **`composite.py`:** a registry of versioned formulas.
   - `composite/v1` = `0.4*closed.mean_f1 + 0.3*open.lc_win_rate + 0.3*executable.compiles`
   - `composite/v1-nc` = `0.4*closed.mean_f1 + 0.3*open.lc_win_rate + 0.3*mean(patch_applies, checkpatch_clean)`. It is selected automatically when `compiles` is `not_run` (**Q4**).
+  - `composite/v1-open` = `0.6*closed.mean_f1 + 0.4*open.lc_win_rate` (added in review loop 1, accepted in review
+    round 2). It is selected automatically when **all three** executable checks are `not_run`, which is every run this
+    sprint because no patch-generation task exists. The weights are published, not a proportional renormalisation of
+    v1 (that would be 4/7 and 3/7). **Gate B precondition:** before B7's non-stub refusal is lifted, a card scored
+    under `composite/v1-open` must be capped at `COMPATIBLE`, because a kernel shard with no executable evidence
+    cannot be `CERTIFIED`. Retire the formula once `patch_applies`/`checkpatch_clean` are wired.
+  - **Open-ended eval set (drift, recorded in review round 2).** For the Gate A stub path, PC judges fused vs base on
+    the domain's 10 eyeball prompts, not on cert items as brief §5.3 intends (`patch_explanation`, n≈100). This is
+    acceptable only for Gate A, and only if those prompt bytes and the judge identity/rubric are inside `eval_hash`.
+    Gate B moves the open eval onto cert items so it is covered by `CertStore`'s freeze, tamper check, and
+    contamination check.
   - `decision_rule/v1`, evaluated in order:
     1. KNOWN_ISSUE if the student does not beat base (the W2 test fails).
     2. BETA if `achieved < target − 0.05`.
@@ -688,8 +699,9 @@ the builder should make **only with the operator's OK** (Q9).
    the Buddy P1 observability work wants anyway.
 6. `compiles`, `hallucination_rate`, `build_energy_est`, and GGUF export are all `not_run`/`not_built`, with one
    ticket each.
-7. `composite/v1-nc` exists alongside `composite/v1`. Two formulas mean cards are only comparable within a
-   formula id, and the `/forge` viewer must show the id.
+7. `composite/v1-nc` and `composite/v1-open` exist alongside `composite/v1`. Three formulas mean cards are only
+   comparable within a formula id, and the `/forge` viewer must show the id. `v1-open` carries a Gate B cap
+   (COMPATIBLE at most) and is retired once patch generation exists (§4.9).
 8. The `refresh:<days>` cert set, the `world:`, `lkml`, and `lwn` source adapters, and the `mixed` runtime path are
    seams only.
 9. **The orchestration layer (`build.py`/`certify.py`) doesn't wire several real-mode paths into the pipeline yet:**

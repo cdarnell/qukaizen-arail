@@ -249,3 +249,334 @@ Before PASS, the builder must either fix these (the B-items) or, for anything le
 11. Resolve or ticket every ASK above, and file the unanticipated debt in BACKLOG and ARCHITECTURE §9.
 
 Then re-request architect review. QA should not start on this build; most QA time would go to rediscovering the items above.
+
+---
+
+# Round 2
+
+**Date:** 2026-09-23
+**Build:** [BUILD_LOG.md](./BUILD_LOG.md) "Review loop 1" at `f17828eb` (fix commits `2cc89e5b..886a0e1c`, diff base `a7f91027`)
+**Architecture:** [ARCHITECTURE.md](./ARCHITECTURE.md). §4.9 and §9 item 7 were amended in this round's commit to record the `composite/v1-open` decision and the open-eval drift.
+**Reviewer:** architect (review mode, round 2)
+
+## Verdict: BLOCK
+
+The loop fixed most of what round 1 found. B1, B2, B5, B7, B8 and B9 are resolved, and I re-ran my own reproductions to confirm it. The orchestration layer now mostly computes what it signs.
+
+Three BLOCKs remain. Each one is round-1 work that stopped short, and each is small:
+
+- **R1:** the signed card contradicts its own composite.
+- **R2:** `eval_hash` does not cover the open-ended yardstick that the loop newly wired in.
+- **R3:** B6's Buddy guard misses Buddy's model when it is configured by absolute path, which is a supported and documented configuration.
+
+No round-1 ASK is promoted to BLOCK. The one ASK that belonged there (base-student numbers missing from the card) is folded into R1.
+
+**Test run on this worktree:**
+- `.venv/bin/pytest tests/nucleus tests/portal/test_forge_viewer.py -q` gave **358 passed, 2 skipped**, which matches the orchestrator's count.
+- I touched a sentinel before the run and ran `find lab models -newer <sentinel>` after it. Result: **nothing written** under `lab/` or `models/`, and `git status` was clean apart from the pre-existing untracked `.venv`/`logs/`. The conftest isolation ASK is resolved.
+- `tests/nucleus/test_seal.py` with `NUCLEUS_QKZ_BIN=~/ProJects/qukaizen-nucleus/qkz/target/release/qkz` gave **18 passed**. The real Rust verifier still accepts the seal.
+
+## Round-1 BLOCKs, one by one
+
+### B1: Resolved (with an ASK)
+
+**Reproduction re-run.** I ran the Gate A fixture through the real CLI as subprocesses: `build` under `ARAIL_NUCLEUS_STUB=1`, then `certify` with the variable unset.
+- `certify` now exits **3**: "this build ran with stub=True (recorded at build time) but the current environment has ARAIL_NUCLEUS_STUB=<unset>".
+- No card is written, and `CERTIFIED_SHARDS.md` does not exist.
+- `context.json` records `"stub": true, "provider": "stub"`, and every phase output carries `"provider": "stub"`.
+
+**Test.** `test_certify_refuses_when_env_disagrees_with_build_record` reads `context.json` from disk (`context=None`). Without the fix, `run_certify` would proceed and the `pytest.raises` would fail, so the test is real.
+
+**Residual (ASK A1).** If I hand-edit `context.json` to `"stub": false` and run `certify` without the stub variable, the result is exit 0: a **lab-key-signed, ledgered, CERTIFIED** card built from stub metrics.
+- The per-phase `provider` stamps that fix item 1 added are never read by `certify`.
+- This is not a security boundary, since the key owner could sign anything anyway.
+- The check is still cheap. B7 refuses every non-stub build this sprint, so any `stub: false` record is by construction not from `build.run`.
+
+### B2: Resolved
+
+What `verify` prints now matches what it computed:
+- `signature`, `key` and `card_hash` are computed as before.
+- Non-fast `eval_hash` is recomputed from the `eval-config.lock` next to the card. I observed `match` with the lock present and `mismatch` with the lock deleted.
+- `chain` now reads `not_checked` and never `match`.
+- In non-fast mode, `all_ok` requires `eval_hash == match` and `chain == match`.
+
+`/forge`'s `_verify_badge` checks `card_hash` first. I edited one metric in a signed card: `verify --fast` reported `card_hash: mismatch`, and the badge path returns `tampered`.
+
+The three cited tests would fail without the fix:
+- The old code returned `chain="match"`.
+- The old CLI never read the lock.
+- The old badge returned `trusted` for a hash mismatch.
+
+Consequence to document (ASK A9): the non-fast `verify` can currently **never exit 0** for any card, because `chain` is always `not_checked`. That is honest and is what I asked for, but `docs/nucleus.md` and the CLI output should say so.
+
+### B3: Partially resolved, residual is BLOCK R1
+
+**Fixed:**
+- `pipeline_hash` is real: `evals/hash.py::pipeline_hash`.
+- `training_hash` is a content hash of fuse's output directory.
+- `teacher_hash` / `teacher identity` is honestly `unresolved:auto`.
+- `tokenizer_parity` is `false`, with the reason stated.
+- `captured_mass`/`dropped_mass` are omitted.
+- The executable checks are `not_run`.
+- PC now scores the **fused** output directory and, separately, the base.
+- `beats_base` is a real comparison, with `None` treated as not-beating.
+
+**Not fixed: the card still contradicts itself.** This is the same symptom I quoted in round 1 ("composite.value 0.15 while open_ended says not_run"). The Gate A card I generated shows:
+- `composite: {formula_id: composite/v1-open, value: 0.566191}`, which is `0.6·0.6103175 + 0.4·0.5`, so it consumes `open.lc_win_rate = 0.5`.
+- `open_ended: {patch_explanation: {status: not_run, reason: "judge not wired in this generic certify path"}}`, which comes from `certify.py:278`, still hardcoded.
+- `baselines: {}`, although the CERTIFIED vs KNOWN_ISSUE decision depends on `base_closed.mean_f1 = 0.4293`, which is not in the signed card.
+
+**The measured LC value is also a self-comparison.** In `build.py::_score_open_lc`:
+- Neither the fused provider nor the base provider gets an answer table, so both return `"[stub:good] deterministic answer for eyeball-i"`. The texts are identical.
+- `StubJudge()` with no preference table always answers `A`.
+- So `lc_win_rate` equals the fraction of items where the seeded randomisation put the model in position A. That comes out at exactly 0.5.
+- A bug that inverted the un-swap would give `1 − 0.5 = 0.5`. The Gate A golden therefore cannot detect a broken judge path.
+- This is B10's "known non-trivial rational" requirement unmet for the open metric.
+
+### B4: Partially resolved, residual is BLOCK R2
+
+**Fixed:**
+- The formula string is a constant registry (`composite.FORMULA_STRINGS`), used for both the card and the hash.
+- `prompts` hashes the real template bytes.
+- `decoding` records the full `Decoding()`.
+- `test_eval_hash_identical_for_different_metric_values_same_yardstick` would fail on the old `str(composite_result.inputs)`, so it is a genuine iff test.
+
+**Not fixed.** The loop turned `open.lc_win_rate` from a constant into a measured input to the composite and the decision. The yardstick behind that measurement is still outside `eval_hash`:
+- `scoring.judge_rubric` and `scoring.judge_model_identity` are still the literal `"not_run"` (`certify.py`). Round 1 said that literal is acceptable **only while those metrics really are not_run**, and they no longer are.
+- The prompt set PC actually judges (the domain's eyeball file, `_score_open_lc`) is not in `prompts`. Only the closed templates are.
+
+So editing the eyeball file, or swapping the judge, changes `lc_win_rate` → composite → decision without changing `eval_hash`. That directly fails the brief §7 acceptance line "eval_hash changes when any of … prompt / scoring … changes, and only then".
+
+**Weaker, ASK A5:**
+- `decoding` is asserted from `Decoding()` in `certify.py`, not derived from what the phases actually used.
+- `test_eval_hash_changes_when_decoding_changes` patches only `certify_mod.Decoding`, the recorded side, so it cannot catch a provider that decodes differently.
+
+### B5: Resolved
+
+- The routing prompt now shows only the text after the first `:`, and gold is the prefix. `test_subsystem_routing_prompt_never_contains_the_gold_label` asserts this.
+- `parse_closed_answer` is whole-token and first-in-answer-order, so "not a cve" parses to `not`.
+- The old substring loop in `valid` order would fail the negation test.
+
+INFO: nested prefixes such as `net: ipv4: …` still show `ipv4:` to the model. That is not the gold label, so it is acceptable.
+
+### B6: Partially resolved, residual is BLOCK R3
+
+**Fixed:**
+- `protected` is now Buddy's configured names (`MODEL_NAME` and `buddy_deep_model_env_value()`), resolved through `resolve_model` → `model_identity`.
+- `_refuse` picks the largest non-protected candidate.
+- `build.run` and `plan` pass the resolved models in.
+
+**Reproduced failure.** `resolve_model` rejects any value containing `/`. When `AEROLLM_MODEL`/`QUEUELLM_MODEL` is an **absolute path**, that resolution fails, and the protected key falls back to the raw path string. A candidate model, on the other hand, is keyed by its content hash, so the two never match. The absolute-path form is supported: `AeroLLMBackend` accepts it, and `docs/verification/aerollm-1.0.0-pin.md` uses it.
+
+My probe setup:
+- Real tmp model dirs.
+- `AEROLLM_MODEL=<abs path>/Qwen2.5-7B-Instruct-4bit`.
+- The judge set to `resolve_model("ai-engineer")`.
+- Phase C over budget.
+
+Result: `PreflightRefusal.drop == ['Qwen2.5-7B-Instruct-4bit']`. That tells the user to drop **Buddy's model**, which is the exact round-1 scenario. With the bare-name form, the same probe correctly drops `student`.
+
+**Tests.** The B6 tests and the 200-combo property test use `SimpleNamespace` doubles with no `.path`, so every comparison is name against name. The identity path the fix depends on is never exercised.
+
+The `PreflightRefusal` invariant `drop ∩ protected = ∅` also compares **names**, so it cannot catch this case either.
+
+### B7: Resolved
+
+`build.run` refuses a non-stub build before any lock, run dir or phase exists. The refusal happens right after the domain loads and before `profile_gate`. Exit is 3, and the message is plain.
+
+The BACKLOG umbrella entry exists. It is partly stale (ASK A10).
+
+INFO: because the B7 refusal runs before `profile_gate`, a non-stub `--profile gateway` build under airgapped now gets the "not wired" message instead of the airgap banner. That is harmless while B7 stands.
+
+### B8: Resolved
+
+**Reproduction re-run.** I built a hostile repo with:
+- `gpg.program`, `gpg.ssh.program`, `core.pager` and `diff.external` each pointed at marker scripts;
+- `log.showSignature=true`;
+- `diff.evil.textconv` enabled through `.gitattributes`;
+- a fabricated `gpgsig` commit.
+
+With the **old** argument set:
+- `log --format=%H`, `log --format='%H %G?'`, `log --stat` and `show HEAD` each fired **gpg**;
+- `log -p` fired **gpg and textconv**.
+
+With the new `run_git`, **none of them fired**.
+
+The cited test would fail without the fix. `git_kernel.extract` is the only `run_git` caller and it only runs `log`, which also gets `--no-textconv`. `executable_kernel.py`'s two inline calls use `HARDENED_CONFIG_ARGS`.
+
+INFO:
+- `diff.<driver>.textconv` is neutralised only for `log`. Any future `show`/`diff` caller must add `--no-textconv`.
+- `run_git` does not pass `stdin=DEVNULL` when there is no input, so a repo-configured program that reads stdin would inherit the parent's stdin.
+- `paths.py:145` runs `git check-ignore` unhardened, but against ARAIL's own checkout, so that is acceptable.
+
+### B9: Resolved
+
+Observed:
+- `fuse.json` records `{shard, version, shard_dir}`.
+- The card, seal, report and lock land at `$ARAIL_MODELS_DIR/forge/qkz-kernel/0.1.0/`.
+- The card's `version` comes from fuse.
+- `verify qkz-kernel@0.1.0` finds it.
+- The e2e test asserts `/api/forge/cards` lists it.
+
+INFO:
+- A refused certify (for example, contamination) leaves fuse's uncertified weights directory under `FORGE_ROOT`.
+- Re-certifying the same build overwrites the signed card in place.
+
+### B10: Mostly resolved, residual folded into R1
+
+- The e2e test asserts exact per-task F1, macro-F1, composite value, formula id and string, the decision, the executable `not_run` fields, lock→`eval_hash` recompute, and not-ledgered.
+- The fixture is byte-reproducible (`GIT_COMMITTER_DATE`).
+- The tautological `decision in (…)` assertion is gone.
+
+The open metric's golden is the 0.5 self-comparison described under B3 (R1).
+
+INFO: the comment in `test_certify.py` says fused and base "score IDENTICALLY … same deterministic fallback text". That has been false since B10 added answer tables (salts `fused-v1`/`base-v1`, wrong-every 5 vs 2). The `KNOWN_ISSUE` asserted there is a property of the staged fixture's items, not the stated reason (ASK A6).
+
+## The builder's flagged gap: `composite/v1-open`: accepted, not a BLOCK
+
+**Decision:** acceptable for Gate A. I have recorded it in ARCHITECTURE §4.9 and §9 item 7.
+
+**Reasoning:**
+- Brief §5.5 requires the formula to be "published, versioned" in the card. `v1-open` meets that: it has a distinct `formula_id`, a constant formula string in the card, and that string goes into `eval_hash`.
+- VISION risk #4 prescribes exactly this mechanism for unmeasurable executable checks: mark them `not_run`, which "changes `eval_hash` and the composite formula version", and "do not substitute a proxy".
+- `v1-open` is selected by rule (`select_formula_id`), never by hand, by the same mechanism that already picks `v1-nc`.
+- The alternative, keeping `executable` in the formula and refusing certify, would make Gate A unreachable without building a patch-generation task. That would be new capability, not wiring, and the builder was right not to improvise it.
+
+**Conditions (now in ARCHITECTURE §4.9):**
+1. **Gate B precondition:** before B7's non-stub refusal is lifted, a `v1-open` card must be capped at `COMPATIBLE`. A kernel shard with zero executable evidence must not read `CERTIFIED`. This sprint only produces stub cards, which are ephemeral-keyed, never ledgered and badged `STUB`, so the cap is not needed for Gate A.
+2. Retire `v1-open` once `patch_applies`/`checkpatch_clean` are wired.
+3. The 0.6/0.4 weights are not the proportional renormalisation of v1 (4/7, 3/7). That is fine because they are published, but note it in the formula registry docstring.
+4. `v1-open` is only honest if the card carries the open input it consumes. That is R1.
+
+**On `NOT_EVALUATED`:** refusing certify is the right call. The card schema is a frozen wire contract, and widening the decision enum would be an architecture change I am not making. `decide()` returning `NOT_EVALUATED` immediately before the refusal is acceptable as documentation.
+
+## Round-1 ASKs: status
+
+| Round-1 ASK | Status |
+|---|---|
+| `runtime_names` hashes `__init__.py`, not the `.so`; `runtime_provenance` never called | **Open.** Unchanged, and in the BACKLOG umbrella. Required before Gate B. |
+| Contamination: raw train only, not prompts + teacher outputs; O(train) memory; no 8/800 boundary test; string date compare | **Open.** Unchanged. It becomes load-bearing at Gate B. Not promoted, because stub train material has no teacher outputs of consequence. |
+| T-JUDGE-1 literal strings; judge identity check not wired | **Open, and more pressing.** PC now runs a judge but never calls `assert_judge_identity_distinct`. For StubJudge that is moot; R2's judge-identity recording is the seam for it. |
+| T-EGR-1 scope | **Open.** |
+| Tests write into real `lab/data` | **Resolved** (`2cc89e5b`, verified by the sentinel run). |
+| `/forge` on minimalist shows `invalid` without `cryptography` | **Open.** `_verify_badge` still maps any exception to `invalid`. |
+| Cert set needs `--new-cert-version`, undocumented; no preflight row | **Open.** `docs/nucleus.md` still never mentions the flag. |
+| `seal.py` key owner check; malformed hex raises outside `try` | **Open.** |
+| `spike.py` real path refuses; residency B3 "passes" when unmeasured | **Open, and not in the BACKLOG umbrella.** Must be filed. |
+| `run_certify` too long | **Worse.** It is now **342 lines** (was ~170), with three nested helpers. Not a correctness issue, so not promoted. R1 and R2 both edit this function again, so extract `_eval_hash_inputs`, `_assemble_card` and `_provenance_hashes` while doing them. |
+
+## New findings this round
+
+### BLOCK
+
+- **[BLOCK] R1: The signed card must carry, consistently, every number its composite and decision are computed from.**
+  - **Where:** `certify.py:278` (`open_ended` hardcoded `not_run`), `certify.py` `build_card(... baselines` omitted `)`, and `build.py::_score_open_lc` (identical fused and base texts).
+  - **Fix:**
+    1. Build `open_ended` from `metrics["open"]`. When `lc_win_rate` is a number, write `{lc_win_rate_vs_base, judge, n, ci95}`; the schema already permits these fields. Write `not_run` only when `metrics["open"]["lc_win_rate"] == "not_run"`. Name the entry after the set actually judged (for example `eyeball_explanation`). Keep `patch_explanation` only once the open eval runs on cert items.
+    2. Write `baselines.base_student` with the base `closed.mean_f1` and rows that `beats_base` was computed from. State in the card, or in the formula docstring, that `beats_base` compares `closed.mean_f1`.
+    3. Make the stub LC path discriminating:
+       - Give the fused and base stub providers different open answers, for example an `(eyeball-i, "open")` answer table per salt.
+       - Give `StubJudge` a preference table keyed so the true preference is known.
+       - The golden must be an exact value that is **not 0.5**, and a position-unswap inversion must change it.
+    4. Add an invariant test: recompute the composite and the decision **from the card alone**, from `closed_ended`, `open_ended`, `executable` and `baselines` through `composite.compute`/`decide`, and assert they equal `composite.value` and `fidelity.decision`.
+
+- **[BLOCK] R2: `eval_hash` must cover the open-ended yardstick now that it is measured.**
+  - **Fix:**
+    1. When `open.lc_win_rate` is measured, set `scoring.judge_model_identity` to the judge's identity:
+       - stub: `"stub-judge/v1:" + sha256(canonical preferences table)`;
+       - real: `model_identity`.
+       Set `scoring.judge_rubric` to the rubric bytes. For StubJudge, use a constant rubric id string declared next to the class. Keep `"not_run"` only when open is `not_run`.
+    2. Put the bytes of the open-eval prompt set, meaning the eyeball file content PC judged, into `prompts`. For example, extend the joined payload with `open_eval=<the prompt lines>`.
+    3. Add pipeline-level tests:
+       - editing the eyeball file changes `eval_hash`;
+       - changing the StubJudge preference table changes `eval_hash`;
+       - the existing "different metrics, same yardstick → same hash" test still passes.
+
+- **[BLOCK] R3: The Buddy guard must match Buddy's model by identity in every supported configuration form.**
+  - **Where:** `preflight.py::_resolve_protected_identities` and `PreflightRefusal.__init__`'s invariant.
+  - **Fix:**
+    1. When a protected value is an absolute path to a directory containing `config.json`, build the `LocalModel` for it directly. Add a small helper such as `models.local_model_at(path)`. Do **not** route this through `resolve_model`, whose path ban exists for `domain.yaml`. Then key it by `model_identity`.
+    2. Check the invariant by identity, not by display name.
+    3. Replace the `SimpleNamespace`-only B6 tests with (or add) tests on **real tmp model dirs**, with Buddy configured as:
+       - a bare name;
+       - an absolute path;
+       - a byte-identical copy under another name.
+
+       In each case the judge is `resolve_model("ai-engineer")`, and Phase C is the largest and over budget. Assert that Buddy's directory is never in `drop`, and that the drop is the largest non-protected candidate.
+
+### ASK
+
+- **[ASK] A1:** `certify` should cross-check `context.json`'s `stub` against the per-phase `provider` stamps and refuse on disagreement. While B7 stands, it should refuse `stub: false` outright ("no non-stub build path exists in this sprint").
+- **[ASK] A3:** `build-report.md`'s eyeball section still renders `"(not generated in this generic certify path)"` × 10 for the student and base columns, although PC now generates exactly those outputs. Brief §7: "includes the 10 eyeball prompts with outputs". Persist PC's fused and base eyeball generations and render them.
+- **[ASK] A4:** `pipeline_hash` needs fixing in two places:
+  - it passes `training_hyperparams={"target": fidelity_target}`, which is not a training hyperparameter; record LoRA rank, lr, cycles, stop rule;
+  - `distill_params` lacks `renorm` and teacher decoding (§4.9).
+
+  `training_hash` has two problems:
+  - it omits the adapter;
+  - `_dir_content_hash` reads each file fully into memory. Switch to the streaming, cached `models.content_hash` before real fused weights exist.
+- **[ASK] A5:** derive the `decoding` recorded in `eval_hash` from what the phases actually used (record it in the phase outputs). Make the decoding test perturb the provider side.
+- **[ASK] A6:** fix the false "score IDENTICALLY" comments in `test_certify.py`. Assert the fused and base F1 values that make `KNOWN_ISSUE` the outcome there, so it is not a salt coincidence.
+- **[ASK] A7:** the executable `not_run` reason says "not available in this generic certify path". Say why: "no patch-generation task in sprint 1; see BACKLOG".
+- **[ASK] A9:** document that non-fast `verify` exits non-zero until chain re-derivation lands (Gate B). Have the CLI print a one-line explanation under `chain: not_checked`. Also give the `tampered` badge a style in `forge.html`; today it is just a class name with no CSS.
+- **[ASK] A10:** refresh the BACKLOG umbrella entry.
+  - Its "tokenizer parity hardcoded" and "`pipeline_hash` never called" lines are stale.
+  - Add these items:
+    - the `v1-open` COMPATIBLE cap;
+    - moving the open eval onto cert items;
+    - `residency: unmeasured` currently permits CERTIFIED;
+    - the spike harness has no real provider (round-1 ASK);
+    - the contamination scope ASK.
+
+### INFO
+
+- The `select_formula_id` precedence is right: all three executable checks `not_run` → `v1-open`; only `compiles` `not_run` → `v1-nc`.
+- The stub path legitimately ignores `model_path`, so "PC evaluates the fused student" is structurally true but behaviourally invisible under the stub. The closed-task tables are what differentiate fused from base.
+
+## Security findings (round 2, what I checked)
+
+- **Git config exec:** repro re-run against old and new argument sets (B8 above). Closed for every current call site.
+- **Stub laundering:** CLI repro re-run (B1 above). Closed for the environment-mismatch path. The forged-record path is ASK A1. That path is not a boundary, because it requires the key owner to edit a file.
+- **Tamper visibility:** metric edited after signing gives `card_hash: mismatch` and the `tampered` badge. Verified.
+- **Writes outside tmp during tests:** none, verified by the sentinel.
+- **Frozen surface:** the diff adds no `aerollm`/`AERO_` spelling outside `runtime_names.py`. The test files set `AEROLLM_MODEL` via `monkeypatch` only, and `arail.nucleus` still never writes `os.environ`.
+
+## Test coverage assessment (round 2)
+
+358 passed and 2 skipped; 18 seal tests pass with the real binary. Changed-line coverage was still not measured, and QA should report it.
+
+Round-1 tautological tests now real:
+- T-SEC-GIT-1 via the gpg test;
+- T-E2E-1 goldens (except LC);
+- B2's three tests;
+- B4's metric-invariance test.
+
+Still weak:
+- the B6 tests (name-only doubles), R3;
+- the LC golden (self-comparison), R1;
+- the decoding-change test (recorded side only), A5.
+
+## Tech debt delta (round 2)
+
+ARCHITECTURE §9 now lists item 9 (the orchestration umbrella). This round, I added to §4.9 and §9 item 7:
+- `v1-open` as a third formula, with its Gate B cap;
+- the open-eval-on-eyeball drift.
+
+`run_certify` doubled in size. Net debt is still **positive (significant)**, and it is now fully homed once A10 refreshes BACKLOG.
+
+## Required actions before merge (round 2)
+
+1. **R1:** make the card consistent and complete: open metric, baselines, a discriminating stub LC golden, and a test that recomputes the composite and decision from the card alone.
+2. **R2:** put the judge identity, rubric, and open-eval prompt bytes into `eval_hash`, with iff tests.
+3. **R3:** match protected Buddy models by identity for absolute-path configs, check the invariant by identity, and test on real model dirs.
+4. Resolve or ticket ASKs A1 and A3–A10, plus the open round-1 ASKs listed above. Tickets go in the BACKLOG umbrella.
+
+Then re-request architect review (round 3), which should be a short pass over R1–R3.
+
+**What QA should target first, once round 3 passes:**
+1. Card self-consistency: recompute the composite and decision from the card alone, and try hand-edited cards against `verify` and `/forge`.
+2. `eval_hash` iff over every yardstick input: templates, eyeball file, judge, decoding, cert set. Also confirm that metrics, paths and build id leave it unchanged.
+3. Preflight with Buddy configured in every form (bare name, alias, absolute path, byte-identical copy) on real model dirs.
+4. Stub-laundering variants: environment mismatch, a forged `context.json`, and a missing `fuse.json`.
+5. `verify` exit-code semantics.
+6. Changed-line coverage on `build.py` and `certify.py`.
