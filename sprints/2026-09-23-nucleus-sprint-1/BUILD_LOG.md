@@ -194,3 +194,74 @@ deltas, not open questions.
 5. `git diff 82ed6c78~1..82ed6c78` (the `/build` retirement commit) — the
    largest single diff by deletion count; confirm nothing outside its
    stated scope was swept up.
+
+## Review loop 1 (2026-09-23, REVIEW.md at commit `a7f91027`, verdict BLOCK)
+
+All ten BLOCK findings fixed, plus the ASK the review flagged as a
+required side effect (tests writing into the real checkout's
+`lab/data`). One atomic commit per finding, in this order:
+
+| Finding | Commit | What changed | Proving test |
+|---|---|---|---|
+| lab/data isolation (ASK, required side effect) | `2cc89e5b` | Autouse `tests/nucleus/conftest.py` fixture points `ARAIL_DATA_DIR`/`ARAIL_MODELS_DIR` (env + `arail.config`) and `arail.activity`'s `LOG_FILE`/singleton at a per-test tmp dir | Full `tests/nucleus` suite unchanged (324→324) with no writes into the checkout's real `lab/data/` |
+| B8 | `b31a16a9` | `_git_env.HARDENED_CONFIG_ARGS` neutralises `gpg.program`/`log.showSignature`/`core.pager`/`diff.external`/`core.sshCommand`, applied at every git invocation (`run_git` + `executable_kernel.py`'s two inline calls); `LOG_SAFETY_ARGS` added to `git log` | `test_hostile_repo_gpg_program_never_executes_during_log` — confirmed fails without the fix, passes with it |
+| B5 | `c377fff3` | `subsystem_routing_task` shows only the post-`:` description, never the gold subsystem prefix; `parse_closed_answer` does whole-token, answer-order (not `valid`-order) matching | `test_subsystem_routing_prompt_never_contains_the_gold_label`, `test_parse_closed_answer_negation_before_label_parses_as_negation` |
+| B6 | `1ae7ce81` | `protected` resolves Buddy's actual configured model names (`MODEL_NAME`, `buddy_deep_model_env_value()`), compared by `model_identity()`/name, not the literal `"Buddy"`; `_refuse` picks the largest *non-protected* candidate; `build.run`/`plan <slug>` resolve and pass models into preflight | `test_teacher_refusal_never_drops_buddys_own_deep_model`, `test_phase_c_never_drops_buddys_model_even_when_largest` |
+| B7 | `3d3faed8` | `build.run()` refuses non-stub builds immediately after loading the domain, before any lock/run dir/phase; BACKLOG's MLX entry expanded into an umbrella "Model Forge real-runtime wiring" ticket | `test_build_run_refuses_non_stub_up_front`, `test_cli_build_non_stub_exits_3` |
+| B1 | `19830f62` | `build.run()` records `{"stub": bool, "provider": ...}` in `context.json` at build start; `certify.run_certify()` derives `is_stub` from that record, never from the certify process's own env, and refuses on a build/certify mode mismatch | `test_certify_refuses_when_env_disagrees_with_build_record` — reproduces the review's exact repro |
+| B9 | `aaa74c59` | `fuse` phase records `{shard, version, shard_dir}` in its phase output; `certify` writes card/seal/report/lock into that exact `FORGE_ROOT`-rooted dir instead of a run-dir scratch path | `test_e2e_gate_a.py`'s card-location asserts, `verify <shard>@<ver>` (not just `verify <dir>`), and `/api/forge/cards` listing |
+| B2 | `2caf2fcd` | `VerifyResult.fast` distinguishes `--fast`'s legitimate "skipped" from a non-fast verify's honest "not_checked"/never-"match" chain; CLI recomputes `eval_hash` from `eval-config.lock` (missing lock = mismatch); `/forge` badge checks `card_hash` before signature/key | `test_non_fast_verify_never_reports_chain_match`, `test_cli_verify_non_fast_missing_lock_is_a_mismatch`, `test_verify_badge_reports_tampered_on_card_hash_mismatch` |
+| B4 | `e3d2232d` | `composite.FORMULA_STRINGS` is a constant per formula id (card + eval_hash both use it, never computed metric values); `prompts` hashes the real `PROMPT_TEMPLATES` bytes; `decoding` records the full `Decoding()` dataclass per role | `test_eval_hash_identical_for_different_metric_values_same_yardstick`, `test_eval_hash_changes_when_a_task_template_changes`, `test_eval_hash_changes_when_decoding_changes` |
+| B3 | `2b07ef8e` | PC scores the FUSED student (fuse's recorded `output_dir`) and separately the base student; `open.lc_win_rate` is real (position-randomized LC judge, stub path); `executable.*` stays honestly `not_run` (no patch-generation task exists this sprint) with a new `composite/v1-open` formula selected automatically so the composite is still computed from what's real; `beats_base` is a genuine comparison; `pipeline_hash`/`training_hash`/teacher identity are real; `tokenizer_parity` calls the real module or defaults `False` | `test_certify_card_has_no_placeholder_values` (asserts `not_run` executable, a real `pipeline_hash`, the constant formula string, and the genuinely-reached `KNOWN_ISSUE` decision) |
+| B10 | `886a0e1c` | `_stub_closed_answer_table` derives real, deterministically-imperfect stub answers from actual gold labels (no more hardcoded/unreachable metrics); `make_fixture_repo.py` forces `GIT_COMMITTER_DATE` so the fixture — and therefore every golden — is byte-identical across repeated builds | `test_e2e_gate_a.py`'s exact `closed_ended`/composite/decision asserts, plus the `eval-config.lock` recompute assert |
+
+**Full suite at the end of the loop:** `.venv/bin/pytest tests/nucleus -q`
+→ **344 passed, 2 skipped** (up from 324 passed, 2 skipped at review time;
++20 new/changed tests across the ten findings and the conftest fix), 0
+failed. `tests/portal/test_forge_viewer.py` (14 passed, +1 for B2's
+tampered-badge test) and the rest of the broader repo suite re-checked
+green except the four PRE-EXISTING failures BUILD_LOG already recorded
+(`test_health_refresh_probes_without_constructing_aerollm` and three
+`test_docs_routes.py` tests) plus two more, confirmed unrelated to this
+diff by inspection (not reproduced by any file this loop touched):
+`test_opencode_config_lifecycle.py::TestStartEnvVars::test_start_sets_OPENCODE_CONFIG_DIR_env`,
+`test_opencode_lifecycle.py::TestLogRotation::test_log_rotation_at_10mb`,
+`test_token_compliance.py::test_token_compliance_ratchet`.
+
+### Architect feedback required
+
+One item, flagged as a documented interpretation rather than a silent
+improvisation (proceeded past it rather than blocking the whole loop —
+see the builder-subagent protocol's note that partial completion with a
+flagged gap is preferred to stalling all ten findings):
+
+- **B3 fix item 7** ("wire the LC judge and executable checks into PC
+  for the stub path... otherwise mark them not_run") is under-specified
+  for `executable.patch_applies`/`checkpatch_clean` specifically: doing
+  so for real requires a model-generated PATCH for each cert item, and
+  no patch-generation task exists anywhere in this sprint's task-adapter
+  seam (only `cve_detection`/`subsystem_routing`/open explanation).
+  Building one from scratch is a real new capability (prompt design,
+  patch parsing, a plausible base-repo target), not a wiring fix, and
+  risks silent scope expansion under "no redesign."
+  **Resolution taken:** wired the LC judge for real (genuinely
+  achievable with existing `StubJudge`/`open_lc_judge.py` machinery —
+  no new capability needed), left `executable.*` honestly `not_run`
+  (the fix's own explicit fallback), and added a `composite/v1-open`
+  formula (closed + open only) selected automatically by the *same
+  existing mechanism* `select_formula_id` already uses to choose
+  v1-nc over v1 — so the composite is computed from what this sprint
+  genuinely measures instead of being permanently `NOT_COMPUTED`
+  (which would make B10's "reach a real decision" requirement
+  unsatisfiable). **Please confirm** `composite/v1-open` is an
+  acceptable minimal formula addition, or direct a different
+  resolution (e.g. explicitly deferring `executable.*` and its
+  composite entirely to Gate B, with Gate A capped at BETA/KNOWN_ISSUE
+  by construction).
+- Relatedly: since `achieved` and `fidelity.decision` are `type: number`
+  / a fixed 4-value enum in `spec/dna-card-v2.schema.json` (a frozen
+  wire contract), `composite.decide()`'s `NOT_EVALUATED` value is dead
+  code in practice — certify refuses (exit 3, no card written) instead
+  of ever writing a card with it, per B3 fix item 2's explicit "or
+  refuse certify" alternative. Flagged in case the architect intended
+  the schema to grow a fifth decision value instead.
