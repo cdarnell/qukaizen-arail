@@ -1753,3 +1753,76 @@ oversight.
 
 Required before Gate B / item 10. Verify on the M5 alongside the
 `requires_mlx` markers.
+
+---
+
+## `tests/nucleus` combined with the full root test suite in one pytest process is order-dependent
+
+**Filed by:** builder session, `sprints/2026-09-23-nucleus-sprint-1/BUILD_LOG.md` "Review loop 4 (F3)",
+2026-09-24. Originally reported as TEST_REPORT.md finding F3 (round 1, `90fa766d`); this entry carries the
+follow-up root-cause evidence and the fallback taken (`ARCHITECTURE.md` §7.2).
+
+**The symptom.** Running `pytest tests -q` (the whole repo, ~350 root `tests/test_*.py` files plus
+`tests/dbspec tests/eval tests/nucleus tests/portal tests/registry tests/router tests/setup_ladder`, one
+process) fails 18 tests that pass in isolation and pass when run alone: `test_r1_r3_chat_models.py` ×4,
+`test_aerollm_model_ready.py` ×3, `test_deep_default_and_tier.py` ×2, `test_model_ux_phase0_warmth_probe.py`
+×2, `test_qa_model_ux_memory_and_eject_fidelity.py` ×2, `test_qa_provider_dropdown_paranoid.py` ×2,
+`test_b1_cloud_gallery_contract.py` ×1, `test_runtime_profile_api.py::test_post_emits_activity_event` ×1,
+plus `test_cli_qa_edge.py::test_q1_restart_…` in one of two paired runs. They pass when the same list runs
+without `tests/nucleus` present, and `tests/nucleus` + all 18 victim files together (582 items) also pass —
+the trigger needs `tests/nucleus` **and** the full ~350-file root prefix at the same time.
+
+**What this loop confirmed, precisely (evidence a future session can start from):**
+
+1. **The actual exception**, captured by wrapping `arail.portal.app._get_primary_router` with a scratch
+   pytest plugin and running the exact failing ordering once: `ModelRouter.__init__` picks the `mlx` backend
+   (Apple Silicon auto-detect) and `AeroLLMBackend.__init__`-equivalent MLX loader calls
+   `os.getenv("MODEL_NAME", "mlx-community/Qwen2.5-3B-Instruct-4bit")`, which returns the live string
+   `"ai-engineer:latest"` — an Ollama tag, not a HuggingFace repo id — so `mlx_lm.utils._download` raises
+   `HFValidationError: Repo id must use alphanumeric chars, '-', '_' or '.' ...`. `api_chat_models`'s
+   `except Exception` fallback then returns a 3-key payload, and every victim test's assertion on the missing
+   keys (`deep`, `gallery`, `optional_backends`, ...) is what actually fails.
+2. **`tests/nucleus` does not do this.** `grep -rn "arail.portal\|arail.registry\|arail.router" src/arail/nucleus
+   tests/nucleus` → zero hits (one unrelated docstring mention), and neither `arail.nucleus` nor
+   `tests/nucleus` sets `MODEL_NAME`/`MODEL_BACKEND`/`AEROLLM_MODEL` anywhere (grep confirmed). A
+   `pytest_runtest_setup` hookwrapper plugin that snapshots `MODEL_NAME`/`MODEL_BACKEND`/`AEROLLM_MODEL`/
+   `QUEUELLM_MODEL`/`ARAIL_MODELS_DIR`/`ARAIL_DATA_DIR` **before each test's own fixtures run** (i.e., only a
+   real leak from the *previous* test would show up) found **zero** leaks anywhere across a full
+   `tests/nucleus`-only run (443 passed, 4 skipped, 14 xfailed).
+3. **The two real, non-monkeypatch writers of `MODEL_NAME`/`AEROLLM_MODEL` are both outside `arail.nucleus`,
+   in `arail.model_defaults.apply()` (`src/arail/model_defaults.py:76,82,85`) and
+   `arail.portal.app._export_registry_env()` (`src/arail/portal/app.py:6899,6903`, called from the FastAPI
+   startup handler, i.e. on every `TestClient(app)` lifespan start) — both are **intentional, documented bare
+   `os.environ[...] =` writes that bypass `monkeypatch`** ("`apply()` writes MODEL_NAME/AEROLLM_MODEL straight
+   to os.environ — by design... monkeypatch's own teardown can't undo it", `tests/test_model_defaults.py`'s
+   own `_clean_env` docstring, which documents this exact failure signature happening once before, fixed by a
+   restore-by-hand fixture in that one file only). `_export_registry_env()` stamps `MODEL_NAME` from the
+   process-lifetime `arail.registry` singleton's tier0 entry — if that singleton is ever left holding
+   `model_id="ai-engineer:latest"`/`backend="ollama_native"` (the fixture default several `tests/registry/*`
+   tests set up) at the moment some *other* test's `TestClient(app)` triggers a fresh startup event, the next
+   `MODEL_NAME` env write is unconditional and untracked by that test's own `monkeypatch`.
+4. **Given (2) and (3), the likely mechanism is not a leak owned by `tests/nucleus`.** It is a pre-existing
+   test-isolation gap in `arail.portal.app`/`arail.model_defaults`/`arail.registry`'s bare-`os.environ`/
+   process-singleton pattern, which `tests/nucleus`'s ~40 real-subprocess-spawning tests only *expose* by
+   shifting wall-clock/thread/GC scheduling enough for the race to land badly — matching TEST_REPORT.md F3's
+   own characterization ("a resource-class interaction... not a state leak I can attribute to a specific line
+   in `tests/nucleus`").
+
+**Why not fixed this session.** The actual fix belongs in `arail.portal.app`/`arail.registry`/
+`arail.model_defaults` (restore-by-hand cleanup around every bare `os.environ` write and/or a reliable
+per-test registry-singleton reset, mirroring `tests/test_model_defaults.py`'s own `_clean_env` fixture) — files
+outside this sprint's scope (`sprints/2026-09-23-nucleus-sprint-1/BUILD_LOG.md`'s plan). Landing that fix here
+would be scope drift into a pre-existing, cross-cutting test-hygiene defect that predates and is independent of
+Model Forge.
+
+**Fallback landed instead:** `ARCHITECTURE.md` §7.2 documents that `tests/nucleus` must always run as its own
+pytest invocation (which `.github/workflows/nucleus-tests.yml` already does — there is no CI job anywhere that
+runs the combined full suite as one process) and that `pytest tests -q` is a local diagnostic only, not a merge
+gate.
+
+**What a future sprint should do:** reproduce step 1's failing ordering with the scratch diagnostic plugin
+above (`_get_primary_router` wrapped to print the real exception) and step 3's leads; add a `monkeypatch`-safe
+or restore-by-hand-cleaned wrapper around `arail.model_defaults.apply()` and
+`arail.portal.app._export_registry_env()`'s env writes, and/or a `reset_registry()` autouse fixture at the
+root `tests/conftest.py` level (not just `tests/registry/`), so the registry singleton can never survive
+between tests regardless of which file touches it.

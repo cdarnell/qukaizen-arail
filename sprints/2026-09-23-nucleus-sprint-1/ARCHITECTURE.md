@@ -659,6 +659,43 @@ this MIT repo's fixtures). It contains:
 
 Split: cert_n = 20, dev 10 %, train ≈ 27.
 
+### 7.2 `tests/nucleus` runs in its own CI invocation, never merged into a whole-repo `pytest tests` run
+
+**Decided 2026-09-24** (SPRINT.md decisions log; TEST_REPORT.md finding F3; BUILD_LOG.md "Review loop 4"),
+**fallback (a)** taken after a time-boxed root-cause attempt did not land a fix inside `tests/nucleus`'s own
+conftest/tests.
+
+**What's true today.** `.github/workflows/nucleus-tests.yml` already only ever runs
+`tests/nucleus tests/portal/test_forge_viewer.py tests/portal/test_models_api.py tests/test_qa6_security_gate.py`
+in one job — it has never mixed `tests/nucleus` into a single `pytest tests` invocation with the whole repo's
+~350 other root test files. **There is no existing CI job anywhere in `.github/workflows/` that runs the full
+`pytest tests -q` suite as one invocation**; only QA and local developers do that by hand. So this fallback
+formalizes and future-proofs an isolation that already holds in CI, rather than fixing a currently-broken gate.
+
+**The rule going forward:** `tests/nucleus` MUST always be its own pytest invocation (its own CI job, or its own
+`pytest tests/nucleus ...` command locally) and MUST NOT be concatenated into one `pytest` process with the
+~350-file root `tests/test_*.py` prefix. Running `pytest tests -q` (the whole repo, one process) is a **local
+diagnostic tool only** — its result is not a merge gate, and 17–18 order-dependent failures in Chat/deep-runtime/
+activity tests are a **known, filed** interaction (see `sprints/BACKLOG.md`, "`tests/nucleus` combined with the
+full root test suite in one pytest process is order-dependent"), not a regression to chase on every PR.
+
+**Why this is a fallback, not a fix.** A one-session root-cause attempt (BUILD_LOG.md "Review loop 4 (F3)")
+traced the failure to a real, reproducible exception (`ModelRouter` construction failing inside
+`arail.portal.app._get_primary_router`, with `MODEL_NAME` resolving to a stray `ai-engineer:latest` and the
+`mlx` backend then trying to treat it as a HuggingFace repo id) and found the mechanism is **not** inside
+`tests/nucleus` or its conftest: `arail.nucleus` never imports `arail.portal`/`arail.registry`/`arail.router`
+and never touches `MODEL_NAME`/`AEROLLM_MODEL`, and an isolated leak-detection run confirmed `tests/nucleus`
+never leaves any of those variables set between its own tests, or into the tests immediately following it.
+The two confirmed non-monkeypatch, non-nucleus writers of `MODEL_NAME`/`AEROLLM_MODEL`
+(`arail.model_defaults.apply()` and `arail.portal.app._export_registry_env()`, both intentionally bare
+`os.environ[...] =` writes that bypass `monkeypatch`, per those modules' own docstrings) plus the process-lifetime
+`arail.registry` singleton are the likely real culprits, combined with the wall-clock/thread/subprocess load of
+`tests/nucleus`'s ~40 real-subprocess tests shifting scheduling enough to expose the pre-existing race — this
+matches TEST_REPORT.md F3's own "resource-class interaction, not a state leak `tests/nucleus` owns" finding.
+Fixing that root cause means changing `arail.portal.app`/`arail.registry` test-isolation hygiene, which is
+outside this sprint's file list and risks exactly the kind of scope drift the builder protocol forbids — filed
+instead as its own BACKLOG ticket carrying this evidence.
+
 ---
 
 ## 8. Salvage and retire plan (`/build`)
