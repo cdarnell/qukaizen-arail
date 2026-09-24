@@ -148,6 +148,37 @@ def test_gate_a_stub_pipeline_end_to_end(gate_a_env, monkeypatch):
     assert card["shard"] == shard
     assert card["version"] == fused_version
 
+    # B10 (2026-09-23 review): exact golden metric values, composite, and
+    # decision -- not "decision in the four known values" (tautological).
+    # These are the real, reproducible numbers this fixture produces
+    # (deterministic since make_fixture_repo.py forces GIT_COMMITTER_DATE,
+    # and build._stub_closed_answer_table derives wrong answers from a
+    # fixed hash of item_id, not randomness).
+    cve = card["closed_ended"]["cve_detection"]
+    assert cve["f1"] == pytest.approx(0.5)
+    assert cve["precision"] == pytest.approx(0.333333, abs=1e-5)
+    assert cve["recall"] == pytest.approx(1.0)
+    sub = card["closed_ended"]["subsystem_routing"]
+    assert sub["macro_f1"] == pytest.approx(0.720635, abs=1e-5)
+    assert card["composite"]["formula_id"] == "composite/v1-open"
+    assert card["composite"]["formula"] == "0.6*closed.mean_f1+0.4*open.lc_win_rate"
+    assert card["composite"]["value"] == pytest.approx(0.566191, abs=1e-5)
+    assert card["fidelity"]["achieved"] == pytest.approx(0.566191, abs=1e-5)
+    assert card["fidelity"]["decision"] == "CERTIFIED"
+    for name in ("compiles", "patch_applies", "checkpatch_clean"):
+        assert card["executable"][name]["status"] == "not_run"
+
+    # eval-config.lock recomputes to the card's eval_hash (B10 item 3).
+    from arail.nucleus.evals.hash import eval_hash as _recompute_eval_hash
+    from arail.nucleus.evals.hash import read_eval_config_lock
+
+    lock_inputs = read_eval_config_lock(forge_out / "eval-config.lock")
+    assert _recompute_eval_hash(lock_inputs) == card["eval_hash"]
+
+    # Stub is never ledgered (T-STUB-2 / T-LEDGER-3).
+    ledger_path = gate_a_env["data_dir"] / "nucleus" / "CERTIFIED_SHARDS.md"
+    assert not ledger_path.exists() or shard not in ledger_path.read_text()
+
     report_text = (forge_out / "build-report.md").read_text()
     import re
 

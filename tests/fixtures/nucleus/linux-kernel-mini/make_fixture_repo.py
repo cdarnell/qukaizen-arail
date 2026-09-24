@@ -58,10 +58,12 @@ class FixtureInfo:
     cutoff: str
 
 
-def _run(args, cwd):
-    result = subprocess.run(["git", *args], cwd=str(cwd), capture_output=True,
-                            env={"GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null",
-                                "HOME": str(cwd), "PATH": "/usr/bin:/bin"})
+def _run(args, cwd, *, extra_env=None):
+    env = {"GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null",
+          "HOME": str(cwd), "PATH": "/usr/bin:/bin"}
+    if extra_env:
+        env.update(extra_env)
+    result = subprocess.run(["git", *args], cwd=str(cwd), capture_output=True, env=env)
     if result.returncode != 0:
         raise RuntimeError(f"git {' '.join(args)} failed: {result.stderr.decode(errors='replace')}")
     return result
@@ -80,7 +82,16 @@ def build(root: Path, *, cutoff: str = CUTOFF) -> FixtureInfo:
 
     (repo_dir / "MAINTAINERS").write_text(MAINTAINERS_TEMPLATE)
     _run(["add", "MAINTAINERS"], repo_dir)
-    _run(["commit", "-q", "-m", "Add MAINTAINERS"], repo_dir)
+    # B10 (2026-09-23 review): a fixed committer date, not just author date
+    # (below), so this commit's SHA -- and therefore every downstream
+    # item_id-derived ordering (evals/splits.py's sha-based dev/cert
+    # sampling) -- is byte-identical across repeated fixture builds, not
+    # just within a single build. Without this, "known, non-trivial
+    # rational" goldens would drift build to build.
+    _init_date = "2026-01-01T00:00:00+00:00"
+    _run(["commit", "-q", "-m", "Add MAINTAINERS", f"--date={_init_date}",
+         "--author=Fixture Author <fixture@example.invalid>"], repo_dir,
+        extra_env={"GIT_COMMITTER_DATE": _init_date})
 
     cutoff_date = datetime.fromisoformat(cutoff).replace(tzinfo=timezone.utc)
     # 30 commits strictly before cutoff (1 per day going back), 20 strictly
@@ -106,12 +117,16 @@ def build(root: Path, *, cutoff: str = CUTOFF) -> FixtureInfo:
         fname.write_text(f"/* fixture change {i} */\nint fixture_{i}(void) {{ return {i}; }}\n")
         _run(["add", str(fname.relative_to(repo_dir))], repo_dir)
         env_date = date.strftime("%Y-%m-%dT%H:%M:%S+00:00")
+        # B10 (2026-09-23 review): GIT_COMMITTER_DATE is forced to the same
+        # timestamp as --date= (author date) so the commit SHA -- and thus
+        # every item_id derived from it -- is fully deterministic across
+        # repeated fixture builds. git_kernel.py's extractor only ever
+        # reads %aI (author date); the committer date is forced purely so
+        # the commit hash itself stops depending on wall-clock "now".
         _run(["commit", "-q", "-m", subject,
              f"--date={env_date}",
-             "--author=Fixture Author <fixture@example.invalid>"], repo_dir)
-        # git_kernel.py's extractor reads %aI (author date), which --date=
-        # sets directly -- the committer date (defaults to "now") is never
-        # read downstream, so it doesn't need forcing.
+             "--author=Fixture Author <fixture@example.invalid>"], repo_dir,
+            extra_env={"GIT_COMMITTER_DATE": env_date})
         sha = _run(["rev-parse", "HEAD"], repo_dir).stdout.decode().strip()
         if is_cve:
             cve_shas.append(sha)

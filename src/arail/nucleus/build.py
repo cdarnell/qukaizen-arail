@@ -87,15 +87,19 @@ def _resolve_preflight_models(domain) -> Dict[str, Any]:
 
 
 def _provider_for_role(role: str, model_name: str, *, run_dir: Path, top_n: int,
-                       model_path: "Path | str | None" = None):
+                       model_path: "Path | str | None" = None, answers: "dict | None" = None):
     """``model_path``, when given, is used directly instead of resolving
     ``model_name`` under ARAIL_MODELS_DIR (B3, 2026-09-23 review) — PC's
     fused-student role passes fuse's own recorded output_dir here, since
-    the fused shard has no ARAIL_MODELS_DIR alias/name of its own."""
+    the fused shard has no ARAIL_MODELS_DIR alias/name of its own.
+    ``answers``, in stub mode, is a real (item_id, role) -> text table
+    (B10: tuned from real gold labels so closed-task F1 is a known
+    non-trivial rational instead of the stub's generic unparseable
+    fallback text)."""
     if _is_stub():
         from arail.nucleus.providers.stub import StubProvider
 
-        return StubProvider(role=role)
+        return StubProvider(role=role, answers=answers)
 
     from arail.nucleus.providers.queuellm import QueueLLMProvider
 
@@ -276,7 +280,45 @@ def _phase_fuse(context: dict) -> dict:
 _CLOSED_TASKS = None  # populated lazily inside _phase_eval (avoids a module-load-order import)
 
 
-def _score_closed_tasks(cert_items, *, run_dir: Path, model_name: str = "", model_path=None):
+def _stub_closed_answer_table(cert_items, *, salt: str, wrong_every: int) -> dict:
+    """B10 (2026-09-23 review): a real ``(item_id, role) -> text`` answer
+    table, built from the cert set's actual gold labels, deterministically
+    WRONG on 1-in-``wrong_every`` items (a stable hash of item_id, never
+    randomness) — so closed-task F1 is a known, reproducible, non-trivial
+    rational (not 0.0 from the stub's generic unparseable fallback text,
+    and not a hardcoded metric — the F1 is still computed for real from
+    these generated answers against gold)."""
+    import hashlib
+
+    from arail.nucleus.evals.tasks.linux_kernel import cve_detection_task, subsystem_routing_task
+
+    answers: dict = {}
+
+    cve_prompts, cve_gold = cve_detection_task(cert_items)
+    for p, gold_label in zip(cve_prompts, cve_gold):
+        h = int(hashlib.sha256(f"{salt}:{p.item_id}".encode()).hexdigest(), 16)
+        wrong = (h % wrong_every) == 0
+        answer = ("not" if gold_label == "cve" else "cve") if wrong else gold_label
+        answers[(p.item_id, "cve_detection")] = answer
+
+    sub_prompts, sub_gold = subsystem_routing_task(cert_items)
+    subsystems = sorted(set(sub_gold)) or ["unknown"]
+    for p, gold_label in zip(sub_prompts, sub_gold):
+        h = int(hashlib.sha256(f"{salt}:{p.item_id}".encode()).hexdigest(), 16)
+        wrong = (h % wrong_every) == 0
+        if wrong:
+            alternatives = [s for s in subsystems if s != gold_label] or [gold_label]
+            answer = alternatives[h % len(alternatives)]
+        else:
+            answer = gold_label
+        # subsystem_routing's parser reads text.split(":")[0] -- match that shape.
+        answers[(p.item_id, "subsystem_routing")] = f"{answer}: fixture answer"
+
+    return answers
+
+
+def _score_closed_tasks(cert_items, *, run_dir: Path, model_name: str = "", model_path=None,
+                        answers: "dict | None" = None):
     """Runs every closed task against ONE resolved model (fused shard or
     unfused base — caller picks via model_name/model_path) and returns
     (rows, mean_f1). Shared by the fused-student and base-student passes
@@ -293,7 +335,8 @@ def _score_closed_tasks(cert_items, *, run_dir: Path, model_name: str = "", mode
         (subsystem_routing_task, None),
     ):
         prompts, gold = task_fn(cert_items)
-        provider = _provider_for_role("student", model_name, run_dir=run_dir, top_n=1, model_path=model_path)
+        provider = _provider_for_role("student", model_name, run_dir=run_dir, top_n=1, model_path=model_path,
+                                      answers=answers)
         try:
             generations = provider.generate(prompts, Decoding())
         finally:
@@ -372,8 +415,13 @@ def _phase_eval(context: dict) -> dict:
     fuse_output = json.loads(fuse_output_path.read_text())
     fused_model_dir = fuse_output["output_dir"]
 
-    fused_rows, fused_mean_f1 = _score_closed_tasks(cert_items, run_dir=run_dir, model_path=fused_model_dir)
-    base_rows, base_mean_f1 = _score_closed_tasks(cert_items, run_dir=run_dir, model_name=domain.student_base)
+    fused_answers = _stub_closed_answer_table(cert_items, salt="fused-v1", wrong_every=5) if _is_stub() else None
+    base_answers = _stub_closed_answer_table(cert_items, salt="base-v1", wrong_every=2) if _is_stub() else None
+
+    fused_rows, fused_mean_f1 = _score_closed_tasks(cert_items, run_dir=run_dir, model_path=fused_model_dir,
+                                                    answers=fused_answers)
+    base_rows, base_mean_f1 = _score_closed_tasks(cert_items, run_dir=run_dir, model_name=domain.student_base,
+                                                  answers=base_answers)
 
     open_metrics = _score_open_lc(domain, fused_model_dir=fused_model_dir, run_dir=run_dir)
 
