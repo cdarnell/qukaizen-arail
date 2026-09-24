@@ -257,3 +257,59 @@ def test_certify_refuses_on_contamination(staged_context, tmp_path, monkeypatch)
     # No card written anywhere under the run dir.
     rd = build_mod._run_dir(staged_context)
     assert not any(rd.rglob("dna-card.yaml"))
+
+
+# ── R1 (2026-09-23 review round 2): the signed card must carry, and be
+# CONSISTENT WITH, every number its composite and decision are computed
+# from -- recompute both straight from the card's own headline blocks
+# (closed_ended, open_ended, executable, baselines) and assert they match
+# the signed composite.value / fidelity.decision exactly ──────────────
+
+def test_card_composite_and_decision_recompute_from_the_card_alone(staged_context, tmp_path, monkeypatch):
+    monkeypatch.setenv("NUCLEUS_SIGNING_KEY_PATH", str(tmp_path / "signing.ed25519"))
+
+    _run_phase(staged_context, "PA")
+    _run_phase(staged_context, "PA2")
+    _run_phase(staged_context, "PB")
+    _run_phase(staged_context, "fuse")
+    _run_phase(staged_context, "PC")
+
+    result = certify_mod.run_certify(staged_context["build_id"], context=staged_context)
+    from arail.nucleus.cards.dna_v2 import load_card
+
+    card = load_card(Path(result["card_dir"]) / "dna-card.yaml")
+
+    # open_ended must actually be populated (not the old hardcoded
+    # not_run) -- PC measured open.lc_win_rate this run.
+    open_entry = card["open_ended"]["eyeball_explanation"]
+    assert "lc_win_rate_vs_base" in open_entry
+    assert open_entry["lc_win_rate_vs_base"] != pytest.approx(0.5)  # not the old un-discriminating golden
+    assert "ci95" in open_entry and len(open_entry["ci95"]) == 2
+
+    # baselines must carry the base_student score beats_base was computed
+    # against.
+    assert "base_student" in card["baselines"]
+    base_mean_f1 = card["baselines"]["base_student"]["closed.mean_f1"]
+
+    from arail.nucleus.evals import closed as closed_mod
+    from arail.nucleus.evals import composite as composite_mod
+
+    closed_mean_f1 = closed_mod.mean_f1(list(card["closed_ended"].values()))
+
+    reconstructed_metrics = {
+        "closed": {"mean_f1": closed_mean_f1},
+        "open": {"lc_win_rate": open_entry["lc_win_rate_vs_base"]},
+        "executable": {
+            name: (composite_mod.NOT_RUN if row.get("status") == "not_run" else row["rate"])
+            for name, row in card["executable"].items()
+        },
+    }
+    recomputed = composite_mod.compute(reconstructed_metrics, formula_id=card["composite"]["formula_id"])
+    assert recomputed.value == card["composite"]["value"]
+
+    recomputed_decision = composite_mod.decide(
+        recomputed.value, card["fidelity"]["target"],
+        beats_base=(closed_mean_f1 > base_mean_f1),
+        residency_status=card["residency"]["status"],
+    )
+    assert recomputed_decision == card["fidelity"]["decision"]

@@ -351,47 +351,120 @@ def _score_closed_tasks(cert_items, *, run_dir: Path, model_name: str = "", mode
     return rows, closed.mean_f1(rows)
 
 
+def _open_answer_table(prompts, *, salt: str) -> dict:
+    """Deterministic per-item open-eval completion text, DIFFERENT between
+    the fused and base stub providers (R1, 2026-09-23 review round 2):
+    previously both roles fell through to StubProvider's identical generic
+    fallback text ("[stub:good] deterministic answer for <item_id>", the
+    same string for every role), so the LC judge had nothing to
+    distinguish and the golden lc_win_rate came out at exactly the
+    position-randomization average, 0.5 -- a value that can't detect a
+    broken A/B un-swap. Keyed by (item_id, "open") to match the Prompt
+    role _score_open_lc uses.
+
+    The trailing "." padding (0-6 chars, hashed from item_id AND salt, so
+    it differs between the fused and base tables) gives the LC judge's
+    length-control regression a genuinely varying per-item length delta
+    to fit -- a constant-length template made every item's delta
+    identical, which makes the regression's design matrix singular (no
+    length signal to control for) and the Newton-Raphson fit silently
+    stall at b0=b1=0, i.e. lc_win_rate=0.5, REGARDLESS of who actually
+    won each item. This is cosmetic padding, not a quality signal --
+    open_winner_table (not length) is the only thing that decides which
+    side wins."""
+    import hashlib
+
+    answers = {}
+    for p in prompts:
+        pad_n = int(hashlib.sha256(f"open-pad:{salt}:{p.item_id}".encode()).hexdigest(), 16) % 7
+        answers[(p.item_id, "open")] = f"[stub:open:{salt}] explanation for {p.item_id}" + ("." * pad_n)
+    return answers
+
+
+def _open_winner_table(prompts, *, wrong_every: int) -> dict:
+    """item_id -> "model"|"baseline": the ground-truth winner for this
+    stub run, a deterministic (hash-of-item_id, never random) function so
+    the golden is reproducible -- "model" (fused) wins most items but not
+    all (1-in-``wrong_every`` goes to "baseline"), so lc_win_rate is a
+    known, non-trivial rational, never 0.0/1.0/0.5 by construction."""
+    import hashlib
+
+    table = {}
+    for p in prompts:
+        h = int(hashlib.sha256(f"open-winner:{p.item_id}".encode()).hexdigest(), 16)
+        table[p.item_id] = "baseline" if (h % wrong_every) == 0 else "model"
+    return table
+
+
 def _score_open_lc(domain, *, fused_model_dir, run_dir: Path):
     """Pairwise LC-judged fused-vs-base on the domain's eyeball prompts
-    (B3 item 7: wired for the stub path, which has a fixture judge --
-    StubJudge -- available; the real-runtime judge path is unwired this
-    sprint, same as every other real-mode gap tracked in the "Model Forge
-    real-runtime wiring" BACKLOG entry, and B7 already refuses non-stub
-    builds up front). Genuinely computed from generated text through
-    evals/open_lc_judge.py's real position-randomization + LC-regression
-    math — never a constant."""
+    (B3 item 7: wired for the stub path; the real-runtime judge path is
+    unwired this sprint, same as every other real-mode gap tracked in the
+    "Model Forge real-runtime wiring" BACKLOG entry, and B7 already
+    refuses non-stub builds up front). Genuinely computed from generated
+    text through evals/open_lc_judge.py's real position-randomization +
+    LC-regression math -- never a constant.
+
+    R1 (2026-09-23 review round 2): the fused and base stub providers now
+    generate DIFFERENT text (_open_answer_table), and the judge used here
+    is a content-based oracle that knows the true per-item winner
+    (_open_winner_table) -- not StubJudge's old "always answer A"
+    default, whose win rate was exactly 0.5 regardless of what either
+    side actually said, so it could never catch a broken position-swap.
+    """
     from arail.nucleus.evals import open_lc_judge
     from arail.nucleus.providers.base import Prompt
 
     if not _is_stub():
         return {"lc_win_rate": "not_run", "reason": "real-runtime judge not wired this sprint"}
 
-    from arail.nucleus.providers.stub import StubJudge
-
     lines = [ln for ln in domain.eval_eyeball_prompts.read_text().splitlines() if ln.strip()][:10]
     prompts = [Prompt(item_id=f"eyeball-{i}", text=ln, role="open") for i, ln in enumerate(lines)]
 
-    provider_fused = _provider_for_role("student", "", run_dir=run_dir, top_n=1, model_path=fused_model_dir)
+    winner_table = _open_winner_table(prompts, wrong_every=4)
+    fused_answers = _open_answer_table(prompts, salt="fused-v1")
+    base_answers = _open_answer_table(prompts, salt="base-v1")
+
+    provider_fused = _provider_for_role("student", "", run_dir=run_dir, top_n=1, model_path=fused_model_dir,
+                                        answers=fused_answers)
     try:
         fused_gens = provider_fused.generate(prompts, Decoding())
     finally:
         provider_fused.close()
-    provider_base = _provider_for_role("student", domain.student_base, run_dir=run_dir, top_n=1)
+    provider_base = _provider_for_role("student", domain.student_base, run_dir=run_dir, top_n=1,
+                                       answers=base_answers)
     try:
         base_gens = provider_base.generate(prompts, Decoding())
     finally:
         provider_base.close()
 
+    fused_text_by_id = {g.item_id: g.text for g in fused_gens}
+    base_text_by_id = {g.item_id: g.text for g in base_gens}
+
     pairs = [
-        open_lc_judge.PairItem(item_id=p.item_id, text_model=fg.text, text_baseline=bg.text)
-        for p, fg, bg in zip(prompts, fused_gens, base_gens)
+        open_lc_judge.PairItem(item_id=p.item_id, text_model=fused_text_by_id[p.item_id],
+                               text_baseline=base_text_by_id[p.item_id])
+        for p in prompts
     ]
-    judge = StubJudge()
-    judged = open_lc_judge.randomize_and_judge(pairs, seed=7, judge_fn=judge.judge)
+
+    # A content-based judge: it knows the ground-truth winner PER ITEM
+    # (winner_table), not per letter -- so it answers correctly whichever
+    # side (A or B) the winning text lands on after randomize_and_judge's
+    # per-item position swap. A bug that failed to un-swap the position
+    # correctly would make this judge disagree with the recorded winner
+    # on roughly half the items, which changes lc_win_rate -- unlike the
+    # old always-answer-"A" judge, whose win rate was 0.5 regardless of
+    # what either side actually said.
+    def _judge_fn(item_id: str, text_a: str, text_b: str) -> str:
+        winner_text = fused_text_by_id[item_id] if winner_table[item_id] == "model" else base_text_by_id[item_id]
+        return "A" if text_a == winner_text else "B"
+
+    judged = open_lc_judge.randomize_and_judge(pairs, seed=7, judge_fn=_judge_fn)
     len_model = {g.item_id: len(g.text) for g in fused_gens}
     len_baseline = {g.item_id: len(g.text) for g in base_gens}
     result = open_lc_judge.score(judged, len_model=len_model, len_baseline=len_baseline, seed=42)
-    return {"lc_win_rate": result.lc_win_rate, "n": result.n, "invalid_rate": result.invalid_rate}
+    return {"lc_win_rate": result.lc_win_rate, "n": result.n, "invalid_rate": result.invalid_rate,
+           "ci95": list(result.ci95)}
 
 
 def _phase_eval(context: dict) -> dict:

@@ -211,6 +211,47 @@ def parity(student: LocalModel, teacher: LocalModel) -> Parity:
     return _parity(student.path, teacher.path)
 
 
+def local_model_at(path) -> LocalModel:
+    """Build a LocalModel directly from an operator-supplied absolute
+    directory path -- never routed through resolve_model(), whose '/' ban
+    exists specifically so a domain.yaml can never carry a path (§4.4).
+    This is for callers that already hold a real absolute path, such as
+    preflight's Buddy-protection resolution (R3, 2026-09-23 review round
+    2): Buddy's frozen deep-runtime model env var (see runtime_names.py)
+    is a supported absolute-path configuration too, and Buddy's model
+    must be recognized by content identity in that form, not only as a
+    bare ARAIL_MODELS_DIR name."""
+    resolved = Path(path).resolve()
+    config_path = resolved / "config.json"
+    if not resolved.is_dir() or not config_path.is_file():
+        raise DomainConfigError(f"no model config.json found at {resolved}")
+
+    config = json.loads(config_path.read_text())
+    weight_files = _weight_files(resolved)
+    weights_bytes = sum(f.stat().st_size for f in weight_files)
+    params_est_b = _estimate_params_b(config, weights_bytes)
+    is_moe = _is_moe(config)
+
+    return LocalModel(name=resolved.name, path=resolved, config=config,
+                      params_est_b=params_est_b, is_moe=is_moe, weights_bytes=weights_bytes)
+
+
+def best_effort_identity(name: str) -> str:
+    """The content identity of *name* when it resolves to a real, on-disk
+    model under ARAIL_MODELS_DIR, or a plain "unresolved:<name>" fallback
+    when it doesn't (never a fake hash) -- shared by certify.py's
+    pipeline_hash/teacher_hash provenance and build.py's PC-phase judge-
+    identity check (R2/ASK judge-identity, 2026-09-23 review round 2),
+    which previously duplicated this exact logic as a private nested
+    function in certify.py only."""
+    if not name or name == "auto":
+        return "unresolved:auto"
+    try:
+        return model_identity(resolve_model(name))
+    except Exception:  # noqa: BLE001 -- identity falls back to the name, never raises
+        return f"unresolved:{name}"
+
+
 def select_teacher(
     auto: bool,
     student: LocalModel,

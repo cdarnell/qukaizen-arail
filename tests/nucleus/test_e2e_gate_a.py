@@ -162,11 +162,18 @@ def test_gate_a_stub_pipeline_end_to_end(gate_a_env, monkeypatch):
     assert sub["macro_f1"] == pytest.approx(0.720635, abs=1e-5)
     assert card["composite"]["formula_id"] == "composite/v1-open"
     assert card["composite"]["formula"] == "0.6*closed.mean_f1+0.4*open.lc_win_rate"
-    assert card["composite"]["value"] == pytest.approx(0.566191, abs=1e-5)
-    assert card["fidelity"]["achieved"] == pytest.approx(0.566191, abs=1e-5)
+    assert card["composite"]["value"] == pytest.approx(0.713231, abs=1e-5)
+    assert card["fidelity"]["achieved"] == pytest.approx(0.713231, abs=1e-5)
     assert card["fidelity"]["decision"] == "CERTIFIED"
     for name in ("compiles", "patch_applies", "checkpatch_clean"):
         assert card["executable"][name]["status"] == "not_run"
+
+    # R1 (2026-09-23 review round 2): open_ended and baselines must be
+    # populated with what the composite/decision actually consumed --
+    # never the old hardcoded not_run/empty pair.
+    open_entry = card["open_ended"]["eyeball_explanation"]
+    assert open_entry["lc_win_rate_vs_base"] != pytest.approx(0.5)
+    assert "base_student" in card["baselines"]
 
     # eval-config.lock recomputes to the card's eval_hash (B10 item 3).
     from arail.nucleus.evals.hash import eval_hash as _recompute_eval_hash

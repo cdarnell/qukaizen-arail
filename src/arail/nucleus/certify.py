@@ -251,6 +251,31 @@ def run_certify(build_id: str, *, publish_row: bool = False, context: dict = Non
         except Exception as exc:  # noqa: BLE001 — a failed parity check is False, not a certify crash
             tokenizer_parity_detail = f"parity check failed: {exc}"
 
+    # R1 (2026-09-23 review round 2): the card must carry, consistently,
+    # every number its composite and decision are computed from --
+    # previously `open_ended` was hardcoded not_run even on a run where PC
+    # genuinely measured open.lc_win_rate (which the composite/v1-open
+    # formula was already consuming), and `baselines` was omitted even
+    # though `beats_base` is computed from base_closed.mean_f1 below.
+    open_metrics = metrics.get("open", {})
+    if isinstance(open_metrics.get("lc_win_rate"), (int, float)):
+        open_ended_block = {
+            "eyeball_explanation": {
+                "lc_win_rate_vs_base": open_metrics["lc_win_rate"],
+                "n": open_metrics.get("n", 0),
+                "ci95": list(open_metrics.get("ci95", [0.0, 0.0])),
+            }
+        }
+    else:
+        open_ended_block = {
+            "eyeball_explanation": not_run(open_metrics.get("reason", "open eval not run")),
+        }
+
+    # `beats_base` (above) compares closed.mean_f1 -- record the base
+    # value it was compared against so the card is self-consistent
+    # without a reader having to trust an un-shown number.
+    baselines_block = {"base_student": {"closed.mean_f1": base_closed["mean_f1"]}} if base_closed is not None else {}
+
     card = build_card(
         shard=domain.shard, version=fused_version,
         built=datetime.now(timezone.utc).isoformat(),
@@ -275,7 +300,8 @@ def run_certify(build_id: str, *, publish_row: bool = False, context: dict = Non
                        "temporal_leak": contamination_report.temporal_leak},
         corpus={"sources": stage_result.manifest["sources"]},
         closed_ended=closed_ended,
-        open_ended={"patch_explanation": not_run("judge not wired in this generic certify path")},
+        open_ended=open_ended_block,
+        baselines=baselines_block,
         executable={
             k: (not_run("not available in this generic certify path") if v == composite_mod.NOT_RUN
                else {"rate": v, "n": len(cert_items)})
