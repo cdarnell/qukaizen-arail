@@ -55,16 +55,11 @@ def test_stub_judge_deterministic_preferences(monkeypatch):
     assert judge.judge("item-2", "a", "b") == "A"  # default fallback
 
 
-def test_stub_capabilities():
-    import os
-
-    os.environ["ARAIL_NUCLEUS_STUB"] = "1"
-    try:
-        caps = StubProvider().capabilities()
-        assert caps.logprobs_topn is True
-        assert caps.max_top_n >= 20
-    finally:
-        del os.environ["ARAIL_NUCLEUS_STUB"]
+def test_stub_capabilities(monkeypatch):
+    monkeypatch.setenv("ARAIL_NUCLEUS_STUB", "1")
+    caps = StubProvider().capabilities()
+    assert caps.logprobs_topn is True
+    assert caps.max_top_n >= 20
 
 
 def test_stub_close_is_idempotent(monkeypatch):
