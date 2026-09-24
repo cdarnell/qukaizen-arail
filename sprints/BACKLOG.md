@@ -1642,9 +1642,11 @@ only reason they are not merge-blocking.
     prompts + teacher outputs (`extract/*.npz` and teacher text).
   - `contamination.py` holds every train doc's n-gram set in memory:
     O(train), not O(cert), which misses the "1 M lines < 1 GB" target.
-  - There is no boundary test at exactly 8/800 = 0.01.
+  - Boundary: QA added `test_contamination_exactly_one_percent_blocks`
+    (8/800 blocks, as designed).
   - Dates are compared as strings, so a timestamped date on the cutoff
-    day counts as a leak.
+    day counts as a leak. Strict xfail:
+    `test_contamination_timestamp_on_cutoff_day_is_not_a_leak`.
 
 ### Docs and UX (not Gate-B-blocking)
 

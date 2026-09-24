@@ -1353,3 +1353,51 @@ def test_first_build_without_a_cert_set_fails_at_pa2_after_phase_a(tmp_path, mon
     with pytest.raises(RefusedByPolicy) as exc_info:
         _run_phase(ctx, "PA2")                     # ...before the missing cert set surfaces
     assert "cert" in str(exc_info.value).lower()
+
+
+# ═════════════════════════════════════════════════════════════════════
+# 12. Brief §7 "contamination blocks >= 1 %": the exact boundary and the
+#     date-compare edge (round-1 ASK, BACKLOG umbrella "Contamination")
+# ═════════════════════════════════════════════════════════════════════
+
+_LONG = " ".join(f"word{i}" for i in range(30))
+
+
+def _checker_with_dups(n_dups, *, n_cert=800, train_date="2026-01-01"):
+    from arail.nucleus.evals import contamination as cm
+
+    cert = [{"id": f"c{i}", "date": "2026-07-01", "text": f"unique cert text number {i} " + _LONG}
+            for i in range(n_cert)]
+    checker = cm.ContaminationChecker(cert, cutoff="2026-06-01")
+    for i in range(n_dups):
+        checker.observe_train_doc(f"unique cert text number {i} " + _LONG, date=train_date)
+    checker.observe_train_doc("an unrelated train document with its own words " * 3, date=train_date)
+    return checker.check()
+
+
+def test_contamination_exactly_one_percent_blocks():
+    report = _checker_with_dups(8)
+    assert report.overlap == 8 / 800
+    assert report.contaminated is True
+
+
+def test_contamination_just_under_one_percent_passes():
+    report = _checker_with_dups(99, n_cert=10_000)
+    assert report.overlap == 99 / 10_000
+    assert report.contaminated is False
+
+
+def test_contamination_train_item_after_cutoff_is_a_temporal_leak():
+    report = _checker_with_dups(0, train_date="2026-06-02")
+    assert report.temporal_leak == "2026-06-02"
+    assert report.contaminated is True
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "Round-1 ASK, still open (BACKLOG umbrella 'Contamination scope'): dates are "
+    "compared as strings, so a train item timestamped ON the cutoff day "
+    "('2026-06-01T12:00:00Z' > '2026-06-01') is reported as a temporal leak "
+    "and would block certify."))
+def test_contamination_timestamp_on_cutoff_day_is_not_a_leak():
+    report = _checker_with_dups(0, train_date="2026-06-01T12:00:00Z")
+    assert report.temporal_leak == "none"
