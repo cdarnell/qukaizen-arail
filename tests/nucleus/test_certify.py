@@ -140,6 +140,38 @@ def test_certify_card_has_no_placeholder_values(staged_context, tmp_path, monkey
     assert result["decision"] == "KNOWN_ISSUE"
 
 
+# ── ASK forged-context (2026-09-23 review round 2): context.json's
+# "stub" flag is hand-editable, but the per-phase provider stamps aren't
+# -- a forged "stub: false" over stub-stamped phase output must refuse
+# just like a genuine build/certify mismatch ────────────────────────
+
+def test_certify_refuses_on_forged_context_stub_flag(staged_context, tmp_path, monkeypatch):
+    monkeypatch.setenv("NUCLEUS_SIGNING_KEY_PATH", str(tmp_path / "signing.ed25519"))
+
+    _run_phase(staged_context, "PA")
+    _run_phase(staged_context, "PA2")
+    _run_phase(staged_context, "PB")
+    _run_phase(staged_context, "fuse")
+    _run_phase(staged_context, "PC")
+
+    # Every phase output really did stamp "provider": "stub" (written by
+    # the phase itself). Forge context.json to claim stub=False while
+    # unsetting the env var to match it -- so B1's build/certify env-match
+    # check alone would pass.
+    forged_context = dict(staged_context)
+    forged_context["stub"] = False
+    monkeypatch.delenv("ARAIL_NUCLEUS_STUB", raising=False)
+
+    with pytest.raises(RefusedByPolicy, match="phase output disagrees"):
+        certify_mod.run_certify(staged_context["build_id"], context=forged_context)
+
+    rd = build_mod._run_dir(staged_context)
+    assert not any(rd.rglob("dna-card.yaml"))
+    from arail.nucleus.cards import certified_models
+    ledger = certified_models._default_local_path(build_mod._nucleus_data(staged_context))
+    assert not ledger.exists() or "kernel" not in ledger.read_text()
+
+
 def test_certify_refuses_on_build_record_missing_stub_field(staged_context, tmp_path, monkeypatch):
     monkeypatch.setenv("NUCLEUS_SIGNING_KEY_PATH", str(tmp_path / "signing.ed25519"))
     _run_phase(staged_context, "PA")

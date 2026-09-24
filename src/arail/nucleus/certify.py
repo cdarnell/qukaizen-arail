@@ -63,6 +63,33 @@ def run_certify(build_id: str, *, publish_row: bool = False, context: dict = Non
         )
     is_stub = build_was_stub
 
+    # ASK forged-context (2026-09-23 review round 2): context.json's
+    # top-level "stub" flag is cheap to hand-edit after the fact. Every
+    # phase that actually ran also stamped its OWN "provider" into
+    # run_dir/phase_output/<phase>.json (B1's per-phase auditable stamp,
+    # written by the subprocess that ran that phase, not by whoever calls
+    # certify later) — cross-check every already-run phase's stamp
+    # against what context.json now claims. A forged "stub: false" with
+    # stub-stamped phase output (or the reverse) must refuse exactly like
+    # a genuine build/certify environment mismatch does: exit 3, no card,
+    # no ledger.
+    phase_output_dir = rd / "phase_output"
+    mismatched_phases = []
+    for phase in build_mod._WORKER_PHASES:
+        phase_output_path = phase_output_dir / f"{phase}.json"
+        if not phase_output_path.is_file():
+            continue
+        phase_provider = json.loads(phase_output_path.read_text()).get("provider")
+        phase_was_stub = phase_provider == "stub"
+        if phase_was_stub != is_stub:
+            mismatched_phases.append((phase, phase_provider))
+    if mismatched_phases:
+        raise RefusedByPolicy(
+            f"certify refused: context.json claims stub={is_stub} but phase "
+            f"output disagrees for {mismatched_phases} — certify must reflect "
+            f"what each phase actually recorded, not a hand-edited record"
+        )
+
     from arail.nucleus.corpus.stage import load_items, load_staged
     from arail.nucleus.evals.splits import CertStore, split
 
