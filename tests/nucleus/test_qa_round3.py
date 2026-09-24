@@ -1410,3 +1410,31 @@ def test_contamination_train_item_after_cutoff_is_a_temporal_leak():
 def test_contamination_timestamp_on_cutoff_day_is_not_a_leak():
     report = _checker_with_dups(0, train_date="2026-06-01T12:00:00Z")
     assert report.temporal_leak == "none"
+
+
+# ═════════════════════════════════════════════════════════════════════
+# 13. QA round 2 (F3 root cause): the nucleus-owned half of the full-suite
+#     order dependency
+# ═════════════════════════════════════════════════════════════════════
+
+import importlib.util as _ilu  # noqa: E402
+import sys  # noqa: E402
+
+
+@pytest.mark.skipif(_ilu.find_spec("mlx_lm") is None,
+                    reason="only meaningful where mlx_lm is installed (Apple Silicon dev box); "
+                           "CI's ubuntu runner has no mlx_lm, so this would trivially pass there")
+@pytest.mark.xfail(strict=True, reason=(
+    "F3 (TEST_REPORT round 2, BACKLOG 'tests/nucleus combined with the full root suite'): "
+    "preflight._probe_mlx_lm_version() does a real `import mlx_lm` in-process. On a Mac "
+    "with mlx_lm installed, that leaves mlx_lm in sys.modules for the rest of the pytest "
+    "process; router.core._is_importable('mlx_lm') then returns True where it otherwise "
+    "would not, ModelRouter auto-detects 'mlx', and /api/chat/models falls back to its "
+    "3-key error payload. Probe the version without importing (importlib.util.find_spec + "
+    "importlib.metadata.version)."))
+def test_mlx_lm_version_probe_does_not_import_mlx_lm_into_the_process(monkeypatch):
+    for name in [m for m in sys.modules if m == "mlx_lm" or m.startswith("mlx_lm.")]:
+        monkeypatch.delitem(sys.modules, name)
+    row = pf._probe_mlx_lm_version()
+    assert row.available != "absent"          # it really did find mlx_lm on this machine
+    assert "mlx_lm" not in sys.modules

@@ -1826,3 +1826,47 @@ or restore-by-hand-cleaned wrapper around `arail.model_defaults.apply()` and
 `arail.portal.app._export_registry_env()`'s env writes, and/or a `reset_registry()` autouse fixture at the
 root `tests/conftest.py` level (not just `tests/registry/`), so the registry singleton can never survive
 between tests regardless of which file touches it.
+
+**QA round 2 correction (2026-09-24, TEST_REPORT.md "Round 2"). Point 4 above is wrong: there *is* a
+nucleus-owned trigger. It is a module, not an env var.** Step 2's snapshot covered env vars only. A
+`sys.modules` snapshot finds it:
+
+- **Nucleus imports `mlx_lm` in-process.** In the failing ordering, `mlx_lm` enters `sys.modules` during
+  `tests/nucleus/test_build_phases.py::test_build_run_end_to_end`. `build.run()` →
+  `preflight.run_preflight()`'s default capability probes → `preflight._probe_mlx_lm_version()` does a real
+  `import mlx_lm`, and it stays imported for the rest of the process. In the non-nucleus ordering, `mlx_lm`
+  is **not** in `sys.modules` when the first victim starts.
+- **The `MODEL_NAME` leak is not the differentiator.** The stray `MODEL_NAME="ai-engineer:latest"` write
+  happens **identically in both orderings**, after
+  `tests/test_aerollm_compute_source.py::test_select_aerollm_allowed_airgapped_when_built`.
+  `tests/test_models_boot_endpoint.py` resets it to `llama-ai-eng` before `test_r1_r3_chat_models.py` runs, so
+  at the r1_r3 victims `MODEL_NAME` is `llama-ai-eng` in both orderings.
+- **Decisive experiment.** Take the non-nucleus prefix (which passes) plus the victim file:
+  - put a no-op test first → **0/4** r1_r3 victims fail;
+  - put a single test that only calls `arail.nucleus.preflight._probe_mlx_lm_version()` first → **4/4** fail.
+
+So the nucleus-side condition is the preloaded `mlx_lm`, not scheduling or GC.
+
+**Mechanism:**
+
+1. With `mlx_lm` already in `sys.modules`, `router.core._is_importable("mlx_lm")` is a no-op success.
+2. `ModelRouter._auto_detect()` then returns `mlx`.
+3. The MLX backend is constructed from whatever `MODEL_NAME` holds (an Ollama tag either way) and raises.
+4. `api_chat_models` falls back to its 3-key payload.
+
+**Still undetermined:** why a *fresh* `import mlx_lm` at that point in the non-nucleus ordering does not lead
+to the same outcome. Most likely something in the root prefix makes the fresh import fail, or caches an
+earlier router. Either way it is outside nucleus.
+
+**Pinned by** `tests/nucleus/test_qa_round3.py::test_mlx_lm_version_probe_does_not_import_mlx_lm_into_the_process`
+(strict xfail; skipped where `mlx_lm` is absent, e.g. CI's ubuntu runner).
+
+**Two fixes, either sufficient for the nucleus half:**
+
+- **(a) production:** probe the version without importing: `importlib.util.find_spec("mlx_lm")` plus
+  `importlib.metadata.version("mlx_lm")`. This is also cheaper for `nucleus plan` on minimalist, since a real
+  `import mlx_lm` costs ~1.5 s and initialises Metal.
+- **(b) tests:** have `build.run` tests pass `capability_probes` or monkeypatch the probe.
+
+The fallback in §7.2 remains valid for CI: CI runs `tests/nucleus` alone, on ubuntu, where `_auto_detect`
+never picks `mlx`.
