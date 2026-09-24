@@ -344,44 +344,35 @@ def test_certify_refuses_on_contamination(staged_context, tmp_path, monkeypatch)
     assert not any(rd.rglob("dna-card.yaml"))
 
 
-# ── R1 (2026-09-23 review round 2): the signed card must carry, and be
-# CONSISTENT WITH, every number its composite and decision are computed
-# from -- recompute both straight from the card's own headline blocks
-# (closed_ended, open_ended, executable, baselines) and assert they match
-# the signed composite.value / fidelity.decision exactly ──────────────
+# ── R1 (2026-09-23 review round 2) / R3-A2 (round 3): the signed card
+# must carry, and be CONSISTENT WITH, every number its composite and
+# decision are computed from -- recompute both straight from the card's
+# own headline blocks (closed_ended, open_ended, executable, baselines,
+# composite.formula_id) and assert they match the signed values exactly.
+# Round 3 found the first version called decide() WITHOUT formula_id,
+# which only agreed because the unit card is KNOWN_ISSUE (cap
+# irrelevant); on a cap-reaching card it recomputed CERTIFIED against
+# the card's COMPATIBLE. It also only asserted lc != 0.5, which a broken
+# A/B un-swap (lc = 0.0) passes. ─────────────────────────────────────
 
-def test_card_composite_and_decision_recompute_from_the_card_alone(staged_context, tmp_path, monkeypatch):
-    monkeypatch.setenv("NUCLEUS_SIGNING_KEY_PATH", str(tmp_path / "signing.ed25519"))
+# The exact open-eval golden for the 10-prompt eyeball fixture: the stub
+# winner table (build._open_winner_table, wrong_every=4) + the per-item
+# length padding, through open_lc_judge's real randomize/un-swap + LC fit.
+# A broken position un-swap gives 0.0 / ci95 [0.0, 0.6] (REVIEW round 3).
+LC_GOLDEN = 0.8676
+LC_GOLDEN_CI95 = [0.5, 1.0]
 
-    _run_phase(staged_context, "PA")
-    _run_phase(staged_context, "PA2")
-    _run_phase(staged_context, "PB")
-    _run_phase(staged_context, "fuse")
-    _run_phase(staged_context, "PC")
 
-    result = certify_mod.run_certify(staged_context["build_id"], context=staged_context)
-    from arail.nucleus.cards.dna_v2 import load_card
-
-    card = load_card(Path(result["card_dir"]) / "dna-card.yaml")
-
-    # open_ended must actually be populated (not the old hardcoded
-    # not_run) -- PC measured open.lc_win_rate this run.
-    open_entry = card["open_ended"]["eyeball_explanation"]
-    assert "lc_win_rate_vs_base" in open_entry
-    assert open_entry["lc_win_rate_vs_base"] != pytest.approx(0.5)  # not the old un-discriminating golden
-    assert "ci95" in open_entry and len(open_entry["ci95"]) == 2
-
-    # baselines must carry the base_student score beats_base was computed
-    # against.
-    assert "base_student" in card["baselines"]
-    base_mean_f1 = card["baselines"]["base_student"]["closed.mean_f1"]
-
+def assert_card_recomputes_from_itself(card):
+    """Shared with the Gate A e2e test. Returns (recomputed_value,
+    recomputed_decision) for callers that want to assert more."""
     from arail.nucleus.evals import closed as closed_mod
     from arail.nucleus.evals import composite as composite_mod
 
+    open_entry = card["open_ended"]["eyeball_explanation"]
     closed_mean_f1 = closed_mod.mean_f1(list(card["closed_ended"].values()))
-
-    reconstructed_metrics = {
+    base_mean_f1 = card["baselines"]["base_student"]["closed.mean_f1"]
+    reconstructed = {
         "closed": {"mean_f1": closed_mean_f1},
         "open": {"lc_win_rate": open_entry["lc_win_rate_vs_base"]},
         "executable": {
@@ -389,12 +380,108 @@ def test_card_composite_and_decision_recompute_from_the_card_alone(staged_contex
             for name, row in card["executable"].items()
         },
     }
-    recomputed = composite_mod.compute(reconstructed_metrics, formula_id=card["composite"]["formula_id"])
-    assert recomputed.value == card["composite"]["value"]
+    # The formula is selected from the card's own executable block, and
+    # must agree with the one the card says it used.
+    assert composite_mod.select_formula_id(reconstructed) == card["composite"]["formula_id"]
+    assert composite_mod.formula_string(card["composite"]["formula_id"]) == card["composite"]["formula"]
 
-    recomputed_decision = composite_mod.decide(
+    recomputed = composite_mod.compute(reconstructed, formula_id=card["composite"]["formula_id"])
+    assert recomputed.value == card["composite"]["value"]
+    assert card["fidelity"]["achieved"] == card["composite"]["value"]
+
+    decision = composite_mod.decide(
         recomputed.value, card["fidelity"]["target"],
         beats_base=(closed_mean_f1 > base_mean_f1),
         residency_status=card["residency"]["status"],
+        formula_id=card["composite"]["formula_id"],
     )
-    assert recomputed_decision == card["fidelity"]["decision"]
+    assert decision == card["fidelity"]["decision"]
+    return recomputed.value, decision
+
+
+def _certify_card(staged_context):
+    for phase in ("PA", "PA2", "PB", "fuse", "PC"):
+        _run_phase(staged_context, phase)
+    result = certify_mod.run_certify(staged_context["build_id"], context=staged_context)
+    from arail.nucleus.cards.dna_v2 import load_card
+
+    return load_card(Path(result["card_dir"]) / "dna-card.yaml")
+
+
+def test_card_composite_and_decision_recompute_from_the_card_alone(staged_context, tmp_path, monkeypatch):
+    monkeypatch.setenv("NUCLEUS_SIGNING_KEY_PATH", str(tmp_path / "signing.ed25519"))
+    card = _certify_card(staged_context)
+
+    open_entry = card["open_ended"]["eyeball_explanation"]
+    assert open_entry["lc_win_rate_vs_base"] == LC_GOLDEN
+    assert open_entry["ci95"] == LC_GOLDEN_CI95
+    assert open_entry["n"] == 10
+    assert "base_student" in card["baselines"]
+
+    _value, decision = assert_card_recomputes_from_itself(card)
+    assert decision == "KNOWN_ISSUE"  # this fixture's fused student loses to its base
+
+
+def test_card_recompute_holds_on_a_compatible_by_cap_card(staged_context, tmp_path, monkeypatch):
+    """Same invariant on a card whose decision is COMPATIBLE *only because
+    of* the v1-open cap -- the case the round-2 test could not see."""
+    monkeypatch.setenv("NUCLEUS_SIGNING_KEY_PATH", str(tmp_path / "signing.ed25519"))
+
+    original = build_mod._stub_closed_answer_table
+
+    def _fused_nearly_perfect(cert_items, *, salt, wrong_every):
+        if salt == "fused-v1":
+            wrong_every = 1_000_003  # effectively never wrong
+        return original(cert_items, salt=salt, wrong_every=wrong_every)
+
+    monkeypatch.setattr(build_mod, "_stub_closed_answer_table", _fused_nearly_perfect)
+    card = _certify_card(staged_context)
+
+    assert card["open_ended"]["eyeball_explanation"]["lc_win_rate_vs_base"] == LC_GOLDEN
+    assert card["composite"]["formula_id"] == "composite/v1-open"
+    assert card["fidelity"]["achieved"] >= card["fidelity"]["target"]
+    assert card["fidelity"]["decision"] == "COMPATIBLE"
+
+    value, decision = assert_card_recomputes_from_itself(card)
+    assert decision == "COMPATIBLE"
+
+    # Discrimination check: dropping formula_id (the round-2 bug) gives a
+    # DIFFERENT decision on this card, so the helper above really does
+    # depend on passing it.
+    from arail.nucleus.evals import closed as closed_mod
+    from arail.nucleus.evals import composite as composite_mod
+
+    closed_mean_f1 = closed_mod.mean_f1(list(card["closed_ended"].values()))
+    without_formula = composite_mod.decide(
+        value, card["fidelity"]["target"],
+        beats_base=closed_mean_f1 > card["baselines"]["base_student"]["closed.mean_f1"],
+        residency_status=card["residency"]["status"])
+    assert without_formula == "CERTIFIED"
+
+
+def test_broken_position_unswap_moves_the_lc_golden(staged_context, tmp_path, monkeypatch):
+    """Mutation check for the LC golden (REVIEW round 3): a
+    randomize_and_judge that forgets to un-swap positions (model_won =
+    verdict == "A") must NOT reproduce LC_GOLDEN -- otherwise pinning the
+    golden proves nothing about the un-swap."""
+    monkeypatch.setenv("NUCLEUS_SIGNING_KEY_PATH", str(tmp_path / "signing.ed25519"))
+    from arail.nucleus.evals import open_lc_judge
+
+    def _broken(items, *, seed, judge_fn):
+        import random
+
+        out = []
+        for idx, item in enumerate(items):
+            rng = random.Random(seed ^ idx)
+            model_first = rng.random() < 0.5
+            a, b, order = ((item.text_model, item.text_baseline, ("model", "baseline")) if model_first
+                           else (item.text_baseline, item.text_model, ("baseline", "model")))
+            verdict = judge_fn(item.item_id, a, b).strip().upper()
+            out.append(open_lc_judge.JudgedPair(item.item_id, order, verdict, verdict == "A"))
+        return out
+
+    monkeypatch.setattr(open_lc_judge, "randomize_and_judge", _broken)
+    card = _certify_card(staged_context)
+    lc = card["open_ended"]["eyeball_explanation"]["lc_win_rate_vs_base"]
+    assert lc != LC_GOLDEN
+    assert lc == 0.0

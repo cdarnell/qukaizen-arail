@@ -175,8 +175,17 @@ def test_gate_a_stub_pipeline_end_to_end(gate_a_env, monkeypatch):
     # populated with what the composite/decision actually consumed --
     # never the old hardcoded not_run/empty pair.
     open_entry = card["open_ended"]["eyeball_explanation"]
-    assert open_entry["lc_win_rate_vs_base"] != pytest.approx(0.5)
+    # R3-A2 (REVIEW round 3): pin the exact LC golden (a broken A/B
+    # un-swap gives 0.0, which "!= 0.5" let through) and recompute the
+    # composite AND the decision -- with formula_id, so the v1-open cap
+    # is honoured -- from the signed card alone.
+    from tests.nucleus.test_certify import LC_GOLDEN, LC_GOLDEN_CI95, assert_card_recomputes_from_itself
+
+    assert open_entry["lc_win_rate_vs_base"] == LC_GOLDEN
+    assert open_entry["ci95"] == LC_GOLDEN_CI95
     assert "base_student" in card["baselines"]
+    _value, recomputed_decision = assert_card_recomputes_from_itself(card)
+    assert recomputed_decision == "COMPATIBLE"
 
     # eval-config.lock recomputes to the card's eval_hash (B10 item 3).
     from arail.nucleus.evals.hash import eval_hash as _recompute_eval_hash
