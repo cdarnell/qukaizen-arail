@@ -1503,103 +1503,251 @@ implementation instead of two that could drift.
 
 ---
 
-## Model Forge real-runtime wiring (umbrella: MLX training cycle, teacher select, parity, logprob probe, residency, judge, executable checks, hashes, provenance)
+## Model Forge real-runtime wiring (umbrella: MLX training cycle, teacher select, logprob probe, residency, judge, executable checks, hashes, provenance, Gate B preconditions)
 
 **Filed by:** builder session, sprints/2026-09-23-nucleus-sprint-1
-BUILD_LOG.md "Deviations from the architecture" (MLX training cycle,
-commit 18) and REVIEW.md review-loop-1 B3/B7/tech-debt-delta
-(2026-09-23, everything else below) — not itself named in
-ARCHITECTURE.md §9 at design time; §9 "Added" item 9 (added in review
-loop 1) points here.
+(BUILD_LOG.md deviation 8, the MLX training cycle, commit 18), expanded
+by REVIEW.md rounds 1–3. It is ARCHITECTURE.md §9 "Added" items 9 and 10.
+**Refreshed 2026-09-23 by QA** (REVIEW.md round 3, ASK A10 / R3-A10):
+stale lines were dropped, round-3 tickets were added, and each open item
+carries its QA test reference from TEST_REPORT.md where one exists.
 
-**What's still unwired for a real (non-stub) build, beyond the MLX
-training cycle detailed below:**
+**Status as of the refresh.** Gate A (stub pipeline) is proven. Every
+item below is required before Gate B / item 10 unless marked otherwise.
+While B7 stands, `build.run()` refuses any non-stub build up front, so
+none of these gaps can produce a signed real card today. That is the
+only reason they are not merge-blocking.
 
-- **Teacher auto-select.** `domain.teacher_model` can be `"auto"`, but
-  `build.py` never calls `models.select_teacher()` — `PA`/`PA2` resolve
-  `context.get("teacher_name", "")`, which is never written to context,
-  so a real (non-stub) build would fail inside Phase A with a misleading
-  "model '' not found" error. B7 (review loop 1) makes this refuse up
-  front instead, with a clear message, but doesn't wire selection itself.
-- **Tokenizer parity** (`tokenizer_parity.py`) is implemented and unit
-  tested but never called from `build.py`/`certify.py`; the card's
-  `tokenizer_parity`/`tokenizer_parity_detail` fields are hardcoded.
-- **The logprob capability probe** (`providers/queuellm.py`'s
-  `probe_logprobs_capability`) is never called outside its own tests.
-- **The residency sampler** (`residency.py`, classifier side is real and
-  tested) never actually runs during a build; `certify.py` hardcodes
-  `residency_status="unmeasured"`.
-- **The LC judge and executable checks** (`open_lc_judge.py`,
-  `executable_kernel.py`) are real, tested modules, but the generic
-  (non-Gate-A-fixture) certify path in `build.py`'s `_phase_eval` never
-  calls either — they report `not_run` unconditionally outside the Gate A
-  test's own fixture wiring.
-- **`pipeline_hash`/`training_hash`/`teacher_hash`.** `evals/hash.py`'s
-  `pipeline_hash()` is implemented and tested but never called from
-  `certify.py`; `training_hash`/`teacher_hash` were literal placeholder
-  strings until B3 (review loop 1) wired `training_hash` for the stub
-  path — a real (content-hash) `teacher_hash` still needs
-  `models.content_hash()` wired in.
-- **Runtime provenance** (`runtime_names.runtime_provenance()`) is
-  implemented and tested but never called by the pipeline; a certified
-  card never records which `aerollm_api` build (bundle vs local rebuild)
-  actually ran.
+### Resolved since the original filing (removed from the list)
 
-**What a future sprint should do:** wire each of the above into
-`build.py`'s real-mode phase bodies and `certify.py`'s card assembly, in
-roughly this order: teacher auto-select (unblocks a real Phase A),
-tokenizer parity + logprob probe (preflight/capability rows), the MLX
-training cycle (below), residency sampling during PB/PC, judge +
-executable checks in the generic PC path, then the three hash fields and
-runtime provenance in certify. This is required before Gate B / item 10
-can run for real (`ARAIL_NUCLEUS_STUB` unset) — verify each piece on the
-M5 alongside the `requires_mlx` markers.
+- `tokenizer_parity` is now called from `certify.py` whenever both the
+  student and a concretely named teacher resolve. It defaults to `False`
+  with a reason for `teacher: auto`.
+- `pipeline_hash()` is now called from `certify.py`.
+- `training_hash` is a real content hash of the fuse output dir.
+- The LC judge is wired into PC for the stub path, with the judge ≠
+  teacher/student-base identity check before generation.
+
+### Still unwired for a real (non-stub) build
+
+- **Teacher auto-select.** `build.py` never calls
+  `models.select_teacher()`. `PA`/`PA2` resolve
+  `context.get("teacher_name", "")`, which is never written.
+- **Logprob capability probe.** `providers/queuellm.py`'s
+  `probe_logprobs_capability` is never called outside its own tests.
+- **MLX training cycle.** Detailed in the subsection below.
+- **Residency sampler.** The `residency.py` classifier is real, but no
+  sampler runs during a build, and `certify.py` hardcodes
+  `residency_status="unmeasured"`. See the decision item below: today
+  `unmeasured` does not block any decision.
+- **Real judge path.** `_score_open_lc` returns `not_run` when not stub.
+  Also: `fused_student_identity` is not passed to
+  `assert_judge_identity_distinct`.
+- **Executable checks.** No patch-generation task exists, so
+  `patch_applies`/`checkpatch_clean` are always `not_run`, and
+  `composite/v1-open` is auto-selected (capped at COMPATIBLE, §4.9).
+  Retire `v1-open` once patch generation exists. Also fix the `not_run`
+  reason text (round-2 **A7**): today it reads "not available in this
+  generic certify path"; it should say "no patch-generation task in
+  sprint 1; see BACKLOG".
+- **Open eval on cert items.** The LC judge runs on the 10 eyeball
+  prompts only. Move it onto cert items before a `patch_explanation`
+  entry is published (round-2 A10 list).
+- **Runtime provenance.** `runtime_names.runtime_provenance()` is never
+  called. It also hashes `aerollm_api/__init__.py` instead of the
+  extension `.so`, so `source` always reads `local-build` (round 1).
+- **`teacher_hash`.** It is still `best_effort_identity` (a cheap
+  identity or `unresolved:<name>`). Wire `models.content_hash()`.
+
+### Hash and yardstick precision (round-2 A4/A5)
+
+- **A4, `pipeline_hash`:** `training_hyperparams={"target":
+  fidelity_target}` is not a training hyperparameter. Record LoRA rank,
+  lr, cycles, and stop rule. `distill_params` lacks `renorm` and teacher
+  decoding.
+- **A4, `training_hash`:** it omits the adapter. `_dir_content_hash`
+  reads every file fully into memory; switch to the streaming, cached
+  `models.content_hash` before real fused weights exist.
+- **A5:** the `decoding` recorded in `eval_hash` is `Decoding()` at
+  certify time, not what the phases actually used. Record it in the
+  phase outputs and hash that. The existing decoding test perturbs only
+  the recorded side.
+- **Eyeball bytes read at certify time** (round-3 INFO). They are
+  hashed at certify, but PC judged them at PC time, so an edit in
+  between makes `eval_hash` describe prompts PC never judged. Hash them
+  into `metrics.json` at PC. QA pins the current behaviour:
+  `test_eval_hash_follows_eyeball_file_edited_between_pc_and_certify`
+  (xfail).
+- `decision_rule_id` stays `decision_rule/v1` even though `decide()`
+  gained the v1-open cap. That is acceptable because the cap keys on the
+  hashed `composite_formula_id`; say so in the §4.9 text.
+
+### Round-3 tickets
+
+- **R3-A3, LC estimator degenerate cases** (§9 item 10).
+  - `open_lc_judge.score` returns **0.5** whenever Δlen has zero
+    variance: all equal lengths, or a constant delta, including 10/10
+    wins. The 2×2 Hessian is singular on iteration 1.
+  - It returns **1.0** under quasi-separation at n = 10.
+  - Fix: fall back to the intercept-only fit (= raw win rate) when
+    `std(Δlen) == 0`, and add Firth/ridge regularisation or an explicit
+    `unreliable` flag under separation.
+  - QA pins all four probe cases as strict xfails in
+    `tests/nucleus/test_qa_round3.py` (`test_lc_*_degenerate_*`).
+- **R3-A4, preflight's protected-Buddy source mismatch** (§9 item 10).
+  - `runtime_names.buddy_deep_model_env_value()` prefers
+    `QUEUELLM_MODEL`, but `router/backends.py`'s `AeroLLMBackend` reads
+    only `AEROLLM_MODEL`.
+  - With `QUEUELLM_MODEL=<other>` and `AEROLLM_MODEL=<Buddy>`, preflight
+    advises dropping Buddy's actual model.
+  - With both unset, the backend default `Qwen2.5-7B-Instruct-4bit`
+    (also the `ai-engineer` judge target) is unprotected.
+  - Both are advisory text only (`nucleus plan` "WOULD REFUSE — Drop:
+    …"); nothing is evicted.
+  - Fix: protect both env values, plus the backend default when the
+    configured tier's deep backend is live.
+  - Also: `PreflightRefusal.__init__` still asserts the invariant on
+    display names against raw env strings. Check it by identity or
+    remove it.
+  - QA strict xfails: `test_preflight_protects_aerollm_model_when_queuellm_model_differs`,
+    `test_preflight_protects_backend_default_when_env_unset`,
+    `test_plan_output_never_advises_dropping_buddy_under_env_mismatch`.
+- **R3-A5, stub-laundering residuals.**
+  - Certify's stamp cross-check `continue`s past a missing
+    `phase_output/<phase>.json`. With `context.json` forged to
+    `stub: false` and every stamp deleted except a forged `fuse.json`,
+    the card is signed with the lab key and ledgered.
+  - Fix: refuse any missing `_WORKER_PHASES` stamp, and refuse
+    `stub: false` outright while B7 stands.
+  - Variant (b), all stamps forged, is the key-owner-can-sign-anything
+    case, not a key boundary, but the B7 refusal closes it too.
+  - QA strict xfails: `test_certify_refuses_when_phase_stamps_deleted`,
+    `test_certify_refuses_stub_false_while_b7_stands`.
+- **`run_certify` length.** 428 lines after three loops (§9 item 10).
+  Extract `_eval_hash_inputs`, `_assemble_card`, `_provenance_hashes`.
+
+### Decision and evaluation honesty
+
+- **`residency: unmeasured` permits CERTIFIED.** `decide()` caps only on
+  `violated`. Until the sampler runs, a non-v1-open card reaches
+  CERTIFIED with residency never measured. Decide whether `unmeasured`
+  caps at COMPATIBLE. QA pins current behaviour in
+  `test_decide_unmeasured_residency_does_not_cap`.
+- **Spike harness has no real provider** (round 1). `spike.py`'s real
+  path refuses, so the Gate B harness can't run on the M5 as-is. B3
+  "passes" via `classify([])` = `unmeasured`. B3 must never read "pass"
+  when residency was unmeasured on a real run.
+- **Contamination scope** (round 1):
+  - `certify.py` feeds only raw train corpus items; §4.9 requires
+    prompts + teacher outputs (`extract/*.npz` and teacher text).
+  - `contamination.py` holds every train doc's n-gram set in memory:
+    O(train), not O(cert), which misses the "1 M lines < 1 GB" target.
+  - There is no boundary test at exactly 8/800 = 0.01.
+  - Dates are compared as strings, so a timestamped date on the cutoff
+    day counts as a leak.
+
+### Docs and UX (not Gate-B-blocking)
+
+- **A9:** non-fast `verify` can never exit 0 while `chain` is
+  `not_checked`, including for a trusted, untampered card. Document
+  this in `docs/nucleus.md` and print a one-line explanation under
+  `chain: not_checked`. Give the `tampered` badge a style in
+  `forge.html`. QA pins the exit code in
+  `test_cli_verify_non_fast_exits_3_even_when_everything_checkable_matches`.
+- **`--new-cert-version`** is undocumented in `docs/nucleus.md`, and
+  there is no preflight "cert set present" row, so a first build fails
+  at PA2, after Phase A.
+- **`/forge` on minimalist:** without `cryptography`, every badge reads
+  `invalid`. Render a neutral `unchecked` badge instead.
+- **`seal.py`:**
+  - The key file's owner is not checked (§6 #35 says "0600, owner").
+  - A malformed `public_key_hex` raises outside the `try`, so it
+    becomes exit 1 "internal error" instead of `signature: invalid`.
+    QA narrowed this: a malformed `signature_hex` is already handled.
+    Strict xfail: `test_malformed_public_key_hex_reports_invalid_exit_3`.
+- **Round-2 A6:** remove the false "score IDENTICALLY" comments in
+  `tests/nucleus/test_certify.py`. The fused and base stubs differ;
+  KNOWN_ISSUE there is fused 0.0625 < base 0.4167 mean F1.
+- **`baselines.base_student."closed.mean_f1"`** is written unrounded,
+  while every other card float has 6 dp. This is cosmetic (round-3 INFO).
+
+### Found by QA (2026-09-23, TEST_REPORT.md), all LOW
+
+- **F-QA-3, `$`-anchored validators accept a trailing newline.**
+  - Affected: `paths._BUILD_ID_RE`/`_SHARD_RE`/`_SEMVER_RE`,
+    `domain._SLUG_RE`, and `forge_api`'s copies. All use `re.match(r"^…$")`.
+  - No traversal is possible, but newline-bearing dir names can be minted.
+  - Fix: use `re.fullmatch` or `\Z`.
+  - Strict xfail: `test_validators_reject_trailing_newline`.
+- **F-QA-4, `build-report.md` is not covered by the seal.** `/forge`
+  renders it under the card's badge, so a hand-edited report still
+  shows `trusted`. Hash it into the card (or gate_results), or label it
+  "unsigned" in the viewer. Pinned by
+  `test_edited_build_report_is_not_covered_by_the_seal`.
+- **F-QA-5, `nucleus verify` never reads `seal.json`.** It checks only
+  the card's embedded `signed:` block, so a corrupted `seal.json` (the
+  file `qkz isotope verify` reads) goes unnoticed. Compare the two, or
+  verify both. Pinned by
+  `test_nucleus_verify_reads_the_card_seal_not_seal_json`.
+- **F-QA-6, `verify <shard>@<ver>` skips shard/semver validation**, so
+  `../../x@y` resolves outside FORGE_ROOT. It's read-only and
+  operator-supplied today, but must be fixed before the deferred MCP
+  tools pass model-chosen targets. Strict xfail:
+  `test_verify_shard_at_version_rejects_traversal`.
+- **F-QA-7, failure-mode grace.** Both cases fail closed with no card,
+  but neither names the fix the way a refusal would:
+  - `certify` on a well-formed but unknown build id prints
+    `internal error: [Errno 2] … context.json` with exit 1, where
+    `status` gives a plain "no such build" with exit 3.
+  - A missing `eval/metrics.json` likewise exits 1.
+
+  Pinned by `test_certify_unknown_but_well_formed_build_id_fails_without_traceback`
+  and `test_certify_missing_metrics_json_fails_closed_without_a_card`.
+
+### What a future sprint should do
+
+Wire the items above into `build.py`'s real-mode phase bodies and
+`certify.py`'s card assembly, in this order:
+
+1. Teacher auto-select, which unblocks a real Phase A.
+2. The logprob probe as a preflight row.
+3. The MLX training cycle (below).
+4. Residency sampling during PB/PC.
+5. The real judge and the LC estimator fix (R3-A3).
+6. Patch generation and executable checks, then retire v1-open.
+7. The A4/A5 hash precision fixes and runtime provenance.
+8. Close R3-A4 and R3-A5 before B7 is lifted.
+
+Verify each piece on the M5 alongside the `requires_mlx` markers. Flip
+the corresponding QA xfails to plain tests as each item lands, since
+they are strict and will fail loudly when fixed.
 
 ---
 
 ### The MLX training-cycle stub, specifically
 
-`train/mlx_kd.py` (commit 17) implements the per-step MLX
-loss/grad computation (`kd_train_step`) and model loading
-(`load_student_for_training`), matching train/kd_loss.py's numpy
-reference exactly. `build.py`'s `_phase_train` (commit 18) wires
-`arbitrage.run()` to a real trainer only for the stub path
-(`providers.stub.StubTrainer`) — the real-runtime branch
-(`_mlx_train_cycle_fn`) currently always refuses with a clear message
-rather than actually driving a multi-cycle loop that reads `.npz`
-extract shards, builds MLX batches, calls `kd_train_step`, applies an
-optimizer step, and reports a real `dev_proxy_composite`. This was a
-deliberate scope decision under the builder's time budget, not an
-oversight discovered late: the stub path is what Gate A (CI) needs, and
-wiring a full MLX training loop is real additional integration work
-(optimizer choice/schedule, batch construction from sharded `.npz`
-files, checkpointing) beyond what commit 17's single-step primitives
-provide on their own.
+`train/mlx_kd.py` (commit 17) implements the per-step MLX loss/grad
+computation (`kd_train_step`) and model loading
+(`load_student_for_training`), matching `train/kd_loss.py`'s numpy
+reference.
 
-**The gap.** `train/mlx_kd.py` (commit 17) implements the per-step MLX
-loss/grad computation (`kd_train_step`) and model loading
-(`load_student_for_training`), matching train/kd_loss.py's numpy
-reference exactly. `build.py`'s `_phase_train` (commit 18) wires
-`arbitrage.run()` to a real trainer only for the stub path
-(`providers.stub.StubTrainer`) — the real-runtime branch
-(`_mlx_train_cycle_fn`) currently always refuses with a clear message
-rather than actually driving a multi-cycle loop that reads `.npz`
-extract shards, builds MLX batches, calls `kd_train_step`, applies an
-optimizer step, and reports a real `dev_proxy_composite`. This was a
-deliberate scope decision under the builder's time budget, not an
-oversight discovered late: the stub path is what Gate A (CI) needs, and
-wiring a full MLX training loop is real additional integration work
-(optimizer choice/schedule, batch construction from sharded `.npz`
-files, checkpointing) beyond what commit 17's single-step primitives
-provide on their own.
+`build.py`'s `_phase_train` wires `arbitrage.run()` to a real trainer
+only for the stub path (`providers.stub.StubTrainer`). The real branch,
+`_mlx_train_cycle_fn`, always refuses with a clear message. That was a
+deliberate scope decision (Gate A needs only the stub path), not an
+oversight.
 
-**What a future sprint needs to do:** complete `_mlx_train_cycle_fn` in
-`build.py` — read train shards from `run_dir/extract/*.npz` in batches,
-call `train.mlx_kd.load_student_for_training` once per build (not once
-per cycle), run `kd_train_step` + an `mlx.optimizers.Adam` (or similar)
-step per batch, checkpoint the adapter each cycle, and run a lightweight
-MLX-served dev-only proxy eval (per ARCHITECTURE.md §3's
-"arbitrage.dev_eval_runtime: mlx") to produce a real
-`dev_proxy_composite`. This is required before Gate B / item 10 can run
-for real (`ARAIL_NUCLEUS_STUB` unset) — verify on the M5 alongside the
+**What a future sprint needs to do:** complete `_mlx_train_cycle_fn`:
+
+1. Read train shards from `run_dir/extract/*.npz` in batches.
+2. Call `train.mlx_kd.load_student_for_training` once per build, not
+   once per cycle.
+3. Run `kd_train_step` plus an `mlx.optimizers.Adam` (or similar) step
+   per batch.
+4. Checkpoint the adapter each cycle.
+5. Run a lightweight MLX-served, dev-only proxy eval (ARCHITECTURE.md
+   §3, `arbitrage.dev_eval_runtime: mlx`) to produce a real
+   `dev_proxy_composite`.
+
+Required before Gate B / item 10. Verify on the M5 alongside the
 `requires_mlx` markers.
