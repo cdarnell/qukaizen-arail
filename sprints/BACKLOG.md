@@ -1503,11 +1503,78 @@ implementation instead of two that could drift.
 
 ---
 
-## Model Forge's real MLX training-cycle wiring (build.py's PB phase) is a stub for the M5
+## Model Forge real-runtime wiring (umbrella: MLX training cycle, teacher select, parity, logprob probe, residency, judge, executable checks, hashes, provenance)
 
 **Filed by:** builder session, sprints/2026-09-23-nucleus-sprint-1
-BUILD_LOG.md "Deviations from the architecture" — not itself named in
-ARCHITECTURE.md §9, but a real gap discovered during commit 18.
+BUILD_LOG.md "Deviations from the architecture" (MLX training cycle,
+commit 18) and REVIEW.md review-loop-1 B3/B7/tech-debt-delta
+(2026-09-23, everything else below) — not itself named in
+ARCHITECTURE.md §9 at design time; §9 "Added" item 9 (added in review
+loop 1) points here.
+
+**What's still unwired for a real (non-stub) build, beyond the MLX
+training cycle detailed below:**
+
+- **Teacher auto-select.** `domain.teacher_model` can be `"auto"`, but
+  `build.py` never calls `models.select_teacher()` — `PA`/`PA2` resolve
+  `context.get("teacher_name", "")`, which is never written to context,
+  so a real (non-stub) build would fail inside Phase A with a misleading
+  "model '' not found" error. B7 (review loop 1) makes this refuse up
+  front instead, with a clear message, but doesn't wire selection itself.
+- **Tokenizer parity** (`tokenizer_parity.py`) is implemented and unit
+  tested but never called from `build.py`/`certify.py`; the card's
+  `tokenizer_parity`/`tokenizer_parity_detail` fields are hardcoded.
+- **The logprob capability probe** (`providers/queuellm.py`'s
+  `probe_logprobs_capability`) is never called outside its own tests.
+- **The residency sampler** (`residency.py`, classifier side is real and
+  tested) never actually runs during a build; `certify.py` hardcodes
+  `residency_status="unmeasured"`.
+- **The LC judge and executable checks** (`open_lc_judge.py`,
+  `executable_kernel.py`) are real, tested modules, but the generic
+  (non-Gate-A-fixture) certify path in `build.py`'s `_phase_eval` never
+  calls either — they report `not_run` unconditionally outside the Gate A
+  test's own fixture wiring.
+- **`pipeline_hash`/`training_hash`/`teacher_hash`.** `evals/hash.py`'s
+  `pipeline_hash()` is implemented and tested but never called from
+  `certify.py`; `training_hash`/`teacher_hash` were literal placeholder
+  strings until B3 (review loop 1) wired `training_hash` for the stub
+  path — a real (content-hash) `teacher_hash` still needs
+  `models.content_hash()` wired in.
+- **Runtime provenance** (`runtime_names.runtime_provenance()`) is
+  implemented and tested but never called by the pipeline; a certified
+  card never records which `aerollm_api` build (bundle vs local rebuild)
+  actually ran.
+
+**What a future sprint should do:** wire each of the above into
+`build.py`'s real-mode phase bodies and `certify.py`'s card assembly, in
+roughly this order: teacher auto-select (unblocks a real Phase A),
+tokenizer parity + logprob probe (preflight/capability rows), the MLX
+training cycle (below), residency sampling during PB/PC, judge +
+executable checks in the generic PC path, then the three hash fields and
+runtime provenance in certify. This is required before Gate B / item 10
+can run for real (`ARAIL_NUCLEUS_STUB` unset) — verify each piece on the
+M5 alongside the `requires_mlx` markers.
+
+---
+
+### The MLX training-cycle stub, specifically
+
+`train/mlx_kd.py` (commit 17) implements the per-step MLX
+loss/grad computation (`kd_train_step`) and model loading
+(`load_student_for_training`), matching train/kd_loss.py's numpy
+reference exactly. `build.py`'s `_phase_train` (commit 18) wires
+`arbitrage.run()` to a real trainer only for the stub path
+(`providers.stub.StubTrainer`) — the real-runtime branch
+(`_mlx_train_cycle_fn`) currently always refuses with a clear message
+rather than actually driving a multi-cycle loop that reads `.npz`
+extract shards, builds MLX batches, calls `kd_train_step`, applies an
+optimizer step, and reports a real `dev_proxy_composite`. This was a
+deliberate scope decision under the builder's time budget, not an
+oversight discovered late: the stub path is what Gate A (CI) needs, and
+wiring a full MLX training loop is real additional integration work
+(optimizer choice/schedule, batch construction from sharded `.npz`
+files, checkpointing) beyond what commit 17's single-step primitives
+provide on their own.
 
 **The gap.** `train/mlx_kd.py` (commit 17) implements the per-step MLX
 loss/grad computation (`kd_train_step`) and model loading

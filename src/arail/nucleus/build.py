@@ -359,6 +359,21 @@ def run(argv: Sequence[str]) -> int:
     parsed = _parse_build_args(argv)
     domain = _resolve_domain({"domain_name": parsed["slug"]})
 
+    # B7 (2026-09-23 review): refuse a non-stub build up front, before any
+    # lock, run dir, or phase exists -- not several steps in, as a
+    # misleading "model '' not found" error out of a half-created run
+    # (teacher auto-select, the logprob probe, and the real MLX
+    # multi-cycle training loop are not wired this sprint; see
+    # _mlx_train_cycle_fn and sprints/BACKLOG.md "Model Forge real-runtime
+    # wiring").
+    if not _is_stub():
+        raise RefusedByPolicy(
+            "real-runtime builds are not wired yet in sprint 1 (teacher "
+            "selection, logprob probe, and MLX training cycle -- see "
+            "BACKLOG 'Model Forge real-runtime wiring'). Gate A runs with "
+            "ARAIL_NUCLEUS_STUB=1."
+        )
+
     from arail.nucleus.providers.gateway import profile_gate
 
     profile_gate(domain.teacher_profile)

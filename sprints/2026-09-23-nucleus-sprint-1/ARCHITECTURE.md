@@ -692,6 +692,12 @@ the builder should make **only with the operator's OK** (Q9).
    formula id, and the `/forge` viewer must show the id.
 8. The `refresh:<days>` cert set, the `world:`, `lkml`, and `lwn` source adapters, and the `mixed` runtime path are
    seams only.
+9. **The orchestration layer (`build.py`/`certify.py`) doesn't wire several real-mode paths into the pipeline yet:**
+   teacher auto-select, tokenizer parity, the logprob probe, the residency sampler, the LC judge and executable
+   checks in the generic (non-fixture) certify path, `pipeline_hash`/`training_hash`/`teacher_hash`, and runtime
+   provenance. Found during review-loop-1 (2026-09-23); filed as a single umbrella ticket, "Model Forge real-runtime
+   wiring", in `sprints/BACKLOG.md` (expands the existing MLX-training-cycle entry). Required before Gate B / item
+   10, not before Gate A.
 
 **Repaid**
 
@@ -704,8 +710,10 @@ the builder should make **only with the operator's OK** (Q9).
    already needed.
 5. `jsonschema`/`numpy` become declared dependencies instead of transitive accidents.
 
-**Net: positive (moderate).** Items 1–3 of Added need tickets in `sprints/BACKLOG.md` before the review PASS
-(the builder files them in the final commit). Item 2 is also filed in qukaizen-nucleus.
+**Net: positive (significant), revised 2026-09-23 after review loop 1.** Items 1–3 of Added need tickets in
+`sprints/BACKLOG.md` before the review PASS (the builder files them in the final commit). Item 2 is also filed in
+qukaizen-nucleus. Item 9 was not anticipated at design time; see REVIEW.md's "Tech debt delta" for the reviewer's
+accounting.
 
 ---
 

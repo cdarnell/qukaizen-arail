@@ -140,6 +140,40 @@ def test_unknown_phase_refused(staged_context):
         build_mod.run_phase_body("nonexistent", staged_context)
 
 
+# ── B7 (2026-09-23 review): a non-stub build refuses up front, before
+# any lock/run dir/phase exists — never partway through with a
+# misleading "model '' not found" error ─────────────────────────────
+
+def test_build_run_refuses_non_stub_up_front(staged_context, monkeypatch, tmp_path):
+    domains_dir = Path(staged_context["domains_dir"])
+    monkeypatch.setattr("arail.nucleus.domain._DOMAINS_DIR", domains_dir)
+    monkeypatch.setenv("ARAIL_DATA_DIR", str(Path(staged_context["nucleus_data"]).parent))
+    monkeypatch.setattr("arail.config.DATA_DIR", str(Path(staged_context["nucleus_data"]).parent))
+    monkeypatch.delenv("ARAIL_NUCLEUS_STUB", raising=False)
+    from arail.nucleus.errors import RefusedByPolicy
+    from arail.nucleus.paths import nucleus_data
+
+    with pytest.raises(RefusedByPolicy) as exc_info:
+        build_mod.run(["kernel", "--profile", "local"])
+    assert "ARAIL_NUCLEUS_STUB=1" in str(exc_info.value)
+
+    runs_dir = nucleus_data() / "runs"
+    assert not runs_dir.is_dir() or not any(runs_dir.iterdir())
+    assert not (nucleus_data() / "build.lock").exists()
+
+
+def test_cli_build_non_stub_exits_3(staged_context, monkeypatch):
+    domains_dir = Path(staged_context["domains_dir"])
+    monkeypatch.setattr("arail.nucleus.domain._DOMAINS_DIR", domains_dir)
+    monkeypatch.setenv("ARAIL_DATA_DIR", str(Path(staged_context["nucleus_data"]).parent))
+    monkeypatch.setattr("arail.config.DATA_DIR", str(Path(staged_context["nucleus_data"]).parent))
+    monkeypatch.delenv("ARAIL_NUCLEUS_STUB", raising=False)
+    from arail.nucleus import cli
+
+    rc = cli.main(["build", "kernel", "--profile", "local"])
+    assert rc == 3
+
+
 # ── build.run() end-to-end (real subprocess phases, stub mode) ────────
 
 def test_build_run_end_to_end(staged_context, monkeypatch):
