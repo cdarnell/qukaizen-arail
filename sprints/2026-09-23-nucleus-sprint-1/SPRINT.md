@@ -35,6 +35,7 @@ Make Project Nucleus a first-class ARAIL surface ("Model Forge"): `src/arail/nuc
 | 2026-09-23 | Q5: `certify` writes a local ledger by default; tracked `docs/CERTIFIED_MODELS.md` is appended only with `--publish-row` | Operator |
 | 2026-09-23 | Q9: builder may update repo `CLAUDE.md` for the `/build` → `/forge` retirement | Operator |
 | 2026-09-23 | Q2, Q3, Q7 (lineage key, 24 GB cap, network prep) deferred to Gate B | Not needed for Gate A |
+| 2026-09-24 | F3: root-cause fix required before ship, time-boxed to one builder session; fallback = `tests/nucleus` in its own CI invocation (like `requires_qkz_bin`), documented in ARCHITECTURE §7 + CI, with a BACKLOG ticket carrying the bisection evidence | Architect (round 3 agent): QA showed the prefix without `tests/nucleus` is green, so it is nucleus-owned; lead is `conftest::_isolated_lab_data` env vars set before `arail.config` patch → import-time capture of tmp paths (`arail.activity.LOG_FILE`) |
 | 2026-09-23 | Re-implement Nucleus against the brief; salvage `src/arail/build/preflight.py`, `world_corpus.py`, and the seal format selectively — do not port the old private pipeline wholesale | Operator; agrees with brief §1 and VISION.md |
 
 ## Skipped phases
