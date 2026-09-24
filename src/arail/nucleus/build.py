@@ -480,6 +480,18 @@ def _score_open_lc(domain, *, fused_model_dir, run_dir: Path):
     fused_text_by_id = {g.item_id: g.text for g in fused_gens}
     base_text_by_id = {g.item_id: g.text for g in base_gens}
 
+    # ASK eyeball outputs (2026-09-23 review round 2): persist PC's real
+    # generated eyeball outputs so certify.py's build-report can render
+    # them verbatim (brief §7: "includes the 10 eyeball prompts with
+    # outputs") instead of the placeholder "(not generated in this
+    # generic certify path)" it printed even when PC HAD just generated
+    # exactly those outputs.
+    eval_dir = run_dir / "eval"
+    eval_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    (eval_dir / "eyeball_outputs.json").write_text(json.dumps(
+        {"student": [fused_text_by_id[p.item_id] for p in prompts],
+        "base": [base_text_by_id[p.item_id] for p in prompts]}, sort_keys=True))
+
     pairs = [
         open_lc_judge.PairItem(item_id=p.item_id, text_model=fused_text_by_id[p.item_id],
                                text_baseline=base_text_by_id[p.item_id])

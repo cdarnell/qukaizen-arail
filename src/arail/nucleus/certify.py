@@ -19,6 +19,41 @@ def _is_stub() -> bool:
     return os.getenv("ARAIL_NUCLEUS_STUB", "").strip() == "1"
 
 
+def _previous_version_student_outputs(shard_root: Path, current_version: str):
+    """The most recent OTHER version's student eyeball outputs, for the
+    build-report's "previous version" column (ARCHITECTURE.md §4.10:
+    "student | base_student | previous version (if any)") -- or None when
+    no other version exists yet, or it never persisted an
+    eyeball_outputs.json (older cards, or a real-runtime cert this sprint
+    doesn't produce eyeball text for)."""
+    shard_parent = shard_root.parent
+    if not shard_parent.is_dir():
+        return None
+
+    candidates = []
+    for child in shard_parent.iterdir():
+        if not child.is_dir() or child.name == current_version:
+            continue
+        try:
+            parts = tuple(int(p) for p in child.name.split("."))
+        except ValueError:
+            continue
+        candidates.append((parts, child))
+    if not candidates:
+        return None
+
+    candidates.sort()
+    _, prev_dir = candidates[-1]
+    prev_path = prev_dir / "eyeball_outputs.json"
+    if not prev_path.is_file():
+        return None
+    try:
+        data = json.loads(prev_path.read_text())
+    except (OSError, ValueError):
+        return None
+    return data.get("student")
+
+
 def run_certify(build_id: str, *, publish_row: bool = False, context: dict = None) -> dict:
     """The pipeline body — pulled out of run() so it's directly callable
     from tests without going through argv parsing."""
@@ -383,16 +418,43 @@ def run_certify(build_id: str, *, publish_row: bool = False, context: dict = Non
     write_card(card, shard_root / "dna-card.yaml")
     (shard_root / "seal.json").write_text(json.dumps(sealed.seal_json))
 
+    # ASK eyeball outputs (2026-09-23 review round 2): read PC's real
+    # generated eyeball outputs (build.py::_score_open_lc persists them
+    # to run_dir/eval/eyeball_outputs.json) instead of always printing the
+    # placeholder -- the placeholder is now genuinely reserved for the
+    # cases where PC really didn't run the open eval (a real-runtime
+    # build with the judge path still unwired; B7 refuses those up front
+    # this sprint, so in practice it's dead on the stub path but honest
+    # for whatever calls run_certify() directly without going through PC).
+    eyeball_outputs_path = rd / "eval" / "eyeball_outputs.json"
+    if eyeball_outputs_path.is_file():
+        eyeball_data = json.loads(eyeball_outputs_path.read_text())
+        student_outputs = list(eyeball_data.get("student") or [])[:10]
+        base_outputs = list(eyeball_data.get("base") or [])[:10]
+        student_outputs += ["(no output recorded for this item)"] * max(0, 10 - len(student_outputs))
+        base_outputs += ["(no output recorded for this item)"] * max(0, 10 - len(base_outputs))
+    else:
+        student_outputs = ["(not generated in this generic certify path)"] * 10
+        base_outputs = ["(not generated in this generic certify path)"] * 10
+
+    previous_outputs = _previous_version_student_outputs(shard_root, fused_version)
+
     eyeball_prompts = domain.eval_eyeball_prompts.read_text().splitlines()
     report_text = build_report.render(
         decision=decision, beats_base=beats_base, achieved=achieved, base_composite=base_composite_value,
         composite_formula_id=composite_result.formula_id, composite_value=composite_result.value,
         closed_ended=card["closed_ended"], open_ended=card["open_ended"], executable=card["executable"],
         eyeball_prompts=eyeball_prompts[:10] + [""] * max(0, 10 - len(eyeball_prompts)),
-        student_outputs=["(not generated in this generic certify path)"] * 10,
-        base_outputs=["(not generated in this generic certify path)"] * 10,
+        student_outputs=student_outputs, base_outputs=base_outputs, previous_outputs=previous_outputs,
     )
     (shard_root / "build-report.md").write_text(report_text)
+
+    # Snapshot this version's eyeball outputs INTO the shard dir too (not
+    # just the ephemeral run dir), so the NEXT version's certify can find
+    # them as "previous version" without needing this run dir to still
+    # exist.
+    (shard_root / "eyeball_outputs.json").write_text(
+        json.dumps({"student": student_outputs, "base": base_outputs}, sort_keys=True))
 
     verify_result = seal.verify(card, eval_hash_recompute=this_eval_hash, fast=True)
     # The card/seal/report are always written above -- the ledger append is

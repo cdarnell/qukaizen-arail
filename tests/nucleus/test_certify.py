@@ -172,6 +172,28 @@ def test_certify_refuses_on_forged_context_stub_flag(staged_context, tmp_path, m
     assert not ledger.exists() or "kernel" not in ledger.read_text()
 
 
+# ── ASK eyeball outputs (2026-09-23 review round 2): build-report.md
+# carries the real PC-generated eyeball outputs, not the old placeholder
+# text -- even though PC genuinely generated them ─────────────────────
+
+def test_build_report_carries_real_eyeball_outputs(staged_context, tmp_path, monkeypatch):
+    monkeypatch.setenv("NUCLEUS_SIGNING_KEY_PATH", str(tmp_path / "signing.ed25519"))
+
+    _run_phase(staged_context, "PA")
+    _run_phase(staged_context, "PA2")
+    _run_phase(staged_context, "PB")
+    _run_phase(staged_context, "fuse")
+    _run_phase(staged_context, "PC")
+
+    result = certify_mod.run_certify(staged_context["build_id"], context=staged_context)
+    report_text = Path(result["card_dir"], "build-report.md").read_text()
+
+    assert "(not generated in this generic certify path)" not in report_text
+    # the fixture's real, distinguishable stub texts for both roles.
+    assert "[stub:open:fused-v1] explanation for eyeball-0" in report_text
+    assert "[stub:open:base-v1] explanation for eyeball-0" in report_text
+
+
 def test_certify_refuses_on_build_record_missing_stub_field(staged_context, tmp_path, monkeypatch):
     monkeypatch.setenv("NUCLEUS_SIGNING_KEY_PATH", str(tmp_path / "signing.ed25519"))
     _run_phase(staged_context, "PA")
