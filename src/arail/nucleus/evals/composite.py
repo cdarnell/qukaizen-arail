@@ -48,6 +48,25 @@ _FORMULAS: Dict[str, Callable[[dict], CompositeResult]] = {
     "composite/v1-nc": _composite_v1_nc,
 }
 
+# B4 (2026-09-23 review): a CONSTANT formula string per formula id, used
+# both as the card's published `composite.formula` and as one of the
+# eval_hash inputs. Previously both places used `str(composite_result.inputs)`
+# -- the computed METRIC VALUES, not the formula -- so two students scored
+# on an identical yardstick got different eval_hashes, and the card's
+# "formula" field was really a dump of that run's numbers.
+FORMULA_STRINGS: Dict[str, str] = {
+    "composite/v1": "0.4*closed.mean_f1+0.3*open.lc_win_rate+0.3*executable.compiles",
+    "composite/v1-nc": "0.4*closed.mean_f1+0.3*open.lc_win_rate"
+                       "+0.3*mean(executable.patch_applies,executable.checkpatch_clean)",
+}
+
+
+def formula_string(formula_id: str) -> str:
+    try:
+        return FORMULA_STRINGS[formula_id]
+    except KeyError:
+        raise ValueError(f"unknown composite formula id {formula_id!r}") from None
+
 
 def select_formula_id(metrics: dict) -> str:
     """`compiles` is `not_run` in sprint 1 (no Linux build host) -> the

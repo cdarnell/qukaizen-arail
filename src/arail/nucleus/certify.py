@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Sequence
 
 from arail.nucleus.errors import RefusedByPolicy
+from arail.nucleus.providers.base import Decoding
 
 
 def _is_stub() -> bool:
@@ -115,13 +116,35 @@ def run_certify(build_id: str, *, publish_row: bool = False, context: dict = Non
     decision = composite_mod.decide(achieved, domain.fidelity_target, beats_base=beats_base,
                                     residency_status="unmeasured")
 
+    # B4 (2026-09-23 review): `prompts` is the actual task template BYTES
+    # (hex-encoded), not a hand-maintained version label -- editing a
+    # template in evals/tasks/linux_kernel.py now changes eval_hash;
+    # bumping a label by hand (or forgetting to) can no longer desync it.
+    from arail.nucleus.evals.tasks.linux_kernel import PROMPT_TEMPLATES
+
+    prompts_bytes = "\x1e".join(f"{name}={PROMPT_TEMPLATES[name]}" for name in sorted(PROMPT_TEMPLATES)).encode()
+    prompts_hex = prompts_bytes.hex()
+
+    # `composite_formula` is the CONSTANT formula string for this run's
+    # formula id -- never the computed metric values (composite_result.inputs
+    # holds those; two students scored on an identical yardstick must get
+    # the SAME eval_hash regardless of what they scored).
+    composite_formula_str = composite_mod.formula_string(composite_result.formula_id)
+
+    # Full Decoding() for every role -- every provider role in this sprint's
+    # pipeline (build.py's PA/PA2/PC calls) uses the Decoding() default, so
+    # this is what actually ran, not a placeholder.
+    from dataclasses import asdict as _asdict
+
+    default_decoding = _asdict(Decoding())
+
     eval_inputs = EvalHashInputs(
-        harness_version="1", prompts="linux-kernel-task-adapters-v1",
+        harness_version="1", prompts=prompts_hex,
         few_shot={"bytes_hex": "", "k": 0},
         scoring={
             "metric_defs": ["f1", "macro_f1"], "positive_classes": {"cve_detection": "cve"},
             "composite_formula_id": composite_result.formula_id,
-            "composite_formula": str(composite_result.inputs),
+            "composite_formula": composite_formula_str,
             "decision_rule_id": "decision_rule/v1", "judge_rubric": "not_run",
             "judge_model_identity": "not_run", "lc_method": "alpacaeval2-lc", "lc_params": {"n": 1000},
             "bootstrap_n": 1000, "bootstrap_seed": 42, "position_seed": 7,
@@ -130,7 +153,7 @@ def run_certify(build_id: str, *, publish_row: bool = False, context: dict = Non
             "contamination_method": contamination_report.method,
             "contamination_params": contamination_report.params,
         },
-        decoding={"student": {"temperature": 0.0}, "base": {"temperature": 0.0}, "teacher": {"temperature": 0.0}},
+        decoding={"student": default_decoding, "base": default_decoding, "teacher": default_decoding},
         cert_set_version=cert_access.manifest["sha256"],
     )
     this_eval_hash = compute_eval_hash(eval_inputs)
@@ -172,7 +195,7 @@ def run_certify(build_id: str, *, publish_row: bool = False, context: dict = Non
                else {"rate": v, "n": len(cert_items)})
             for k, v in metrics["executable"].items()
         },
-        composite={"formula_id": composite_result.formula_id, "formula": str(composite_result.inputs),
+        composite={"formula_id": composite_result.formula_id, "formula": composite_formula_str,
                   "value": composite_result.value},
         fidelity={"target": domain.fidelity_target, "achieved": achieved, "decision": decision,
                  "decision_rule": "decision_rule/v1"},

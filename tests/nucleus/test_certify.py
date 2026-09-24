@@ -4,6 +4,7 @@ contamination refusal path."""
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -103,6 +104,72 @@ def test_certify_refuses_on_build_record_missing_stub_field(staged_context, tmp_
 
     with pytest.raises(RefusedByPolicy, match="stub"):
         certify_mod.run_certify(staged_context["build_id"], context=legacy_context)
+
+
+# ── B4 (2026-09-23 review): eval_hash changes iff the YARDSTICK changes,
+# never because of what a run happened to score ──────────────────────
+
+def _certify_and_read_card_eval_hash(staged_context, tmp_path, monkeypatch, *, version_suffix):
+    monkeypatch.setenv("NUCLEUS_SIGNING_KEY_PATH", str(tmp_path / f"signing-{version_suffix}.ed25519"))
+    ctx = dict(staged_context)
+    ctx["build_id"] = f"kernel-2026010{version_suffix}T000000Z-{version_suffix:04x}"
+    ctx["version"] = f"0.{version_suffix}.0"
+
+    _run_phase(ctx, "PA")
+    _run_phase(ctx, "PA2")
+    _run_phase(ctx, "PB")
+    _run_phase(ctx, "fuse")
+    _run_phase(ctx, "PC")
+
+    result = certify_mod.run_certify(ctx["build_id"], context=ctx)
+    from arail.nucleus.cards.dna_v2 import load_card
+
+    card = load_card(Path(result["card_dir"]) / "dna-card.yaml")
+    return card["eval_hash"], ctx
+
+
+def test_eval_hash_identical_for_different_metric_values_same_yardstick(staged_context, tmp_path, monkeypatch):
+    hash_1, ctx1 = _certify_and_read_card_eval_hash(staged_context, tmp_path, monkeypatch, version_suffix=1)
+
+    # Same yardstick, but hand-edit metrics.json before a second certify --
+    # a DIFFERENT run that scored differently on the IDENTICAL task set.
+    eval_dir = build_mod._run_dir(ctx1) / "eval"
+    metrics = json.loads((eval_dir / "metrics.json").read_text())
+    metrics["closed"]["mean_f1"] = 0.999
+    (eval_dir / "metrics.json").write_text(json.dumps(metrics))
+
+    result = certify_mod.run_certify(ctx1["build_id"], context=ctx1)
+    from arail.nucleus.cards.dna_v2 import load_card
+
+    card_2 = load_card(Path(result["card_dir"]) / "dna-card.yaml")
+    assert card_2["eval_hash"] == hash_1
+    assert card_2["closed_ended"]["cve_detection"]["f1"] != None  # sanity: real per-task rows still present
+
+
+def test_eval_hash_changes_when_a_task_template_changes(staged_context, tmp_path, monkeypatch):
+    hash_1, _ctx1 = _certify_and_read_card_eval_hash(staged_context, tmp_path, monkeypatch, version_suffix=2)
+
+    import arail.nucleus.evals.tasks.linux_kernel as linux_kernel_mod
+
+    monkeypatch.setitem(linux_kernel_mod.PROMPT_TEMPLATES, "cve_detection", "a totally different template {subject} {body}")
+
+    hash_2, _ctx2 = _certify_and_read_card_eval_hash(staged_context, tmp_path, monkeypatch, version_suffix=3)
+    assert hash_2 != hash_1
+
+
+def test_eval_hash_changes_when_decoding_changes(staged_context, tmp_path, monkeypatch):
+    hash_1, _ctx1 = _certify_and_read_card_eval_hash(staged_context, tmp_path, monkeypatch, version_suffix=4)
+
+    from arail.nucleus.providers.base import Decoding
+
+    # dataclass defaults are baked into __init__'s bytecode at class
+    # definition time, so patching the class attribute doesn't change
+    # what `Decoding()` returns -- patch the name certify.py actually
+    # calls instead.
+    monkeypatch.setattr(certify_mod, "Decoding", lambda: Decoding(max_new_tokens=999))
+
+    hash_2, _ctx2 = _certify_and_read_card_eval_hash(staged_context, tmp_path, monkeypatch, version_suffix=5)
+    assert hash_2 != hash_1
 
 
 def test_certify_refuses_on_contamination(staged_context, tmp_path, monkeypatch):

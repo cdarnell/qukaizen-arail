@@ -29,6 +29,28 @@ from arail.nucleus.providers.base import Prompt
 
 _WORD_RE = re.compile(r"[a-z0-9]+")
 
+# B4 (2026-09-23 review): named template strings, hashed into eval_hash's
+# `prompts` field by certify.py -- so eval_hash changes iff a task
+# template actually changes, independent of which model answered or what
+# it scored. Kept as named module-level constants (not inlined in the
+# f-strings below) specifically so they're importable for hashing.
+CVE_DETECTION_TEMPLATE = (
+    "Is the following kernel commit a security fix (CVE)? "
+    "Answer exactly 'cve' or 'not'.\n\nSubject: {subject}\n\n{body}"
+)
+SUBSYSTEM_ROUTING_TEMPLATE = (
+    "Which subsystem does this kernel commit belong to? "
+    "Answer with just the subsystem name.\n\nCommit description: {description}"
+)
+
+# What certify.py hashes for the `prompts` eval_hash field -- every
+# closed-task template this domain's yardstick uses, concatenated in a
+# fixed, named order (never dict-iteration order).
+PROMPT_TEMPLATES = {
+    "cve_detection": CVE_DETECTION_TEMPLATE,
+    "subsystem_routing": SUBSYSTEM_ROUTING_TEMPLATE,
+}
+
 
 def cve_detection_task(items: List[dict]) -> Tuple[List[Prompt], List[str]]:
     prompts: List[Prompt] = []
@@ -38,8 +60,7 @@ def cve_detection_task(items: List[dict]) -> Tuple[List[Prompt], List[str]]:
         body = item.get("text", "")
         prompts.append(Prompt(
             item_id=item["id"],
-            text=(f"Is the following kernel commit a security fix (CVE)? "
-                 f"Answer exactly 'cve' or 'not'.\n\nSubject: {subject}\n\n{body}"),
+            text=CVE_DETECTION_TEMPLATE.format(subject=subject, body=body),
             role="cve_detection",
         ))
         gold.append("cve" if item.get("labels", {}).get("cve") else "not")
@@ -59,8 +80,7 @@ def subsystem_routing_task(items: List[dict]) -> Tuple[List[Prompt], List[str]]:
         shown = description.strip() if sep else subject
         prompts.append(Prompt(
             item_id=item["id"],
-            text=(f"Which subsystem does this kernel commit belong to? "
-                 f"Answer with just the subsystem name.\n\nCommit description: {shown}"),
+            text=SUBSYSTEM_ROUTING_TEMPLATE.format(description=shown),
             role="subsystem_routing",
         ))
         gold.append(subsystem)
