@@ -87,12 +87,16 @@ async def models_resolve(profile: str, tab: Optional[str] = None) -> Dict[str, A
 class RegisterArtifactRequest(BaseModel):
     run_id: str
     name: Optional[str] = None       # entry id / ollama model name override
-    gguf_path: Optional[str] = None  # explicit path when known client-side
+    gguf_path: str                   # required -- /build's NucleusClient graduation
+                                      # lookup is retired; the caller supplies the path
+                                      # (Model Forge doesn't build GGUF this sprint either,
+                                      # ARCHITECTURE.md §3 "Brief §2 GGUF output" — this
+                                      # endpoint stays for artifacts registered by hand)
 
 
 @models_router.post("/register-artifact")
 async def models_register_artifact(req: RegisterArtifactRequest) -> Dict[str, Any]:
-    """Register a nucleus-graduated model into the registry.
+    """Register a graduated model into the registry.
 
     The entry lands as ``not_installed`` with an install hint; the interval
     health probe flips it healthy once the model appears in Ollama, at which
@@ -103,16 +107,6 @@ async def models_register_artifact(req: RegisterArtifactRequest) -> Dict[str, An
 
     grad: Dict[str, Any] = {}
     gguf = req.gguf_path
-    if gguf is None:
-        try:
-            from arail.build.nucleus_client import NucleusClient
-            grad = NucleusClient().graduation(req.run_id) or {}
-            gguf = grad.get("gguf_path") or grad.get("model_path")
-        except Exception as exc:  # noqa: BLE001
-            raise HTTPException(
-                status_code=502,
-                detail=f"could not fetch graduation info for run "
-                       f"'{req.run_id}': {exc}")
     name = (req.name or grad.get("skill_id")
             or f"nucleus-{req.run_id}").lower().replace("_", "-")
 

@@ -75,9 +75,9 @@
      title="Agents — Status · Skills · Activity">Agents</a>
   {% endif %}
 
-  {% if 'build' in _ts %}
-  <a href="/build"{% if active == 'build' %} class="active"{% endif %}
-     title="Model Building — build, distill, and register models via the Nucleus pipeline.">Model Building</a>
+  {% if 'forge' in _ts %}
+  <a href="/forge"{% if active == 'forge' %} class="active"{% endif %}
+     title="Model Forge — signed DNA cards from local arailctl nucleus builds.">Model Forge</a>
   {% endif %}
 
   {% if 'admin' in _ts %}

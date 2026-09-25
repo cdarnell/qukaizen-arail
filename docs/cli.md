@@ -744,6 +744,24 @@ another `pkb reembed` already running against this root) · `2` the given
 DaC WorldBundle ops — passthrough to `python -m arail.world_mount`.
 Unchanged.
 
+### `nucleus <verb>`
+
+Model Forge (local domain distillation) — passthrough to
+`python -m arail.nucleus`, which owns its own tier gate and exit-code
+contract (`0` ok · `1` internal error · `2` usage · `3` refused by
+policy). See `docs/nucleus.md` for the full tour.
+
+| Verb | What it does |
+|----|--------------|
+| `plan "<intent>" --name <slug>` | Writes `configs/domains/<slug>.yaml` and confirms it resolves |
+| `stage <slug> --source KIND:NAME=<path>` | Stages a local corpus; makes zero network calls |
+| `build <slug> --profile local` | Preflight, then extract / extract-on-cert / train / fuse / eval |
+| `spike <slug>` | Gate B half-day M5 harness |
+| `certify <build_id>` | Contamination gate, DNA card, seal, build report, local ledger |
+| `verify <shard>@<version>|<dir>` | Re-checks a card's signature, key trust, and content hashes |
+| `status <build_id>` | Prints a build's `run.json` |
+| `list` | Shows certified shards |
+
 ### `benchmark_models` (aliases: `benchmark`, `aerollm`)
 
 Measure local model TPS for autoresearch routing. Defaults to `--all`
