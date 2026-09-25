@@ -247,6 +247,129 @@ def _no_ambient_world_mount(monkeypatch, tmp_path_factory):
 
 
 @pytest.fixture(autouse=True)
+def _isolated_agent_observability_data_root(monkeypatch, tmp_path):
+    """Isolate agent_trace / flight-recorder / agent_context state per test
+    (sprint 2026-09-20-buddy-front-and-center hermeticity fix).
+
+    Since that sprint, ``ModelRouter.complete()``/``.stream_complete()`` —
+    the single chokepoint every agent (and chat) inference call already
+    went through — now writes an ``agent_trace`` record on every call, and
+    may capture a body when the flight recorder is on. Both persist to
+    ``DATA_DIR`` (lazily resolved per call, by design — see
+    ``agent_trace.py``'s module docstring — specifically so a fixture like
+    this one can redirect it). Without this, ANY test anywhere in the
+    suite that drives a real ``ModelRouter`` — not just the sprint's own
+    new test files — writes into the developer's actual
+    ``lab/data/agent_traces.jsonl`` / ``flight_recorder.json``, following
+    the same pre-existing pattern as ``_no_ambient_halt_flag`` /
+    ``_no_ambient_window_override`` above, just for a data root instead of
+    a single file.
+
+    ``activity.py``'s ``LOG_FILE`` is the one exception in this family
+    that is NOT resolved lazily — it is a module-level constant bound to
+    the real ``config.DATA_DIR`` at ``activity.py``'s import time.
+    Monkeypatching ``activity_mod.LOG_FILE`` still works for *future*
+    ``.emit()`` disk writes (the method does a fresh global lookup of
+    ``LOG_FILE`` on every call, not a value captured once at
+    construction) — but the module-level ``activity_log`` singleton
+    itself is a specific object every other module already holds a direct
+    reference to (``from arail.activity import activity_log``), typically
+    imported during collection, well before any fixture runs. Setting
+    ``ActivityLog._instance = None`` does **not** reset that — it only
+    affects a *future* ``ActivityLog()`` call, and nothing in the
+    codebase makes one after the first (confirmed the hard way: an
+    earlier version of this fixture did exactly that and still leaked
+    200 stale in-memory events into every test). The only thing that
+    actually clears the singleton every other module already points at
+    is mutating its buffer in place — the same technique
+    ``test_autoresearch_e2e_fake_aerollm.py``'s local ``_fresh_events()``
+    helper already uses. This matters to this sprint specifically because
+    ``GET /api/agents/status`` (the V7 fix) reads ``activity_log.recent()``
+    as a fallback when an agent has no trace yet — an unisolated buffer
+    leaks real, accumulated activity into that fallback's numbers.
+
+    Also isolates ``cost_tracker`` (QA F9, TEST_REPORT.md). Same class of
+    bug as ``activity_log`` above: ``CostTracker.__new__`` returns a
+    process-global singleton, and ``__init__`` binds ``_data_path`` from
+    ``config.DATA_DIR`` once — but only the *first* time, guarded by
+    ``self._initialized`` — so simply monkeypatching ``config.DATA_DIR``
+    later, the way this fixture already does, has no effect on a
+    ``CostTracker`` constructed before this fixture ran (i.e. at import
+    time, on every module that did ``from arail.costs import
+    cost_tracker``). Every test that drives a real ``ModelRouter`` bills
+    this singleton to the real ``lab/data/costs.json``; this sprint's own
+    per-agent ``source=`` attribution (contract #8) made that pollution
+    directly visible on the cost page instead of an anonymous "cloud"
+    bucket, and — because recap's ``$5`` cost ceiling
+    (``RECAP_COST_CEILING_USD``) reads ``cost_tracker.total_billed_usage_
+    usd``, a real, accumulating number — running the suite enough times
+    exhausts it and 21 of ``test_recap_{core,paranoid,robotouille_
+    mock}.py``'s tests fail with ``COST_EXCEEDED``, on a worktree that has
+    simply been used, no code change required to reproduce.
+
+    Forcing ``_initialized = False`` then calling ``__init__()`` again
+    (rather than replacing ``cost_tracker`` with a new instance, which —
+    per the ``activity_log`` lesson just above — every other module's
+    already-bound reference would not see) re-runs the whole constructor
+    against the by-then-patched ``config.DATA_DIR``: every accumulator
+    (``total_calls``, ``total_billed_usage_usd``, ``calls_by_source``,
+    etc.) goes back to its own zero-state and ``_data_path`` is rebound
+    to this test's ``tmp_path``, in one call, immune to a future
+    accumulator being added to ``__init__`` and forgotten here.
+
+    A companion default this redirect requires: ``portal/app.py``'s
+    one-shot World nudge (``_world_prompt_pending()``) checks whether
+    ``DATA_DIR / ".world-prompt-seen"`` exists to decide whether to render
+    the dashboard's onboarding nudge instead of the normal page chrome.
+    Before this fixture existed, most page-rendering tests were
+    incidentally reading the real, already-dismissed marker on the
+    developer's machine — an always-empty ``tmp_path`` makes every such
+    request look like a brand-new, never-onboarded lab instead, which
+    broke `tests/portal/test_base_template_smoke.py` AND
+    `tests/test_boot_overlay.py` (confirmed: both fail, even standalone,
+    without this). Pre-seeding "already seen" as the default restores the
+    ambient state those (and presumably other, not-yet-found) tests
+    already unknowingly depended on.
+
+    The one place that default is *wrong*: a test specifically about the
+    marker's absence. `tests/test_onboarding.py::test_dashboard_unblocks_
+    after_onboarding` is exactly that, and — like `tests/test_world_
+    first_impression.py`'s tests already do for the same reason —
+    explicitly monkeypatches `portal.app._world_prompt_marker` to a
+    guaranteed-absent path of its own, which wins over this fixture's
+    default regardless of `DATA_DIR`. A global fixture deciding an
+    ambient default is fine; a global fixture deciding it for the ONE
+    test that is *about* that state is the bug this docstring's git
+    history is a cautionary tale of (an earlier version of this fixture
+    got exactly this backwards twice: first by not seeding at all, then
+    by seeding only in one unrelated test module instead of here).
+    """
+    from arail import agent_context, agent_trace, config
+    from arail import activity as activity_mod
+    from arail.costs import cost_tracker
+
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    (tmp_path / ".world-prompt-seen").touch()
+    monkeypatch.setattr(activity_mod, "LOG_FILE", tmp_path / "activity.jsonl")
+    activity_mod.activity_log._buffer.clear()
+
+    agent_context._reset_for_tests()
+    agent_trace._reset_for_tests()
+    # QA F9: force a full re-__init__ against the now-patched DATA_DIR --
+    # see the docstring above for why a fresh CostTracker() would not do
+    # (every other module's `from arail.costs import cost_tracker` import
+    # would keep pointing at the old, unpatched object).
+    cost_tracker._initialized = False
+    cost_tracker.__init__()
+
+    yield
+
+    agent_context._reset_for_tests()
+    agent_trace._reset_for_tests()
+    activity_mod.activity_log._buffer.clear()
+
+
+@pytest.fixture(autouse=True)
 def _reset_egress_guard():
     """Reset the egress guard to un-installed state between tests.
 

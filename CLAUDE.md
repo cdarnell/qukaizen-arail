@@ -23,27 +23,36 @@ users are expected to fork, rename, and adapt.
 ARAIL is the umbrella project. Two sibling repos in `~/ProJects` hang
 off it:
 
-- **aerollm** (`~/ProJects/qukaizen-aerollm`, GitHub repo now
-  `cdarnell/qukaizen-queuellm`) — Streaming inference runtime, a
-  product of ARAIL, **renaming to QueueLLM** (display name only so far —
-  the `aerollm-api` package, `aerollm`/`AERO_*` identifiers, and this
-  repo's own `aerollm = "aerollm-api>=1.0,<2.0"` dependency pin in
-  `pyproject.toml` are unchanged; see `~/ProJects/CLAUDE.md` § Naming
-  status for the full picture). Origin lives here in `research/aerollm/`
-  (00 through 04 design docs) before it was extracted to its own repo.
-  As of v1.0.0, AeroLLM/QueueLLM is the deep-mode backend for the
+- **QueueLLM** (`~/ProJects/qukaizen-queuellm`, GitHub
+  `cdarnell/qukaizen-queuellm`; formerly AeroLLM, renamed 2026-08-21 — the
+  old local path `qukaizen-aerollm` survives as a compat symlink) —
+  Streaming inference runtime, a product of ARAIL. Origin lives here in
+  `research/aerollm/` (00 through 04 design docs) before it was extracted
+  to its own repo. As of v1.0.0, QueueLLM is the deep-mode backend for the
   `maximus` tier. CUDA hosts fall back to AirLLM with a notice until its
   CUDA backend ships. The README's Compute Source pivot in the Chat tab
   is the surface where alternative backends slot in. See
-  `aerollm/CLAUDE.md` for runtime internals.
+  `~/ProJects/qukaizen-queuellm/CLAUDE.md` for runtime internals.
 - **qukaizen-nucleus** (`~/ProJects/qukaizen-nucleus`) — Nucleus, the
   Super Skill Distillation Pipeline. Independent today (its own pipeline, its own
-  CLI also called `qkz`), but a planned future consumer of aeroLLM for
+  CLI also called `qkz`), but a planned future consumer of QueueLLM for
   teacher inference. The shared `qkz` name is convergent: in this repo
   `./qkz` is symlinked to `./arailctl` as a shorthand alias; in qukaizen
   `qkz` is a Rust CLI binary. They're not the same program.
 
-ARAIL is where the user's research **happens** — the lab. aeroLLM is
+**Naming: QueueLLM, formerly AeroLLM.** The product and the sibling repo are
+QueueLLM. ARAIL's *integration surface* still carries the old name on purpose
+and must not be renamed in passing: the `aerollm-api` package / `aerollm_api`
+module (and this repo's `aerollm = "aerollm-api>=1.0,<2.0"` pin),
+`AEROLLM_*` / `AERO_*` env vars (they live in users' `.env` files), backend
+id `"aerollm"`, registry id `tier1-aerollm`, `AeroLLMBackend`, the
+`*-aerollm*.sh` scripts, `THIRD-PARTY-LICENSES/aerollm/`, the `aerollm` CLI
+alias, and the `research/aerollm/` origin docs. Renaming those is a
+coordinated release with deprecation aliases (the legacy `min`/`max` tier
+values are the pattern) — its own sprint, not a sweep. See
+`~/ProJects/CLAUDE.md` § Naming status for the full picture.
+
+ARAIL is where the user's research **happens** — the lab. QueueLLM is
 the inference substrate the lab will run on. qukaizen is a separate
 research effort that also needs that substrate.
 
@@ -56,7 +65,7 @@ with a deprecation warning for one release):
 | Tier         | What's in it                                                                                                                 |
 |--------------|------------------------------------------------------------------------------------------------------------------------------|
 | `minimalist` | Dashboard · Chat · Autoresearch · Knowledge Base · Agents · LanceDB vectors · **Llama AI Engineer** (`llama-ai-eng`, built with Llama-3.2-1B-Instruct, ~0.9 GB, runs on 16 GB) — the everyday lab |
-| `maximus`    | + Admin · Docs · Notebooks · **AeroLLM** deep-mode runtime · Anthropic SDK · LangChain · full cloud SDKs · **AI Engineer (deep, 7B)** (Qwen2.5-7B-Instruct deep persona, Apache-2.0) — the full local bench, cloud frontier one click away |
+| `maximus`    | + Admin · Docs · Notebooks · **QueueLLM** deep-mode runtime · Anthropic SDK · LangChain · full cloud SDKs · **AI Engineer (deep, 7B)** (Qwen2.5-7B-Instruct deep persona, Apache-2.0) — the full local bench, cloud frontier one click away |
 
 Tier upgrade is a single `./arailctl upgrade maximus` away; downgrade
 likewise. Knowledge Base and Agents are part of `minimalist`
@@ -164,8 +173,8 @@ The top of the tree is dense; the parts that matter:
 | `blueprints/`                 | Four reference blueprints: `autoresearch`, `client-followup`, `inbox-triager`, `status-digest` |
 | `core/knowledge-canvas/`      | The Knowledge Canvas frontend (TS/React)                                           |
 | `compose/open-notebook/`      | Surreal-backed notebook integration (the surrealdb log file in git history is from here) |
-| `research/aerollm/`           | **Five-doc design study where aeroLLM started.** Read these to understand aeroLLM's origin: `00-product-vision.md`, `01-pipeline-map.md`, `02-batching-strategy.md`, `03-parallel-work.md`, `04-measurement-log.md` |
-| `research/speculative-decoding/` | Spec-decode research (now realised in `aerollm-speculative`)                    |
+| `research/aerollm/`           | **Five-doc design study where QueueLLM started.** Read these to understand QueueLLM's origin: `00-product-vision.md`, `01-pipeline-map.md`, `02-batching-strategy.md`, `03-parallel-work.md`, `04-measurement-log.md` |
+| `research/speculative-decoding/` | Spec-decode research (now realised in `queuellm-speculative`)                    |
 | `examples/peanut_farmer/`     | A canonical "PeanutLab" example of forking + renaming the lab                      |
 | `docs/`                       | INSTALL, MACOS, LINUX, WSL, PRIVACY, TROUBLESHOOTING, agents architecture          |
 | `BLUEPRINTS.md`               | How this repo thinks of itself as a blueprint, not a product                       |
@@ -196,14 +205,14 @@ used to be three overlapping version-management verbs — see
 `sprints/2026-07-29-elite-cli/`. Cross-repo tooling still auto-generates
 qukaizen-style branch names in this repo.
 
-The code is more mature than aeroLLM's (it predates the extraction);
+The code is more mature than QueueLLM's (it predates the extraction);
 treat the portal and the agent loader as stable surfaces, the
 autoresearch loop and the knowledge-base ingest paths as the moving
 parts.
 
 ## Conventions worth knowing
 
-- **License: MIT.** (Different from aeroLLM's Apache-2.0.)
+- **License: MIT.** (Different from QueueLLM's Apache-2.0.)
 - **Local-first by default.** `LAB_MODE=airgapped` blocks every cloud
   provider. The Compute Source row in Chat shows a banner; the
   save/test/models endpoints refuse. `LAB_MODE=hybrid` opens the door.
@@ -211,7 +220,7 @@ parts.
 - **Internal package name stays `arail`.** Display name (LAB_NAME,
   LAB_TAGLINE) is rebrand-able via `.env`. Imports must not break when
   someone calls their lab "PeanutLab".
-- **Compute Source pivot is the integration seam.** When aeroLLM lands
+- **Compute Source pivot is the integration seam.** When QueueLLM lands
   HTTP bindings, it slots in as a new Compute Source option — same UX,
   no UI changes. Don't bake AirLLM into the surface; bake "local
   inference backend" with AirLLM as one implementation.
@@ -242,7 +251,7 @@ parts.
   people run on their own machines. *Machine-level convention:* on boxes shared
   across QuKaiZen products, MLX checkpoints are pooled world-readable at
   `/Users/Shared/models/` (with `~/models` symlinked to it) so multiple macOS
-  accounts read one copy — required by aeroLLM's GA gate #6 cross-user replay.
+  accounts read one copy — required by QueueLLM's GA gate #6 cross-user replay.
   Opt in per-machine with `ARAIL_MODELS_DIR=/Users/Shared/models`; prefer that
   location when downloading new checkpoints there. Do **not** make it a product
   default. See `docs/models-on-disk.md`.
@@ -313,9 +322,9 @@ parts.
 4. **For setup / port work**: `scripts/setup.sh` is the only file you
    need to touch. `AGENTS.md` walks an external agent through what each
    `case` statement does and what to add.
-5. **For aeroLLM context**: `research/aerollm/00-product-vision.md`
+5. **For QueueLLM context**: `research/aerollm/00-product-vision.md`
    through `04-measurement-log.md` are the design docs. The actual
-   runtime is `~/ProJects/qukaizen-aerollm`.
+   runtime is `~/ProJects/qukaizen-queuellm`.
 6. **Knowledge Base ingest**: easiest path is the portal —
    `/knowledge` has folder-reveal buttons (`lab/pkb/inbox` for docs,
    `lab/models` for model weights), full-page drag-drop, and a
@@ -337,7 +346,7 @@ In rough priority order:
 - `docs/agents.md` — agent architecture and loader contract.
 - `AGENTS.md` — external-agent porting manifest. (Different from
   Claude-onboarding; keep separate.)
-- `research/aerollm/README.md` — the bridge to the aeroLLM repo.
+- `research/aerollm/README.md` — the bridge to the QueueLLM repo.
 - `ROADMAP.md` — forward plan; check before proposing significant changes.
 
 ## What this file is not

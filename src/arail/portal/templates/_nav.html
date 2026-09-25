@@ -116,7 +116,7 @@
     <span class="sb-label">Avg resp</span><span class="sb-value" id="sb-latency">—</span></span>
   <span class="sb-grow"></span>
   <button class="btn btn-sm btn-red" id="btn-halt"
-          title="Cancel all running jobs — portal stays up">⏸ Halt jobs</button>
+          title="Hold all agents — agents stop calling models and stop posting findings, suggestions and announcements. Operational/error lines and SRE crash alerts continue.">⏸ Hold all agents</button>
   <button class="btn btn-sm btn-primary" id="btn-resume" style="display:none"
           title="Resume scheduler">▶ Resume</button>
 </div>
@@ -174,7 +174,7 @@
   }
   var halt=document.getElementById('btn-halt'), resume=document.getElementById('btn-resume');
   if(halt) halt.addEventListener('click', async function(){
-    if(!confirm('Halt all running jobs? The portal and services stay up — this cancels agent work only.'))return;
+    if(!confirm('Hold all agents? agents stop calling models and stop posting findings, suggestions and announcements. Operational/error lines and SRE crash alerts continue.'))return;
     await fetch('/api/jobs/halt',{method:'POST'}); refreshJobs(); });
   if(resume) resume.addEventListener('click', async function(){
     await fetch('/api/jobs/resume',{method:'POST'}); refreshJobs(); });

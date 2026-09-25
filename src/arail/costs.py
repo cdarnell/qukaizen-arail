@@ -229,6 +229,18 @@ class CostTracker:
                 self.latency_by_backend = data.get("latency_by_backend", {})
                 self.calls_by_backend = data.get("calls_by_backend", {})
                 self.calls_by_source = data.get("calls_by_source", {})
+                # Legacy-key migration (sprint 2026-09-20-buddy-front-and-
+                # center, W2): calls_by_source is persisted, so a bare
+                # "agent" bucket accumulated by every pre-attribution call
+                # would never return to zero no matter what new code does.
+                # One-time, idempotent rename on load — nothing writes the
+                # bare key again after this sprint's chokepoint change.
+                legacy_agent_calls = self.calls_by_source.pop("agent", None)
+                if legacy_agent_calls:
+                    self.calls_by_source["agent:pre-p1-legacy"] = (
+                        self.calls_by_source.get("agent:pre-p1-legacy", 0)
+                        + legacy_agent_calls
+                    )
                 self.tokens_by_backend = data.get("tokens_by_backend", {})
                 self.cloud_by_backend = data.get("cloud_by_backend", {})
                 self._started_at = data.get("started_at", time.time())
