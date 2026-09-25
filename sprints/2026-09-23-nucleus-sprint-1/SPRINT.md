@@ -2,6 +2,7 @@
 
 **ID:** 2026-09-23-nucleus-sprint-1
 **Started:** 2026-09-23
+**Shipped:** 2026-09-25 — PR #197 open; Gate A complete. Gate B and item 10 are a follow-on (see TEST_REPORT.md round 2 readiness list).
 **Product:** arail
 **Branch:** `qukaizen/arail-nucleus-sprint-1` (worktree `~/ProJects/arail-nucleus-wt`, cut from origin/main)
 **Brief:** `sprints/nucleus-in-arail-brief.md` (committed 11826fc3)
@@ -18,7 +19,7 @@ Make Project Nucleus a first-class ARAIL surface ("Model Forge"): `src/arail/nuc
 | build | builder | BUILD_LOG.md | done | 2026-09-23 | 2026-09-23 | Gate A reached (commits 1-27, 14dd54aa); commit 28 / Gate B / item 10 out of scope per operator instruction |
 | review | architect (review) | REVIEW.md | done | 2026-09-23 | 2026-09-23 | round 1 BLOCK → loop 1 (12 commits); round 2 BLOCK → loop 2 (8 commits); round 3 WEAK_PASS |
 | test | qa | TEST_REPORT.md | done | 2026-09-23 | 2026-09-24 | round 2: WEAK_PASS — CI gate 443 passed / 15 xfail / 0 failed; four-path list 508 passed / 1 pre-existing failure. Round 1 was | round 1: FAIL — Gate A pipeline holds (460 passed / 14 strict xfail); full suite regresses 44 → 57 failures vs merge-base 236504ca. Loop 3 fixed F1/F2. Loop 4 (F3): time-boxed root-cause attempt traced the exception to non-nucleus modules (arail.portal.app/arail.model_defaults bare os.environ writes + the arail.registry singleton); fallback (a) landed — tests/nucleus isolated as its own CI invocation (ARCHITECTURE.md §7.2), BACKLOG ticket filed with evidence, commit 66e1924f |
-| ship | — | PR | pending | — | — | — |
+| ship | — | PR | done | 2026-09-25 | 2026-09-25 | https://github.com/cdarnell/qukaizen-arail/pull/197 (open, awaiting CI + merge) |
 
 ## Decisions log
 
