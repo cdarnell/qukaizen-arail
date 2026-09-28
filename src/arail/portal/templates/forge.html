@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% set active = 'forge' %}
+{% block title %}{{ brand.name if brand else 'ARAIL' }} — Model Forge{% endblock %}
+
+{% block head %}
+<style>
+  .fg-wrap{max-width:1000px;margin:0 auto;padding:1rem 1.2rem;}
+  .fg-badge{font-size:.7rem;padding:.1em .5em;border-radius:var(--radius-pill);}
+  .fg-badge.trusted{background:color-mix(in srgb, var(--positive) 15%, transparent);color:var(--positive);}
+  .fg-badge.untrusted,.fg-badge.invalid{background:color-mix(in srgb, var(--warn) 15%, transparent);color:var(--warn);}
+  .fg-badge.STUB,.fg-badge.ephemeral-stub{background:#d33;color:#fff;}
+  .fg-table{width:100%;border-collapse:collapse;font-size:.85rem;}
+  .fg-table td,.fg-table th{border-bottom:1px solid var(--border-strong);padding:.4rem;text-align:left;}
+  .fg-report{margin-top:1rem;}
+  .fg-report pre{white-space:pre-wrap;word-break:break-word;}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="fg-wrap">
+  <h1>Model Forge</h1>
+
+  {% if mode == 'list' %}
+  <p class="bx-sub">Local, signed DNA cards. Built with <code>arailctl nucleus build</code>.</p>
+
+  <table class="fg-table">
+    <tr><th>Shard</th><th>Version</th><th>Decision</th><th>Runtime</th><th>Built</th></tr>
+    {% for c in cards %}
+    <tr>
+      <td><a href="/forge/{{ c.shard }}/{{ c.version }}">{{ c.shard }}</a></td>
+      <td>{{ c.version }}</td>
+      <td>{{ c.decision }}</td>
+      <td>{{ c.runtime }}</td>
+      <td>{{ c.built }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5">No cards yet — run <code>arailctl nucleus build &lt;domain&gt;</code>.</td></tr>
+    {% endfor %}
+  </table>
+
+  {% if in_progress %}
+  <h2>In progress</h2>
+  <ul>
+    {% for run in in_progress %}
+    <li>{{ run.build_id }} ({{ run.domain }}) —
+      {% for p in run.phases %}{{ p.phase }}:{{ p.status }} {% endfor %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  {% elif mode == 'detail' %}
+  <p><a href="/forge">&larr; back to Model Forge</a></p>
+  <h2>{{ shard }} @ {{ version }}
+    <span class="fg-badge {{ verify_badge }}">{{ verify_badge }}</span>
+  </h2>
+
+  <table class="fg-table">
+    <tr><td>Decision</td><td>{{ card.fidelity.decision }}</td></tr>
+    <tr><td>Composite</td><td>{{ card.composite.value }} ({{ card.composite.formula_id }})</td></tr>
+    <tr><td>Runtime</td><td>{{ card.runtime }}</td></tr>
+    <tr><td>Lab mode</td><td>{{ card.lab_mode }}</td></tr>
+    <tr><td>eval_hash</td><td><code>{{ card.eval_hash }}</code></td></tr>
+    <tr><td>pipeline_hash</td><td><code>{{ card.pipeline_hash }}</code></td></tr>
+  </table>
+
+  {% if report_html %}
+  <div class="fg-report">
+    <h2>Build report</h2>
+    {{ report_html | safe }}
+  </div>
+  {% endif %}
+  {% endif %}
+</div>
+{% endblock %}

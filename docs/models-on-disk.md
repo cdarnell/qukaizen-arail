@@ -2,9 +2,9 @@
 
 > Short version: **chat models live in Ollama's own store** (outside this repo),
 > **downloaded weights live in `lab/models/`**, and **anything you build** lands
-> in `build/`, `models/graduated/`, or the sibling Nucleus repo depending on
-> which path you used. This page is the map. Nothing here is guessed — each
-> location is the real path the code writes to.
+> in `build/`, `$ARAIL_MODELS_DIR/forge/` (Model Forge shards), or
+> `models/graduated/` depending on which path you used. This page is the map.
+> Nothing here is guessed — each location is the real path the code writes to.
 
 ARAIL has several different notions of "a model," and they don't all live in the
 same place. That's the single most confusing thing about model building here, so
@@ -18,8 +18,7 @@ start with the table, then read the path that matches what you did.
 | **Downloaded weights** (GGUF / safetensors for AirLLM / AeroLLM streaming) | `lab/models/` | `ARAIL_MODELS_DIR` (`src/arail/config.py`) — git-ignored |
 | **`build_ai_eng.sh` output** (the real local distillation pipeline) | `build/` at the repo root (e.g. `build/ai-eng-1.5b-v2.1.Q4_K_M.gguf`) | `ARAIL_BUILD_DIR` (default `./build`) — git-ignored |
 | **Graduated LoRA adapters** (from a Nucleus run) | `models/graduated/<id>/` | committed via git-lfs |
-| **`/build` tab manifests** (the spec you submit) | the **sibling Nucleus repo**: `~/ProJects/qukaizen-nucleus/configs/arail-generated/<run_id>.yaml` | `NUCLEUS_CONFIGS_DIR` (`src/arail/build/manifest.py`) |
-| **Nucleus-trained student model** | wherever the Nucleus trainer writes it (outside ARAIL); re-imported into ARAIL via `POST /api/models/register-artifact` | the Nucleus pipeline |
+| **Model Forge shards** (`arailctl nucleus build` output — DNA card, seal, build report, fused weights) | `$ARAIL_MODELS_DIR/forge/<shard>/<version>/` | `ARAIL_MODELS_DIR` (`src/arail/config.py`); private intermediates (cert set, teacher logits, keys) live in `lab/data/nucleus/`, 0700 |
 | **Experiment records** (Autoresearch measured runs) | `lab/data/experiments/<id>.json` (raw) + `lab/pkb/agents/experiments/*.md` (KB, until you promote them) | the Researcher agent |
 
 > **"Wipe the PKB = forget me"** covers `lab/pkb/` (knowledge + chat memory).
@@ -47,21 +46,21 @@ not the same, and only one runs automatically at setup:
    today — read the script's header before running:
    `./scripts/build_ai_eng.sh --help`.
 
-3. **The `/build` tab (Nucleus SSDP pipeline).** This is the "Build, distill,
-   and register models" UI. It is a **thin client for a separate program** —
-   the `qukaizen-nucleus` repo's orchestrator/synthesizer/trainer, which ARAIL's
-   setup does **not** install or start. On a fresh clone the tab shows "Nucleus
-   orchestrator offline" and a build returns an error until you install and run
-   Nucleus yourself. Preflight (the readiness estimate) works offline; the
-   actual build does not. Manifests you submit land in the **sibling Nucleus
-   repo's `configs/arail-generated/`**; the trained model lands on the Nucleus
-   side and is re-imported via the Models registry.
+3. **Model Forge (`arailctl nucleus <verb>`, viewed at `/forge`).** This
+   replaced the old `/build` tab and its separate-program dependency
+   (2026-09-23, sprints/2026-09-23-nucleus-sprint-1). It's an in-repo,
+   local-first distillation pipeline: `nucleus plan` writes a
+   `configs/domains/<slug>.yaml`, `nucleus stage` snapshots a local corpus,
+   `nucleus build` runs preflight -> extract -> train -> eval, and
+   `nucleus certify` writes a signed DNA card, a seal, a build report, and
+   (locally by default) a ledger row. `/forge` is a **read-only viewer** —
+   it lists and renders cards; it does not trigger builds. There is no
+   sibling-repo dependency and no separate program to install.
 
 4. **The `/tuning` tab** — this is **not** model building at all. It tunes the
-   *inference throughput* of a very large (≥1 TB) model by sweeping AeroLLM
+   *inference throughput* of a very large (≥1 TB) model by sweeping QueueLLM
    runtime knobs and committing the winners to `config/tuning.yml`. No weights
-   are trained. It sits one nav click from `/build`, so it's easy to confuse —
-   it isn't the same thing.
+   are trained.
 
 ## Shared checkpoints (machine-level convention, not an ARAIL default)
 
@@ -98,8 +97,9 @@ required no code changes.
 
 - **"I ran setup — what model do I have?"** `llama-ai-eng` in Ollama (the
   minimalist default). Check with `ollama list` or `./arailctl doctor`.
-- **"The `/build` tab is red / 502s."** That's expected without Nucleus running.
-  See surface 3 above — it's a separate install, by design for now.
+- **"Where's the `/build` tab?"** Retired 2026-09-23; replaced by Model
+  Forge (`arailctl nucleus <verb>`, viewed read-only at `/forge`). See
+  surface 3 above.
 - **"Where did my Autoresearch experiment results go?"** `lab/data/experiments/`
   (raw JSON) and `lab/pkb/agents/experiments/` (markdown you can promote into the
   Knowledge Base). See `docs/agents-explained.md`.

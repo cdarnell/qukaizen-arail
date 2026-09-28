@@ -1,5 +1,7 @@
 # Sprint: distill-now
 
+> **Superseded by [2026-09-23-nucleus-sprint-1](../2026-09-23-nucleus-sprint-1/SPRINT.md) (Model Forge).** The `/build` tab this sprint targeted is retired; the local `domain.yaml` -> `arailctl nucleus build` -> signed DNA card loop replaces it. This record is kept for history, not as live guidance.
+
 **ID:** 2026-07-22-distill-now
 **Started:** 2026-07-22
 **Product:** arail (touches qukaizen-dac / qukaizen-nucleus / AeroLLM as integration points)

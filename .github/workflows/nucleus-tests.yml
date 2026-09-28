@@ -1,0 +1,60 @@
+name: Nucleus Tests
+
+# CI gate for Model Forge (arail.nucleus): the stub-provider pipeline must
+# stay green with zero network and zero real teacher/model dependency.
+# Hardware-bound markers (requires_mlx / requires_aerollm / requires_kernel /
+# requires_qkz_bin) are excluded here; they run locally on the operator's M5
+# and are reported by hand in BUILD_LOG.md / TEST_REPORT.md.
+# See sprints/2026-09-23-nucleus-sprint-1/ARCHITECTURE.md §7.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nucleus-tests-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  nucleus-tests:
+    name: Model Forge stub-provider suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dev dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Run Model Forge suite (stub provider, zero network)
+        shell: bash
+        env:
+          ARAIL_NONINTERACTIVE: "1"
+          ARAIL_NUCLEUS_STUB: "1"
+        run: |
+          set -euo pipefail
+          # NOTE: this list grows as later commits land the referenced files
+          # (tests/portal/test_forge_viewer.py at commit 25, tests/test_qa6_security_gate.py
+          # rewired at commit 3, tests/portal/test_models_api.py rewired at commit 26).
+          # Skeleton state (commit 1): tests/nucleus only.
+          python -m pytest \
+            tests/nucleus \
+            -m "not requires_mlx and not requires_aerollm and not requires_kernel and not requires_qkz_bin" \
+            -p no:cacheprovider -q

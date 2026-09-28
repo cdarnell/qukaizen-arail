@@ -23,6 +23,17 @@ import socket
 from urllib.parse import urlparse
 
 
+# Single source of truth for the airgapped-mode explanation shown to the
+# user. Originally lived only in the Chat providers-status endpoint
+# (portal/app.py); Model Forge's `nucleus gateway` seam (ARCHITECTURE.md
+# §4.11) needs the identical string, so it moved here. Byte-identical to
+# the pre-move Chat string — see tests/test_airgap.py::test_airgapped_notice_unchanged.
+AIRGAPPED_NOTICE = (
+    "Lab is in airgapped mode. Only My Machine is usable. "
+    "To enable cloud providers, set LAB_MODE=hybrid in .env and restart."
+)
+
+
 class EgressBlocked(RuntimeError):
     """Raised when an outbound network call is denied by the airgap guard.
 

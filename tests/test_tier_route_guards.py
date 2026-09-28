@@ -13,7 +13,7 @@ import pytest
 
 MAXIMUS_ONLY_GETS = [
     "/terminal", "/notebook", "/notebooks", "/marimo",
-    "/plugins", "/admin", "/build", "/tuning",
+    "/plugins", "/admin", "/tuning",
 ]
 MAXIMUS_ONLY_POSTS = [
     ("/api/notebook/start", {}),
@@ -51,6 +51,17 @@ def test_maximus_serves_maximus_routes(client, monkeypatch):
     for path in MAXIMUS_ONLY_GETS:
         r = client.get(path)
         assert r.status_code != 404, f"{path} must serve on maximus, got 404"
+
+
+def test_build_redirects_to_forge_on_every_tier(client, monkeypatch):
+    """/build is retired (sprints/2026-09-23-nucleus-sprint-1 ARCHITECTURE.md
+    §8): it is a permanent 308 redirect to /forge, not a tier-gated route, so
+    it is deliberately absent from MAXIMUS_ONLY_GETS above (T-FORGE-4)."""
+    for tier in ("minimalist", "maximus"):
+        monkeypatch.setenv("LAB_TIER", tier)
+        r = client.get("/build", follow_redirects=False)
+        assert r.status_code == 308, f"/build on {tier} must 308, got {r.status_code}"
+        assert r.headers["location"] == "/forge"
 
 
 def test_plugin_install_requires_confirmation(client, monkeypatch):

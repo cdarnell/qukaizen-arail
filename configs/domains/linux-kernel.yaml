@@ -1,0 +1,37 @@
+# Model Forge domain: Linux kernel (item 10's real target). See
+# sprints/2026-09-23-nucleus-sprint-1/ARCHITECTURE.md for the full design;
+# docs/nucleus.md for the operator-facing tour once it lands (commit 27).
+#
+# `nucleus stage` must be run before `nucleus build` — see F8/Q7 in the
+# ARCHITECTURE doc for the networked, pre-airgapped-run prerequisites
+# (cloning torvalds/linux + the kernel vulns repo, downloading the student
+# base). Nothing in this file causes a network fetch by itself.
+
+student:
+  base: qwen2.5-3b-instruct   # alias resolved by arail.nucleus.models (commit 7); < 8B required
+
+teacher:
+  profile: local
+  model: auto   # tokenizer-parity-first selection; picks Qwen3-30B-A3B-Instruct-2507 on this box (F6)
+
+runtime: queuellm
+
+corpus:
+  sources:
+    - git:linux
+    - cve:vulns
+  cutoff: "2026-06-01"   # train/dev pool is <= cutoff; cert is strictly after it
+
+eval:
+  cert_set: frozen
+  eyeball_prompts: linux-kernel.eyeball.txt
+  dev_fraction: 0.1
+  cert_n: 800
+
+fidelity:
+  target: 0.75
+
+distill:
+  top_n: 20
+
+shard: qkz-linux-kernel

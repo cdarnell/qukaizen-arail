@@ -252,7 +252,7 @@ def test_slug_sanitizer_parity_with_world_mount_and_world_corpus():
     for s in samples:
         assert ckb._safe_term_slug(s) == wm(s), s
     try:
-        from arail.build.world_corpus import _safe_term_slug as wc
+        from arail.world_catalog import _safe_term_slug as wc
     except Exception:  # pragma: no cover - optional import
         wc = None
     if wc is not None:
