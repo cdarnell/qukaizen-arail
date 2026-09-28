@@ -1896,7 +1896,7 @@ class AeroLLMBackend(BaseBackend):
 # ---------------------------------------------------------------------------
 # OllamaNativeBackend  (Ollama native /api/chat — carries options.num_ctx)
 # ---------------------------------------------------------------------------
-def _normalize_keep_alive(value: str) -> "str | int":
+def _normalize_keep_alive(value: "str | int") -> "str | int":
     """Coerce a keep_alive setting into something Ollama actually accepts.
 
     Ollama reads a JSON *string* as a Go duration and a JSON *number* as
@@ -1905,6 +1905,16 @@ def _normalize_keep_alive(value: str) -> "str | int":
     Operators reasonably write ARAIL_OLLAMA_KEEP_ALIVE=-1 meaning
     "forever", so turn any bare integer into the number form and leave
     real durations ("2h", "30s") untouched.
+
+    Called at the REQUEST boundary (complete/stream_complete), not only
+    inside _keep_alive: this bug class has shipped twice — first when the
+    pin value itself was the string "-1" (see tests/router/
+    test_keep_alive.py's CORRECTED note: every /api/chat call 400'd and
+    the whole local lane was dead), then again on a branch whose fork of
+    _keep_alive drifted from the fixed version. Whatever resolves the
+    value — this method, an env override, a subclass, a __new__-built
+    instance — the body that reaches Ollama can never carry a bare
+    numeric string.
     """
     try:
         return int(value)
@@ -2054,7 +2064,9 @@ class OllamaNativeBackend(OpenAICompatBackend):
             body["think"] = think
         keep_alive = self._keep_alive()
         if keep_alive is not None:
-            body["keep_alive"] = keep_alive
+            # Wire guard: whatever produced the value, a bare numeric
+            # string must leave here as a JSON number (Ollama 400s "-1").
+            body["keep_alive"] = _normalize_keep_alive(keep_alive)
 
         resp = self._session.post(
             f"{self._ollama_root()}/api/chat",   # F-OLLAMA-SHIM: native endpoint
@@ -2111,7 +2123,8 @@ class OllamaNativeBackend(OpenAICompatBackend):
             body["think"] = think
         keep_alive = self._keep_alive()
         if keep_alive is not None:
-            body["keep_alive"] = keep_alive
+            # Wire guard — same rule as complete(); see _normalize_keep_alive.
+            body["keep_alive"] = _normalize_keep_alive(keep_alive)
 
         full_text = ""
         eval_count = 0
