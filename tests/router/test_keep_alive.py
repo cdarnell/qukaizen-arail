@@ -207,3 +207,71 @@ def test_chat_gallery_new_path_gets_keep_alive_too(monkeypatch):
     be._session = _CapturingSession()
     be.complete("hi", max_tokens=8)
     assert be._session.bodies[0]["keep_alive"] == "2h"
+
+
+# ---------------------------------------------------------------------------
+# The wire guard: complete()/stream_complete() normalize keep_alive at the
+# request boundary, so NO producer — env, pin, a subclass, a drifted fork of
+# _keep_alive on another branch — can put the bare string "-1" on the wire.
+# (Ollama parses a string keep_alive as a Go duration; "-1" has no unit and
+# 400s the call — the failure that painted the dashboard's "unhealthy"
+# banner over a perfectly healthy lab.)
+# ---------------------------------------------------------------------------
+
+class _StreamingCapturingSession(_CapturingSession):
+    """Adds the context-manager + iter_lines surface stream_complete needs."""
+
+    def post(self, url, headers=None, json=None, timeout=None, stream=False):
+        self.bodies.append(json)
+
+        class _R:
+            status_code = 200
+
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"message": {"content": "ok"}, "eval_count": 1,
+                        "model": "m"}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def iter_lines(self, decode_unicode=False):
+                return iter(['{"message":{"content":"ok"},"done":true,'
+                             '"eval_count":1,"model":"m"}'])
+        return _R()
+
+
+def test_wire_guard_normalizes_a_drifted_keep_alive_override(backend, monkeypatch):
+    """Simulates the fork drift that re-shipped this bug: _keep_alive
+    resolving to the bare string "-1". The body must still carry the
+    JSON number."""
+    monkeypatch.delenv("ARAIL_OLLAMA_KEEP_ALIVE", raising=False)
+    monkeypatch.setattr(backend, "_keep_alive", lambda: "-1")
+    backend.complete("hi", max_tokens=8)
+    sent = backend._session.bodies[0]["keep_alive"]
+    assert sent == -1
+    assert not isinstance(sent, str)
+
+
+def test_wire_guard_leaves_real_durations_alone(backend, monkeypatch):
+    monkeypatch.delenv("ARAIL_OLLAMA_KEEP_ALIVE", raising=False)
+    monkeypatch.setattr(backend, "_keep_alive", lambda: "30s")
+    backend.complete("hi", max_tokens=8)
+    assert backend._session.bodies[0]["keep_alive"] == "30s"
+
+
+def test_stream_body_keep_alive_is_normalized_too(monkeypatch):
+    monkeypatch.setenv("MODEL_NAME", "ai-engineer:latest")
+    monkeypatch.delenv("MODEL_API_BASE", raising=False)
+    monkeypatch.setenv("ARAIL_OLLAMA_KEEP_ALIVE", "-1")
+    be = OllamaNativeBackend()
+    be._session = _StreamingCapturingSession()
+    list(be.stream_complete("hi", max_tokens=8))
+    sent = be._session.bodies[0]["keep_alive"]
+    assert sent == -1
+    assert not isinstance(sent, str)
