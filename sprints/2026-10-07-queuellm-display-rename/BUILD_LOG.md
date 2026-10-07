@@ -126,3 +126,12 @@ Deltas and judgement calls:
 Test results (temp HOME, same machine; base `5f775f1c` in a separate checkout):
 - The sprint, QA and guard files pass: `test_queuellm_rename_qa.py` 35 passed (the strict xfail is now a normal test), `test_no_user_visible_aerollm.py` 43 passed, `test_skill_pack_pre_rename_refresh.py` 2 passed.
 - Full suite on base: 73 failed, 7 errors. The FAILED id sets match except one: `tests/test_cli_qa_edge.py::test_qa_edge_driver_scenarios` failed once on HEAD when other jobs ran on the machine. It passes in isolation (11 passed). It is a CLI subprocess driver and the loop touches nothing it exercises, so I treat it as load-sensitive. The HEAD run's error ids were not captured. No new deterministic failure.
+
+## Loop 3
+
+| # | Files | Change | Commit |
+|---|---|---|---|
+| L3-1 | `docs/verification/aerollm-1.0.0-pin.md`, `tests/test_no_user_visible_aerollm.py`, `tests/test_queuellm_rename_qa.py` | [BLOCK] Lines 54 and 62 (fenced recorded tool output) restored byte-for-byte from `5f775f1c`; prose edits kept. Both guards exempt exactly those two strings (anchored regexes), not the file. The QA portal-docs test needed the same exemption, since it renders the doc. | `a3ac4ff7` |
+| L3-2 | `tests/test_skill_pack_pre_rename_refresh.py` | [ASK] Positive path: an unedited pre-rename `optimize-aerollm` SKILL.md (sha injected via monkeypatch) is in `installed` on the first call and replaced with no "AeroLLM"; the second call lists it in `skipped_existing` and leaves the bytes unchanged. | `3d107e0d` |
+
+Tests (temp HOME): the three sprint files, 81 passed.
