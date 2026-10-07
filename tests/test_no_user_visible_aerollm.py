@@ -60,8 +60,12 @@ MIGRATION_NOTES = [
 ALLOWLIST: tuple[tuple[re.Pattern[str], str], ...] = (
     # the ``arailctl`` CLI alias is a command name users type
     (re.compile(r"benchmark,\s*aerollm"), "arailctl alias `aerollm` is a command"),
-    (re.compile(r"(?<=['\"])aerollm(?=['\"])"),
-     "backend id quoted inside a validation message (the value users must type)"),
+    (re.compile(r"(?<=expected ')aerollm(?=')"),
+     "autoresearch validation message: the backend id value users must type"),
+    (re.compile(r"(?<=No module named ')aerollm(?=')"),
+     "verbatim Python ImportError text quoting the frozen module name"),
+    (re.compile(r"(?<=\[\")aerollm(?=\")"),
+     "docs: a backend id in a quoted preference list"),
     (re.compile(r"(?<=`)aerollm(?=`)"),
      "backticked identifier in docs: the arailctl alias / an id users type"),
     (re.compile(r"git\+https://github\.com/cdarnell/aerollm@\w+"),
@@ -81,6 +85,8 @@ ALLOWLIST: tuple[tuple[re.Pattern[str], str], ...] = (
 EXCLUDED_FILES = {
     # implements the AERO_* -> QUEUELLM_* alias mapping itself
     "src/arail/nucleus/runtime_names.py",
+    # maintainer packaging script pinned to the frozen bundle (ARCHITECTURE A6)
+    "scripts/package-aerollm-bundle.sh",
 }
 
 
@@ -237,9 +243,21 @@ def extract_yaml_toml(text: str):
             yield n, line
 
 
+# Markdown only. Code, not prose: a lowercase ``aerollm`` joined to other
+# characters by ``- _ @ / .`` (repo, crate, path, test, knob, pip name), the
+# frozen module in ``import aerollm``, the pyproject extra key ``aerollm = "``,
+# ``grep -i aerollm`` and a quoted ``backend: aerollm`` value. A standalone
+# word ``aerollm`` and every capitalised spelling are prose and stay flagged.
+_MD_IDENTIFIER = re.compile(
+    r"[\w.@~/-]*[-_@/~]aerollm(?![A-Za-z0-9])[\w.@/-]*|\baerollm[-_@/][\w.@/-]*|"
+    r"\baerollm\.\w+|\bimport\s+aerollm\b|\baerollm\s*=\s*\"|"
+    r"grep\s+-i\s+aerollm\b|\bbackend:\s*aerollm\b")
+
+
 def extract_markdown(text: str):
     text = _strip_block_comments(text, "<!--", "-->")
     for n, line in enumerate(text.splitlines(), 1):
+        line = _MD_IDENTIFIER.sub(" ", line)
         if line.strip():
             yield n, line
 
@@ -261,14 +279,23 @@ def scan_targets() -> list[tuple[Path, str]]:
             targets.append((p, "js"))
         elif p.suffix == ".css":
             targets.append((p, "css"))
-    for name in ("arailctl", "scripts/setup.sh", "scripts/upgrade.sh",
-                 "scripts/build-aerollm.sh", "scripts/blueprint.sh"):
-        targets.append((ROOT / name, "shell"))
+    targets.append((ROOT / "arailctl", "shell"))
+    for p in sorted((ROOT / "scripts").glob("*.sh")):
+        if _rel(p) not in EXCLUDED_FILES:
+            targets.append((p, "shell"))
+    for p in sorted((ROOT / "lab" / "tools").rglob("*.py")):
+        targets.append((p, "py"))
     for p in sorted(src.rglob("*.yaml")):
         targets.append((p, "yaml"))
     for p in sorted(src.rglob("*.md")):
         targets.append((p, "md"))
-    targets.append((ROOT / "docs" / "cli.md", "md"))
+    # Docs the portal renders under /docs/ plus the root markdown it serves.
+    # docs/archive/ is historical record and is never scanned.
+    for p in sorted((ROOT / "docs").rglob("*.md")):
+        if "archive" not in p.relative_to(ROOT / "docs").parts:
+            targets.append((p, "md"))
+    for name in ("BLUEPRINTS.md", "AGENTS.md"):
+        targets.append((ROOT / name, "md"))
     for name in ("config/tuning.yml", "config/tuning-mlx.yml",
                  "catalog/models.toml"):
         targets.append((ROOT / name, "yaml"))
@@ -372,6 +399,34 @@ def test_guard_flags_user_visible_samples(kind, sample):
 def test_guard_passes_frozen_and_non_visible_samples(kind, sample):
     got = scan_text(kind, sample)
     assert not got, f"false positive on {sample!r}: {got}"
+
+
+@pytest.mark.parametrize("sample", [
+    "Run the aerollm engine.",
+    "Deep model: AeroLLM.",
+    "label: 'aerollm'",
+])
+def test_guard_markdown_flags_prose_spellings(sample):
+    assert scan_text("md", sample)
+
+
+@pytest.mark.parametrize("sample", [
+    "see `aerollm-api` and ~/ProJects/qukaizen-aerollm/NOTICE",
+    "run test_aerollm_compute_source",
+    ">>> import aerollm",
+    "backend: aerollm",
+])
+def test_guard_markdown_passes_identifiers(sample):
+    assert not scan_text("md", sample)
+
+
+def test_guard_scans_docs_tools_and_all_scripts():
+    rels = {_rel(p) for p, _ in scan_targets()}
+    assert "BLUEPRINTS.md" in rels and "lab/tools/benchmark_models.py" in rels
+    assert "docs/world-forge.md" in rels
+    assert not any(r.startswith("docs/archive/") for r in rels)
+    assert "scripts/blueprint.sh" in rels
+    assert "scripts/package-aerollm-bundle.sh" not in rels
 
 
 def test_guard_runs_fast_and_scans_real_files():

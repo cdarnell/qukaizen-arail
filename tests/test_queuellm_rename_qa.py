@@ -41,6 +41,7 @@ def _visible_hits(text: str) -> list[str]:
     body = re.sub(r"['\"`][a-z0-9_:.\-/]*aerollm[a-z0-9_:.\-/]*['\"`]", "", body)
     body = re.sub(r"[#.\w/-]*aerollm[\w-]*", "", body)
     body = re.sub(r"[A-Z0-9_]*AERO(?:LLM)?_[A-Z0-9_]*", "", body)
+    body = re.sub(r"[A-Z0-9_]*_AEROLLM\b", "", body)   # ARAIL_FORCE_AEROLLM
     body = re.sub(r"AeroLLMBackend", "", body)
     body = re.sub(r"[Ff]ormerly AeroLLM|AeroLLM was renamed", "", body)
     return [m.group(0) for m in re.finditer(r".{0,50}aero\s*llm.{0,50}", body, re.I | re.S)]
@@ -89,7 +90,7 @@ def tracker(monkeypatch, tmp_path):
 _SKIP_ROUTE_PARTS = ("stream", "events", "sse", "openapi", "redoc", "watch", "tail")
 # Routes that render repo markdown (docs/, BLUEPRINTS.md, AGENTS.md). The
 # builder left those docs out of scope and the reviewer accepted that as a
-# follow-up. They are covered by the xfail test below, not this one.
+# follow-up. They are covered by the repo-docs test below, not this one.
 _REPO_DOC_ROUTES = {"/docs", "/docs/INDEX.md", "/docs/design.md", "/design",
                     "/blueprints-overview", "/blueprints-guide",
                     "/porting-manifest"}
@@ -129,11 +130,6 @@ def test_every_parameter_free_get_route_renders_no_user_visible_aerollm(
     assert not hits, "\n".join(hits)
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "Accepted debt (REVIEW.md follow-up 4): ~20 docs/*.md, BLUEPRINTS.md and "
-    "the world-forge.md frontmatter description (shown as a /docs index card) "
-    "still say AeroLLM, and /docs/<path> renders all of them in the portal. "
-    "Remove this marker when the docs sweep lands."))
 def test_portal_rendered_repo_docs_have_no_user_visible_aerollm(monkeypatch):
     monkeypatch.setenv("LAB_TIER", "maximus")
     from fastapi.testclient import TestClient
