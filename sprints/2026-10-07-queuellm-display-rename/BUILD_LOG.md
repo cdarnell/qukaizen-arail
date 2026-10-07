@@ -135,3 +135,13 @@ Test results (temp HOME, same machine; base `5f775f1c` in a separate checkout):
 | L3-2 | `tests/test_skill_pack_pre_rename_refresh.py` | [ASK] Positive path: an unedited pre-rename `optimize-aerollm` SKILL.md (sha injected via monkeypatch) is in `installed` on the first call and replaced with no "AeroLLM"; the second call lists it in `skipped_existing` and leaves the bytes unchanged. | `3d107e0d` |
 
 Tests (temp HOME): the three sprint files, 81 passed.
+
+## Loop 4
+
+Correction to Loop 3: row L3-1 says the QA portal-docs test received the same exemption in `a3ac4ff7`. That was wrong. `a3ac4ff7` touched only `docs/verification/aerollm-1.0.0-pin.md` and `tests/test_no_user_visible_aerollm.py`; the `tests/test_queuellm_rename_qa.py` edit stayed uncommitted in the working tree, so the "81 passed" run in Loop 3 depended on that dirty file.
+
+| # | Files | Change | Commit |
+|---|---|---|---|
+| L4-1 | `tests/test_queuellm_rename_qa.py` | Committed the two exact-line exemptions (`• AeroLLM ready (release wheel 1.0.0) — the 2nd inference.` and `• AeroLLM (2nd inference) status`) in `_visible_hits`. No other tracked change. | `e12d19b9` |
+
+Tests (temp HOME, tracked tree clean before the run): the three sprint files, 81 passed.
