@@ -111,3 +111,36 @@ None blocking. File these follow-ups in SPRINT.md or tickets:
 4. Docs sweep for the ~20 `docs/` files, with the guard extended to cover them.
 5. DDaC re-seal of the `terms.json` AeroLLM entries (F8).
 6. QA: run the full suite on a clean machine and confirm the 54 failures match baseline.
+
+## Re-review (loop 2)
+
+**Date:** 2026-10-07
+**Scope:** `3cdc6de9..12d44163` (3801b93a, 3c389cfc, da307caf, 3b6af1da, 12d44163)
+
+### Verdict: BLOCK
+
+There is one BLOCK, and it is cheap to fix. Everything else in loop 2 is sound.
+
+### Skill-pack refresh (3801b93a)
+- [INFO] Safety: I checked all four pinned hashes against `git show 5f775f1c:<pack>/<skill>/SKILL.md`, and all four match. Any hand edit changes the hash, so an edited file is skipped (tested). A missing or unreadable file returns False and falls through to normal behaviour. `force=True` is unchanged.
+- [INFO] Idempotency: I verified this by hand in a temp PKB. I seeded the pre-rename `optimize-aerollm`, and the first `install_pack('model-building')` refreshed it (no "AeroLLM" left). The second call skipped all three skills, because the new file no longer matches a pre-rename hash.
+- [INFO] Frozen ids: the pack ids, the skill id/dir `optimize-aerollm`, and `manifest.yaml` are untouched.
+- [INFO] Reach: `skill_seed.py` calls `install_pack(force=False)` for `research-methodology` and `model-building` on boot, so those three skills refresh automatically. `setup-arail` (onboarding pack) refreshes only when the user installs it from the Skills tab. `pkb_seed.install_pack` is a separate function and is not affected.
+- [ASK] No test covers the positive path, i.e. that an unedited pre-rename file **is** replaced. That path is the actual fix for QA failure 1. The two existing tests only prove the negatives. Add a test that writes `git`-pinned pre-rename bytes (or a fixture whose sha is injected into `_PRE_RENAME_SHA256` via monkeypatch), then asserts the skill is in `installed` and that a second call skips it.
+
+### benchmark_models.py (3c389cfc)
+- [INFO] Only message text changed. The `backend == "aerollm"` comparison is intact.
+
+### Docs sweep (da307caf)
+- [INFO] Frozen identifiers in the `-` lines survive verbatim in the `+` lines. I checked `ARAIL_FORCE_AEROLLM`, `ARAIL_AEROLLM_PRELOAD`, `aerollm_api`, `lab/data/aerollm-bench.jsonl`, and the `github.com/qukaizen/aerollm` URLs. No commands or paths changed.
+- [INFO] `world-forge.md` tag `aerollm` → `queuellm`: tags are used only for display pills, the `/docs` hub filter text, and related-doc scoring by shared tags (`docs_registry.py:500-508`). No doc under `docs/` (excluding archive) carries either tag besides `world-forge.md`, so related ranking is unchanged. Nothing filters on `tag=aerollm`. Safe.
+- [BLOCK] `docs/verification/aerollm-1.0.0-pin.md` lines 54 and 62 sit inside fenced **captured-output** blocks: `• AeroLLM ready (release wheel 1.0.0)` and `• AeroLLM (2nd inference) status`. The v1.0.0 tool printed exactly those strings. Rewriting them makes the evidence record claim output that never happened, which contradicts BUILD_LOG's own statement ("not its … outputs"). Fix: restore those two lines verbatim from `5f775f1c`, and exempt them from the guard narrowly. Use an allowlist entry for those exact strings, or a markdown rule that skips fenced blocks in `docs/verification/`. Do not exclude the whole file. Rewording the prose in that file is acceptable either way.
+
+### Guard (3b6af1da)
+- [INFO] Loop-1 ASKs resolved. The quoted-id catch-all is replaced by three context-anchored entries, and `label: 'aerollm'` is now flagged (self-test). Scripts are globbed with `package-aerollm-bundle.sh` excluded by name. `lab/tools`, `docs/**` (excluding archive), `BLUEPRINTS.md` and `AGENTS.md` are scanned, and the scope self-test asserts this.
+- [INFO] The `_MD_IDENTIFIER` rule is broad. Any lowercase `aerollm` joined by `-_@/.~` is treated as code, so prose like "the aerollm-powered deep mode" would slip through. That is acceptable, because the capitalised spelling (the real prose risk) is always flagged. Note it as a known miss.
+- Ran with a temp HOME: `test_skill_pack_pre_rename_refresh.py`, `test_no_user_visible_aerollm.py`, `test_queuellm_rename_qa.py`: 80 passed.
+
+### Required actions before merge
+1. [BLOCK] Restore the two captured-output lines in `docs/verification/aerollm-1.0.0-pin.md`, with a narrow guard exemption.
+2. [ASK] Add a positive refresh-and-idempotency test for `_PRE_RENAME_SHA256`.
