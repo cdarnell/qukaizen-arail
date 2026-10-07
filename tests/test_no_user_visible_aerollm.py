@@ -65,6 +65,9 @@ ALLOWLIST: tuple[tuple[re.Pattern[str], str], ...] = (
      "config/tuning.yml knob value: a pinned pip ref compared by string against "
      "its `choices` and persisted experiment state; changing it is a config "
      "migration, not a display fix (BUILD_LOG: architect feedback)"),
+    (re.compile(r"Tier 1 deep reasoning via aeroLLM \(in-process"),
+     "registry/store.py: the exact legacy built-in note, matched so persisted "
+     "registries can be refreshed (F7); never shown to a user"),
     (re.compile(r"\[teacher, aerollm\]"),
      "PKB frontmatter tag written for retrieval; a tag is an id, not prose"),
 )
@@ -268,8 +271,15 @@ def extract(kind: str, text: str):
 def scan_text(kind: str, text: str) -> list[tuple[int, str]]:
     hits = []
     for line_no, chunk in extract(kind, text):
-        for frag in violations_in_text(chunk):
-            hits.append((line_no, chunk.strip()[:120] or frag))
+        if not violations_in_text(chunk):
+            continue
+        # A multi-line literal is reported at the line that actually matches.
+        rows = chunk.split("\n")
+        located = [(i, r) for i, r in enumerate(rows) if violations_in_text(r)]
+        if not located:
+            located = [(0, rows[0])]
+        for offset, row in located:
+            hits.append((line_no + offset, row.strip()[:120]))
     return hits
 
 
