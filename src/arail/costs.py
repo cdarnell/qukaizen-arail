@@ -18,7 +18,7 @@ import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Literal, Optional
 
 
 # ---------------------------------------------------------------------------
@@ -98,6 +98,43 @@ JOULES_PER_TOKEN: Dict[str, float] = {
 
 
 # ---------------------------------------------------------------------------
+# Cost source classification
+# ---------------------------------------------------------------------------
+CostSource = Literal["billed_estimate", "local", "unpriced"]
+
+# Explicit allowlist, not a blocklist: a backend that is not listed here is
+# "unpriced", never "local", so a new cloud backend cannot silently hide a
+# real charge behind a null.
+COST_SOURCE_BY_BACKEND: Dict[str, CostSource] = {
+    # Real cloud charges that we estimate from token counts.
+    "claude": "billed_estimate",
+    "huggingface": "billed_estimate",
+    "openrouter": "billed_estimate",
+    # Runs on this machine: the cloud cost is zero by construction.
+    "mlx": "local",
+    "cuda": "local",
+    "cpu": "local",
+    "airllm": "local",
+    "aerollm": "local",
+    "ollama_native": "local",
+    # "openai_compat" is deliberately absent: it may be a LAN Ollama or a
+    # paid gateway, and we cannot tell which.
+}
+
+
+def cost_source(backend: Optional[str]) -> CostSource:
+    """Classify where a backend's cost comes from. Never raises.
+
+    ``billed_estimate`` means a real cloud charge that we estimate,
+    ``local`` means no cloud charge exists, and ``unpriced`` means we do not
+    know (None, unknown backend, or ``openai_compat``).
+    """
+    if not isinstance(backend, str):
+        return "unpriced"
+    return COST_SOURCE_BY_BACKEND.get(backend, "unpriced")
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 def _classify_model(backend: str, model_name: str) -> str:
@@ -151,6 +188,17 @@ class CostRecord:
     provider: Optional[str] = None
     entry_id: Optional[str] = None
     tab: Optional[str] = None
+    # Honest-cost fields. ``cloud_cost_usd`` is non-None only for a real
+    # (estimated) cloud charge; ``cloud_equivalent_usd`` above is the
+    # simulated what-if figure and is labelled as such.
+    cloud_cost_usd: Optional[float] = None
+    cloud_cost_source: str = "unpriced"
+    cloud_equivalent_source: str = "simulated"
+    energy_source: str = "estimated"
+
+    @property
+    def energy_cost_usd(self) -> float:
+        return self.energy_usd
 
 
 # ---------------------------------------------------------------------------
@@ -380,6 +428,9 @@ class CostTracker:
             + cache_creation_input_tokens
         )
 
+        c_source = cost_source(backend)
+        cloud_cost = round(billed_usage_total, 6) if c_source == "billed_estimate" else None
+
         record = CostRecord(
             ts=time.time(),
             backend=backend,
@@ -394,6 +445,8 @@ class CostTracker:
             provider=provider,
             entry_id=entry_id,
             tab=tab,
+            cloud_cost_usd=cloud_cost,
+            cloud_cost_source=c_source,
         )
 
         # Keep last 500 in memory
@@ -405,7 +458,14 @@ class CostTracker:
             "tokens": tokens_in + tokens_out,
             # Keep both keys for backward-compat with current UI helpers.
             "cloud_usd": round(billed_usage_total, 6),
-            "cloud_cost_usd": round(billed_usage_total, 6),
+            # Real cloud charge only; None for local/unpriced backends.
+            "cloud_cost_usd": cloud_cost,
+            "cloud_cost_source": c_source,
+            # The simulated what-if figure (same math as before).
+            "cloud_equivalent_usd": round(billed_usage_total, 6),
+            "cloud_equivalent_source": "simulated",
+            "energy_cost_usd": round(energy_cost, 6),
+            "energy_source": "estimated",
             "raw_cloud_usd": round(raw_cloud_total, 6),
             "energy_usd": round(energy_cost, 6),
             "recap_depth": recap_depth,
@@ -416,6 +476,8 @@ class CostTracker:
             "entry_id": entry_id,
             "tab": tab,
             "latency_ms": round(float(latency_ms or 0.0), 1),
+            "tokens_in": tokens_in,
+            "tokens_out": tokens_out,
         })
         if len(self._history) > 500:
             self._history = self._history[-500:]
@@ -478,6 +540,44 @@ class CostTracker:
     def get_last_record(self) -> Optional[Dict[str, Any]]:
         """Return the most recent cost record."""
         return self._history[-1] if self._history else None
+
+
+def record_to_fields(record: Any) -> Dict[str, Any]:
+    """Normalise a ``CostRecord`` or a history dict to the honest-cost fields.
+
+    Returns a dict with ``backend``, ``model`` and the six cost keys.
+    Missing keys (history written by an older build) come back as None.
+    """
+    if record is None:
+        return {}
+    if isinstance(record, dict):
+        get = record.get
+        equiv = get("cloud_equivalent_usd")
+        if equiv is None:
+            equiv = get("cloud_usd")
+        energy = get("energy_cost_usd")
+        if energy is None:
+            energy = get("energy_usd")
+        return {
+            "backend": get("backend"),
+            "model": get("model"),
+            "cloud_cost_usd": get("cloud_cost_usd"),
+            "cloud_cost_source": get("cloud_cost_source"),
+            "cloud_equivalent_usd": equiv,
+            "cloud_equivalent_source": get("cloud_equivalent_source"),
+            "energy_cost_usd": energy,
+            "energy_source": get("energy_source"),
+        }
+    return {
+        "backend": record.backend,
+        "model": record.model,
+        "cloud_cost_usd": record.cloud_cost_usd,
+        "cloud_cost_source": record.cloud_cost_source,
+        "cloud_equivalent_usd": round(record.cloud_equivalent_usd, 6),
+        "cloud_equivalent_source": record.cloud_equivalent_source,
+        "energy_cost_usd": round(record.energy_usd, 6),
+        "energy_source": record.energy_source,
+    }
 
 
 # Module-level singleton
