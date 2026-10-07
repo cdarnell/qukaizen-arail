@@ -120,7 +120,7 @@ aerollm_version() {
 }
 
 clone_hint() {
-    err "No aerollm sibling repo at ${BOLD}${AEROLLM_REPO}${RST}."
+    err "No QueueLLM sibling repo at ${BOLD}${AEROLLM_REPO}${RST}."
     warn "For a source (dev) build, either:"
     warn "  1) clone it next to arail:"
     warn "       git clone https://github.com/cdarnell/qukaizen-queuellm \"${AEROLLM_REPO}\""
@@ -152,7 +152,7 @@ cargo_build() {
     info "Installing → ${dest}"
     cp -f "$built" "$dest"
     verify_or_die
-    info "${GRN}AeroLLM ready${RST} (source build) — the deep-mode 2nd inference."
+    info "${GRN}QueueLLM ready${RST} (source build) — the deep-mode 2nd inference."
 }
 
 pip_install() {  # $* = extra pip args (e.g. --upgrade)
@@ -162,13 +162,13 @@ pip_install() {  # $* = extra pip args (e.g. --upgrade)
             --extra-index-url "https://pypi.org/simple/" \
             "$AEROLLM_PIP_SPEC"; then
         err "pip could not install ${AEROLLM_PIP_SPEC} from the index."
-        warn "AeroLLM wheels are macOS-arm64-only; on other platforms there's no"
+        warn "QueueLLM wheels are macOS-arm64-only; on other platforms there's no"
         warn "matching wheel yet (CUDA backend pending). The lab runs without the"
         warn "2nd inference until then."
         exit 1
     fi
     verify_or_die
-    info "${GRN}AeroLLM ready${RST} (release wheel $(aerollm_version)) — the 2nd inference."
+    info "${GRN}QueueLLM ready${RST} (release wheel $(aerollm_version)) — the 2nd inference."
 }
 
 verify_or_die() {
@@ -196,7 +196,7 @@ resolve_bundle_url() {
 bundle_install() {
     # F4: platform guard, before any network call.
     if [[ "$(uname -s)" != "Darwin" || "$(uname -m)" != "arm64" ]]; then
-        err "The bundled AeroLLM channel is macOS-arm64-only."
+        err "The bundled QueueLLM channel is macOS-arm64-only."
         warn "The lab runs without the 2nd inference on this platform."
         exit 1
     fi
@@ -222,7 +222,7 @@ bundle_install() {
         local installed_tag
         installed_tag="$("$PY" -c "import json; print(json.load(open('$dest_marker')).get('arail_release','?'))" 2>/dev/null || echo '?')"
         if [[ "$installed_tag" == "$AEROLLM_BUNDLE_TAG" ]] && import_ok; then
-            info "Bundled AeroLLM ${AEROLLM_BUNDLE_TAG} already installed (use --force to reinstall)."
+            info "Bundled QueueLLM ${AEROLLM_BUNDLE_TAG} already installed (use --force to reinstall)."
             return 0
         fi
     fi
@@ -254,11 +254,11 @@ bundle_install() {
             err "Refusing a non-https bundle URL: ${url}"
             exit 1
         fi
-        info "Downloading AeroLLM bundle from ${BOLD}${url}${RST}…"
+        info "Downloading QueueLLM bundle from ${BOLD}${url}${RST}…"
         tarball="$tmp/bundle.tar.gz"
         if ! curl -fsSL --retry 2 -o "$tarball" -- "$url"; then
             err "Could not download the bundle asset: ${url}"
-            warn "Either this ARAIL release has no bundled AeroLLM (run: ./arailctl deep status),"
+            warn "Either this ARAIL release has no bundled QueueLLM (run: ./arailctl deep status),"
             warn "or you're offline — set AEROLLM_BUNDLE_FILE to a local tarball instead."
             exit 1
         fi
@@ -363,7 +363,7 @@ bundle_install() {
         exit 1
     fi
     local ver; ver="$("$PY" -c "import json; print(json.load(open('$dest_marker')).get('aerollm_version','unknown'))" 2>/dev/null || echo unknown)"
-    info "${GRN}AeroLLM ready${RST} (bundled ${ver}) — the deep-mode 2nd inference."
+    info "${GRN}QueueLLM ready${RST} (bundled ${ver}) — the deep-mode 2nd inference."
 }
 
 # ── channel detection (for status + auto's rule 2) ──────────────────────────
@@ -395,7 +395,7 @@ installed_channel() {
 
 case "$MODE" in
     status)
-        info "AeroLLM (2nd inference) status"
+        info "QueueLLM (2nd inference) status"
         printf '    repo:         %s\n' "$AEROLLM_REPO"
         if [[ -d "$CRATE_DIR" ]]; then
             printf '    crate:        %s (found → source/dev channel)\n' "$CRATE_DIR"

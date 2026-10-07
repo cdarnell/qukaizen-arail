@@ -36,7 +36,7 @@ FROZEN_TOKENS = [
         r"libaerollm_api|aerollm[_-]api|AeroLLMBackend|tier1-aerollm|"
         r"backend_aerollm|aerollm-mlx|aerollm-cuda|tn-arch-aerollm|"
         r"show_aerollm|aerollm_status|aerollm_model|aerollm_preload_loop|"
-        r"_record_aerollm_bench|optimize-aerollm"
+        r"_record_aerollm_bench|optimize-aerollm|aerollm_version"
     ),
     # file and path names
     re.compile(r"[\w./-]*aerollm[\w.-]*\.(?:sh|md|py|toml)\b"),

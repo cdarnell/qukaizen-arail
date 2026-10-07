@@ -33,7 +33,7 @@ def test_status_runs_without_sibling_repo(tmp_path):
         env={**os.environ, "ARAIL_AEROLLM_REPO": str(tmp_path / "nope"), "NO_COLOR": "1"},
     )
     assert r.returncode == 0, r.stderr
-    assert "AeroLLM" in r.stdout
+    assert "QueueLLM" in r.stdout
 
 
 def test_build_fails_clearly_when_sibling_missing(tmp_path):
