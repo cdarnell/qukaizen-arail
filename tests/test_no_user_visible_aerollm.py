@@ -36,10 +36,11 @@ FROZEN_TOKENS = [
         r"libaerollm_api|aerollm[_-]api|AeroLLMBackend|tier1-aerollm|"
         r"backend_aerollm|aerollm-mlx|aerollm-cuda|tn-arch-aerollm|"
         r"show_aerollm|aerollm_status|aerollm_model|aerollm_preload_loop|"
-        r"_record_aerollm_bench|optimize-aerollm|aerollm_version"
+        r"_record_aerollm_bench|optimize-aerollm|aerollm_version|aerollm_bundle_(?:tag|sha256)|aerollm_commit"
     ),
     # file and path names
-    re.compile(r"[\w./-]*aerollm[\w.-]*\.(?:sh|md|py|toml)\b"),
+    re.compile(r"[\w./-]*aerollm[\w.-]*\.(?:sh|md|py|toml|jsonl|json|ya?ml)\b"),
+    re.compile(r"/api/aerollm\b"),
     re.compile(r"research/aerollm|THIRD-PARTY-LICENSES/aerollm"),
     re.compile(r"sprints/[\w./-]*aerollm[\w./-]*"),
 ]
@@ -61,6 +62,8 @@ ALLOWLIST: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"benchmark,\s*aerollm"), "arailctl alias `aerollm` is a command"),
     (re.compile(r"(?<=['\"])aerollm(?=['\"])"),
      "backend id quoted inside a validation message (the value users must type)"),
+    (re.compile(r"(?<=`)aerollm(?=`)"),
+     "backticked identifier in docs: the arailctl alias / an id users type"),
     (re.compile(r"git\+https://github\.com/cdarnell/aerollm@\w+"),
      "config/tuning.yml knob value: a pinned pip ref compared by string against "
      "its `choices` and persisted experiment state; changing it is a config "
@@ -68,6 +71,8 @@ ALLOWLIST: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"Tier 1 deep reasoning via aeroLLM \(in-process"),
      "registry/store.py: the exact legacy built-in note, matched so persisted "
      "registries can be refreshed (F7); never shown to a user"),
+    (re.compile(r"(?m)^\s*tags:\s*\[[^\]]*\baerollm\b[^\]]*\]"),
+     "frontmatter tag list: a tag is a retrieval id, not prose"),
     (re.compile(r"\[teacher, aerollm\]"),
      "PKB frontmatter tag written for retrieval; a tag is an id, not prose"),
 )
@@ -199,7 +204,7 @@ def extract_shell(text: str):
     their backslash continuations. Comments are skipped."""
     out_call = re.compile(
         r"^\s*(?:[\w-]+\s*\(\)\s*\{\s*)?(?:info|warn|err|error|ok|die|echo|printf|"
-        r"log|say|fail|success)\b")
+        r"log|say|fail|success)\b|\bprint\(")   # also inline `python -c` output
     heredoc_end: str | None = None
     continued = False
     for n, line in enumerate(text.splitlines(), 1):
@@ -337,6 +342,7 @@ def test_no_user_visible_aerollm():
     ("html", "flashStatus('deep model (aeroLLM) not built')  // note"),
     ("shell", 'info "AeroLLM ready"'),
     ("shell", 'echo "building AeroLLM"'),
+    ("shell", '"$PY" -c "\nprint(f\'bundle: aerollm {ver}\')\n"'),
     ("shell", "cat <<EOF\n  deep <op>  AeroLLM 2nd inference\nEOF"),
     ("yaml", "description: AeroLLM layer streaming"),
     ("md", "Run the AeroLLM engine."),

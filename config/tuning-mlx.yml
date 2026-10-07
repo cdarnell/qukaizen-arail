@@ -263,7 +263,7 @@ knobs:
         Reuse KV cache across generate() calls that share a prompt
         prefix. Huge win for chat-like workloads with a stable
         system prompt; zero benefit for independent one-shot bench
-        prompts (which is what the default AeroLLM bench prompt is).
+        prompts (which is what the default QueueLLM bench prompt is).
   model_quant_variant:
     current: "mlx-community/Qwen2.5-7B-Instruct-4bit"
     schema:
@@ -293,5 +293,5 @@ knobs:
       max: 100
       rationale: |
         Percent improvement in tokens/sec over baseline required
-        before AeroLLM autoresearch commits a variant. Smaller = more commits,
+        before QueueLLM autoresearch commits a variant. Smaller = more commits,
         noisier; larger = fewer, more confident commits.

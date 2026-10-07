@@ -419,7 +419,7 @@ try:
     ver = m.get('aerollm_version', 'unknown')
     sha = m.get('aerollm_commit', '?')[:7]
     built = m.get('built_at', 'unknown')
-    print(f'    bundle:       aerollm {ver} ({sha}, built {built})')
+    print(f'    bundle:       QueueLLM {ver} ({sha}, built {built})')
 except Exception:
     print('    bundle:       channel: unknown (installed, provenance not recorded)')
 " 2>/dev/null || printf '    bundle:       %sunknown (installed, provenance not recorded)%s\n' "$YLW" "$RST"
