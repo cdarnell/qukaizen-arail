@@ -144,3 +144,21 @@ There is one BLOCK, and it is cheap to fix. Everything else in loop 2 is sound.
 ### Required actions before merge
 1. [BLOCK] Restore the two captured-output lines in `docs/verification/aerollm-1.0.0-pin.md`, with a narrow guard exemption.
 2. [ASK] Add a positive refresh-and-idempotency test for `_PRE_RENAME_SHA256`.
+
+## Re-review (loop 3)
+
+**Date:** 2026-10-07
+**Scope:** `git log cb5352d1..HEAD` (a3ac4ff7, 3d107e0d, b3714ae6)
+
+### Verdict: PASS
+
+- [RESOLVED, was BLOCK] I diffed lines 54 and 62 of `docs/verification/aerollm-1.0.0-pin.md` against `5f775f1c` and they are byte-identical. The recorded v1.0.0 output is truthful again. No other lines in that file changed.
+- [RESOLVED] The exemptions are narrow in both guards. `tests/test_no_user_visible_aerollm.py` adds two `^...$` multiline-anchored patterns that match the two exact strings, with dots and parentheses escaped. `tests/test_queuellm_rename_qa.py` strips the same two exact strings, with no wildcards. The file is not excluded, and fenced blocks are not blanket-skipped.
+- [INFO] Neither exemption is scoped to the pin-record path. A byte-identical line in any other scanned file would also pass. The risk is negligible because the strings are exact and include "1.0.0". No action needed.
+- [RESOLVED, was ASK] `test_unedited_pre_rename_skill_is_replaced_once_then_skipped` really exercises `install_pack`:
+  - It writes legacy bytes and injects their sha into the real module's `_PRE_RENAME_SHA256` via `monkeypatch.setitem`. This is the same dict object `install_pack` reads.
+  - It calls `install_pack(force=False)` and asserts the skill is in `installed` with the bytes replaced and AeroLLM-free.
+  - A second call asserts `skipped_existing`, not in `installed`, with bytes unchanged.
+  - The positive path and idempotency are both covered.
+- Tests: `test_no_user_visible_aerollm.py`, `test_skill_pack_pre_rename_refresh.py` and `test_skill_packs.py` give 64 passed. `test_queuellm_rename_qa.py` gives 35 passed.
+- No production code changed in this loop. The two loop-1 ASKs on guard scope remain the documented follow-ups listed above.
