@@ -42,6 +42,10 @@ def _visible_hits(text: str) -> list[str]:
     body = re.sub(r"[#.\w/-]*aerollm[\w-]*", "", body)
     body = re.sub(r"[A-Z0-9_]*AERO(?:LLM)?_[A-Z0-9_]*", "", body)
     body = re.sub(r"[A-Z0-9_]*_AEROLLM\b", "", body)   # ARAIL_FORCE_AEROLLM
+    # Captured v1.0.0 tool output recorded verbatim in
+    # docs/verification/aerollm-1.0.0-pin.md; these exact lines only.
+    body = re.sub(r"• AeroLLM ready \(release wheel 1\.0\.0\) — the 2nd inference\.", "", body)
+    body = re.sub(r"• AeroLLM \(2nd inference\) status", "", body)
     body = re.sub(r"AeroLLMBackend", "", body)
     body = re.sub(r"[Ff]ormerly AeroLLM|AeroLLM was renamed", "", body)
     return [m.group(0) for m in re.finditer(r".{0,50}aero\s*llm.{0,50}", body, re.I | re.S)]
