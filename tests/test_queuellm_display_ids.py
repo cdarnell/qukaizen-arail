@@ -38,3 +38,37 @@ def test_compute_source_row_keeps_id_and_shows_new_label(monkeypatch):
 def test_display_provider_name_maps_only_the_label():
     assert appmod._display_provider_name("aerollm") == "QueueLLM"
     assert appmod._display_provider_name("claude") == "Claude"
+
+
+def test_template_ids_and_runtime_values_are_untouched():
+    chat = (TEMPLATES / "chat.html").read_text(encoding="utf-8")
+    tuning = (TEMPLATES / "tuning.html").read_text(encoding="utf-8")
+    research = (TEMPLATES / "research.html").read_text(encoding="utf-8")
+    assert "runtime: 'aerollm'" in chat
+    assert "'aerollm'" in chat and "tier1-aerollm" in chat
+    assert 'data-view="aerollm-mlx"' in tuning
+    assert 'data-view="aerollm-cuda"' in tuning
+    assert 'id="tn-arch-aerollm"' in tuning
+    assert '"aerollm-mlx"' in tuning            # VIEWS / localStorage value
+    assert 'value="aerollm"' in research        # radio value posted to the API
+
+
+def test_pages_render_queuellm_and_no_user_visible_aerollm(monkeypatch):
+    import re
+    monkeypatch.setenv("LAB_TIER", "maximus")
+    from fastapi.testclient import TestClient
+
+    client = TestClient(appmod.app, raise_server_exceptions=False)
+    for path in ("/chat", "/research", "/tuning"):
+        r = client.get(path)
+        assert r.status_code == 200, (path, r.status_code)
+        html = r.text
+        assert "QueueLLM" in html, path
+        # Strip comments and identifier-shaped tokens, then no old display name.
+        body = re.sub(r"<!--.*?-->|/\*.*?\*/", "", html, flags=re.S)
+        body = re.sub(r"(?m)^\s*//.*$", "", body)
+        body = re.sub(r"['\"`][a-z0-9_:.\-/]*aerollm[a-z0-9_:.\-/]*['\"`]", "", body)
+        body = re.sub(r"[#.\w-]*aerollm[\w-]*", "", body)   # selectors, ids
+        body = re.sub(r"[A-Z0-9_]*AERO(?:LLM)?_[A-Z0-9_]*", "", body)
+        assert not re.search(r"aero\s*llm", body, re.I), (
+            path, re.search(r".{40}aero\s*llm.{40}", body, re.I | re.S))

@@ -325,11 +325,11 @@
        both views regardless — only the buttons hide. -->
   <div class="tn-tabs" role="tablist">
     <button class="tn-tab active" data-view="aerollm-mlx" role="tab">
-      AeroLLM MLX <span class="tn-tab-note">· Apple silicon · default</span>
+      QueueLLM MLX <span class="tn-tab-note">· Apple silicon · default</span>
     </button>
     {% if show_aerollm %}
     <button class="tn-tab" data-view="aerollm-cuda" role="tab">
-      AeroLLM CUDA <span class="tn-tab-note">· experimental · 1 TB class</span>
+      QueueLLM CUDA <span class="tn-tab-note">· experimental · 1 TB class</span>
     </button>
     {% endif %}
   </div>
@@ -342,7 +342,7 @@
     <div class="tn-framing-row">
       <span class="tn-framing-icon">🧪</span>
       <div class="tn-meta tn-framing-body" id="tn-framing-body">
-        <strong class="tn-strong">AeroLLM — layer streaming on Apple silicon.</strong>
+        <strong class="tn-strong">QueueLLM — layer streaming on Apple silicon.</strong>
         Each transformer layer is loaded from NVMe into unified
         memory, executed by MLX kernels in place, then evicted
         before the next layer streams in. Lets a 70B-class model
@@ -761,9 +761,9 @@
   };
   const VIEW_META = {
     "aerollm-mlx": {
-      heroTitle: "AeroLLM MLX \u2014 tune the deep model on Apple silicon",
+      heroTitle: "QueueLLM MLX \u2014 tune the deep model on Apple silicon",
       archDiagram: "mlx",
-      archTitle: "Architecture \u2014 AeroLLM unified-memory streaming",
+      archTitle: "Architecture \u2014 QueueLLM unified-memory streaming",
       archBlurb: ("Layers live on NVMe. A <em>rotating window</em> of the current "
        + "layer is mmap'd into unified memory; MLX kernels read it "
        + "<em>in place</em> (no PCIe copy \u2014 that stage doesn't exist on "
@@ -771,20 +771,20 @@
        + "<code>quantized_kv_start</code>; prefill chunks via "
        + "<code>prefill_step_size</code>; prefixes reuse via the prompt "
        + "cache. These are the levers our knobs reach."),
-      framingBody: ("<strong class=\"tn-strong\">AeroLLM \u2014 layer streaming on Apple silicon.</strong> "
+      framingBody: ("<strong class=\"tn-strong\">QueueLLM \u2014 layer streaming on Apple silicon.</strong> "
        + "Each transformer layer is loaded from NVMe into unified memory, executed by MLX kernels in "
        + "place, then evicted before the next layer streams in. Lets a 70B-class model run on hardware "
        + "that can't hold the full weights at once. "
        + "<br><span class=\"tn-dim\">Measurements land in <code>lab/data/mlx-bench.jsonl</code>.</span>"),
     },
     "aerollm-cuda": {
-      heroTitle: "AeroLLM CUDA \u2014 tune the deep model on a CUDA host",
+      heroTitle: "QueueLLM CUDA \u2014 tune the deep model on a CUDA host",
       archDiagram: "aerollm",
-      archTitle: "Architecture \u2014 AeroLLM CUDA 3-tier streaming",
-      archBlurb: ("Reference diagram for the AeroLLM CUDA path (1 TB class on a 24 GB card): "
+      archTitle: "Architecture \u2014 QueueLLM CUDA 3-tier streaming",
+      archBlurb: ("Reference diagram for the QueueLLM CUDA path (1 TB class on a 24 GB card): "
        + "layers stream SSD \u2192 CPU RAM buffer \u2192 GPU VRAM, with a background prefetch "
        + "thread keeping the next layer ready before the current one finishes."),
-      framingBody: ("<strong class=\"tn-strong\">AeroLLM CUDA \u2014 layer streaming on a discrete GPU.</strong> "
+      framingBody: ("<strong class=\"tn-strong\">QueueLLM CUDA \u2014 layer streaming on a discrete GPU.</strong> "
        + "Layers stream from SSD into a CPU RAM buffer, then across PCIe into GPU VRAM for "
        + "compute, then are freed. Lets a 1 TB-class model run on a single consumer GPU."),
     },

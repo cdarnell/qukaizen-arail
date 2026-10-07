@@ -180,6 +180,7 @@ def extract_markup(text: str, *, kind: str = "html"):
     ``//`` are ordinary text in markup), ``js`` or ``css``."""
     text = _strip_block_comments(text, "<!--", "-->")
     if kind == "html":
+        text = _strip_block_comments(text, "{#", "#}")   # Jinja comment
         def region(m: re.Match[str]) -> str:
             if m.group(1):
                 return m.group(1) + _strip_code_comments(m.group(2), js_comments=True) + m.group(3)
@@ -353,6 +354,7 @@ def test_guard_flags_user_visible_samples(kind, sample):
     ("py", 'def f():\n    """AeroLLM docstring."""\n    return 1'),
     ("py", 'note = "formerly AeroLLM"'),
     ("html", "<!-- AeroLLM comment --><p>ok</p>"),
+    ("html", "{# AeroLLM jinja\n   comment #}<p>ok</p>"),
     ("css", "/* AeroLLM css */ .a{}"),
     ("js", "var x = 1; // AeroLLM comment"),
     ("html", "<script>var x = 1; // AeroLLM comment\n</script>"),

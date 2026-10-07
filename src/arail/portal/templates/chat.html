@@ -1607,8 +1607,8 @@
         <section class="col" data-col="B" hidden>
           <div class="col-quickbar">
             <div class="col-chip picker" id="model-picker-B" tabindex="0" role="button" aria-haspopup="true"
-                 title="Deep model — served by AeroLLM, fully resident once loaded. Click to change.">
-              <span class="qb-label">Deep · aeroLLM</span>
+                 title="Deep model — served by QueueLLM, fully resident once loaded. Click to change.">
+              <span class="qb-label">Deep · QueueLLM</span>
               <span class="chip-name" id="picker-label-B">—</span>
               <button class="chip-eject" id="deep-eject-btn" type="button" title="Free this model from VRAM/RAM" hidden>eject</button>
               <span class="chip-caret">▾</span>
@@ -1815,13 +1815,13 @@
             <ul class="ref-list">
               <li><code class="inline-path">src/arail/model_specs.py</code><span class="ref-note">add params · license · benchmarks · notes</span></li>
               <li><code class="inline-path">src/arail/chat/__init__.py</code><span class="ref-note">gallery_view() / detect_installed_models() — how models get scanned + rendered for the picker</span></li>
-              <li><code class="inline-path">src/arail/router/backends.py</code><span class="ref-note">backend adapters (MLX, Ollama, AeroLLM, Claude, …)</span></li>
+              <li><code class="inline-path">src/arail/router/backends.py</code><span class="ref-note">backend adapters (MLX, Ollama, QueueLLM, Claude, …)</span></li>
             </ul>
           </div>
           <div class="ref-group">
             <div class="ref-h">deep backends</div>
             <ul class="ref-list">
-              <li><a href="https://github.com/cdarnell/aerollm" target="_blank" rel="noopener noreferrer">AeroLLM ↗</a><span class="ref-note">ARAIL's Rust runtime for 30B+ local models, kept resident once loaded · set <code>AEROLLM_MODEL</code></span></li>
+              <li><a href="https://github.com/cdarnell/qukaizen-queuellm" target="_blank" rel="noopener noreferrer">QueueLLM ↗</a><span class="ref-note">ARAIL's Rust runtime for 30B+ local models, kept resident once loaded · set <code>AEROLLM_MODEL</code></span></li>
             </ul>
           </div>
           <div class="ref-group">
@@ -2110,7 +2110,7 @@
           <span class="runtime">· ${escapeHtml(m.runtime || '')}</span>
           ${isNew ? '<span class="new-badge">new</span>' : ''}
           ${isDeep ? '<span class="deep-badge">deep</span>' : ''}
-          ${isStreamed ? '<span class="streamed-badge" title="Exceeds the local hardware floor — routes through a deep backend (AeroLLM resident · AirLLM layer-streamed)">streamed</span>' : ''}
+          ${isStreamed ? '<span class="streamed-badge" title="Exceeds the local hardware floor — routes through a deep backend (QueueLLM resident · AirLLM layer-streamed)">streamed</span>' : ''}
           ${extra.attribution ? `<span class="attribution-badge">${escapeHtml(extra.attribution)}</span>` : ''}
         </div>
         <div class="meta">
@@ -2734,9 +2734,9 @@
         el.innerHTML =
           '<div class="cs-col a"><div class="cs-h">Resident · on-GPU</div>'
           + '<div class="cs-row"><span>fast, always-on</span></div></div>'
-          + '<div class="cs-col b"><div class="cs-h">Deep · aeroLLM</div>'
+          + '<div class="cs-col b"><div class="cs-h">Deep · QueueLLM</div>'
           + '<div class="cs-row"><span>not on this tier</span></div></div>'
-          + '<div class="cs-why">The deep model (aeroLLM) ships '
+          + '<div class="cs-why">The deep model (QueueLLM) ships '
           + 'with the <b>maximus</b> tier. Upgrade: <code>' + escapeHtml(cmd) + '</code></div>';
         return;
       }
@@ -2763,9 +2763,9 @@
       // to defend against, and the header stays "Deep" for terminology
       // consistency with the rest of this UI.
       html += State.bId
-        ? cell('b', 'Deep · aeroLLM', State.bId,
-               bSpec.params || (deep.params_b ? `~${deep.params_b}B` : '?'), 'resident via aeroLLM')
-        : '<div class="cs-col b"><div class="cs-h">Deep · aeroLLM</div>'
+        ? cell('b', 'Deep · QueueLLM', State.bId,
+               bSpec.params || (deep.params_b ? `~${deep.params_b}B` : '?'), 'resident via QueueLLM')
+        : '<div class="cs-col b"><div class="cs-h">Deep · QueueLLM</div>'
           + '<div class="cs-row"><span>not selected yet</span></div></div>';
       el.innerHTML = html;
     }
@@ -2792,20 +2792,20 @@
       const deep = State.deepSlot;
       if (!deep || deep.available_in_tier === false) {
         const cmd = (deep && deep.upgrade_command) || './arailctl upgrade maximus';
-        flashStatus('deep model (aeroLLM) needs the maximus tier — ' + cmd);
+        flashStatus('deep model (QueueLLM) needs the maximus tier — ' + cmd);
       } else if (!State.bId) {
         // Auto-bind to whatever's actually configured — honest about
         // readiness instead of picking anything that isn't truly usable.
         if (deep.model_ready) {
           selectDeepModel({ id: deep.model_id, label: deep.display_name || deep.model_id, runtime: 'aerollm' });
-          flashStatus('compare on · column B = deep model (aeroLLM)');
+          flashStatus('compare on · column B = deep model (QueueLLM)');
         } else if (!deep.installed) {
-          flashStatus('compare on, but aeroLLM isn’t built — run ./arailctl deep rebuild');
+          flashStatus('compare on, but QueueLLM isn’t built — run ./arailctl deep rebuild');
         } else {
           flashStatus('compare on, but the deep model isn’t downloaded yet — set AEROLLM_MODEL in .env, or pick one from the deep picker');
         }
       } else {
-        flashStatus('compare on · column B = deep model (aeroLLM)');
+        flashStatus('compare on · column B = deep model (QueueLLM)');
       }
       renderComparisonStrip();
     }
@@ -2842,14 +2842,14 @@
       const sec = document.createElement('div');
       sec.className = 'section';
       const capText = deep && deep.cap_b ? `~${deep.cap_b}B cap on this hardware` : '';
-      sec.innerHTML = `<div class="head"><span>Deep model · aeroLLM</span><span class="hw">${escapeHtml(capText)}</span></div>`;
+      sec.innerHTML = `<div class="head"><span>Deep model · QueueLLM</span><span class="hw">${escapeHtml(capText)}</span></div>`;
       pop.appendChild(sec);
 
       if (!deep) {
         const empty = document.createElement('div');
         empty.className = 'opt-reason';
         empty.style.padding = '0.5rem var(--s-4)';
-        empty.textContent = 'aeroLLM isn’t available on this box.';
+        empty.textContent = 'QueueLLM isn’t available on this box.';
         pop.appendChild(empty);
         renderPickerSourceRow(pop, renderDeepPicker);
         return;
@@ -2860,7 +2860,7 @@
       if (deep.available_in_tier === false) {
         const lock = document.createElement('div');
         lock.className = 'lock-notice';
-        lock.innerHTML = `AeroLLM ships on the maximus tier.` +
+        lock.innerHTML = `QueueLLM ships on the maximus tier.` +
           `<code class="upgrade-cmd">${escapeHtml(deep.upgrade_command || './arailctl upgrade maximus')}</code>`;
         pop.appendChild(lock);
         return;
@@ -2909,7 +2909,7 @@
       regime.className = 'regime-note';
       regime.textContent = deep.ring_depth
         ? `Resident once loaded (ring depth ${deep.ring_depth}${deep.ring_depth_source ? ' · ' + deep.ring_depth_source : ''}). ${deep.restart_note || ''}`
-        : (deep.restart_note || 'Resident once loaded — aeroLLM keeps its model fully in memory; it does not stream.');
+        : (deep.restart_note || 'Resident once loaded — QueueLLM keeps its model fully in memory; it does not stream.');
       pop.appendChild(regime);
 
       renderPickerSourceRow(pop, renderDeepPicker);
