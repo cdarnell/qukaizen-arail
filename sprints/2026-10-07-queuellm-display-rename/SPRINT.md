@@ -21,7 +21,7 @@
 | plan | architect (design) | ARCHITECTURE.md | done | 2026-10-07 | 2026-10-07 | complete (20726778) |
 | build | builder | BUILD_LOG.md | done | 2026-10-07 | 2026-10-07 | complete (86145282); 54 pre-existing failures identical on base |
 | review | architect (review) | REVIEW.md | done | 2026-10-07 | 2026-10-07 | WEAK_PASS (c586e41d) |
-| test | qa | TEST_REPORT.md | pending | — | — | — |
+| test | qa | TEST_REPORT.md | FAIL → loop to build | 2026-10-07 | 2026-10-07 | FAIL (3cdc6de9): installed skill packs keep AeroLLM; benchmark_models.py strings |
 | ship | — | PR | pending | — | — | — |
 
 ## Decisions log
@@ -30,6 +30,8 @@
 |---|---|---|
 | 2026-10-07 | Owner picked this sprint over a speed investigation | Owner repeatedly saw "AeroLLM" after being told the rename was done |
 | 2026-10-07 | Work in a fresh worktree, not `arail-buddy-wt` | `arail-buddy-wt` runs the owner's live lab and has uncommitted world files |
+
+| 2026-10-07 | Build loop 2 also sweeps the in-portal docs (`docs/*.md` served under `/docs/`, `BLUEPRINTS.md`; never `docs/archive/`) and extends the guard to them, flipping QA's strict-xfail docs test | Owner's win condition is zero user-visible AeroLLM; docs are rendered in the portal. Orchestrator scope addition over ARCHITECTURE.md's deferral. |
 
 ## Skipped phases
 
