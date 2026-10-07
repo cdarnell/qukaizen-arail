@@ -97,3 +97,67 @@ Not measured: `pytest-cov` is not run in this repo's suite, and I did not add it
 - **The full-suite failure count depends on the environment** (54 in BUILD_LOG vs 66 here). Always compare id sets base-vs-HEAD on the same machine and HOME, never counts against a number in a log.
 - `test_mini_experiments.py::test_no_legacy_fabricated_constants` is flaky by design (substring match against a timestamp). File it separately.
 - The owner witness still has to be run: picker header, chip, and raw final event. Add a fourth check: open the Skills tab and confirm "Optimize AeroLLM" is gone.
+
+## Re-verification
+
+**Date:** 2026-10-07
+**Build:** `65de31cc` (BUILD_LOG loops 2-3, REVIEW loop-3 PASS)
+**Verdict:** FAIL. One blocking item, and the fix is a single commit. Both original FAIL items are fixed.
+
+Method: every run used clean detached checkouts of `65de31cc` and `5f775f1c`, a temp HOME per checkout, and `PYTHONPATH=<checkout>/src`. The worktree's `.venv` is an editable install pinned to the main worktree's `src/`. Without the override, every scratch checkout silently tests the same code. I also set `ARAIL_TEST_VENV` and symlinked `.venv` into each checkout. Without that, `test_qa_edge_driver_scenarios` and other venv-dependent tests skip, and a base-vs-HEAD comparison is vacuous for them.
+
+### Blocking
+
+| # | Test | Symptom | Minimal repro | Severity |
+|---|---|---|---|---|
+| R1 | `tests/test_queuellm_rename_qa.py::test_portal_rendered_repo_docs_have_no_user_visible_aerollm` | Fails deterministically on the committed branch. The two restored captured-output lines in `docs/verification/aerollm-1.0.0-pin.md` (54, 62) are flagged. | `git worktree add --detach /tmp/x 65de31cc && cd /tmp/x && PYTHONPATH=src pytest tests/test_queuellm_rename_qa.py`: 1 failed, 34 passed | **Blocking (the fix is trivial).** BUILD_LOG loop 3 (L3-1) says `a3ac4ff7` adds the exemption to both guards. It touches only `tests/test_no_user_visible_aerollm.py`. The QA-file half (4 lines, two exact `re.sub` strips) is **uncommitted** in the worktree, and the loop-3 "35 passed" (BUILD_LOG and REVIEW) was measured on that dirty tree. Fix: commit the existing working-tree diff to `tests/test_queuellm_rename_qa.py`. With it applied, the three sprint files give 81 passed. |
+
+### Original FAIL items
+
+| # | Check | Result |
+|---|---|---|
+| 3 | **Existing lab, end to end, not simulated in-process.** Seeded a temp `LAB_ROOT` with **base code** (`ensure_starter_skills()` + `install_pack('onboarding')`), giving 4 SKILL.md files with AeroLLM. Then booted **HEAD's** portal through its real lifespan (TestClient context manager, loopback host, onboarding gate patched open) on that lab and scanned `/api/skills/list`, `/skills`, `/agents/skills`, `/agents/skills/optimize-aerollm`, `/api/skills/{id}`, `/api/skills/packs`, `/api/chat/system-prompt`, `/api/agents/forge/preview`, `/forge`. | **Fixed.** HEAD: 0 hits on every surface. On boot, 3 of the 4 files were refreshed (`optimize-aerollm`, `frontier-local-models`, `understanding-precision`). `setup-arail` keeps one line ("Python + Rust + AeroLLM") until the onboarding pack is reinstalled (`POST /api/skills/packs/install` then gives 0 hits). That is as designed, and it is not in the system prompt by default. Control: the same probe with the base portal gives 5 hits on skills/list, 12 on the skill detail and 17 on the system prompt, so the probe bites. An earlier probe run without the gate patched returned the `/welcome` redirect for every HTML route. That would have been a false pass; it was caught and re-run. |
+| 5 | `lab/tools/benchmark_models.py` | **Fixed.** `:340` and `:362` say QueueLLM. The `backend == "aerollm"` comparisons are intact. The guard now scans `lab/tools/`. |
+
+### New holes (non-blocking, file as follow-ups)
+
+| # | Finding | Evidence | Severity |
+|---|---|---|---|
+| N1 | `_PRE_RENAME_SHA256` pins only the **last** shipped version of each skill. `optimize-aerollm` shipped 3 versions (`b98e862a` 04-24, `ac261ae7` 05-08, `68dd3e46` 07-17), and `setup-arail` shipped 2 (`8b4e74f1`, `ac261ae7`). All contain AeroLLM, and only the newest is pinned. A lab seeded before 2026-07-17 keeps "Optimize AeroLLM" in Skills, Forge and the system prompt. | Wrote each historical version into a HEAD-seeded lab and re-ran `ensure_starter_skills()`: `b98e862a` gives 12 AeroLLM lines left, `ac261ae7` 12, `68dd3e46` 0. Both labs on this Mac (`qukaizen-arail/lab`, seeded 2026-08-02) match the pinned hashes, so the owner's lab is covered. | Low. Add the 3 older hashes. |
+| N2 | A CRLF copy of an unedited pre-rename SKILL.md (from a Windows/autocrlf checkout) never matches and is not refreshed. | `68dd3e46` text with `\r\n` line endings gives 12 AeroLLM lines left after boot. | Low. Hash after newline normalisation, or accept. |
+| N3 | The portal's `_ROOT_ALLOWLIST` lists `ROADMAP.md` (3 AeroLLM) and `SECURITY.md` (1), and the guard does not scan them. | They appear in the `/docs` registry (root-sourced slugs), but `/docs/ROADMAP.md` and `/docs/SECURITY.md` **404 on both base and HEAD**, because `serve_local_doc` reads only `docs/`. So no rendered leak today. That is a pre-existing broken hub link. If the link is ever fixed, these become visible. | Low. |
+| N4 | `test_qa_edge_driver_scenarios` QA-7 race (pre-existing, not this sprint). The driver returns from `_qa7_wait` on `✓ Portal` and then asserts "All services running." on a log that `start.sh` may not have written yet. | Under load (concurrent full suite): HEAD failed 2/8, base 0/8 (Fisher p≈0.47, not significant). Each failure was the "honest banner missing" assertion at ~28 s. Isolated: 6/6 pass on both. Passed in both full-suite runs. **Deterministic proof:** adding `sleep 1` before the banner line in a scratch base checkout gives the identical failure. The sprint's only boot-path change is one `arailctl` help string. | Low (test flake). Wait for "All services running." instead of `✓ Portal`. |
+
+### Docs sweep and guard probes
+
+- **Rendered pages:** every doc in `docs_registry` (43, 38 of them under `docs/`) plus the `/docs` hub went through TestClient (gate open). HEAD has 0 visible hits (with the two exempt evidence lines stripped). Base shows hits on the swept `docs/` pages, so the probe is not vacuous.
+- **Frozen identifiers:** across all 65 changed non-test, non-sprint files I compared the multiset of identifier tokens base vs HEAD: `*AERO(LLM)?_*` env vars, `aerollm`-joined paths/ids, `AeroLLMBackend`, aero URLs. No env var, `aerollm_api`, `aerollm_version`, `tier1-aerollm`, path or config key was lost. Every removal is a bare prose `aerollm` (e.g. "the aerollm repo", `"aerollm (in-process)"`) or one of the expected exceptions: the `world-forge.md` tag, the `qukaizen-aerollm` → `qukaizen-queuellm` GitHub URLs (rule 7) and the `catalog/models.toml` crate-path correction. `NOTICE`, `THIRD-PARTY-LICENSES/`, `lab/worlds/`, `pyproject.toml`, `uv.lock`, `BUNDLE.json` have an empty diff. The remaining `docs/` mentions are all code identifiers.
+- **Evidence record:** `aerollm-1.0.0-pin.md` lines 54 and 62 are byte-identical to base. The other changes in that file are prose (repo and sprint names), which REVIEW accepted.
+- Known guard miss (REVIEW, still true): lowercase `aerollm` joined by `-_./@` is always treated as code.
+
+### Full suite, base vs HEAD (sequential, same machine, temp HOME each, `ARAIL_TEST_VENV` set)
+
+| Checkout | Result |
+|---|---|
+| `5f775f1c` | 6776 passed, **87 failed, 7 errors**, 26 skipped, 27 xfailed (1181 s) |
+| `65de31cc` + R1 patch | 6895 passed, **87 failed, 7 errors**, 26 skipped, 27 xfailed (1178 s) |
+
+- The id sets from junit XML are **identical** for failures (87 = 87), errors (7 = 7) and skips (53 = 53, xfail included). No HEAD-only id in any category.
+- The 7 errors (the comparison the builder could not make) are the same on both sides: `tests/test_aerollm_defaults.py` × 7, a fixture setup error (`Mo…`, ModuleNotFound/stub).
+- The largest failure clusters are environmental and present on base: `test_pkb_index_qa` 15, `test_qa6_bootstrap_cli` 12, `test_claude_cache` 7, `test_bench_ai_eng_harness` 5.
+- The count is higher than the first pass (66). That pass ran without `ARAIL_TEST_VENV`, so venv-dependent tests skipped there (37 skipped then, 26 now). Compare ids, not counts.
+- One aborted attempt is noted for honesty: the first base run was SIGTERMed at 31% while I ran the edge driver concurrently, so I re-ran it with nothing else on the machine.
+
+### Security
+
+Unchanged from the first pass. Loop 2-3 adds a sha256 read of an installed file (OSError leads to no refresh, so it fails closed to "keep the user's file"), doc prose, and guard regexes. No new input surface, network, deserialisation or dependency (`pyproject.toml`/`uv.lock` empty diff).
+
+### Housekeeping
+
+- `logs/scheduler/` in the worktree is untracked test-run output from 12:58 and is left alone.
+- Scratch worktrees (`git worktree add --detach` in the session scratchpad) were removed after the run.
+- `~/ProJects/arail-buddy-wt` and `~/.arail` were not touched. The main arail checkout's lab SKILL.md hashes were read only.
+
+### Routing
+
+Builder: commit the working-tree diff to `tests/test_queuellm_rename_qa.py` (R1). Then QA's re-check is one command (the three sprint files on a clean checkout). N1-N4 are follow-ups and do not block.
