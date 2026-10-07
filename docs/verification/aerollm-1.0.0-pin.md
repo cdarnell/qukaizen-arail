@@ -51,7 +51,7 @@ Collecting aerollm-api<2.0,>=1.0
      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 38.8/38.8 MB 66.5 MB/s  0:00:00
 Installing collected packages: aerollm-api
 Successfully installed aerollm-api-1.0.0
-• QueueLLM ready (release wheel 1.0.0) — the 2nd inference.
+• AeroLLM ready (release wheel 1.0.0) — the 2nd inference.
 ```
 
 ## Step 2 — `scripts/build-aerollm.sh status`
@@ -59,7 +59,7 @@ Successfully installed aerollm-api-1.0.0
 ```
 $ bash scripts/build-aerollm.sh status
 
-• QueueLLM (2nd inference) status
+• AeroLLM (2nd inference) status
     repo:         .../scratchpad/arail-1.0-verify/nonexistent-aerollm
     crate:        .../nonexistent-aerollm/crates/aerollm-api (missing → release channel)
     index:        https://pypi.qukaizen.com/simple/

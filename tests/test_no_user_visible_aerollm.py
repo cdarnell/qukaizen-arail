@@ -77,6 +77,12 @@ ALLOWLIST: tuple[tuple[re.Pattern[str], str], ...] = (
      "registries can be refreshed (F7); never shown to a user"),
     (re.compile(r"(?m)^\s*tags:\s*\[[^\]]*\baerollm\b[^\]]*\]"),
      "frontmatter tag list: a tag is a retrieval id, not prose"),
+    (re.compile(r"(?m)^• AeroLLM ready \(release wheel 1\.0\.0\) — the 2nd inference\.$"),
+     "docs/verification/aerollm-1.0.0-pin.md: captured v1.0.0 tool output "
+     "recorded verbatim as evidence; exact line only"),
+    (re.compile(r"(?m)^• AeroLLM \(2nd inference\) status$"),
+     "docs/verification/aerollm-1.0.0-pin.md: captured v1.0.0 tool output "
+     "recorded verbatim as evidence; exact line only"),
     (re.compile(r"\[teacher, aerollm\]"),
      "PKB frontmatter tag written for retrieval; a tag is an id, not prose"),
 )
