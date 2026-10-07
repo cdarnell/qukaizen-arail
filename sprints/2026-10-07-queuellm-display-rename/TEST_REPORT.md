@@ -161,3 +161,28 @@ Unchanged from the first pass. Loop 2-3 adds a sha256 read of an installed file 
 ### Routing
 
 Builder: commit the working-tree diff to `tests/test_queuellm_rename_qa.py` (R1). Then QA's re-check is one command (the three sprint files on a clean checkout). N1-N4 are follow-ups and do not block.
+
+## Final confirmation
+
+**Date:** 2026-10-07
+**Build:** `5cd9c221` (HEAD; R1 fixed in `e12d19b9`, BUILD_LOG loop 4)
+**Verdict:** PASS
+
+- **Diff since the measured build:** `git diff 65de31cc..HEAD --stat` touches only `BUILD_LOG.md`, `TEST_REPORT.md` and `tests/test_queuellm_rename_qa.py` (+4 lines: the two exact `re.sub` strips). This is byte-for-byte the R1 patch that the base-vs-HEAD full-suite comparison already ran with. No product code changed, so I did not re-run the full suite.
+- **Clean checkout:** I made a detached `git worktree add` of `5cd9c221` in the session scratchpad, with a temp HOME, `PYTHONPATH=<checkout>/src` and `ARAIL_TEST_VENV` set. Results:
+  - `test_queuellm_rename_qa.py`: 35 passed (R1 resolved)
+  - `test_no_user_visible_aerollm.py` (guard): 43 passed
+  - `test_queuellm_display_ids.py`: 6 passed
+  - `test_queuellm_rename_frozen_surface.py`: 5 passed
+  - `test_skill_pack_pre_rename_refresh.py`: 3 passed
+  - 0 failures
+- **Tracked tree:** `git status --untracked-files=no` in the sprint worktree is clean. Only the pre-existing untracked `logs/` is present. I removed the scratch worktree afterwards.
+
+### Follow-ups carried (non-blocking)
+
+| # | Item | Severity |
+|---|---|---|
+| N1 | `_PRE_RENAME_SHA256` lacks the older shipped versions (`optimize-aerollm` `b98e862a`, `ac261ae7`; `setup-arail` `8b4e74f1`) | Low |
+| N2 | CRLF copies of unedited pre-rename SKILL.md files are not refreshed | Low |
+| N3 | Guard doesn't scan `ROADMAP.md`/`SECURITY.md` (in `_ROOT_ALLOWLIST`; currently 404, pre-existing broken hub link) | Low |
+| N4 | `test_qa_edge_driver_scenarios` QA-7 race: wait for "All services running." rather than `✓ Portal` (pre-existing flake) | Low |
