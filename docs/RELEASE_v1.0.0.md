@@ -27,7 +27,7 @@ deprecation warning. Re-run `./arailctl setup` to pick up the new
 | Tier         | What you get                                                                                              |
 |--------------|-----------------------------------------------------------------------------------------------------------|
 | **Minimalist** *(default)* | Dashboard · Chat · Autoresearch · Knowledge Base · Agents · Docs · LanceDB vector recall. The everyday lab. |
-| **Maximus**                | + Admin · Notebooks · AeroLLM deep-mode runtime · Anthropic SDK · LangChain · full cloud SDKs. The full bench. |
+| **Maximus**                | + Admin · Notebooks · QueueLLM deep-mode runtime · Anthropic SDK · LangChain · full cloud SDKs. The full bench. |
 
 Renamed from the old `min`/`max` (and the inconsistent README typo
 `minamalist`/`maximum`). Upgrade with:
@@ -61,14 +61,14 @@ that ships pre-installed.
 > `./arailctl setup` after the GGUF is uploaded picks it up
 > automatically.
 
-### AeroLLM is the Maximus deep-mode backend
+### QueueLLM is the Maximus deep-mode backend
 
-When you upgrade to Maximus, ARAIL installs **AeroLLM** — our own Rust
+When you upgrade to Maximus, ARAIL installs **QueueLLM** — our own Rust
 streaming runtime — as the deep-mode backend.
 
-- **Apple Silicon:** native, fast. AeroLLM is the default Compute
+- **Apple Silicon:** native, fast. QueueLLM is the default Compute
   Source pivot option once installed.
-- **CUDA / Linux x86:** AeroLLM's CUDA backend is in flight; until it
+- **CUDA / Linux x86:** QueueLLM's CUDA backend is in flight; until it
   ships, Maximus on CUDA falls back to AirLLM with a clear log notice.
   Set `ARAIL_FORCE_AEROLLM=1` to disable the fallback and wait for the
   CUDA release.
@@ -152,8 +152,8 @@ passphrase on first load — that's the only secret you need to manage.
 
 ## Known limitations
 
-- **AeroLLM CUDA backend** — not yet shipped. CUDA Maximus hosts fall
-  back to AirLLM (with a clear notice) until AeroLLM CUDA lands.
+- **QueueLLM CUDA backend** — not yet shipped. CUDA Maximus hosts fall
+  back to AirLLM (with a clear notice) until QueueLLM CUDA lands.
 - **ai-eng 1.5B self-hosted GGUF** — not yet uploaded at release time.
   Setup uses `qwen2.5:1.5b` as the preview base in the interim. Re-run
   setup once the GGUF is uploaded to HuggingFace

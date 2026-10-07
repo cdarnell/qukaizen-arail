@@ -93,9 +93,9 @@ Legacy `min`/`max` tier names are accepted with a deprecation warning
   - `anthropic` SDK — first-class Claude integration.
   - `langchain` + `langgraph` — for operators who want to compose agents
     with the community ecosystem on top of the built-ins.
-  - **AeroLLM** — Arail's own Rust streaming runtime, the deep-mode
+  - **QueueLLM** — Arail's own Rust streaming runtime, the deep-mode
     backend. Apple Silicon: native. CUDA hosts: fall back to AirLLM with
-    a notice until AeroLLM CUDA ships (set `ARAIL_FORCE_AEROLLM=1` to
+    a notice until QueueLLM CUDA ships (set `ARAIL_FORCE_AEROLLM=1` to
     disable fallback).
   - Hardware-specific extras (MLX, CUDA, or CPU) install automatically
     based on what `./arailctl setup` detects.
@@ -170,8 +170,8 @@ Creates `./.venv/` and installs:
   - `mlx` → `mlx`, `mlx-lm`
   - `cuda` → `vllm`, `torch`
   - `cpu` → `llama-cpp-python`
-- **AeroLLM** — installed only when `LAB_TIER=maximus` on Apple
-  Silicon. On CUDA Maximus, AeroLLM CUDA is pending; AirLLM serves as
+- **QueueLLM** — installed only when `LAB_TIER=maximus` on Apple
+  Silicon. On CUDA Maximus, QueueLLM CUDA is pending; AirLLM serves as
   the fallback (opt-in via `ARAIL_INSTALL_AIRLLM=1`).
 - **AirLLM** — opt-in only as of v1.0.0. Set `ARAIL_INSTALL_AIRLLM=1`
   to enable layer-streaming 70B/405B inference on CUDA/Linux.
@@ -199,7 +199,7 @@ Shows the two-tier menu and reads your choice:
 - **`minimalist`** (default) — Dashboard, Chat, Autoresearch, Knowledge
   Base, Agents, Docs. The everyday lab. Ships `ai-eng` as the only
   default model.
-- **`maximus`** — everything in Minimalist + Admin, Notebooks, AeroLLM
+- **`maximus`** — everything in Minimalist + Admin, Notebooks, QueueLLM
   deep-mode runtime, Anthropic SDK, LangChain/LangGraph, full cloud
   catalog. Targets 32 GB+ machines.
 
@@ -337,7 +337,7 @@ Open [http://127.0.0.1:8080](http://127.0.0.1:8080). You're in.
 When you're ready for more:
 
 ```bash
-./arailctl tier maximus        # installs AeroLLM + adds notebook/cloud orchestration extras
+./arailctl tier maximus        # installs QueueLLM + adds notebook/cloud orchestration extras
 ./arailctl restart             # pick up the new nav
 ```
 

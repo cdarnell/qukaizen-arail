@@ -173,7 +173,7 @@ sized to the agent."
 This isn't an ARAIL invention. It's the general shape behind any system
 that gets called an "agent" — Claude Code itself runs Observe → Think →
 Act (read the repo and the conversation, decide what to do, call a
-tool). aeroLLM's inference loop and DDaC's declare→gate→version pipeline
+tool). QueueLLM's inference loop and DDaC's declare→gate→version pipeline
 aren't agent loops in this sense — they're not making act-or-don't-act
 judgment calls on a cadence — but paperagents' declarative agent configs
 and any future qukaizen.com agent surface would be expected to fit the

@@ -15,7 +15,7 @@ related:
 # Certified & Compatible Models
 
 This page lists the models we've tested with ARAIL and the status of each
-on the local-inference path (AeroLLM and AirLLM backends). Use this as
+on the local-inference path (QueueLLM and AirLLM backends). Use this as
 your shopping list when picking what to download via `./arailctl pkb ingest`
 or the **Knowledge** tab's reveal-folder buttons.
 
@@ -34,7 +34,7 @@ chat as long as your token is valid.
 | **Beta** | Loads with a known fix in flight. Use only if you want to help shake out bugs. |
 | **Known Issue** | Documented failure mode. See linked issue. Don't use as a daily driver. |
 
-## Local inference — AeroLLM (MLX-native)
+## Local inference — QueueLLM (MLX-native)
 
 The MLX-native backend lives in `aerollm-backend-mlx-native`. It runs
 quantized Qwen2.5 and Llama-family checkpoints on Apple Silicon Metal
@@ -62,12 +62,12 @@ to `lab/models/`.
 ## Local inference — AirLLM fallback
 
 AirLLM is the layered-loading runtime that backs ARAIL's `min` and `max`
-tiers when AeroLLM doesn't ship a fast path for the architecture. It
+tiers when QueueLLM doesn't ship a fast path for the architecture. It
 trades latency for the ability to run very large models on a single Mac.
 
 | Model | Quantization | Status | Tier | Notes |
 |---|---|---|---|---|
-| `meta-llama/Llama-3.1-70B-Instruct` | bf16 | **Compatible** | `min` default | Layered load. Slow but works. Default when AeroLLM has no fast path. |
+| `meta-llama/Llama-3.1-70B-Instruct` | bf16 | **Compatible** | `min` default | Layered load. Slow but works. Default when QueueLLM has no fast path. |
 | `meta-llama/Llama-3.1-405B-Instruct` | bf16 | **Compatible** | `max` only | Frontier-scale bench model. Expect minutes-per-token without aggressive caching. |
 | `meta-llama/Llama-4-Maverick-17B-128E-Instruct-fp8` | fp8 | **Compatible** | either | MoE model. Loads through AirLLM; routing latency is high but stable. |
 
@@ -108,7 +108,7 @@ cloud provider for the affected session without restarting the lab.
 
 ## How a model graduates from Beta → Certified
 
-1. Loads cleanly via the relevant backend (AeroLLM or AirLLM).
+1. Loads cleanly via the relevant backend (QueueLLM or AirLLM).
 2. Passes 19/19 numeric correctness tests in `aerollm-correctness`.
 3. Runs through the ARAIL portal's Chat tab end-to-end (prefill +
    streaming decode + EOS).
