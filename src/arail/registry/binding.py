@@ -108,7 +108,7 @@ def build_router(entry: ModelEntry, *, billing_source: str = "agent",
         deep = deep_policy.get_deep_router()
         if deep is None:
             raise RuntimeError(
-                f"aeroLLM runtime unavailable (model '{entry.model_id}' — "
+                f"QueueLLM runtime unavailable (model '{entry.model_id}' — "
                 "wheel not installed or model dir missing)")
         # Rewrap the shared resident backend in a fresh router so per-call
         # attribution (tab/entry) never mutates the deep_policy singleton.

@@ -1422,7 +1422,7 @@ def _resolve_kv_budget() -> dict[str, Any]:
         available: int = int(vm.available)
     except Exception as exc:  # noqa: BLE001
         reason = (
-            f"psutil unavailable ({exc}); aerollm will auto-detect KV budget"
+            f"psutil unavailable ({exc}); QueueLLM will auto-detect KV budget"
         )
         return {
             "budget_bytes": None,
@@ -1442,7 +1442,7 @@ def _resolve_kv_budget() -> dict[str, Any]:
     if total == 0:
         return {
             "budget_bytes": None,
-            "reason": "psutil returned total=0; aerollm will auto-detect KV budget",
+            "reason": "psutil returned total=0; QueueLLM will auto-detect KV budget",
             "fields": {
                 "pct_used": pct,
                 "total_gib": 0.0,
@@ -1602,7 +1602,7 @@ class AeroLLMBackend(BaseBackend):
             # repo IDs are the canonical 4-bit MLX conversions.
             hf_repo = "mlx-community/" + self.model_name
             raise RuntimeError(
-                f"AeroLLM model dir not found: {model_path}. "
+                f"QueueLLM model dir not found: {model_path}. "
                 f"Set AEROLLM_MODEL and/or ARAIL_MODELS_DIR, or "
                 f"download the checkpoint with `huggingface-cli download "
                 f"{hf_repo} --local-dir {model_path}`."

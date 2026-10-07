@@ -1942,7 +1942,7 @@ async def providers_active(request: Request):
                 "error": "Airgapped mode — only local sources are active. Set LAB_MODE=hybrid to use cloud providers."}
     if provider == "aerollm" and not _is_aerollm_installed():
         return {"ok": False,
-                "error": "The AeroLLM engine isn't built on this machine. Run './arailctl deep rebuild' to enable it."}
+                "error": "The QueueLLM engine isn't built on this machine. Run './arailctl deep rebuild' to enable it."}
     os.environ["COMPUTE_SOURCE"] = provider
     activity_log.emit("chat", f"Compute source switched to '{provider}'.", "info")
     # Sprint 2: regenerate_config() THEN restart() — under a single lock.
@@ -4338,7 +4338,7 @@ async def post_research_deep(request: Request):
     activity_log.emit(
         "researcher",
         ("Deep research passes turned on — planning and interpretation may "
-         "use the aeroLLM deep model." if enabled else
+         "use the QueueLLM deep model." if enabled else
          "Deep research passes turned off — research runs on the fast "
          "model only."),
         "info")
@@ -4392,7 +4392,7 @@ def _research_models_block() -> dict | None:
             eligible = False
             code = "disabled"
             detail = ("deep passes are switched off — flip the toggle to use "
-                      "the aeroLLM deep model for planning and interpretation")
+                      "the QueueLLM deep model for planning and interpretation")
 
         return {
             "tier": get_current_tier(),
@@ -6955,7 +6955,7 @@ async def system_graph():
         "mlx": "MLX", "cuda": "CUDA", "cpu": "CPU",
         "openai_compat": "OpenAI-Compat", "huggingface": "HuggingFace",
         "openrouter": "OpenRouter", "claude": "Claude",
-        "airllm": "AirLLM", "aerollm": "AeroLLM",
+        "airllm": "AirLLM", "aerollm": "QueueLLM",
     }
     for name in BACKEND_MAP:
         is_active = name == active_backend
@@ -8474,7 +8474,7 @@ async def api_chat_eject(request: Request):
         if names:
             freed.extend(f"{name} cache" for name in names)
             activity_log.emit("chat", "Ejected all optional chat backends.", "info")
-            notes.append("in-process deep backends (aeroLLM/AirLLM) still "
+            notes.append("in-process deep backends (QueueLLM/AirLLM) still "
                          "need a portal restart to actually free memory.")
         ok = bool(freed)
         requires_restart = bool(names)
@@ -8609,7 +8609,7 @@ _CHAT_MODEL_LOAD_STATE: dict[str, Any] = {
 
 _OPTIONAL_CHAT_BACKEND_CONFIG: dict[str, dict[str, str]] = {
     "aerollm": {
-        "label": "AeroLLM",
+        "label": "QueueLLM",
         "class_name": "AeroLLMBackend",
         # Built from the local sibling repo ($ARAIL_AEROLLM_REPO) — not pip.
         # `deep rebuild` re-runs the cargo build + dylib copy so active local
@@ -9918,7 +9918,7 @@ async def api_chat_models(provider: str = ""):
         })
     optional_backends.append({
         "id": "aerollm",
-        "label": "AeroLLM",
+        "label": "QueueLLM",
         "model": aero_model_name,
         "installed": _is_aerollm_installed(),
         # See deep_info's model_ready above — "installed" is package-level
@@ -10310,7 +10310,7 @@ def _display_provider_name(provider: str) -> str:
     mapping = {
         "my_machine": "Local",
         "local": "Local",
-        "aerollm": "AeroLLM",
+        "aerollm": "QueueLLM",
         "claude": "Claude",
         "nvidia": "NVIDIA",
         "huggingface": "HF",

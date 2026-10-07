@@ -342,7 +342,7 @@ def test_report_never_raises_and_mentions_both_slots(monkeypatch, tmp_path):
     monkeypatch.setattr("arail.chat._ollama_installed_models", lambda *a, **kw: [])
     text = model_defaults.report()
     assert "A (resident):" in text
-    assert "B (aeroLLM):" in text
+    assert "B (QueueLLM):" in text
 
 
 # ---------------------------------------------------------------------------
@@ -383,3 +383,24 @@ def test_cli_json_is_valid_json_with_expected_keys(tmp_path):
     payload = json.loads(result.stdout)
     assert "settled" in payload and "facts" in payload
     assert payload["settled"] is False
+
+
+def test_report_banner_columns_align_after_label_rename(monkeypatch, tmp_path):
+    """`B (QueueLLM):` is one character wider than the old `B (aeroLLM):`;
+    the A and B model columns must still start at the same offset."""
+    monkeypatch.setenv("ARAIL_MODEL_DEFAULTS_FILE", str(tmp_path / "model_defaults.yaml"))
+    monkeypatch.setattr("arail.chat._ollama_installed_models", lambda *a, **kw: [])
+    monkeypatch.setattr(
+        model_defaults, "_gather_slot_facts",
+        lambda: {
+            "a": {"model": "model-a", "size_gb": 4.0, "present": True,
+                  "fit": "ok", "install_command": None},
+            "b": {"model": "model-b", "size_gb": 8.0, "present": True,
+                  "fit": "ok", "cap_b": 30, "install_command": None},
+        },
+    )
+    lines = model_defaults.report().splitlines()
+    a_line = next(x for x in lines if "A (resident):" in x)
+    b_line = next(x for x in lines if "B (QueueLLM):" in x)
+    assert "aeroLLM" not in "\n".join(lines)
+    assert a_line.index("model-a") == b_line.index("model-b")

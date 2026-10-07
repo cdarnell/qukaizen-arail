@@ -204,7 +204,7 @@ def test_missing_model_dir_suggests_correct_hf_repo(env_clean, monkeypatch):
     with pytest.raises(RuntimeError) as excinfo:
         AeroLLMBackend()
     msg = str(excinfo.value)
-    assert "AeroLLM model dir not found" in msg
+    assert "QueueLLM model dir not found" in msg
     # The default model is Qwen2.5-7B-Instruct-4bit; the suggested HF
     # repo is mlx-community/<name>.
     assert "mlx-community/Qwen2.5-7B-Instruct-4bit" in msg, msg

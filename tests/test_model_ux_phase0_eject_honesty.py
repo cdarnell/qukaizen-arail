@@ -53,7 +53,7 @@ def test_eject_aerollm_never_reports_ok_true_and_names_the_real_backend(monkeypa
     assert body["ok"] is False, "aeroLLM eject must never report ok:true (A3 — cannot hot-free this sprint)"
     assert body["requires_restart"] is True
     assert body["freed"] == [], "dropping the wrapper cache frees nothing real — must not be claimed as freed"
-    assert any("AeroLLM" in n for n in body["notes"]), body["notes"]
+    assert any("QueueLLM" in n for n in body["notes"]), body["notes"]
     # The wrapper cache is untouched — a stale/direct call must not corrupt
     # state the load path relies on.
     assert app_mod._OPTIONAL_CHAT_BACKEND_CACHE.get("aerollm") is sentinel
@@ -71,9 +71,11 @@ def test_eject_airllm_names_airllm_not_aerollm(monkeypatch):
     assert body["ok"] is False
     assert body["requires_restart"] is True
     assert any("AirLLM" in n for n in body["notes"]), body["notes"]
-    assert not any("aeroLLM" in n for n in body["notes"]), (
-        "AirLLM eject must not stamp aeroLLM copy onto the note"
-    )
+    # Absence check covers both the old and the new engine name (F6): after
+    # the rename an old-name-only assertion would pass vacuously.
+    assert not any(
+        name in n.lower() for n in body["notes"] for name in ("aerollm", "queuellm")
+    ), "AirLLM eject must not stamp QueueLLM copy onto the note"
 
 
 def test_eject_aerollm_when_not_loaded_says_so_and_still_refuses(monkeypatch):
