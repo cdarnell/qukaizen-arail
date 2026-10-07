@@ -24,3 +24,25 @@ def test_edited_pack_skill_is_not_refreshed(tmp_path):
     res = install_pack("model-building", pkb_root=tmp_path, force=False)
     assert "optimize-aerollm" in res["skipped_existing"]
     assert dst.read_text() == edited
+
+
+def test_unedited_pre_rename_skill_is_replaced_once_then_skipped(tmp_path, monkeypatch):
+    import arail.skill_packs as sp
+
+    install_pack("model-building", pkb_root=tmp_path)
+    dst = tmp_path / "skills" / "optimize-aerollm" / "SKILL.md"
+    legacy = b"---\nname: optimize-aerollm\n---\nOptimize AeroLLM (pre-rename bytes).\n"
+    dst.write_bytes(legacy)
+    monkeypatch.setitem(
+        sp._PRE_RENAME_SHA256, "optimize-aerollm",
+        frozenset({hashlib.sha256(legacy).hexdigest()}))
+
+    first = install_pack("model-building", pkb_root=tmp_path, force=False)
+    assert "optimize-aerollm" in first["installed"]
+    refreshed = dst.read_bytes()
+    assert refreshed != legacy and b"AeroLLM" not in refreshed
+
+    second = install_pack("model-building", pkb_root=tmp_path, force=False)
+    assert "optimize-aerollm" in second["skipped_existing"]
+    assert "optimize-aerollm" not in second["installed"]
+    assert dst.read_bytes() == refreshed
