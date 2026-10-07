@@ -19,9 +19,9 @@
 |---|---|---|---|---|---|---|
 | think | visionary | VISION.md | skipped | — | — | — |
 | plan | architect (design) | ARCHITECTURE.md | done | 2026-10-07 | 2026-10-07 | complete (20726778) |
-| build | builder | BUILD_LOG.md | done | 2026-10-07 | 2026-10-07 | complete (86145282); 54 pre-existing failures identical on base |
-| review | architect (review) | REVIEW.md | done | 2026-10-07 | 2026-10-07 | WEAK_PASS (c586e41d) |
-| test | qa | TEST_REPORT.md | FAIL → loop to build | 2026-10-07 | 2026-10-07 | FAIL (3cdc6de9): installed skill packs keep AeroLLM; benchmark_models.py strings |
+| build | builder | BUILD_LOG.md | done | 2026-10-07 | 2026-10-07 | 4 loops; full-suite failing/erroring ids identical to base |
+| review | architect (review) | REVIEW.md | done | 2026-10-07 | 2026-10-07 | WEAK_PASS → BLOCK (loop 2) → PASS (65de31cc) |
+| test | qa | TEST_REPORT.md | done | 2026-10-07 | 2026-10-07 | FAIL → FAIL (R1) → PASS (dde51c7e) |
 | ship | — | PR | pending | — | — | — |
 
 ## Decisions log
