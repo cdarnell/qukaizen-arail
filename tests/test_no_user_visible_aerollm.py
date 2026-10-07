@@ -318,11 +318,6 @@ def scan_repo() -> list[str]:
 
 
 # ── The guard ────────────────────────────────────────────────────────────
-@pytest.mark.xfail(
-    strict=True,
-    reason="rename in progress: sprint 2026-10-07-queuellm-display-rename "
-           "BUILD_LOG steps 3-6; flipped to a normal test in step 7",
-)
 def test_no_user_visible_aerollm():
     found = scan_repo()
     assert not found, (
