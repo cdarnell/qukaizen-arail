@@ -164,12 +164,30 @@ def _drop_code_identifiers(line: str) -> str:
     return _OBJECT_KEY.sub(" ", line)
 
 
-def extract_markup(text: str, *, js_comments: bool = True):
+def _strip_code_comments(code: str, *, js_comments: bool) -> str:
+    code = _strip_block_comments(code, "/*", "*/")
+    if js_comments:
+        code = "\n".join(_strip_line_comment(x) for x in code.split("\n"))
+    return code
+
+
+_CODE_REGION = re.compile(r"(<script\b[^>]*>)(.*?)(</script>)|(<style\b[^>]*>)(.*?)(</style>)",
+                          re.DOTALL | re.IGNORECASE)
+
+
+def extract_markup(text: str, *, kind: str = "html"):
+    """kind: ``html`` (comments only inside <script>/<style>, since ``/*`` and
+    ``//`` are ordinary text in markup), ``js`` or ``css``."""
     text = _strip_block_comments(text, "<!--", "-->")
-    text = _strip_block_comments(text, "/*", "*/")
+    if kind == "html":
+        def region(m: re.Match[str]) -> str:
+            if m.group(1):
+                return m.group(1) + _strip_code_comments(m.group(2), js_comments=True) + m.group(3)
+            return m.group(4) + _strip_code_comments(m.group(5), js_comments=False) + m.group(6)
+        text = _CODE_REGION.sub(region, text)
+    else:
+        text = _strip_code_comments(text, js_comments=(kind == "js"))
     for n, line in enumerate(text.splitlines(), 1):
-        if js_comments:
-            line = _strip_line_comment(line)
         line = _drop_code_identifiers(line)
         if line.strip():
             yield n, line
@@ -231,10 +249,10 @@ def scan_targets() -> list[tuple[Path, str]]:
     for p in sorted(src.rglob("*.py")):
         targets.append((p, "py"))
     for p in sorted((src / "portal" / "templates").rglob("*.html")):
-        targets.append((p, "markup"))
+        targets.append((p, "html"))
     for p in sorted((src / "portal" / "static").rglob("*")):
         if p.suffix == ".js":
-            targets.append((p, "markup"))
+            targets.append((p, "js"))
         elif p.suffix == ".css":
             targets.append((p, "css"))
     for name in ("arailctl", "scripts/setup.sh", "scripts/upgrade.sh",
@@ -255,10 +273,8 @@ def scan_targets() -> list[tuple[Path, str]]:
 def extract(kind: str, text: str):
     if kind == "py":
         return extract_py(text)
-    if kind == "markup":
-        return extract_markup(text)
-    if kind == "css":
-        return extract_markup(text, js_comments=False)
+    if kind in ("html", "js", "css"):
+        return extract_markup(text, kind=kind)
     if kind == "shell":
         return extract_shell(text)
     if kind == "yaml":
@@ -313,9 +329,11 @@ def test_no_user_visible_aerollm():
 @pytest.mark.parametrize("kind,sample", [
     ("py", 'msg = "AeroLLM isn\'t ready"'),
     ("py", 'label = f"{x} @ aeroLLM"'),
-    ("markup", "<span>Deep · aeroLLM</span>"),
-    ("markup", '<a title="served by AeroLLM" href="/x">y</a>'),
-    ("markup", "flashStatus('deep model (aeroLLM) not built')  // note"),
+    ("html", "<span>Deep · aeroLLM</span>"),
+    # `/*` is ordinary text in markup; it must not blank the lines after it.
+    ("html", '<a href="/api/*">files</a>\n<span>AeroLLM</span>'),
+    ("html", '<a title="served by AeroLLM" href="/x">y</a>'),
+    ("html", "flashStatus('deep model (aeroLLM) not built')  // note"),
     ("shell", 'info "AeroLLM ready"'),
     ("shell", 'echo "building AeroLLM"'),
     ("shell", "cat <<EOF\n  deep <op>  AeroLLM 2nd inference\nEOF"),
@@ -334,11 +352,12 @@ def test_guard_flags_user_visible_samples(kind, sample):
     ("py", '# AeroLLM comment\nx = 1'),
     ("py", 'def f():\n    """AeroLLM docstring."""\n    return 1'),
     ("py", 'note = "formerly AeroLLM"'),
-    ("markup", "<!-- AeroLLM comment --><p>ok</p>"),
-    ("markup", "/* AeroLLM css */ .a{}"),
-    ("markup", "var x = 1; // AeroLLM comment"),
-    ("markup", "<div data-view=\"aerollm-mlx\" id=\"aerollm-card\">x</div>"),
-    ("markup", "runtime: 'aerollm',"),
+    ("html", "<!-- AeroLLM comment --><p>ok</p>"),
+    ("css", "/* AeroLLM css */ .a{}"),
+    ("js", "var x = 1; // AeroLLM comment"),
+    ("html", "<script>var x = 1; // AeroLLM comment\n</script>"),
+    ("html", "<div data-view=\"aerollm-mlx\" id=\"aerollm-card\">x</div>"),
+    ("html", "runtime: 'aerollm',"),
     ("shell", "# AeroLLM comment"),
     ("shell", 'echo "set AEROLLM_MODEL=foo"'),
     ("shell", 'source scripts/build-aerollm.sh'),
@@ -359,6 +378,6 @@ def test_guard_runs_fast_and_scans_real_files():
     scan_repo()
     assert time.perf_counter() - t0 < 5.0
     kinds = {k for _p, k in targets}
-    assert {"py", "markup", "shell", "yaml", "md"} <= kinds
+    assert {"py", "html", "js", "shell", "yaml", "md"} <= kinds
     assert any(_rel(p) == "src/arail/portal/templates/chat.html" for p, _ in targets)
     assert any(_rel(p) == "arailctl" for p, _ in targets)
