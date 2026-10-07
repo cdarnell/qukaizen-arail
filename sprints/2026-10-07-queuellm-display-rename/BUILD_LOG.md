@@ -104,3 +104,25 @@ Targeted runs that touched the sprint (all green after the retargets, compared t
 
 ### Owner witness (not run here)
 On a maximus lab: run one deep answer and confirm the picker header reads "DEEP · QUEUELLM", the chip reads "QueueLLM", and the raw `/api/chat/stream` final event shows `"cloud_cost_usd": null, "cloud_cost_source": "local"`. I did not touch `arail-buddy-wt` or any live lab.
+
+## Loop 2
+
+Scope: QA failures 1 and 2, the orchestrator's docs sweep, REVIEW follow-up 1.
+
+| # | Files | Change | Commit |
+|---|---|---|---|
+| L2-1 | `src/arail/skill_packs/__init__.py`, `tests/test_skill_pack_pre_rename_refresh.py` | `install_pack(force=False)` replaces an installed `SKILL.md` only when its sha256 equals a pre-rename shipped file (4 files: optimize-aerollm, frontier-local-models, understanding-precision, setup-arail). Hand-edited files never match and survive. Same shape as the F7 registry-note migration. | `3801b93a` |
+| L2-2 | `lab/tools/benchmark_models.py` | The warning and the skip reason say QueueLLM. The backend id `"aerollm"` and the TODO comment are unchanged. | `3c389cfc` |
+| L2-3 | `docs/*.md` (not `docs/archive/`), `BLUEPRINTS.md` | Prose-only sweep of 20 files that the portal renders under `/docs/`. Env var names, package, crate and path names, repo URLs, commands and "formerly" notes are verbatim. The `world-forge.md` frontmatter tag `aerollm` became `queuellm`, because it shows on the `/docs` index card. | `da307caf` |
+| L2-4 | `tests/test_no_user_visible_aerollm.py`, `tests/test_queuellm_rename_qa.py` | The guard now scans `docs/**` (not archive), `BLUEPRINTS.md`, `AGENTS.md`, `lab/tools/*.py` and `scripts/*.sh` (all but `package-aerollm-bundle.sh`, per A6). The quoted-lowercase allowlist is replaced by three specific entries. QA's strict xfail is now a normal test. | `3b6af1da` |
+
+Deltas and judgement calls:
+- **Markdown identifier rule.** The guard treats lowercase `aerollm` joined by `- _ @ / .` (repo, crate, path, test and knob names), `import aerollm`, `aerollm = "` (pyproject extra), `grep -i aerollm` and `backend: aerollm` as code in markdown. A standalone word and every capitalised spelling are prose and flagged. Self-tests cover both directions.
+- **QA helper gap.** QA's `_visible_hits` did not exempt the frozen env var `ARAIL_FORCE_AEROLLM`. I added the same `_AEROLLM` suffix pattern the guard already has. Nothing was renamed.
+- **`docs/verification/aerollm-1.0.0-pin.md`** is a dated evidence record. I changed its prose mentions only (repo and sprint names), not its commands, paths, outputs or the file name. This is judgement. Revert that file if the owner wants it left as written.
+- **Skill pack refresh covers only the skills with pre-rename hashes.** A pack skill that gains "AeroLLM" text in the future needs its own hash entry. Skills seeded inline in `skill_seed.py` carry no old name.
+- **Not done:** the runtime-interpolated backend id in activity-log prose (`app.py:7505`, `:7486`), and the `build-aerollm.sh` crate-dir bug. Both stay filed for later.
+
+Test results (temp HOME, same machine; base `5f775f1c` in a separate checkout):
+- The sprint, QA and guard files pass: `test_queuellm_rename_qa.py` 35 passed (the strict xfail is now a normal test), `test_no_user_visible_aerollm.py` 43 passed, `test_skill_pack_pre_rename_refresh.py` 2 passed.
+- Full suite on base: 73 failed, 7 errors. The FAILED id sets match except one: `tests/test_cli_qa_edge.py::test_qa_edge_driver_scenarios` failed once on HEAD when other jobs ran on the machine. It passes in isolation (11 passed). It is a CLI subprocess driver and the loop touches nothing it exercises, so I treat it as load-sensitive. The HEAD run's error ids were not captured. No new deterministic failure.
