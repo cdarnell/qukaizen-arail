@@ -1942,7 +1942,7 @@ async def providers_active(request: Request):
                 "error": "Airgapped mode — only local sources are active. Set LAB_MODE=hybrid to use cloud providers."}
     if provider == "aerollm" and not _is_aerollm_installed():
         return {"ok": False,
-                "error": "The AeroLLM engine isn't built on this machine. Run './arailctl deep rebuild' to enable it."}
+                "error": "The QueueLLM engine isn't built on this machine. Run './arailctl deep rebuild' to enable it."}
     os.environ["COMPUTE_SOURCE"] = provider
     activity_log.emit("chat", f"Compute source switched to '{provider}'.", "info")
     # Sprint 2: regenerate_config() THEN restart() — under a single lock.
@@ -4338,7 +4338,7 @@ async def post_research_deep(request: Request):
     activity_log.emit(
         "researcher",
         ("Deep research passes turned on — planning and interpretation may "
-         "use the aeroLLM deep model." if enabled else
+         "use the QueueLLM deep model." if enabled else
          "Deep research passes turned off — research runs on the fast "
          "model only."),
         "info")
@@ -4392,7 +4392,7 @@ def _research_models_block() -> dict | None:
             eligible = False
             code = "disabled"
             detail = ("deep passes are switched off — flip the toggle to use "
-                      "the aeroLLM deep model for planning and interpretation")
+                      "the QueueLLM deep model for planning and interpretation")
 
         return {
             "tier": get_current_tier(),
@@ -6955,7 +6955,7 @@ async def system_graph():
         "mlx": "MLX", "cuda": "CUDA", "cpu": "CPU",
         "openai_compat": "OpenAI-Compat", "huggingface": "HuggingFace",
         "openrouter": "OpenRouter", "claude": "Claude",
-        "airllm": "AirLLM", "aerollm": "AeroLLM",
+        "airllm": "AirLLM", "aerollm": "QueueLLM",
     }
     for name in BACKEND_MAP:
         is_active = name == active_backend
@@ -7250,25 +7250,74 @@ def _clean_chat_reply(text: str) -> str:
     return reply
 
 
+def _resolve_chat_cost(response: ModelResponse, cost_record: Any = None) -> dict[str, Any]:
+    """Return the honest cost fields for one chat turn.
+
+    ``cost_record`` is what ``cost_tracker.track()`` returned for *this* call.
+    Without it (the router branch tracks internally) we fall back to the
+    tracker's most recent record, but only when its backend and model match
+    this response; otherwise the cost is reported as ``unattributed`` rather
+    than borrowed from another call.
+    """
+    fields: dict[str, Any] = {
+        "cloud_cost_usd": None,
+        "cloud_cost_source": "unattributed",
+        "cloud_equivalent_usd": None,
+        "cloud_equivalent_source": None,
+        "energy_cost_usd": None,
+        "energy_source": None,
+    }
+    try:
+        from arail.costs import cost_source, cost_tracker, record_to_fields
+
+        rec = record_to_fields(cost_record) if cost_record is not None else {}
+        if not rec:
+            last = record_to_fields(cost_tracker.get_last_record())
+            if (
+                last
+                and last.get("backend") == response.backend
+                and last.get("model") == response.model
+            ):
+                rec = last
+        source = cost_source(response.backend)
+        if rec:
+            fields["cloud_cost_usd"] = rec.get("cloud_cost_usd")
+            fields["cloud_cost_source"] = rec.get("cloud_cost_source") or source
+            fields["cloud_equivalent_usd"] = rec.get("cloud_equivalent_usd")
+            fields["cloud_equivalent_source"] = (
+                "simulated" if rec.get("cloud_equivalent_usd") is not None else None
+            )
+            fields["energy_cost_usd"] = rec.get("energy_cost_usd")
+            fields["energy_source"] = (
+                rec.get("energy_source") or "estimated"
+                if rec.get("energy_cost_usd") is not None
+                else None
+            )
+        # Belt and braces, independent of attribution: a backend that is not
+        # a billed cloud estimate never reports a cloud charge.
+        if source != "billed_estimate":
+            fields["cloud_cost_usd"] = None
+            if source == "local" or fields["cloud_cost_source"] != "unattributed":
+                fields["cloud_cost_source"] = source
+        elif fields["cloud_cost_source"] not in ("billed_estimate", "unattributed"):
+            fields["cloud_cost_usd"] = None
+    except Exception:
+        pass
+    return fields
+
+
 def _build_chat_result(
     response: ModelResponse,
     *,
     wants_deep: bool,
     sources: list[dict[str, Any]] | None = None,
     provenance: Any = None,
+    cost_record: Any = None,
 ) -> dict[str, Any]:
     reply = _clean_chat_reply(response.text or "")
     latency_sec = max(response.latency_ms / 1000.0, 0.001)
     tokens_per_sec = round(response.tokens_used / latency_sec, 1)
-    cloud_cost_usd = None
-    energy_cost_usd = None
-    try:
-        from arail.costs import cost_tracker
-        last = cost_tracker.get_last_record() or {}
-        cloud_cost_usd = last.get("cloud_cost_usd")
-        energy_cost_usd = last.get("energy_cost_usd")
-    except Exception:
-        pass
+    cost_fields = _resolve_chat_cost(response, cost_record)
 
     activity_log.emit("chat",
                       f"Chat turn · {response.tokens_used} tokens · "
@@ -7282,8 +7331,7 @@ def _build_chat_result(
         "latency_ms": response.latency_ms,
         "tokens_used": response.tokens_used,
         "tokens_per_sec": tokens_per_sec,
-        "cloud_cost_usd": cloud_cost_usd,
-        "energy_cost_usd": energy_cost_usd,
+        **cost_fields,
         "deep": bool(wants_deep),
         "sources": list(sources or []),
         "error": None,
@@ -7708,7 +7756,7 @@ async def _run_chat_completion_stream(
                     messages=context.get("claude_messages"),
                 )
             from arail.costs import cost_tracker
-            cost_tracker.track(
+            cost_record = cost_tracker.track(
                 backend=response.backend,
                 model=response.model,
                 tokens_in=max(len(prompt) // 4, 1),
@@ -7729,7 +7777,7 @@ async def _run_chat_completion_stream(
             clean_reply = _clean_chat_reply(response.text)
             if clean_reply:
                 yield {"type": "delta", "delta": clean_reply}
-            yield {"type": "final", **_build_chat_result(response, wants_deep=wants_deep, sources=context.get("sources"), provenance=context.get("model_provenance"))}
+            yield {"type": "final", **_build_chat_result(response, wants_deep=wants_deep, sources=context.get("sources"), provenance=context.get("model_provenance"), cost_record=cost_record)}
             return
 
         final_response: ModelResponse | None = None
@@ -7758,7 +7806,7 @@ async def _run_chat_completion_stream(
                     **think_kwargs,
                 )
             from arail.costs import cost_tracker
-            cost_tracker.track(
+            cost_record = cost_tracker.track(
                 backend=response.backend, model=response.model,
                 tokens_in=max(len(prompt) // 4, 1),
                 tokens_out=response.tokens_used,
@@ -7769,7 +7817,7 @@ async def _run_chat_completion_stream(
             clean_reply = _clean_chat_reply(response.text)
             if clean_reply:
                 yield {"type": "delta", "delta": clean_reply}
-            yield {"type": "final", **_build_chat_result(response, wants_deep=wants_deep, sources=context.get("sources"), provenance=context.get("model_provenance"))}
+            yield {"type": "final", **_build_chat_result(response, wants_deep=wants_deep, sources=context.get("sources"), provenance=context.get("model_provenance"), cost_record=cost_record)}
             return
 
         if router is None:
@@ -7880,6 +7928,7 @@ async def _run_chat_completion(
     runtime_backend = context.get("runtime_backend")
     router = context.get("router")
     prompt = str(context["prompt"])
+    cost_record = None  # set by the branches that track the call themselves
 
     try:
         if deep_backend is not None:
@@ -7892,7 +7941,7 @@ async def _run_chat_completion(
                     messages=context.get("claude_messages"),
                 )
             from arail.costs import cost_tracker
-            cost_tracker.track(
+            cost_record = cost_tracker.track(
                 backend=response.backend,
                 model=response.model,
                 tokens_in=max(len(prompt) // 4, 1),
@@ -7924,7 +7973,7 @@ async def _run_chat_completion(
                     messages=context.get("claude_messages"),
                 )
             from arail.costs import cost_tracker
-            cost_tracker.track(
+            cost_record = cost_tracker.track(
                 backend=response.backend,
                 model=response.model,
                 tokens_in=max(len(prompt) // 4, 1),
@@ -7966,7 +8015,7 @@ async def _run_chat_completion(
     finally:
         _restore_chat_context(context)
 
-    return _build_chat_result(response, wants_deep=wants_deep, sources=context.get("sources"), provenance=context.get("model_provenance"))
+    return _build_chat_result(response, wants_deep=wants_deep, sources=context.get("sources"), provenance=context.get("model_provenance"), cost_record=cost_record)
 
 
 def _apply_chat_defaults(
@@ -8425,7 +8474,7 @@ async def api_chat_eject(request: Request):
         if names:
             freed.extend(f"{name} cache" for name in names)
             activity_log.emit("chat", "Ejected all optional chat backends.", "info")
-            notes.append("in-process deep backends (aeroLLM/AirLLM) still "
+            notes.append("in-process deep backends (QueueLLM/AirLLM) still "
                          "need a portal restart to actually free memory.")
         ok = bool(freed)
         requires_restart = bool(names)
@@ -8560,7 +8609,7 @@ _CHAT_MODEL_LOAD_STATE: dict[str, Any] = {
 
 _OPTIONAL_CHAT_BACKEND_CONFIG: dict[str, dict[str, str]] = {
     "aerollm": {
-        "label": "AeroLLM",
+        "label": "QueueLLM",
         "class_name": "AeroLLMBackend",
         # Built from the local sibling repo ($ARAIL_AEROLLM_REPO) — not pip.
         # `deep rebuild` re-runs the cargo build + dylib copy so active local
@@ -9869,7 +9918,7 @@ async def api_chat_models(provider: str = ""):
         })
     optional_backends.append({
         "id": "aerollm",
-        "label": "AeroLLM",
+        "label": "QueueLLM",
         "model": aero_model_name,
         "installed": _is_aerollm_installed(),
         # See deep_info's model_ready above — "installed" is package-level
@@ -10261,7 +10310,7 @@ def _display_provider_name(provider: str) -> str:
     mapping = {
         "my_machine": "Local",
         "local": "Local",
-        "aerollm": "AeroLLM",
+        "aerollm": "QueueLLM",
         "claude": "Claude",
         "nvidia": "NVIDIA",
         "huggingface": "HF",
@@ -12143,6 +12192,24 @@ async def api_system_reveal(request: Request):
     return {"opened": True, "path": abspath, "slot": slot}
 
 
+def _costs_record_fields(last: dict[str, Any]) -> dict[str, Any]:
+    """Honest-cost fields for a history record; a legacy record with a
+    cloud figure but no source is re-gated by its backend."""
+    from arail.costs import cost_source, record_to_fields
+
+    fields = record_to_fields(last)
+    if not fields.get("cloud_cost_source"):
+        src = cost_source(last.get("backend"))
+        fields["cloud_cost_source"] = src
+        if src != "billed_estimate":
+            fields["cloud_cost_usd"] = None
+    if fields.get("cloud_equivalent_usd") is not None:
+        fields["cloud_equivalent_source"] = "simulated"
+    if fields.get("energy_cost_usd") is not None:
+        fields["energy_source"] = fields.get("energy_source") or "estimated"
+    return fields
+
+
 @app.get("/api/system/costs")
 async def system_costs():
     """Return cost tracking summary — cloud-equivalent spend and energy costs."""
@@ -12157,8 +12224,11 @@ async def system_costs():
         "last_record": {
             "backend": last.get("backend"),
             "model_class": last.get("model_class"),
-            "cloud_cost_usd": last.get("cloud_cost_usd"),
-            "energy_cost_usd": last.get("energy_cost_usd"),
+            **{
+                k: v
+                for k, v in _costs_record_fields(last).items()
+                if k not in ("backend", "model")
+            },
             "tokens_in": last.get("tokens_in"),
             "tokens_out": last.get("tokens_out"),
         } if last else None,

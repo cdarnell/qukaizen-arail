@@ -416,7 +416,7 @@ class ModelRegistry:
         if tier0:
             parts.append(f"{tier0.display_name} (resident)")
         if tier1:
-            parts.append(f"{tier1.display_name} @ aeroLLM")
+            parts.append(f"{tier1.display_name} @ QueueLLM")
         return " · ".join(parts) if parts else "no models configured"
 
     def to_state(self) -> Dict[str, Any]:

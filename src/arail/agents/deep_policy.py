@@ -81,7 +81,7 @@ def _background_gate() -> "tuple[bool, str, str]":
                 "when the lab is idle")
     if not runtime_profile.params(profile).get("background_aerollm"):
         return (False, "deferred_now",
-                f"runtime profile '{profile}' disables background aeroLLM")
+                f"runtime profile '{profile}' disables background QueueLLM")
     try:
         from arail.router.mlx_guard import metal_memory_pressure
         pressure = metal_memory_pressure()

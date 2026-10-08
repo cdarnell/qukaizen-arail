@@ -1,24 +1,24 @@
 ---
-title: Optimize AeroLLM — research program
+title: Optimize QueueLLM — research program
 id: optimize-aerollm
-name: Optimize AeroLLM
+name: Optimize QueueLLM
 domain: research
 version: 1.0.0
 tags: [skill, aerollm, optimization, research-methodology, frontier-models]
 when_to_use:
-  - When the lab's goal is improving AeroLLM performance
-  - When designing an experiment that measures AeroLLM tokens/minute
+  - When the lab's goal is improving QueueLLM performance
+  - When designing an experiment that measures QueueLLM tokens/minute
   - When deciding which optimization to try next
 when_not_to_use:
   - For questions unrelated to layer-streamed inference
   - For general model evaluation (see evaluate-llm instead)
 ---
 
-# Optimize AeroLLM — research program
+# Optimize QueueLLM — research program
 
 This is the research-methodology skill for the lab's signature goal:
-make AeroLLM noticeably faster on our hardware, then contribute the
-wins back upstream at github.com/cdarnell/qukaizen-aerollm.
+make QueueLLM noticeably faster on our hardware, then contribute the
+wins back upstream at github.com/cdarnell/qukaizen-queuellm.
 
 ## The metric
 
@@ -34,19 +34,19 @@ held-out task set from `prepare.py`. An optimization that gains
 
 1. **Prefetch lookahead tuning** — low effort, 15-40% gain. More
    layers in flight hides more disk I/O until memory pressure flips
-   the curve. AeroLLM's prefetcher is the baseline; we're looking
+   the curve. QueueLLM's prefetcher is the baseline; we're looking
    for the knee on each hardware profile.
 2. **Persistent KV cache** — high effort, 3-10× on conversational
    use. Cache per-layer K/V on disk keyed by prompt prefix hash;
    follow-up messages skip most re-compute.
 3. **Speculative decoding with the fast SLM** — hard, 3-5× gain.
-   The 8B already loaded in RAM drafts tokens; AeroLLM validates
+   The 8B already loaded in RAM drafts tokens; QueueLLM validates
    in batch. Lab-specific advantage — nobody else has a fast + slow
    model coexisting in one process.
 4. **Mixed-precision per-layer** — easy, 30-50% disk shrink (→ same
    throughput gain). Attention at INT8/FP16, FFN at INT4. Uses the
    "sensitivity rule" from the precision primer.
-5. **Concurrent-prompt batching depth** — AeroLLM's reason for
+5. **Concurrent-prompt batching depth** — QueueLLM's reason for
    existing. Push N up and measure where the per-prompt latency
    curve flattens on your hardware.
 
@@ -59,7 +59,7 @@ Each cycle is 5-10 experiments over roughly a week. The researcher
 agent decomposes the lab goal into this structure automatically.
 
 1. **Baseline.** Wipe `aerollm-bench.jsonl` (or filter by date).
-   Run 10+ messages through the current AeroLLM. Capture median
+   Run 10+ messages through the current QueueLLM. Capture median
    t/min + quality scores.
 2. **Hypothesis.** "Increasing prefetch lookahead from 1 to 3 on
    Qwen3-235B-A22B will increase t/min by ≥ 20% without blowing the
@@ -68,7 +68,7 @@ agent decomposes the lab goal into this structure automatically.
    my mind? List three alternatives (maybe compute dominates on my
    SSD; maybe deeper prefetch thrashes the page cache; maybe CPU
    cores saturate). Design the experiment to distinguish.
-4. **Implement.** Ship the change against the AeroLLM clone.
+4. **Implement.** Ship the change against the QueueLLM clone.
    Rebuild via `./arailctl setup && ./arailctl restart`.
 5. **Measure.** Run the same 10+ messages. Compare against baseline.
 6. **Write up.** One markdown file under
@@ -102,7 +102,7 @@ Before claiming a throughput win, understand why it's true. Pre-work:
   myself."
 - [evaluate-llm](../evaluate-llm/SKILL.md) — how to measure quality
   delta rigorously.
-- AeroLLM source at https://github.com/cdarnell/qukaizen-aerollm. Read the
+- QueueLLM source at https://github.com/cdarnell/qukaizen-queuellm. Read the
   layer iterator and the prefetch worker first.
 
 ## Contribution pathway

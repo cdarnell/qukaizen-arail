@@ -113,7 +113,7 @@ async def _preload_once() -> str:
             return "loaded"
         activity_log.emit(
             "registry",
-            "Deep model preload failed (aeroLLM unavailable) — deep calls "
+            "Deep model preload failed (QueueLLM unavailable) — deep calls "
             "will fall back visibly. Standing down until restart.",
             "warn",
             {"model_event": {"kind": "preload_failed", "entry_id": TIER1_ID}})
@@ -146,7 +146,7 @@ async def aerollm_preload_loop() -> None:
                 except Exception:  # noqa: BLE001
                     pass
         except Exception as exc:  # noqa: BLE001
-            log.warning("aerollm preload tick failed: %s", exc)
+            log.warning("QueueLLM preload tick failed: %s", exc)
         await asyncio.sleep(_interval())
 
 

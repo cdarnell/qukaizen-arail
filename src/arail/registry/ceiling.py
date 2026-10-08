@@ -99,7 +99,7 @@ def resolve_answering_model(
             raise ModelCeilingViolation(
                 f"'{model_id}' is ~{params_b:g}B params — at or over the "
                 f"{PRIMARY_CEILING_B:g}B primary ceiling. It cannot serve as "
-                f"the answering model. Use it as the AeroLLM secondary "
+                f"the answering model. Use it as the QueueLLM secondary "
                 f"instead, or pick a smaller primary.",
                 model_id=model_id,
                 role=role,
@@ -121,7 +121,7 @@ def resolve_answering_model(
         raise ModelCeilingViolation(
             f"'{model_id}' is ~{params_b:g}B params — over the ~{cap:g}B "
             f"this machine's discovered RAM can hold stably as a resident "
-            f"secondary model. Pick a smaller AeroLLM/AirLLM model, or run "
+            f"secondary model. Pick a smaller QueueLLM/AirLLM model, or run "
             f"this one on hardware with more memory.",
             model_id=model_id,
             role=role,

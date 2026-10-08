@@ -193,7 +193,7 @@ message.
 
 **Model selection, settled once and read-only here.** The readiness
 banner always prints a `Models:` block — the two boot slots (A: the
-resident chat model; B: the model AeroLLM references for deep answers),
+resident chat model; B: the model QueueLLM references for deep answers),
 each with size, on-filesystem presence, and RAM fit, plus the exact
 `ollama pull` / `hf download` command when a configured model is
 missing. `start` never picks a model itself and never prompts — the
@@ -370,7 +370,7 @@ active).
 
 ### `deep <op>`
 
-AeroLLM 2nd-inference control: `install` (bundled prebuilt binary) |
+QueueLLM 2nd-inference control: `install` (bundled prebuilt binary) |
 `rebuild` (from source) | `update` (published wheel) | `status`.
 
 Three install channels, dispatched by `scripts/build-aerollm.sh auto`
@@ -380,7 +380,7 @@ channel both use):
 | Channel | Op | Requires | Who it's for |
 |---|---|---|---|
 | BUNDLED | `deep install` | network to `github.com` (or a local tarball via `AEROLLM_BUNDLE_FILE`) | outside users — no source repo, no credentials |
-| DEV | `deep rebuild` | the aeroLLM sibling repo checked out at `$ARAIL_AEROLLM_REPO` | maintainers with local aeroLLM changes |
+| DEV | `deep rebuild` | the QueueLLM sibling repo checked out at `$ARAIL_AEROLLM_REPO` | maintainers with local QueueLLM changes |
 | RELEASE | `deep update` | `pypi.qukaizen.com` index credentials | maintainers on the private index |
 
 `auto` picks DEV if the sibling repo is present, RELEASE if
@@ -400,7 +400,7 @@ regardless of what's on disk.
 | `AEROLLM_BUNDLE_SHA256` | read from `pyproject.toml [tool.arail.package-sources] aerollm_bundle_sha256` — a genuine out-of-band pin, independent of the download — on both routes: `./arailctl setup` forwards it, and standalone `./arailctl deep install` reads pyproject itself when the env var is unset. An explicit env value always wins. Only if pyproject can't be read at all does it fall back to the same-origin `.sha256` sidecar | pin/override the expected **tarball** digest |
 
 `./arailctl deep status` reports a `channel:` line (`dev` \| `release` \|
-`bundled` \| `none`) and, when bundled, an `aerollm <version> (<short-sha>,
+`bundled` \| `none`) and, when bundled, a `QueueLLM <version> (<short-sha>,
 built <date>)` provenance line read from `aerollm_api.bundle.json`.
 
 **What the sha256 check does and doesn't guarantee (v1):** when

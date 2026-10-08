@@ -122,7 +122,7 @@ def write_defaults(
         "#\n"
         "# default_a — the primary, fast, always-resident chat model\n"
         "#             (an installed Ollama model tag).\n"
-        "# default_b — the model AeroLLM (the deep / 2nd inference) loads\n"
+        "# default_b — the model QueueLLM (the deep / 2nd inference) loads\n"
         "#             (a directory name under ARAIL_MODELS_DIR), or null\n"
         "#             for \"no deep model configured\".\n"
     )
@@ -285,10 +285,10 @@ def report() -> str:
 
     b = facts["b"]
     if b is None:
-        lines.append("    B (aeroLLM):   (not configured)")
+        lines.append("    B (QueueLLM):  (not configured)")
     else:
         lines.append(
-            f"    B (aeroLLM):   {b['model']:<28} {_fmt_gb(b['size_gb']):>10}   "
+            f"    B (QueueLLM):  {b['model']:<28} {_fmt_gb(b['size_gb']):>10}   "
             f"on disk: {'yes' if b['present'] else 'NO':<3}   "
             f"fits: {_fit_label(b['fit'], b['cap_b'])}"
         )

@@ -252,7 +252,7 @@ EOF
     uninstall-daemon  remove launchd supervision (back to dev/foreground mode)
     tier [<tier>]   switch (or print) the feature-set tier — minimalist | maximus
                     ('upgrade' is a permanent alias — see docs/cli.md)
-    deep <op>       AeroLLM 2nd inference: install (bundled binary) | rebuild (source) |
+    deep <op>       QueueLLM 2nd inference: install (bundled binary) | rebuild (source) |
                     update (wheel) | status
     version         show installed component versions
     status [--json[=full|instances]] [--probe|--no-probe] [--quiet]  show what's

@@ -119,7 +119,7 @@ def check_models() -> None:
             h = e.health
             if h.status == "healthy":
                 any_healthy = True
-            where = e.endpoint or ("aerollm (in-process)"
+            where = e.endpoint or ("QueueLLM (in-process)"
                                    if e.provider_type == "aerollm" else "local")
             lat = f", {h.latency_ms:.0f}ms" if h.latency_ms is not None else ""
             detail = f" — {h.detail}" if h.detail else ""

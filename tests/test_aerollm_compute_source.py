@@ -34,7 +34,7 @@ def test_aerollm_is_a_local_source_not_cloud():
 
 
 def test_display_name():
-    assert appmod._display_provider_name("aerollm") == "AeroLLM"
+    assert appmod._display_provider_name("aerollm") == "QueueLLM"
 
 
 def test_active_provider_accepts_aerollm(monkeypatch):

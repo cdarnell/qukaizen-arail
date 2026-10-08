@@ -10,7 +10,7 @@
 > you, architecture decisions with real tradeoffs, or thorough code review.
 > The signal that minimalist isn't enough is concrete: it loops, hand-waves
 > the hard step, or confidently gives a shallow answer to a question that
-> needed depth. Maximus runs Qwen2.5-7B locally via AeroLLM on Apple Silicon
+> needed depth. Maximus runs Qwen2.5-7B locally via QueueLLM on Apple Silicon
 > (no cloud, no code leaves your machine). Don't default to maximus "just in
 > case" — it's heavier, and on most days the 1B is the right tool. Use the
 > heavy model when the problem is actually heavy.
@@ -20,7 +20,7 @@
 | | minimalist | maximus |
 |---|---|---|
 | **Default model** | `llama-ai-eng` (Llama-3.2-1B, ~0.9 GB) | `ai-engineer` (Qwen2.5-7B, ~4 GB) |
-| **Runtime** | Ollama (local, native `/api/chat`) | AeroLLM / MLX (Apple Silicon); AirLLM fallback on CUDA |
+| **Runtime** | Ollama (local, native `/api/chat`) | QueueLLM / MLX (Apple Silicon); AirLLM fallback on CUDA |
 | **RAM floor** | 8 GB (1 GB resident) | 16 GB (4 GB resident) |
 | **Install** | Auto — `./arailctl setup` | Opt-in — `./arailctl upgrade maximus` then download weights |
 | **Use when** | Chat, Buddy, quick code, daily lab work | Multi-step reasoning, deep code review, research planning |
@@ -36,7 +36,7 @@
 ```
 
 After upgrading to maximus, follow the printed instructions to build
-AeroLLM and download the 7B weights (~4 GB, one-time).
+QueueLLM and download the 7B weights (~4 GB, one-time).
 
 ## Disclosure
 

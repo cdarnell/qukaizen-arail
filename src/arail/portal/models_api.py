@@ -378,7 +378,7 @@ async def models_boot(full: bool = False, refresh: bool = False) -> Dict[str, An
         "slots": {
             "a": {"label": "Load in GPU/Memory now",
                   "configured": settlement["default_a"], "allow_none": False},
-            "b": {"label": "aeroLLM deep reference",
+            "b": {"label": "QueueLLM deep reference",
                   "configured": settlement["default_b"], "allow_none": True},
         },
     }

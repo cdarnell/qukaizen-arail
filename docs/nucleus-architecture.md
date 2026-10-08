@@ -37,7 +37,7 @@ src/arail/portal/forge_api.py + templates/forge.html
 docs/nucleus.md docs/nucleus-gateway-contract.md (this file)
 ```
 
-## The queuellm ↔ frozen aerollm surface
+## The queuellm ↔ frozen `aerollm` surface
 
 `runtime_names.py` maps the user-facing runtime name `queuellm` to the
 frozen backend id `aerollm`, module `aerollm_api`, registry id
