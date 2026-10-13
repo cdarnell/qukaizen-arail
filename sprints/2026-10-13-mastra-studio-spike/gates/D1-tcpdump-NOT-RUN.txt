@@ -1,0 +1,5 @@
+tcpdump NOT RUN: /dev/bpf0 is root-only (crw-------) and sudo is not permitted for the builder.
+Owner command (60 s idle baseline, then 60 s run), from the worktree root:
+  sudo tcpdump -i any -n -w sprints/2026-10-13-mastra-studio-spike/gates/D1.pcap 'not (host 127.0.0.1 or host ::1)'
+  (concurrently) MODE=test SECS=60 scripts/mastra/gate-d1-egress.sh
+  tcpdump -n -r sprints/2026-10-13-mastra-studio-spike/gates/D1.pcap

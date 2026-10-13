@@ -1,0 +1,13 @@
+{
+ "Apache-2.0": 35,
+ "MIT": 401,
+ "BlueOak-1.0.0": 3,
+ "CC-BY-4.0": 1,
+ "BSD-2-Clause": 2,
+ "ISC": 17,
+ "BSD-3-Clause": 5,
+ "(AFL-2.1 OR BSD-3-Clause)": 1,
+ "(WTFPL OR MIT)": 1
+}
+NOT ALLOWED:
+node_modules/caniuse-lite	CC-BY-4.0
