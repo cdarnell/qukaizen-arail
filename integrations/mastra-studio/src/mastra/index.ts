@@ -11,6 +11,8 @@ const researcherDriver = new Agent({
 });
 
 export const mastra = new Mastra({
+  // Loopback only: `mastra dev` has no --host flag and otherwise binds *:4111 (gate B0.2 finding F11).
+  server: { host: '127.0.0.1' },
   agents: { researcherDriver },
   storage: new LibSQLStore({
     id: 'arail-mastra',

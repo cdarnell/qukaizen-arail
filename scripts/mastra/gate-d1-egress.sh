@@ -9,7 +9,7 @@ MODE="${MODE:-test}"; SECS="${SECS:-60}"
 cd "$ROOT/integrations/mastra-studio"
 mkdir -p "$ROOT/lab/data/mastra"
 ENVV=(env -i PATH="$PATH" HOME="$HOME" ARAIL_MASTRA_DB="$ROOT/lab/data/mastra/mastra.db")
-[ "$MODE" = test ] && ENVV+=(MASTRA_TELEMETRY_DISABLED=1)
+[ "$MODE" = test ] && ENVV+=(MASTRA_TELEMETRY_DISABLED=1 MASTRA_OFFLINE=1 MASTRA_AUTO_REFRESH_PROVIDERS=false)
 "${ENVV[@]}" npx --no-install mastra dev > "$G/D1-$MODE-server.log" 2>&1 &
 ROOTPID=$!
 : > "$G/D1-$MODE-lsof.txt"
