@@ -285,7 +285,6 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "arail.portal" = ["templates/*.html", "templates/wiki/*.html", "static/*"]
-"arail.buddy_host" = ["contract/*.json", "contract/conformance/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
