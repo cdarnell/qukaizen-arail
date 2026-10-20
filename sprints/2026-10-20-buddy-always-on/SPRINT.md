@@ -65,8 +65,8 @@ in `RESEARCH_NOTES.md` §1. Do not design or code until VISION.md is in.
 
 ## Preconditions before plan (VISION §5)
 
-- (a) Operator confirms the QA World's scope in one line (Q-A).
-- (b) `cdarnell/qukaizen-buddy` exists, private, with a `CLAUDE.md` carrying G1–G12 and the S1 QA allocation (35/25/15/15/10) before the builder runs.
+- (a) **Done 2026-10-20:** operator chose "QuKaiZen QA practice" (the qa persona's rules, sprint gates, witness lines, xfail-strict debt, per-product QA allocations, the vault hard gate), sourced to his own files at pinned commits.
+- (b) **Done 2026-10-20:** `cdarnell/qukaizen-buddy` created private; `main` = full clone of HKUDS/nanobot at tag `v0.3.5` (`1bb712d3`), `upstream` remote kept, plus `UPSTREAM.md` (pin + patch rules) and `CLAUDE.md` (laws, G1–G12, QA allocation). Local clone: `<session>/qukaizen-buddy`.
 - (c) Operator writes P1's W5 witness line before QA.
 
 ## Notes
