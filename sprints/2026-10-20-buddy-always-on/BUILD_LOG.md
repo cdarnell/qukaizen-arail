@@ -44,9 +44,9 @@ Status key: `todo` · `done <sha>` · `BLOCKED (reason)`.
 
 | # | Row | Repo | Files | Change | Tests (when written) | Commit ref |
 |---|---|---|---|---|---|---|
-| 0 | BUILD_LOG | arail | `sprints/2026-10-20-buddy-always-on/BUILD_LOG.md` | This skeleton, baselines, verification log, gap G1 | n/a | this commit |
-| 1 | B1a | buddy | `buddy/pyproject.toml`, `buddy/README.md`, `buddy/src/buddy/__init__.py`, `buddy/tools/capture_brain_chat.py`, `buddy/tests/test_nanobot_request_capture.py` | Distribution `qukaizen-buddy` (import `buddy`, src layout); honest README line + Built with Llama; the capture tool; a test that pins the facts the capture found | the capture test (runs nanobot against a loopback fake server) | todo |
-| 2 | B1b | buddy | `buddy/src/buddy/contracts/buddy.host.v1.json`, `contracts/conformance/*.json`, `buddy/tests/test_contract.py` | The contract (§5.3–§5.9) and conformance cases, including the captured request. **Turn-header carrier is provisional (G1).** | schema self-validation, every error code once, no retry marker in any message, enum pin (C-ENUM-01), C-ERR-01 | todo |
+| 0 | BUILD_LOG | arail | `sprints/2026-10-20-buddy-always-on/BUILD_LOG.md` | This skeleton, baselines, verification log, gap G1 | n/a | done `d9cf4e5a` |
+| 1 | B1a | buddy | `buddy/pyproject.toml`, `buddy/README.md`, `buddy/src/buddy/__init__.py`, `buddy/tools/capture_brain_chat.py`, `buddy/tests/test_nanobot_request_capture.py` | Distribution `qukaizen-buddy` (import `buddy`, src layout); honest README line + Built with Llama; the capture tool; a test that pins the facts the capture found | the capture test (runs nanobot against a loopback fake server) | done `ae7f6b7f` (buddy) |
+| 2 | B1b | buddy | `buddy/src/buddy/contracts/buddy.host.v1.json`, `contracts/conformance/*.json`, `buddy/tests/test_contract.py` | The contract (§5.3–§5.9) and conformance cases, including the captured request. **Turn-header carrier is provisional (G1).** | schema self-validation, every error code once, no retry marker in any message, enum pin (C-ENUM-01), C-ERR-01 | done `fcddf1e2` (buddy) |
 | 3 | A1 | arail | `agent_context.py`, `agent_trace.py`, `router/core.py` + tests | `channel`/`identity`/`origin` on `AgentCall`; trace v2 fields and `SCHEMA`; cost capture | trace/schema tests; R-BUDDY-98 | todo |
 | 4 | A2 | arail | `agent_trace.py`, `portal/app.py`, `portal/templates/admin.html` + tests | `recent`, model-call counting, `related`, "Buddy on the phone" block | lanes/endpoint tests | todo |
 | 5 | A3 | arail | `scheduler.py`, `portal/scheduler.py`, `portal/app.py`, `registry/core.py` + tests | `halt_load_failed`, `inference_slot(acquire_timeout_s)`, presence skip, fast-path prefixes, `is_cloud_entry` | R-PRES-01 style tests | todo |
@@ -73,7 +73,45 @@ pieces (guard, confirm, ledger, admission): the failing test is written and run 
 
 ## Execution
 
-(Filled after each commit: what was done and deltas from the plan.)
+### Step 0 (BUILD_LOG skeleton)
+Plan, baselines, verification log, G1. Commit: `d9cf4e5a` (arail).
+
+### Step 1 (B1a, buddy: package skeleton and nanobot request capture)
+Delta from plan: B1 is two commits (B1a skeleton + capture, B1b contract + conformance) so
+the evidence for G1 is reviewable on its own. `buddy/tools/capture_brain_chat.py` is kept in
+the tree (not a throwaway) so the fixture can be re-captured when the pin moves. The test
+file `buddy/tests/test_nanobot_request_capture.py` is characterisation of upstream: it pins
+the request field set, `stream` always true, no `tools` key when none are registered, plain
+string content, and G1 (a `before_iteration` hook can rewrite the current user message but
+not `messages[0]` or history). 8 tests pass. Distribution: `buddy/pyproject.toml`
+(`qukaizen-buddy`, hatchling, src layout, MIT, deps: PTB 22.x, jsonschema). nanobot is not a
+declared dependency (the repo root is the pin; one venv holds both).
+Commit: `ae7f6b7f` (buddy).
+
+### Step 2 (B1b, buddy: contract and conformance)
+`buddy/src/buddy/contracts/buddy.host.v1.json` (62,445 bytes, sha256
+`0646dace9a7d69f0bb89e57d2afe0665a819c7c0fb07d7095c8b679eaf871cd3`) and 126 cases in
+`contracts/conformance/` (124 numbered `NNN-<name>.json`, plus the two nanobot-request
+cases under the names the spec gives). Numbering is three digits because there are more than 99
+cases. Everything in §5.3 to §5.9 is in the file: transport and admission order, limits,
+six method definitions (the five plus GET `brain/models`), the turn header and its schema, the
+actions table, the error table with fixed messages, the conformance DSL (setup keys,
+placeholders, notes). The trace event allowlist is not a side table: it is per-event JSON
+Schema (`allOf` of `if event==X then reason/attrs`) inside the `trace.record` request, so one
+validator enforces it on both sides; the test copies the spec's §5.7 table and compares.
+The captured nanobot request gave no new field: `additionalProperties:false` stands as
+written (the field set is exactly the one the spec listed); `stream_options` is tightened to
+`{include_usage: boolean}` because that is all nanobot sends.
+Conformance cases: both nanobot cases come from the real capture. The stock one is refused
+`turn_header_invalid` (G1 as an executable fact); the other swaps in a `BUDDY-TURN/1 ...`
+`messages[0]` and must be accepted, with nanobot's own headers (`x-session-affinity`,
+`x-stainless-*`) present. Tests (23): format, spec tables for errors and events, every code
+and method covered, each fixture against its schema, nanobot's retry-marker lists as oracle,
+`LLMProvider.is_transient_response` as oracle for every error, action enum pinned.
+Test-first: not applicable (the generator ran before the tests); the tests were written
+against the spec's tables, not the generator's output, and caught two generator defects
+(a marker list shorter than nanobot's, and a two-digit file prefix).
+Commit: `fcddf1e2` (buddy).
 
 ## Architect feedback required
 
@@ -130,6 +168,34 @@ A8 (header reader, if the carrier moves), B7 (`turn_hook.py`), B10 (`nanobot_sea
 list), B11 (`qa_harness`), Phase I. **Rows not affected:** A1 to A7, A9, B3 to B6, B8, B9.
 The contract is written as the spec has it and marked provisional in this respect; if the
 carrier changes, the rule at the end of §9 applies (re-run A5, equal sha256 both sides).
+
+
+### G2. Reconciliations inside §5.4/§5.6 and rules the spec leaves open (decided by the builder; architect to ratify)
+
+These do not stop the build; each is the smallest reading that keeps every spec code
+reachable. They live in the contract and its conformance cases, so they are testable.
+
+1. **Schema vs step list (§5.6 vs §5.4, §6.2, F24).** The request schema says `tools`
+   `maxItems: 0` and text-only parts, which would make `schema_invalid` fire first and leave
+   `tools_not_allowed` and `content_not_allowed` unreachable. The contract lets the schema accept
+   any `tools` array and any part object with a string `type`; step 3 enforces empty `tools` and
+   text-only parts with the two codes (`methods.brain.chat.step_rules`).
+2. **Retry control (§5.4).** The fixed-message rule cannot cover `error.lab_contract_sha256`
+   in the 412 body: a hex digest contains the digit runs 429, 500, 502, 503 or 504 about 7.6% of
+   the time, and nanobot's text fallback treats those as transient
+   (`nanobot/providers/base.py:1011-1028`, markers at `:601-613`). nanobot honours an explicit
+   `x-should-retry` first (`providers/base.py:1004-1005`; header read at
+   `openai_compat_provider.py:1864-1872`). The contract therefore requires `X-Should-Retry: false`
+   on every error response (`errors.response_headers`), and a test shows the digest hazard
+   with nanobot as the oracle.
+3. **Rules the spec leaves open, pinned by conformance cases:** a content array is flattened by
+   joining its text parts with LF; a last message that is not `user` is `schema_invalid`;
+   `approval_id != proposal.id` is `schema_invalid`; `max_tokens` falls back to 400 and
+   `max_completion_tokens` is honoured; a brain the edge refuses is reported in the handshake as
+   `available:false` with the refusal code in `reason`; `trace.record` is accepted while the lab is
+   held or airgapped (Buddy must be able to record the flip and the stop); `hold_all` is allowed when
+   the hold state is unreadable (it is the reductive direction); the 422 for a bad record carries
+   `error.record_index`.
 
 ## Final state
 
