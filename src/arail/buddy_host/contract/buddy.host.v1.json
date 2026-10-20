@@ -503,7 +503,6 @@
                     "finish_reason": {
                       "enum": [
                         "stop",
-                        "length",
                         null
                       ]
                     }
@@ -617,8 +616,7 @@
                   },
                   "finish_reason": {
                     "enum": [
-                      "stop",
-                      "length"
+                      "stop"
                     ]
                   }
                 }
@@ -654,7 +652,8 @@
         "tools_not_allowed": "the tools array is absent or empty",
         "content_not_allowed": "every content part is exactly {type: 'text', text: string of at most 16000 chars}",
         "prompt_too_large": "the sum of all content characters is at most 24000",
-        "schema_invalid": "also: the last message has role user"
+        "schema_invalid": "also: the last message has role user",
+        "turn_header_invalid": "see turn_header.rules (system role, no later system message, header line, non-empty persona)"
       },
       "steps": [
         "admission",
@@ -684,7 +683,9 @@
           "stream_options",
           "tool_choice"
         ]
-      }
+      },
+      "finish_reason_rule": "A completed answer always ends with finish_reason 'stop', with usage on that chunk. 'length' is never sent. This deviates from OpenAI on purpose: nanobot treats 'length' as 'continue' and calls again on a prompt it wrote. A token-capped answer stays visible in the model-call record (tokens_out equals max_tokens).",
+      "budget_rule": "A turn is counted when the call is let into inference: after the inference slot is acquired, the cap is re-checked and the turn counted in one atomic step (refusal budget_exhausted, recorded as a model_call). Lab mode is re-checked at the same point. A call refused because the model is busy costs nothing."
     },
     "brain.models": {
       "http_method": "GET",
@@ -993,7 +994,8 @@
                         "lab_held",
                         "lab_unreachable",
                         "budget",
-                        "gate_closed"
+                        "gate_closed",
+                        "busy"
                       ]
                     },
                     "attrs": {
@@ -1728,9 +1730,9 @@
     }
   },
   "turn_header": {
-    "carrier": "messages[0].content, first line",
+    "carrier": "messages[0] (role system), content, first line",
     "prefix": "BUDDY-TURN/1 ",
-    "encoding": "prefix + one-line JSON, then LF, then the system prompt",
+    "encoding": "prefix + one-line JSON, then LF, then the persona (the system prompt)",
     "schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -1784,7 +1786,13 @@
       "serialized_bytes_max": 4096,
       "serialization": "JSON, separators , and :, UTF-8, no ASCII escaping",
       "refs": "only local '#' references"
-    }
+    },
+    "rules": [
+      "messages[0].role is 'system'.",
+      "No message after index 0 has role 'system'.",
+      "The text of messages[0] is its content string, or its text parts joined by LF. Its first line, up to the first LF, is the prefix followed by one-line JSON valid against 'schema'.",
+      "What follows that LF is not empty after stripping whitespace."
+    ]
   },
   "actions": {
     "arail.pause_research": {
@@ -2061,7 +2069,8 @@
       "budget_used": "{turns, tokens}; default zero",
       "calls_last_minute": "admitted brain.chat calls by the same pseudonym in the last 60 s; default 0",
       "slot": "'free' (default) | 'busy'",
-      "fault": "null (default) | 'internal' (the route raises)"
+      "fault": "null (default) | 'internal' (the route raises)",
+      "brain_tokens": "'few' (default: the fake brain reports 12 completion tokens) | 'max' (it reports exactly max_tokens)"
     },
     "case_schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

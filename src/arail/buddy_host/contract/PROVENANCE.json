@@ -1,10 +1,10 @@
 {
   "schema": "arail.vendor-stamp/v1",
   "source_repo": "cdarnell/qukaizen-buddy",
-  "source_commit": "fb040a0b58c108b74153628f366b6e0dec5a3b3a",
+  "source_commit": "940cf3490671a65bc56ea4c8ab4f146c9f4056af",
   "source_dir": "buddy/src/buddy/contracts",
   "files": {
-    "buddy.host.v1.json": "sha256:0646dace9a7d69f0bb89e57d2afe0665a819c7c0fb07d7095c8b679eaf871cd3",
+    "buddy.host.v1.json": "sha256:48481c1d905df6ed8797de91c6db583f3fc7c1d2f9330c46f79f73b12a785516",
     "conformance/000-handshake-ok-hybrid.json": "sha256:1b1f981e4c1f38b1e92c4178b28d403ca34abed148128350da8e9f43bc825b6f",
     "conformance/001-handshake-ok-airgapped.json": "sha256:a80d1af7142a58618691ee34c6d168b841173073fb25e5eec4ecd95d97ba7d57",
     "conformance/002-handshake-ok-held.json": "sha256:9630e801ebbac67ce9d42ba43bfb7ac3ff95c728f2b52e045fdd4c3df7f4a2e2",
@@ -130,10 +130,16 @@
     "conformance/122-pause-refused-credential-missing.json": "sha256:b9480c39987d2b6c7538f9ee1fc90793209bbfc2e09316d82959a5943bb5c069",
     "conformance/123-pause-refused-internal.json": "sha256:781730d6852a4b1de429cce725335fe58e92de165762563cb858a0c542bc62ca",
     "conformance/124-pause-ok-expired-moments-ago-but-confirmed-in-time.json": "sha256:33d88316dc30c1a30381bfe0a159989380960e2bff431372c4c8725838944407",
+    "conformance/125-brain-chat-refused-header-in-user-role-first-message.json": "sha256:eddcefea8752d367036aa232a40b97d8a1fac8c9ddab46348e99159c2d9ad84c",
+    "conformance/126-brain-chat-refused-later-system-message.json": "sha256:390074c065dd9f422058a076c6310fcd848d515f1bf62f7cb4d086d217a01241",
+    "conformance/127-brain-chat-refused-empty-persona.json": "sha256:13e55727c945fe8d1134a1ebfefaf01884ab2403b1ad292b27a275fff5ef75e8",
+    "conformance/128-brain-chat-refused-header-line-only.json": "sha256:bb0c72872bd9877f82378699703f5a493a4011f89373a643f6c5e4f701d5c73e",
+    "conformance/129-brain-chat-ok-finish-reason-stop-when-all-max-tokens-used.json": "sha256:46499a34c38faab91c1af84fbad55eca93fcac9198b258172b81d09037e4b1fa",
+    "conformance/130-trace-record-ok-inbound-refused-busy.json": "sha256:5a45ed82086297f5068642c32850f4e0a1df119bb06b74faadb7aa99bf9db43c",
     "conformance/brain-chat-nanobot-request.json": "sha256:07590e182a241d05fdc97b066beac0e2ace6877776d35dbfeb44bb9b33b5dafd",
     "conformance/brain-chat-nanobot-turn.json": "sha256:d276e07af1f4feb1273ba9a9b407f2ffb3e11a14a47b9291a734899febe09ebc"
   },
-  "tree_digest": "sha256:6a9dcb58420fd5e102aae153936d235204a73a3a09682a908f7f663f89fa7a39",
+  "tree_digest": "sha256:be0099bfa93046bba92cce2c8f90bd6a1c9e313e997c8c7d124cf1ef2b9aab7c",
   "synced_on": "2026-10-20",
   "sync": "python scripts/sync-buddy-contract.py --from \"$QKZ_BUDDY_PATH\"",
   "check": "python scripts/sync-buddy-contract.py --check"
