@@ -1,0 +1,39 @@
+{
+  "name": "trace-record-ok-while-held",
+  "method": "trace.record",
+  "setup": {
+    "held": true
+  },
+  "request": {
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer $CREDENTIAL",
+      "X-Buddy-Contract": "sha256:$CONTRACT_SHA256"
+    },
+    "body": {
+      "v": 1,
+      "records": [
+        {
+          "event": "stop",
+          "trace_id": "0123456789abcdef",
+          "client_ts": "$NOW-1s",
+          "channel": "telegram",
+          "identity": {
+            "pseudonym": "p_0123456789",
+            "role": "talker"
+          },
+          "outcome": null,
+          "reason": "lab_held",
+          "attrs": {}
+        }
+      ]
+    }
+  },
+  "expect": {
+    "status": 202,
+    "error_code": null,
+    "body_subset": {
+      "accepted": 1
+    }
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "name": "trace-record-refused-too-many-slugs",
+  "method": "trace.record",
+  "setup": {},
+  "request": {
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer $CREDENTIAL",
+      "X-Buddy-Contract": "sha256:$CONTRACT_SHA256"
+    },
+    "body": {
+      "v": 1,
+      "records": [
+        {
+          "event": "citation_check",
+          "trace_id": "0123456789abcdef",
+          "client_ts": "$NOW-1s",
+          "channel": "telegram",
+          "identity": null,
+          "outcome": null,
+          "reason": "ok",
+          "attrs": {
+            "valid_slugs": [
+              "a",
+              "b",
+              "c",
+              "d"
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "expect": {
+    "status": 422,
+    "error_code": "schema_invalid",
+    "body_subset": {
+      "error": {
+        "type": "buddy_host_error",
+        "code": "schema_invalid",
+        "message": "The request does not match the contract.",
+        "record_index": 0
+      }
+    }
+  }
+}

@@ -47,10 +47,10 @@ Status key: `todo` · `done <sha>` · `BLOCKED (reason)`.
 | 0 | BUILD_LOG | arail | `sprints/2026-10-20-buddy-always-on/BUILD_LOG.md` | This skeleton, baselines, verification log, gap G1 | n/a | done `d9cf4e5a` |
 | 1 | B1a | buddy | `buddy/pyproject.toml`, `buddy/README.md`, `buddy/src/buddy/__init__.py`, `buddy/tools/capture_brain_chat.py`, `buddy/tests/test_nanobot_request_capture.py` | Distribution `qukaizen-buddy` (import `buddy`, src layout); honest README line + Built with Llama; the capture tool; a test that pins the facts the capture found | the capture test (runs nanobot against a loopback fake server) | done `ae7f6b7f` (buddy) |
 | 2 | B1b | buddy | `buddy/src/buddy/contracts/buddy.host.v1.json`, `contracts/conformance/*.json`, `buddy/tests/test_contract.py` | The contract (§5.3–§5.9) and conformance cases, including the captured request. **Turn-header carrier is provisional (G1).** | schema self-validation, every error code once, no retry marker in any message, enum pin (C-ENUM-01), C-ERR-01 | done `fcddf1e2` (buddy) |
-| 3 | A1 | arail | `agent_context.py`, `agent_trace.py`, `router/core.py` + tests | `channel`/`identity`/`origin` on `AgentCall`; trace v2 fields and `SCHEMA`; cost capture | trace/schema tests; R-BUDDY-98 | todo |
-| 4 | A2 | arail | `agent_trace.py`, `portal/app.py`, `portal/templates/admin.html` + tests | `recent`, model-call counting, `related`, "Buddy on the phone" block | lanes/endpoint tests | todo |
-| 5 | A3 | arail | `scheduler.py`, `portal/scheduler.py`, `portal/app.py`, `registry/core.py` + tests | `halt_load_failed`, `inference_slot(acquire_timeout_s)`, presence skip, fast-path prefixes, `is_cloud_entry` | R-PRES-01 style tests | todo |
-| 6 | A4 | arail | `router/core.py`, `router/backends.py` + tests | `response_schema` pass-through; Ollama `format` | byte-identical-request test per existing caller path | todo |
+| 3 | A1 | arail | `agent_context.py`, `agent_trace.py`, `router/core.py` + tests | `channel`/`identity`/`origin` on `AgentCall`; trace v2 fields and `SCHEMA`; cost capture | trace/schema tests; R-BUDDY-98 | done `36349f7f` |
+| 4 | A2 | arail | `agent_trace.py`, `portal/app.py`, `portal/templates/admin.html` + tests | `recent`, model-call counting, `related`, "Buddy on the phone" block | lanes/endpoint tests | done `75ce05c5` |
+| 5 | A3 | arail | `scheduler.py`, `portal/scheduler.py`, `portal/app.py`, `registry/core.py` + tests | `halt_load_failed`, `inference_slot(acquire_timeout_s)`, presence skip, fast-path prefixes, `is_cloud_entry` | R-PRES-01 style tests | done `c9762089` |
+| 6 | A4 | arail | `router/core.py`, `router/backends.py` + tests | `response_schema` pass-through; Ollama `format` | byte-identical-request test per existing caller path | done `658e9880` |
 | 7 | A5 | arail | `buddy_host/contract/*`, `scripts/sync-buddy-contract.py` + tests | Vendor contract + conformance + `PROVENANCE.json`; sibling-free check | check test | todo |
 | 8 | A6 | arail | `buddy_host/{__init__,link,__main__}.py`, `arailctl` + tests | `arailctl buddy link/unlink/status` | U-LINK, U-PERM | todo |
 | 9 | A7 | arail | `portal/host_edge_routes.py`, `buddy_host/{admission,events,ledger}.py`, `app.py` + tests | admission, handshake, trace.record, hold_all, pause_research + ledger | conformance run, I-EDGE | todo |
@@ -112,6 +112,57 @@ Test-first: not applicable (the generator ran before the tests); the tests were 
 against the spec's tables, not the generator's output, and caught two generator defects
 (a marker list shorter than nanobot's, and a two-digit file prefix).
 Commit: `fcddf1e2` (buddy).
+
+### Step 3 (A1, arail: agent_trace v2, AgentCall fields, chokepoint cost)
+`AgentCall` gains `channel`, `identity` (a `(pseudonym, role)` tuple, sanitised; malformed
+becomes None, never raises) and `origin`; `agent_call(..., channel=, identity=, origin=)`.
+Delta from the spec's wording ("inherits them, same rule as `trace_id`"): a same-agent inner
+call inherits what it does *not* set, and an explicit inner value wins. `trace_id` ignores an
+inner value; copying that for identity would let a stale outer identity override an explicit
+one, which is the wrong failure for an identity field. A different agent nested inside does
+not inherit a phone identity (tested). `agent_trace.SCHEMA = "arail.agent_trace/v2"`;
+`_FIELDS` keeps the 35 v1 keys in order and appends the 8 v2 keys (a test freezes the v1 list).
+The chokepoint writes `record_type="model_call"`, `channel`, `identity` as `{pseudonym, role}`,
+`origin` (default `in_process`) and `cost` on success; refusal and error records carry
+`cost: null` but still say who asked. `cost.cash_basis` is `estimate` (billed-estimate backend),
+`local`, or `unpriced` (a third value the spec's two-value enum did not list; `cost_source()` has
+three states). 22 tests. R-BUDDY-98: 100 passed, 1 xfailed (unchanged).
+Commit: `36349f7f` (arail).
+
+### Step 4 (A2, arail: lanes `recent`, `related`, Buddy on the phone)
+`lanes_snapshot()` counts `record_type in {None, "model_call"}` only (calls, last, columns,
+unattributed, user-defined, `tokens_out_by_agent`) and adds `recent` per lane. Delta: both
+`recent` and `related` strip `bodies` **always**, recorder on or off (the spec says "bodies
+stripped" and cites the recorder-aware helper; the recorder-aware rule would put a phone
+user's words into a list the operator scrolls). The detail record itself keeps the existing
+recorder-aware behaviour. `agent_trace.find_with_related()` is new; the route returns
+`{**record, "related": [...]}`. `admin.html` gets `renderBuddyPhone`, `showBuddyTrace` and a
+delegated click handler; every cell goes through `esc()`, and the row's `data-trace` is only
+emitted for a 16-hex id. Tests execute the render function under `node` against a hostile
+record (XSS) and `node --check` the whole new block; they skip if `node` is absent. 22 tests.
+**Note for A7:** only records with a `channel` reach `recent`, so the edge must stamp
+`channel="telegram"` on the `hold_all` and `action_executed` records it writes itself.
+Commit: `75ce05c5` (arail).
+
+### Step 5 (A3, arail: plumbing)
+`scheduler.halt_load_failed()` (also true for a halt file that is valid JSON but not an object;
+cleared by the next successful write; `jobs_halted()` behaviour is unchanged, debt D10),
+`inference_slot(label, *, acquire_timeout_s=None)` (a bad value falls back to the global timeout
+instead of disabling it), `/api/host/v1/` in `_PRESENCE_SKIP_PREFIXES`, the four non-brain edge
+paths in `FAST_PATH_PREFIXES`, `registry.core.is_cloud_entry`. 25 tests. Existing tests use a
+per-test `scheduler._halt_path` (conftest), so the new tests write through it, not `DATA_DIR`.
+Side effect seen: some existing tests create an untracked `logs/scheduler/` directory in the
+repo root (pre-existing, not from this sprint); it is never staged.
+Commit: `c9762089` (arail).
+
+### Step 6 (A4, arail: response_schema)
+Router and Ollama backend as specified. The byte-identical proof is a fixture
+(`tests/fixtures/ollama_native_request_bodies.json`) of the request bodies **main@ca0a8f81**
+sends for eight caller shapes times two `num_ctx` values, captured by running main's code from
+a `git archive` snapshot before the change, and compared on every run; a schema adds exactly
+one key (`format`). Legacy backends (no `**kw`) keep working; a schema sent to one raises
+TypeError and is traced once. 39 tests.
+Commit: `658e9880` (arail).
 
 ## Architect feedback required
 

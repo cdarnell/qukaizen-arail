@@ -1,0 +1,2191 @@
+{
+  "schema": "qukaizen-buddy.host-contract/v1",
+  "contract": "buddy.host/v1",
+  "owner": "cdarnell/qukaizen-buddy",
+  "transport": {
+    "scheme": "http",
+    "base_path": "/api/host/v1",
+    "peer": "loopback",
+    "credential": {
+      "header": "Authorization",
+      "scheme": "Bearer",
+      "prefix": "bhc1_",
+      "length": 48,
+      "pattern": "^bhc1_[A-Za-z0-9_-]{43}$"
+    },
+    "contract_header": {
+      "name": "X-Buddy-Contract",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "content_type": "application/json",
+    "admission_order": [
+      "root_lab",
+      "bind_loopback",
+      "peer_loopback",
+      "credential",
+      "contract",
+      "schema"
+    ]
+  },
+  "limits": {
+    "max_body_bytes": {
+      "brain.chat": 262144,
+      "default": 16384
+    },
+    "brain_chat": {
+      "messages_min": 2,
+      "messages_max": 40,
+      "message_chars_max": 16000,
+      "text_parts_max": 8,
+      "total_chars_max": 24000,
+      "max_tokens_max": 400,
+      "response_schema_bytes_max": 4096,
+      "slot_wait_s": 8
+    },
+    "trace_batch_max": 20,
+    "approval": {
+      "ttl_s_max": 600,
+      "freshness_s": 60
+    },
+    "budget_per_day": {
+      "turns": 300,
+      "tokens": 600000
+    },
+    "calls_per_pseudonym_per_minute": 20,
+    "poll_after_s": {
+      "min": 5,
+      "max": 60
+    }
+  },
+  "methods": {
+    "handshake": {
+      "http_method": "POST",
+      "path": "/handshake",
+      "max_body_bytes": 16384,
+      "request": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "v",
+          "contract_sha256",
+          "buddy",
+          "world"
+        ],
+        "properties": {
+          "v": {
+            "const": 1
+          },
+          "contract_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "buddy": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "version",
+              "nanobot_pin",
+              "instance_id",
+              "started_at"
+            ],
+            "properties": {
+              "version": {
+                "type": "string",
+                "maxLength": 40
+              },
+              "nanobot_pin": {
+                "type": "string",
+                "maxLength": 80
+              },
+              "instance_id": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{16}$"
+              },
+              "started_at": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?(Z|[+-][0-9]{2}:[0-9]{2})$"
+              }
+            }
+          },
+          "world": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "slug",
+              "world_sha256"
+            ],
+            "properties": {
+              "slug": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+              },
+              "world_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            }
+          }
+        }
+      },
+      "response": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "v",
+          "contract_sha256",
+          "server_time",
+          "lab",
+          "consent",
+          "hold",
+          "brain",
+          "budget",
+          "research",
+          "poll_after_s"
+        ],
+        "properties": {
+          "v": {
+            "const": 1
+          },
+          "contract_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?(Z|[+-][0-9]{2}:[0-9]{2})$"
+          },
+          "lab": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "mode",
+              "tier",
+              "root"
+            ],
+            "properties": {
+              "mode": {
+                "enum": [
+                  "airgapped",
+                  "hybrid"
+                ]
+              },
+              "tier": {
+                "enum": [
+                  "minimalist",
+                  "maximus"
+                ]
+              },
+              "root": {
+                "const": true
+              }
+            }
+          },
+          "consent": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "api.telegram.org"
+            ],
+            "properties": {
+              "api.telegram.org": {
+                "type": "boolean"
+              }
+            }
+          },
+          "hold": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "held",
+              "readable",
+              "changed_at"
+            ],
+            "properties": {
+              "held": {
+                "type": "boolean"
+              },
+              "readable": {
+                "type": "boolean"
+              },
+              "changed_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?(Z|[+-][0-9]{2}:[0-9]{2})$"
+              }
+            }
+          },
+          "brain": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "available",
+              "local",
+              "model_id",
+              "backend",
+              "structured_output",
+              "attribution",
+              "reason"
+            ],
+            "properties": {
+              "available": {
+                "type": "boolean"
+              },
+              "local": {
+                "type": "boolean"
+              },
+              "model_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 128
+              },
+              "backend": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 40
+              },
+              "structured_output": {
+                "type": "boolean"
+              },
+              "attribution": {
+                "enum": [
+                  "Built with Llama",
+                  null
+                ]
+              },
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[a-z_]{0,40}$"
+              }
+            }
+          },
+          "budget": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "day",
+              "turns_used",
+              "turns_cap",
+              "tokens_used",
+              "tokens_cap"
+            ],
+            "properties": {
+              "day": {
+                "type": "string",
+                "format": "date",
+                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+              },
+              "turns_used": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "turns_cap": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "tokens_used": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "tokens_cap": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          },
+          "research": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "status"
+            ],
+            "properties": {
+              "status": {
+                "enum": [
+                  "idle",
+                  "running",
+                  "paused",
+                  "completed",
+                  "error",
+                  "unknown"
+                ]
+              }
+            }
+          },
+          "poll_after_s": {
+            "type": "integer",
+            "minimum": 5,
+            "maximum": 60
+          }
+        }
+      },
+      "refusals": [
+        "credential_missing",
+        "credential_invalid",
+        "not_linked",
+        "root_lab_only",
+        "bind_not_loopback",
+        "peer_not_loopback",
+        "contract_missing",
+        "contract_mismatch",
+        "schema_invalid"
+      ]
+    },
+    "brain.chat": {
+      "http_method": "POST",
+      "path": "/brain/chat/completions",
+      "max_body_bytes": 262144,
+      "request": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "model",
+          "messages"
+        ],
+        "properties": {
+          "model": {
+            "const": "buddy-fast"
+          },
+          "messages": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 40,
+            "items": {
+              "$ref": "#/$defs/msg"
+            }
+          },
+          "stream": {
+            "type": "boolean"
+          },
+          "stream_options": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "include_usage": {
+                "type": "boolean"
+              }
+            }
+          },
+          "max_tokens": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 400
+          },
+          "max_completion_tokens": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 400
+          },
+          "temperature": {
+            "type": "number"
+          },
+          "top_p": {
+            "type": "number"
+          },
+          "tools": {
+            "type": "array"
+          },
+          "tool_choice": {
+            "enum": [
+              "none",
+              "auto"
+            ]
+          }
+        },
+        "$defs": {
+          "msg": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "role",
+              "content"
+            ],
+            "properties": {
+              "role": {
+                "enum": [
+                  "system",
+                  "user",
+                  "assistant"
+                ]
+              },
+              "content": {
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 16000
+                  },
+                  {
+                    "type": "array",
+                    "maxItems": 8,
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "type"
+                      ],
+                      "properties": {
+                        "type": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      "response": {
+        "stream": {
+          "content_type": "text/event-stream",
+          "chunk": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "required": [
+              "id",
+              "object",
+              "created",
+              "model",
+              "choices"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "object": {
+                "const": "chat.completion.chunk"
+              },
+              "created": {
+                "type": "integer"
+              },
+              "model": {
+                "const": "buddy-fast"
+              },
+              "choices": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 1,
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "index",
+                    "delta",
+                    "finish_reason"
+                  ],
+                  "properties": {
+                    "index": {
+                      "const": 0
+                    },
+                    "delta": {
+                      "type": "object",
+                      "properties": {
+                        "role": {
+                          "const": "assistant"
+                        },
+                        "content": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "finish_reason": {
+                      "enum": [
+                        "stop",
+                        "length",
+                        null
+                      ]
+                    }
+                  }
+                }
+              },
+              "usage": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "prompt_tokens",
+                  "completion_tokens",
+                  "total_tokens"
+                ],
+                "properties": {
+                  "prompt_tokens": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "completion_tokens": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "total_tokens": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          },
+          "error_chunk": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "required": [
+              "error"
+            ],
+            "properties": {
+              "error": {
+                "type": "object",
+                "required": [
+                  "code",
+                  "message"
+                ],
+                "properties": {
+                  "code": {
+                    "const": "brain_failed"
+                  },
+                  "message": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "terminator": "data: [DONE]"
+        },
+        "non_stream": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "required": [
+            "id",
+            "object",
+            "created",
+            "model",
+            "choices",
+            "usage"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "object": {
+              "const": "chat.completion"
+            },
+            "created": {
+              "type": "integer"
+            },
+            "model": {
+              "const": "buddy-fast"
+            },
+            "choices": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 1,
+              "items": {
+                "type": "object",
+                "required": [
+                  "index",
+                  "message",
+                  "finish_reason"
+                ],
+                "properties": {
+                  "index": {
+                    "const": 0
+                  },
+                  "message": {
+                    "type": "object",
+                    "required": [
+                      "role",
+                      "content"
+                    ],
+                    "properties": {
+                      "role": {
+                        "const": "assistant"
+                      },
+                      "content": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "finish_reason": {
+                    "enum": [
+                      "stop",
+                      "length"
+                    ]
+                  }
+                }
+              }
+            },
+            "usage": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "prompt_tokens",
+                "completion_tokens",
+                "total_tokens"
+              ],
+              "properties": {
+                "prompt_tokens": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "completion_tokens": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "total_tokens": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
+      },
+      "step_rules": {
+        "tools_not_allowed": "the tools array is absent or empty",
+        "content_not_allowed": "every content part is exactly {type: 'text', text: string of at most 16000 chars}",
+        "prompt_too_large": "the sum of all content characters is at most 24000",
+        "schema_invalid": "also: the last message has role user"
+      },
+      "steps": [
+        "admission",
+        "schema_invalid",
+        "tools_not_allowed",
+        "content_not_allowed",
+        "prompt_too_large",
+        "turn_header_invalid",
+        "held",
+        "hold_unreadable",
+        "mode_airgapped",
+        "brain_not_local",
+        "brain_unavailable",
+        "structured_output_unsupported",
+        "budget_exhausted",
+        "identity_throttled",
+        "brain_busy"
+      ],
+      "prompt_flattening": {
+        "system": "messages[0].content with the first line (the turn header) removed",
+        "prompt": "for each message after the first: '### ' + role + LF + content + LF + LF",
+        "text_parts": "a content array is its text parts joined with LF",
+        "last_message_role": "user",
+        "ignored_request_fields": [
+          "temperature",
+          "top_p",
+          "stream_options",
+          "tool_choice"
+        ]
+      }
+    },
+    "brain.models": {
+      "http_method": "GET",
+      "path": "/brain/models",
+      "response": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "object",
+          "data"
+        ],
+        "properties": {
+          "object": {
+            "const": "list"
+          },
+          "data": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "object",
+                "owned_by"
+              ],
+              "properties": {
+                "id": {
+                  "const": "buddy-fast"
+                },
+                "object": {
+                  "const": "model"
+                },
+                "owned_by": {
+                  "const": "arail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "trace.record": {
+      "http_method": "POST",
+      "path": "/trace/record",
+      "max_body_bytes": 16384,
+      "request": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "v",
+          "records"
+        ],
+        "properties": {
+          "v": {
+            "const": 1
+          },
+          "records": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 20,
+            "items": {
+              "$ref": "#/$defs/record"
+            }
+          }
+        },
+        "$defs": {
+          "record": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "event",
+              "trace_id",
+              "client_ts",
+              "channel",
+              "identity",
+              "outcome",
+              "reason",
+              "attrs"
+            ],
+            "properties": {
+              "event": {
+                "enum": [
+                  "startup",
+                  "gate_change",
+                  "inbound_accepted",
+                  "inbound_refused",
+                  "unknown_dropped",
+                  "reply_sent",
+                  "citation_check",
+                  "proposal_created",
+                  "proposal_suppressed",
+                  "confirm_attempt",
+                  "action_result",
+                  "deny",
+                  "stop",
+                  "outbound_suppressed",
+                  "self_check_failed",
+                  "config_changed"
+                ]
+              },
+              "trace_id": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{16}$"
+              },
+              "client_ts": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?(Z|[+-][0-9]{2}:[0-9]{2})$"
+              },
+              "channel": {
+                "enum": [
+                  "telegram",
+                  null
+                ]
+              },
+              "identity": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "pseudonym",
+                      "role"
+                    ],
+                    "properties": {
+                      "pseudonym": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "pattern": "^p_[0-9a-f]{10}$"
+                      },
+                      "role": {
+                        "enum": [
+                          "confirmer",
+                          "talker",
+                          "unknown",
+                          "system"
+                        ]
+                      }
+                    }
+                  }
+                ]
+              },
+              "outcome": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[a-z_]{0,32}$"
+              },
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[a-z0-9_]{0,40}$"
+              },
+              "attrs": {
+                "type": "object",
+                "maxProperties": 8
+              }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "required": [
+                    "event"
+                  ],
+                  "properties": {
+                    "event": {
+                      "const": "startup"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "reason": {
+                      "type": "null"
+                    },
+                    "attrs": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "buddy_version": {
+                          "$ref": "#/$defs/attr_str"
+                        },
+                        "nanobot_pin": {
+                          "$ref": "#/$defs/attr_str"
+                        },
+                        "world_sha8": {
+                          "$ref": "#/$defs/attr_str"
+                        },
+                        "contract_sha8": {
+                          "$ref": "#/$defs/attr_str"
+                        },
+                        "persona_sha8": {
+                          "$ref": "#/$defs/attr_str"
+                        },
+                        "seam_ok": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "required": [
+                    "event"
+                  ],
+                  "properties": {
+                    "event": {
+                      "const": "gate_change"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "reason": {
+                      "enum": [
+                        "open",
+                        "airgapped",
+                        "no_consent",
+                        "lab_unreachable",
+                        "contract_mismatch",
+                        "not_linked",
+                        "wake_recheck",
+                        "world_mismatch"
+                      ]
+                    },
+                    "attrs": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "state": {
+                          "$ref": "#/$defs/attr_str"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "required": [
+                    "event"
+                  ],
+                  "properties": {
+                    "event": {
+                      "const": "inbound_accepted"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "reason": {
+                      "type": "null"
+                    },
+                    "attrs": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "input_chars": {
+                          "$ref": "#/$defs/attr_int"
+                        },
+                        "tg_lag_s": {
+                          "$ref": "#/$defs/attr_int"
+                        },
+                        "is_callback": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "required": [
+                    "event"
+                  ],
+                  "properties": {
+                    "event": {
+                      "const": "inbound_refused"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "reason": {
+                      "enum": [
+                        "rate_limited",
+                        "not_dm",
+                        "media",
+                        "stale",
+                        "held",
+                        "lab_held",
+                        "lab_unreachable",
+                        "budget",
+                        "gate_closed"
+                      ]
+                    },
+                    "attrs": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "count": {
+                          "$ref": "#/$defs/attr_int"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "required": [
+                    "event"
+                  ],
+                  "properties": {
+                    "event": {
+                      "const": "unknown_dropped"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "reason": {
+                      "type": "null"
+                    },
+                    "attrs": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "count": {
+                          "$ref": "#/$defs/attr_int"
+                        },
+                        "distinct": {
+                          "$ref": "#/$defs/attr_int"
+                        },
+                        "window_s": {
+                          "$ref": "#/$defs/attr_int"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "required": [
+                    "event"
+                  ],
+                  "properties": {
+                    "event": {
+                      "const": "reply_sent"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "reason": {
+                      "enum": [
+                        "answer",
+                        "abstain",
+                        "refuse",
+                        "escalate",
+                        "held",
+                        "lab_unreachable",
+                        "budget",
+                        "stale",
+                        "card",
+                        "confirm",
+                        "error",
+                        "help",
+                        "status"
+                      ]
+                    },
+                    "attrs": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "e2e_ms": {
+                          "$ref": "#/$defs/attr_int"
+                        },
+                        "chips": {
+                          "$ref": "#/$defs/attr_int"
+                        },
+                        "chars": {
+                          "$ref": "#/$defs/attr_int"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "required": [
+                    "event"
+                  ],
+                  "properties": {
+                    "event": {
+                      "const": "citation_check"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "reason": {
+                      "enum": [
+                        "ok",
+                        "invalid_json",
+                        "no_valid_chip"
+                      ]
+                    },
+                    "attrs": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "offered": {
+                          "$ref": "#/$defs/attr_int"
+                        },
+                        "cited": {
+                          "$ref": "#/$defs/attr_int"
+                        },
+                        "valid": {
+                          "$ref": "#/$defs/attr_int"
+                        },
+                        "dropped": {
+                          "$ref": "#/$defs/attr_int"
+                        },
+                        "valid_slugs": {
+                          "$ref": "#/$defs/attr_slugs"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "required": [
+                    "event"
+                  ],
+                  "properties": {
+                    "event": {
+                      "const": "proposal_created"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "reason": {
+                      "enum": [
+                        "rule",
+                        "model"
+                      ]
+                    },
+                    "attrs": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "proposal_id": {
+                          "$ref": "#/$defs/attr_str"
+                        },
+                        "action": {
+                          "$ref": "#/$defs/attr_str"
+                        },
+                        "expires_at": {
+                          "$ref": "#/$defs/attr_str"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "required": [
+                    "event"
+                  ],
+                  "properties": {
+                    "event": {
+                      "const": "proposal_suppressed"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "reason": {
+                      "enum": [
+                        "requester_not_confirmer",
+                        "held",
+                        "outside_enum",
+                        "superseded"
+                      ]
+                    },
+                    "attrs": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "action": {
+                          "$ref": "#/$defs/attr_str"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "required": [
+                    "event"
+                  ],
+                  "properties": {
+                    "event": {
+                      "const": "confirm_attempt"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "reason": {
+                      "enum": [
+                        "accepted",
+                        "not_confirmer",
+                        "not_dm",
+                        "bad_nonce",
+                        "used_nonce",
+                        "expired",
+                        "unknown_proposal",
+                        "voided",
+                        "held",
+                        "lab_held",
+                        "malformed",
+                        "path_violation"
+                      ]
+                    },
+                    "attrs": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "proposal_id": {
+                          "$ref": "#/$defs/attr_str"
+                        },
+                        "via": {
+                          "$ref": "#/$defs/attr_str"
+                        },
+                        "attempts": {
+                          "$ref": "#/$defs/attr_int"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "required": [
+                    "event"
+                  ],
+                  "properties": {
+                    "event": {
+                      "const": "action_result"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "reason": {
+                      "enum": [
+                        "paused",
+                        "already_paused",
+                        "not_running",
+                        "already_done",
+                        "indeterminate_restart",
+                        "refused",
+                        "lab_unreachable"
+                      ]
+                    },
+                    "attrs": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "proposal_id": {
+                          "$ref": "#/$defs/attr_str"
+                        },
+                        "action": {
+                          "$ref": "#/$defs/attr_str"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "required": [
+                    "event"
+                  ],
+                  "properties": {
+                    "event": {
+                      "const": "deny"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "reason": {
+                      "type": "null"
+                    },
+                    "attrs": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "proposal_id": {
+                          "$ref": "#/$defs/attr_str"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "required": [
+                    "event"
+                  ],
+                  "properties": {
+                    "event": {
+                      "const": "stop"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "reason": {
+                      "enum": [
+                        "lab_held",
+                        "lab_unreachable"
+                      ]
+                    },
+                    "attrs": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {}
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "required": [
+                    "event"
+                  ],
+                  "properties": {
+                    "event": {
+                      "const": "outbound_suppressed"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "reason": {
+                      "enum": [
+                        "no_trigger",
+                        "gate_closed"
+                      ]
+                    },
+                    "attrs": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "count": {
+                          "$ref": "#/$defs/attr_int"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "required": [
+                    "event"
+                  ],
+                  "properties": {
+                    "event": {
+                      "const": "self_check_failed"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "reason": {
+                      "type": "string",
+                      "pattern": "^[rt][0-9]{1,2}$"
+                    },
+                    "attrs": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {}
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "required": [
+                    "event"
+                  ],
+                  "properties": {
+                    "event": {
+                      "const": "config_changed"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "reason": {
+                      "type": "null"
+                    },
+                    "attrs": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {}
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          "attr_int": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "attr_str": {
+            "type": "string",
+            "maxLength": 64,
+            "pattern": "^[A-Za-z0-9_.:@-]*$"
+          },
+          "attr_slugs": {
+            "type": "array",
+            "maxItems": 3,
+            "items": {
+              "type": "string",
+              "maxLength": 64,
+              "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+            }
+          }
+        }
+      },
+      "response": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "accepted"
+        ],
+        "properties": {
+          "accepted": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20
+          }
+        }
+      },
+      "status_ok": 202
+    },
+    "hold_all": {
+      "http_method": "POST",
+      "path": "/hold_all",
+      "max_body_bytes": 16384,
+      "request": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "v",
+          "trace_id",
+          "reason",
+          "by"
+        ],
+        "properties": {
+          "v": {
+            "const": 1
+          },
+          "trace_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{16}$"
+          },
+          "reason": {
+            "const": "telegram_stop"
+          },
+          "by": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "pseudonym",
+              "role"
+            ],
+            "properties": {
+              "pseudonym": {
+                "type": "string",
+                "pattern": "^p_[0-9a-f]{10}$"
+              },
+              "role": {
+                "enum": [
+                  "confirmer",
+                  "talker"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "response": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "held",
+          "already_held",
+          "changed_at"
+        ],
+        "properties": {
+          "held": {
+            "const": true
+          },
+          "already_held": {
+            "type": "boolean"
+          },
+          "changed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?(Z|[+-][0-9]{2}:[0-9]{2})$"
+          }
+        }
+      }
+    },
+    "pause_research": {
+      "http_method": "POST",
+      "path": "/pause_research",
+      "max_body_bytes": 16384,
+      "request": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "v",
+          "approval_id",
+          "action",
+          "args",
+          "proposal",
+          "confirm",
+          "expires_at",
+          "trace_id"
+        ],
+        "properties": {
+          "v": {
+            "const": 1
+          },
+          "approval_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}$"
+          },
+          "action": {
+            "const": "arail.pause_research"
+          },
+          "args": {
+            "type": "object",
+            "maxProperties": 0
+          },
+          "proposal": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "proposed_at",
+              "proposed_by",
+              "requested_by",
+              "channel"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{8}$"
+              },
+              "proposed_at": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?(Z|[+-][0-9]{2}:[0-9]{2})$"
+              },
+              "proposed_by": {
+                "enum": [
+                  "rule",
+                  "model"
+                ]
+              },
+              "requested_by": {
+                "$ref": "#/$defs/who"
+              },
+              "channel": {
+                "const": "telegram"
+              }
+            }
+          },
+          "confirm": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "confirmer",
+              "nonce_sha256",
+              "confirmed_at",
+              "via"
+            ],
+            "properties": {
+              "confirmer": {
+                "$ref": "#/$defs/who"
+              },
+              "nonce_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "confirmed_at": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?(Z|[+-][0-9]{2}:[0-9]{2})$"
+              },
+              "via": {
+                "enum": [
+                  "tap",
+                  "typed"
+                ]
+              }
+            }
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?(Z|[+-][0-9]{2}:[0-9]{2})$"
+          },
+          "trace_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{16}$"
+          }
+        },
+        "$defs": {
+          "who": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "pseudonym",
+              "role"
+            ],
+            "properties": {
+              "pseudonym": {
+                "type": "string",
+                "pattern": "^p_[0-9a-f]{10}$"
+              },
+              "role": {
+                "enum": [
+                  "confirmer",
+                  "talker"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "response": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "approval_id",
+          "outcome",
+          "research_status",
+          "executed_at",
+          "replayed"
+        ],
+        "properties": {
+          "approval_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}$"
+          },
+          "outcome": {
+            "enum": [
+              "paused",
+              "already_paused",
+              "not_running",
+              "indeterminate_restart"
+            ]
+          },
+          "research_status": {
+            "enum": [
+              "idle",
+              "running",
+              "paused",
+              "completed",
+              "error",
+              "unknown"
+            ]
+          },
+          "executed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?(Z|[+-][0-9]{2}:[0-9]{2})$"
+          },
+          "replayed": {
+            "type": "boolean"
+          }
+        }
+      },
+      "steps": [
+        "admission",
+        "schema_invalid",
+        "ledger_lookup",
+        "approval_conflict",
+        "held",
+        "hold_unreadable",
+        "role_not_confirmer",
+        "stale_approval",
+        "execute"
+      ]
+    }
+  },
+  "turn_header": {
+    "carrier": "messages[0].content, first line",
+    "prefix": "BUDDY-TURN/1 ",
+    "encoding": "prefix + one-line JSON, then LF, then the system prompt",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "trace_id",
+        "channel",
+        "identity",
+        "response_schema"
+      ],
+      "properties": {
+        "trace_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{16}$"
+        },
+        "channel": {
+          "enum": [
+            "telegram"
+          ]
+        },
+        "identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "pseudonym",
+            "role"
+          ],
+          "properties": {
+            "pseudonym": {
+              "type": "string",
+              "pattern": "^p_[0-9a-f]{10}$"
+            },
+            "role": {
+              "enum": [
+                "confirmer",
+                "talker"
+              ]
+            }
+          }
+        },
+        "response_schema": {
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      }
+    },
+    "response_schema_rules": {
+      "type": "object",
+      "serialized_bytes_max": 4096,
+      "serialization": "JSON, separators , and :, UTF-8, no ASCII escaping",
+      "refs": "only local '#' references"
+    }
+  },
+  "actions": {
+    "arail.pause_research": {
+      "route": "pause_research",
+      "args": "none",
+      "reductive": true
+    }
+  },
+  "reductive_routes": [
+    "hold_all"
+  ],
+  "errors": {
+    "envelope": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "error"
+      ],
+      "properties": {
+        "error": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "code",
+            "message"
+          ],
+          "properties": {
+            "type": {
+              "const": "buddy_host_error"
+            },
+            "code": {
+              "enum": [
+                "credential_missing",
+                "credential_invalid",
+                "not_linked",
+                "root_lab_only",
+                "bind_not_loopback",
+                "peer_not_loopback",
+                "held",
+                "hold_unreadable",
+                "mode_airgapped",
+                "budget_exhausted",
+                "identity_throttled",
+                "role_not_confirmer",
+                "stale_approval",
+                "contract_missing",
+                "contract_mismatch",
+                "schema_invalid",
+                "turn_header_invalid",
+                "tools_not_allowed",
+                "content_not_allowed",
+                "prompt_too_large",
+                "approval_conflict",
+                "brain_not_local",
+                "brain_unavailable",
+                "brain_busy",
+                "structured_output_unsupported",
+                "internal"
+              ]
+            },
+            "message": {
+              "type": "string"
+            },
+            "record_index": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "lab_contract_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        }
+      }
+    },
+    "codes": {
+      "credential_missing": {
+        "http": 401,
+        "message": "The Buddy credential is missing."
+      },
+      "credential_invalid": {
+        "http": 401,
+        "message": "The Buddy credential is not valid."
+      },
+      "not_linked": {
+        "http": 401,
+        "message": "This lab is not linked to a Buddy."
+      },
+      "root_lab_only": {
+        "http": 403,
+        "message": "The Buddy edge runs on the root lab only."
+      },
+      "bind_not_loopback": {
+        "http": 403,
+        "message": "The lab is not bound to loopback, so the Buddy edge is off."
+      },
+      "peer_not_loopback": {
+        "http": 403,
+        "message": "The Buddy edge accepts loopback peers only."
+      },
+      "held": {
+        "http": 403,
+        "message": "The lab is on hold."
+      },
+      "hold_unreadable": {
+        "http": 403,
+        "message": "The lab's hold state cannot be read, so it is treated as held."
+      },
+      "mode_airgapped": {
+        "http": 403,
+        "message": "The lab is airgapped, so Buddy has no phone channel."
+      },
+      "budget_exhausted": {
+        "http": 403,
+        "message": "Buddy has used today's budget."
+      },
+      "identity_throttled": {
+        "http": 403,
+        "message": "This person is asking too fast."
+      },
+      "role_not_confirmer": {
+        "http": 403,
+        "message": "Only a confirmer can approve this action."
+      },
+      "stale_approval": {
+        "http": 403,
+        "message": "This approval is no longer fresh."
+      },
+      "contract_missing": {
+        "http": 412,
+        "message": "The contract hash header is missing."
+      },
+      "contract_mismatch": {
+        "http": 412,
+        "message": "The contract hash does not match this lab's contract."
+      },
+      "schema_invalid": {
+        "http": 422,
+        "message": "The request does not match the contract."
+      },
+      "turn_header_invalid": {
+        "http": 422,
+        "message": "The turn header is missing or invalid."
+      },
+      "tools_not_allowed": {
+        "http": 422,
+        "message": "Tools are not allowed on this edge."
+      },
+      "content_not_allowed": {
+        "http": 422,
+        "message": "Only text content is allowed."
+      },
+      "prompt_too_large": {
+        "http": 422,
+        "message": "The prompt is larger than the edge allows."
+      },
+      "approval_conflict": {
+        "http": 422,
+        "message": "This approval conflicts with an earlier record."
+      },
+      "brain_not_local": {
+        "http": 424,
+        "message": "The lab's fast brain is not a local model."
+      },
+      "brain_unavailable": {
+        "http": 424,
+        "message": "The lab's fast brain is not available."
+      },
+      "brain_busy": {
+        "http": 424,
+        "message": "The lab's model is busy."
+      },
+      "structured_output_unsupported": {
+        "http": 424,
+        "message": "The lab's brain cannot do structured output."
+      },
+      "internal": {
+        "http": 500,
+        "message": "The edge hit a bug."
+      }
+    },
+    "response_headers": {
+      "X-Should-Retry": "false"
+    },
+    "stream_errors": {
+      "brain_failed": "The brain stopped before it finished."
+    },
+    "never_in_messages": [
+      "429",
+      "500",
+      "502",
+      "503",
+      "504",
+      "rate limit",
+      "rate_limit",
+      "overloaded",
+      "timeout",
+      "timed out",
+      "connection",
+      "server error",
+      "server_error",
+      "temporarily unavailable",
+      "too many requests",
+      "retry after",
+      "try again in",
+      "concurrency limit",
+      "quota",
+      "insufficient_quota",
+      "insufficient quota",
+      "quota exceeded",
+      "quota exhausted",
+      "billing hard limit",
+      "billing_hard_limit_reached",
+      "billing not active",
+      "insufficient balance",
+      "insufficient_balance",
+      "credit balance too low",
+      "payment required",
+      "out of credits",
+      "out of quota",
+      "exceeded your current quota",
+      "速率限制",
+      "访问量过大"
+    ],
+    "retry_note": "nanobot retries on 408/409/429/5xx and on error text containing a transient marker (nanobot/providers/base.py _TRANSIENT_ERROR_MARKERS); an explicit X-Should-Retry: false is honoured first (LLMProvider.is_transient_response), so every error carries it, which also covers the hex digest in error.lab_contract_sha256 that can contain digit runs such as 500."
+  },
+  "edge_events": {
+    "note": "Written by the edge itself; Buddy cannot send them (not in the trace.record event enum).",
+    "edge_link": {
+      "reasons": null
+    },
+    "edge_refused": {
+      "reasons": "an error code"
+    },
+    "hold_all": {
+      "reasons": null
+    },
+    "action_executed": {
+      "reasons": [
+        "paused",
+        "already_paused",
+        "not_running",
+        "indeterminate_restart"
+      ]
+    }
+  },
+  "conformance": {
+    "dir": "conformance",
+    "fake_credential": "bhc1_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "wrong_credential": "bhc1_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+    "fake_reply": "{\"kind\":\"abstain\",\"answer\":\"ok\",\"cite\":[],\"propose\":\"none\"}",
+    "placeholders": {
+      "$CONTRACT_SHA256": "sha256 (hex) of the contract file bytes",
+      "$CREDENTIAL": "conformance.fake_credential",
+      "$WRONG_CREDENTIAL": "conformance.wrong_credential",
+      "$FAKE_REPLY": "conformance.fake_reply",
+      "$NOW": "current UTC time, RFC 3339, second resolution, suffix Z",
+      "$NOW+<n>s / $NOW-<n>s": "the same, n seconds later / earlier"
+    },
+    "setup_keys": {
+      "root_lab": "true (default) | false",
+      "bind_loopback": "true (default) | false",
+      "peer": "'127.0.0.1' (default) | any other address",
+      "linked": "true (default) | false",
+      "lab_mode": "'hybrid' (default) | 'airgapped'",
+      "tier": "'maximus' (default) | 'minimalist'",
+      "consent": "true (default) | false",
+      "held": "false (default) | true",
+      "hold_readable": "true (default) | false",
+      "research_status": "'running' (default) | idle | paused | completed | error | unknown",
+      "brain": "'local' (default: ollama_native, loopback, llama-ai-eng, structured output, Built with Llama) | 'cloud' | 'none' | 'non_ollama' | 'no_structured_output'",
+      "budget_used": "{turns, tokens}; default zero",
+      "calls_last_minute": "admitted brain.chat calls by the same pseudonym in the last 60 s; default 0",
+      "slot": "'free' (default) | 'busy'",
+      "fault": "null (default) | 'internal' (the route raises)"
+    },
+    "case_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "method",
+        "setup",
+        "request",
+        "expect"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9-]+$"
+        },
+        "method": {
+          "enum": [
+            "handshake",
+            "brain.chat",
+            "brain.models",
+            "trace.record",
+            "hold_all",
+            "pause_research"
+          ]
+        },
+        "setup": {
+          "type": "object"
+        },
+        "request": {
+          "$ref": "#/$defs/request"
+        },
+        "expect": {
+          "$ref": "#/$defs/expect"
+        },
+        "followups": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "request",
+              "expect"
+            ],
+            "properties": {
+              "request": {
+                "$ref": "#/$defs/request"
+              },
+              "expect": {
+                "$ref": "#/$defs/expect"
+              }
+            }
+          }
+        }
+      },
+      "$defs": {
+        "request": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "headers",
+            "body"
+          ],
+          "properties": {
+            "headers": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "body": {}
+          }
+        },
+        "expect": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "error_code",
+            "body_subset"
+          ],
+          "properties": {
+            "status": {
+              "type": "integer"
+            },
+            "error_code": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "body_subset": {
+              "type": "object"
+            },
+            "headers_subset": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "stream": {
+              "type": "object"
+            },
+            "brain_received": {
+              "type": "object"
+            },
+            "edge_only": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    "case_notes": [
+      "A case runs against a fresh world built from 'setup'; 'followups' run in order against the same world.",
+      "'body_subset' means every key and value listed must equal the response body at that path; other keys are ignored.",
+      "Every response with status >= 400 must also carry errors.response_headers; the runners check it for all cases.",
+      "'edge_only' holds checks only ARAIL's real routes can make (trace ring, ledger rows); Buddy's FakeHost ignores it.",
+      "'$NOW' is read once per case and reused by every request in it, so a replayed request is byte-identical.",
+      "In 'body_subset', a list is matched element by element from index 0 for as many elements as the expectation lists.",
+      "'stream' checks the SSE response: media_type, the assembled delta content, the final finish_reason, a usage chunk, and the closing data: [DONE].",
+      "'brain_received' checks what the fake brain was called with: system, prompt, max_tokens, response_schema (only the keys listed)."
+    ]
+  }
+}

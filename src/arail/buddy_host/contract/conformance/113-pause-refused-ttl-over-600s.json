@@ -1,0 +1,50 @@
+{
+  "name": "pause-refused-ttl-over-600s",
+  "method": "pause_research",
+  "setup": {},
+  "request": {
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer $CREDENTIAL",
+      "X-Buddy-Contract": "sha256:$CONTRACT_SHA256"
+    },
+    "body": {
+      "v": 1,
+      "approval_id": "7f3a9c2e",
+      "action": "arail.pause_research",
+      "args": {},
+      "proposal": {
+        "id": "7f3a9c2e",
+        "proposed_at": "$NOW-20s",
+        "proposed_by": "rule",
+        "requested_by": {
+          "pseudonym": "p_3f9a1c2e7b",
+          "role": "confirmer"
+        },
+        "channel": "telegram"
+      },
+      "confirm": {
+        "confirmer": {
+          "pseudonym": "p_3f9a1c2e7b",
+          "role": "confirmer"
+        },
+        "nonce_sha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+        "confirmed_at": "$NOW-5s",
+        "via": "tap"
+      },
+      "expires_at": "$NOW+700s",
+      "trace_id": "0123456789abcdef"
+    }
+  },
+  "expect": {
+    "status": 403,
+    "error_code": "stale_approval",
+    "body_subset": {
+      "error": {
+        "type": "buddy_host_error",
+        "code": "stale_approval",
+        "message": "This approval is no longer fresh."
+      }
+    }
+  }
+}

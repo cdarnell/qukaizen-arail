@@ -1,0 +1,56 @@
+{
+  "name": "brain-chat-nanobot-request",
+  "method": "brain.chat",
+  "setup": {},
+  "request": {
+    "headers": {
+      "accept": "application/json",
+      "accept-encoding": "gzip, deflate",
+      "authorization": "Bearer $CREDENTIAL",
+      "connection": "keep-alive",
+      "content-type": "application/json",
+      "user-agent": "AsyncOpenAI/Python 3.35.1",
+      "x-buddy-contract": "sha256:$CONTRACT_SHA256",
+      "x-session-affinity": "4e771f9904974908b996d2b909b558d8",
+      "x-stainless-arch": "arm64",
+      "x-stainless-async": "async:asyncio",
+      "x-stainless-lang": "python",
+      "x-stainless-os": "MacOS",
+      "x-stainless-package-version": "3.35.1",
+      "x-stainless-read-timeout": "90.0",
+      "x-stainless-retry-count": "0",
+      "x-stainless-runtime": "CPython",
+      "x-stainless-runtime-version": "3.12.13"
+    },
+    "body": {
+      "max_tokens": 400,
+      "messages": [
+        {
+          "content": "## Runtime\nmacOS arm64, Python 3.12.13\n\n## Workspace\n- Agent profile: SOUL.md and USER.md\n- Long-term memory: memory/MEMORY.md\n- History log: memory/history.jsonl (append-only JSONL; prefer built-in `grep` for search).\n- Custom skills: skills/{skill-name}/SKILL.md\n\nOnly Dream memory-consolidation tasks may edit the profile and long-term memory files listed above.\n\n## Platform Policy (POSIX)\n- You ",
+          "role": "system"
+        },
+        {
+          "content": "If a test also fails on main, can I call it pre-existing?",
+          "role": "user"
+        }
+      ],
+      "model": "buddy-fast",
+      "stream": true,
+      "stream_options": {
+        "include_usage": true
+      },
+      "temperature": 0.1
+    }
+  },
+  "expect": {
+    "status": 422,
+    "error_code": "turn_header_invalid",
+    "body_subset": {
+      "error": {
+        "type": "buddy_host_error",
+        "code": "turn_header_invalid",
+        "message": "The turn header is missing or invalid."
+      }
+    }
+  }
+}
