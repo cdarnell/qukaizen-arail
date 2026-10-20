@@ -33,6 +33,10 @@ the brief's nine questions.
    specialised QA subject-matter expert on a DDaC World; the gateway is the
    eval surface for 3D.EVAL.
 
+10. (During the VISION pass) "I want agent to be an app outside of ARAIL but initial
+   target will be ARAIL. I want the agent to feel like an agent on my system or I
+   actually give buddy its own container, linux system or AI operating system."
+
 ## 2. The field (verified against each repo via the GitHub API today)
 
 | | nanobot (HKUDS) | Hermes Agent (Nous) | OpenClaw | OpenBot (nightly-labs) |
