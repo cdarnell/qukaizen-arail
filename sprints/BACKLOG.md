@@ -2186,7 +2186,25 @@ Fourteen deliberate deferrals the design accepted knowingly. Each row names the 
 
 | # | Debt | Trigger |
 |---|---|---|
-| D15 | **The turn header cannot be written by a `before_iteration` hook at nanobot v0.3.5** (the runner sends the compaction state's accepted copy of the system message). Resolution pending the architect. | G1 in BUILD_LOG.md. |
+| D15 | **Closed 2026-10-20.** The turn header could not be written by a `before_iteration` hook at nanobot v0.3.5 (the runner sends the compaction state's accepted copy of the system message). ARCHITECTURE Addendum A section A1 resolved it with no nanobot patch: `install()` (R8) wraps `agent.context.build_system_prompt` and `agent._build_transcript_input` on the live agent. | Closed by Addendum A section A1; proved by U-HDR-03 to 07 in qukaizen-buddy. |
 | D16 | **Buddy's `link.json` is a second cross-repo file shape** (`qukaizen-buddy.link/v1`), written by ARAIL and read by Buddy, outside the contract. | Move it into the contract the next time the contract version changes. |
 | D17 | **Admission-level refusals are coalesced** to one `edge_refused` event per code per 5 s, so a flood cannot flush the trace ring; the count is in `attrs`. | Per-caller rate limiting once the portal has real auth (D3). |
 | D18 | **The vendored contract is not declared as package data.** `pyproject.toml` is a frozen path of the QueueLLM rename sprint (`tests/test_queuellm_rename_frozen_surface.py`), so the `arail.buddy_host` JSON files are not listed there. ARAIL runs from a checkout (`pip install -e .`), where they are present; a built wheel would lack them and the portal would then start without the edge (it fails closed). | The first time ARAIL ships a wheel: add `"arail.buddy_host" = ["contract/*.json", "contract/conformance/*.json"]` to `[tool.setuptools.package-data]` and update that test's frozen list in the same change. |
+
+**Added by ARCHITECTURE Addendum A (2026-10-20), filed at the resumed build:**
+
+| # | Debt | Trigger that pays it down |
+|---|---|---|
+| D4 (grows) | **Sixteen seam-locked nanobot files** (was ten), two instance-level wraps, one of them on a private method (`AgentLoop._build_transcript_input`), and four more private overrides in the channel. | Unchanged, plus the two upstream-PR candidates in qukaizen-buddy's `UPSTREAM.md` (a per-request system-prompt provider; a caller-owned history window). |
+| D6 (same kind) | **The header still rides in the system message**; a wrapped `build_system_prompt` now composes it. | Upstream per-request metadata, or a system-prompt provider. |
+| D23 | **Three upstream WebUI gateway smoke tests are deselected under P0** (`tests/webui/test_gateway_webui_smoke.py`): P0 makes `python -m nanobot` Buddy-only and the tests spawn it. Coverage of nanobot's WebUI gateway path stays upstream's, not Buddy's. | Any sprint that enables the WebUI, the websocket channel or a second channel in Buddy (P0 then gets a narrower, tested form); and every pin move, where `UPSTREAM.md` records that the three passed at the bare new tag before P0 is re-applied. |
+| D24 | **`contextWindowTokens` is a switch, not a context size.** Buddy's nanobot is configured with 200,000 so that its model-calling compaction can never start; the edge's 24,000-character cap is the only real prompt limit, and the history window is sized to it. | ARAIL reports the brain's context size in the handshake; both limits are then derived from it. |
+| D25 | **nanobot's session store keeps every message until `/new`**; only replay is windowed (at most 8 messages and the character budget). | A retention policy in S2, or a session-size alarm. |
+| D26 | **The edge reports `finish_reason: stop` for token-capped answers**, a deviation from OpenAI: nanobot reads `length` as "continue" and calls again on a prompt it wrote (`runner.py:631-655`). A capped answer stays visible as `tokens_out == max_tokens`, and Buddy's parser turns truncated JSON into an abstain. | nanobot makes length recovery configurable. |
+| D27 | **Trace lines carry no hash**; only the approvals ledger does, so "a ledger line with a hash" (the harness page) holds for the action but not for turns. | Adopting the harness Loop module, or 3D.EVAL treating lanes as evidence. |
+
+**Found by the first run against a real server (I1, 2026-10-20):**
+
+| # | Debt | Trigger |
+|---|---|---|
+| D28 | **A lab that has not been onboarded answers every `/api` route, the edge's included, with `401 lab_not_onboarded`**, a body that is not a contract error, so Buddy cannot tell it from an unreachable lab and reports "The lab is not reachable". The TestClient tests never see it. It is correct (an un-onboarded lab is not usable) but unhelpful. | An `edge` error code for it in the next contract version, or an exemption of `/api/host/v1/` from the onboarding gate (a decision for the portal's owner). |

@@ -111,10 +111,23 @@ counts model calls only; Buddy's non-model steps are in the list, not in the cal
 The trace schema is `arail.agent_trace/v2` (v1 keys unchanged; 3D.EVAL reads v1 by name, so its
 adapter must accept both).
 
+## What the edge requires of a request, and where it differs from OpenAI
+
+- **The carrier.** `messages[0]` must have role `system`; its first line must be `BUDDY-TURN/1 ` and one-line JSON
+  that matches the contract's header schema; a persona must follow that line (not empty after stripping whitespace);
+  and no later message may be a `system` message. Any failure is `turn_header_invalid`. The edge cannot tell Buddy's
+  persona from anyone else's; Buddy proves that on his side.
+- **`finish_reason` is always `stop`.** A completed answer ends with `stop` and carries usage on that chunk; the edge never
+  sends `length`, even when the answer used all of `max_tokens`. nanobot (Buddy's client) reads `length` as "continue" and
+  would call again on a prompt it wrote, turning one phone question into several admitted model calls. A capped answer stays
+  visible in the model-call record (`tokens_out` equals `max_tokens`). This is a deliberate deviation from OpenAI (debt D26).
+
 ## Limits
 
 - **300 turns and 600,000 tokens per day** for Buddy, reset at local midnight. A person is also
-  limited to 20 admitted calls a minute. Over a cap, Buddy sends a fixed reply.
+  limited to 20 admitted calls a minute. Over a cap, Buddy sends a fixed reply. The caps are checked when a
+  request arrives, and checked again, together with the lab mode, in one atomic step once the call holds the inference slot (the wait can
+  be 8 seconds): a call that cannot be counted is refused as `budget_exhausted` and costs nothing.
 - One inference slot at a time, shared with chat; a phone question waits at most 8 seconds for it,
   then Buddy says the lab's model is busy.
 - Bodies are 16 KiB (256 KiB for chat); a chat prompt is at most 24,000 characters, an answer at
@@ -146,7 +159,7 @@ gets a 404 and stays closed) rather than failing to boot.
 | `brain_busy` | Chat or an agent held the inference slot for more than 8 s. | Ask again in a minute. |
 | `contract_mismatch` (412) | ARAIL and Buddy disagree on the contract. | Update the one that is behind; re-run the sync. |
 | `not_linked` / `credential_invalid` | No link, or the credential was rotated. | `./arailctl buddy status`; `link --rotate`; restart Buddy. |
-| `lab_not_onboarded` (401) | The lab has no passphrase yet. | Open the portal and finish onboarding. |
+| `lab_not_onboarded` (401) | The lab has no passphrase yet. This is not a contract error, so Buddy cannot tell it from an unreachable lab and says "The lab is not reachable" (debt D28). | Open the portal and finish onboarding. |
 
 ## Known limits (tech debt, see `sprints/BACKLOG.md`)
 
