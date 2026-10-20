@@ -737,6 +737,12 @@
     </div>
     <div id="agent-lanes-list" class="pr-card">Loading…</div>
     <div id="agent-lanes-unattributed" class="pr-hint"></div>
+    <!-- A2 (sprint 2026-10-20-buddy-always-on): the lanes table above is one
+         row per agent; a seven-step run on the phone needs a row per step.
+         Fed by lane.recent (the last 50 records that came through a channel). -->
+    <h3>Buddy on the phone — last 50 steps</h3>
+    <div id="buddy-phone-list" class="pr-card">No phone traffic yet.</div>
+    <div id="buddy-phone-detail" class="pr-card" style="display:none"></div>
   </div>
 
   <!-- ═══ Push to TEAM ═══ -->
@@ -1775,6 +1781,91 @@ function renderAgentLanes(snap) {
     : 'Unattributed: 0 calls';
 }
 
+// ── Buddy on the phone (sprint 2026-10-20-buddy-always-on, A2) ──────────
+const BUDDY_STEP_LABELS = {
+  model_call: 'Model call',
+  startup: 'Buddy started',
+  gate_change: 'Phone gate changed',
+  inbound_accepted: 'Message accepted',
+  inbound_refused: 'Message refused',
+  unknown_dropped: 'Unknown sender dropped',
+  reply_sent: 'Reply sent',
+  citation_check: 'Citations checked',
+  proposal_created: 'Proposal card made',
+  proposal_suppressed: 'Proposal suppressed',
+  confirm_attempt: 'Confirm attempt',
+  action_result: 'Action result',
+  deny: 'Proposal denied',
+  stop: 'Stop (hold all)',
+  outbound_suppressed: 'Reply suppressed',
+  self_check_failed: 'Self-check failed',
+  config_changed: 'Config changed',
+  edge_link: 'Buddy linked',
+  edge_refused: 'Edge refused a call',
+  hold_all: 'Hold all agents (from the phone)',
+  action_executed: 'Action executed',
+};
+
+function buddyStepLabel(rec) {
+  const key = rec.record_type === 'event' ? rec.event : 'model_call';
+  return BUDDY_STEP_LABELS[key] || String(key || 'step');
+}
+
+function buddyCostCell(cost) {
+  if (!cost) return 'n/a';
+  return '$' + (Number(cost.cash_usd) || 0).toFixed(2) + ' cash · $' +
+         (Number(cost.simulated_usd) || 0).toFixed(4) + ' simulated';
+}
+
+function renderBuddyPhone(snap) {
+  const el = document.getElementById('buddy-phone-list');
+  if (!el) return;
+  const lane = (snap.lanes || []).find(l => l.id === 'buddy') || {};
+  const rows = lane.recent || [];
+  if (!rows.length) { el.innerHTML = 'No phone traffic yet.'; return; }
+  let html = '<table class="pr-table"><tr><th>Time</th><th>Step</th><th>Channel</th>' +
+             '<th>Who</th><th>Brain</th><th>TTFT</th><th>Tokens in/out</th><th>Cost</th>' +
+             '<th>Outcome</th></tr>';
+  for (const r of rows) {
+    const when = r.ts ? new Date(r.ts * 1000).toLocaleTimeString() : 'n/a';
+    const who = r.identity ? (r.identity.pseudonym || 'n/a') + ' · ' + (r.identity.role || 'n/a') : 'n/a';
+    const brain = [r.brain, r.model].filter(Boolean).join(' · ') || 'n/a';
+    const ttft = r.ttft_ms != null ? Math.round(r.ttft_ms) + 'ms' : (r.ttft_status || 'n/a');
+    const tokens = (r.tokens_in != null || r.tokens_out != null)
+      ? (r.tokens_in != null ? r.tokens_in : '—') + ' / ' + (r.tokens_out != null ? r.tokens_out : '—')
+      : 'n/a';
+    const outcome = [r.outcome, r.reason].filter(Boolean).join(' · ') || '—';
+    const trace = /^[0-9a-f]{16}$/.test(r.trace_id || '') ? ' data-trace="' + r.trace_id + '" style="cursor:pointer"' : '';
+    html += '<tr' + trace + '><td>' + esc(when) + '</td><td>' + esc(buddyStepLabel(r)) + '</td>' +
+            '<td>' + esc(r.channel || 'n/a') + '</td><td>' + esc(who) + '</td>' +
+            '<td>' + esc(brain) + '</td><td>' + esc(ttft) + '</td>' +
+            '<td>' + esc(tokens) + '</td><td>' + esc(buddyCostCell(r.cost)) + '</td>' +
+            '<td>' + esc(outcome) + '</td></tr>';
+  }
+  html += '</table>';
+  el.innerHTML = html;
+}
+
+async function showBuddyTrace(traceId) {
+  // A row click opens the record plus the other records of the same turn.
+  if (!/^[0-9a-f]{16}$/.test(traceId || '')) return;
+  const box = document.getElementById('buddy-phone-detail');
+  try {
+    const r = await fetch('/api/admin/agent-trace/' + traceId);
+    box.style.display = '';
+    if (!r.ok) { box.textContent = 'No record for that trace id (it may have left the ring).'; return; }
+    const rec = await r.json();
+    const related = rec.related || [];
+    delete rec.related;
+    box.innerHTML = '<div class="pr-hint">Trace ' + esc(traceId) + ' — this record and ' +
+      related.length + ' related</div>' +
+      '<pre style="white-space:pre-wrap">' + esc(JSON.stringify(rec, null, 2)) + '</pre>' +
+      related.map(x => '<pre style="white-space:pre-wrap">' + esc(JSON.stringify(x, null, 2)) + '</pre>').join('');
+  } catch (e) {
+    adminLog('Trace fetch failed: ' + e.message, 'error');
+  }
+}
+
 async function loadAgentLanes() {
   try {
     const r = await fetch('/api/admin/agent-lanes');
@@ -1784,6 +1875,7 @@ async function loadAgentLanes() {
     renderHoldControl(snap);
     renderRecorderControl(snap);
     renderAgentLanes(snap);
+    renderBuddyPhone(snap);
   } catch (e) {
     adminLog('Agent lanes fetch failed: ' + e.message, 'error');
   }
@@ -1892,6 +1984,13 @@ async function dismissLegacyBodiesNotice() {
   }
 }
 
+const _buddyPhoneList = document.getElementById('buddy-phone-list');
+if (_buddyPhoneList) {
+  _buddyPhoneList.addEventListener('click', (ev) => {
+    const row = ev.target.closest && ev.target.closest('tr[data-trace]');
+    if (row) showBuddyTrace(row.dataset.trace);
+  });
+}
 loadAgentLanes();
 loadLegacyBodiesNotice();
 connectAgentLanesStream();

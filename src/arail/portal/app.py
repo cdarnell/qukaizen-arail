@@ -6303,14 +6303,17 @@ async def admin_agent_trace_stream():
 @app.get("/api/admin/agent-trace/{trace_id}")
 async def admin_agent_trace_detail(trace_id: str):
     """One record, the "why?" drill-in. 404 on an unknown id. Bodies
-    present only if the flight recorder captured them."""
+    present only if the flight recorder captured them. ``related`` (A2) is
+    up to 20 other ring records with the same trace id, bodies stripped."""
     if (gate := _require_surface("admin")) is not None:
         return gate
     from arail import agent_trace
-    rec = agent_trace.find(trace_id)
-    if rec is None:
+    found = agent_trace.find_with_related(trace_id)
+    if found is None:
         return JSONResponse(status_code=404, content={"error": "unknown_trace_id"})
-    return rec
+    rec, related = found
+    # A1/A2: one Buddy turn writes several records under one trace id.
+    return {**rec, "related": related}
 
 
 @app.post("/api/admin/agents/hold")
