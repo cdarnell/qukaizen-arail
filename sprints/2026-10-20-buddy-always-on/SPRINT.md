@@ -61,6 +61,7 @@ in `RESEARCH_NOTES.md` §1. Do not design or code until VISION.md is in.
 | 2026-10-20 | Build runs as one builder across both repos in ARCHITECTURE §9 order (B1 → A1–A9 → B3–B11), with B2/B7 last because they need the sealed `qa-practice` World (Phase C) on ddac main. Phase C drafting (C1) runs in parallel in a ddac worktree inside the session folder; C2 is the operator's approval line. | Dependency order in §9; sprint skill says phases are sequential, builders on disjoint repos are one phase. |
 | 2026-10-20 | **Build stop point (by design).** ARAIL A1–A9 landed (`36349f7f` … `2ab0f244`, A5c `4395ca50`); Buddy B1, B3–B6, B8, B9, B11a, P0 (`f84aa75a`), P2 (`f696874d`) landed on `qukaizen/buddy-always-on`. Tests: upstream nanobot 7678 passed + 3 deselected (G3); ARAIL R-BUDDY-98 unchanged (100 passed, 1 xfailed); new ARAIL tests 406 incl. 127 conformance cases; whole ARAIL suite fails the same 70 tests on branch and main (none branch-only); Buddy 1070 passed. | BUILD_LOG.md steps 1–23. Nothing pushed. |
 | 2026-10-20 | Blocked: B2/B7 need the sealed World on ddac main (C2 operator approval → C3); B7/B10/B11b/Phase I also need the architect's answer to **G1** (a `before_iteration` hook cannot rewrite `messages[0]` at the pin: `runner.py:443-447`, `context_governance.py:139-173`), plus ratification of G2/G4 interpretations, G3 (P0 deselects 3 upstream WebUI smoke tests) and G5 (tap removes the keyboard, so a lost edge answer cannot be retried by tap). | BUILD_LOG.md "Architect feedback required". Architect addendum requested. |
+| 2026-10-20 | **C2 (operator): qa-practice cards approved.** Operator's words, verbatim: "approved please go". 20 cards at ddac branch `qukaizen/ddac-qa-practice-world` commit `796c13d`. | Written by the operator in chat; recorded verbatim. Unblocks C3 → B2/B7. |
 | 2026-10-20 | VISION v1 pass ran first and recommended staying in ARAIL; superseded, not deleted. | The brief changed afterwards (fork base, QA-SME, eval surface). |
 
 ## Skipped phases
@@ -80,11 +81,11 @@ in `RESEARCH_NOTES.md` §1. Do not design or code until VISION.md is in.
 |---|---|---|
 | O1 | Write P1's W5 witness line (precondition c). | QA step 7 |
 | O2 | Provide Telegram accounts B (talker-only QA account) and C (no list) for the win run (§8.8). | QA |
-| O3 | Approve the `qa-practice` cards in one line, in your own words, here in the decisions log (C2). | B2, B7, QA blind set |
+| O3 | **Done 2026-10-20** ("approved please go", decisions log). | — |
 | O4 | Accept the budget defaults: 300 turns and 600,000 tokens per day; 10/min and 200/day per person. | nothing (defaults apply) |
 | O5 | Accept that proposal cards go only to the confirmer who asked. | nothing |
 | O6 | Accept sha256-pinned sources for unversioned files such as `~/.claude/agents/qa.md`. | C1 |
-| O7 | In BotFather, turn "Allow groups" off for Buddy's bot. | setup |
+| O7 | **Done 2026-10-20** (operator: "Allow groups is off in BotFather"). | — |
 
 ## Notes
 
