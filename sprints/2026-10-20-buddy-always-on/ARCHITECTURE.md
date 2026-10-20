@@ -1078,7 +1078,7 @@ system-level test (§8.3 L3) is the backstop.
 
 ### 5.16 `buddy.nanobot_seam`: hooks and `install()` (P1)
 
-> **Addendum A (2026-10-20):** `before_iteration` no longer writes; `install()` gains R8 (two wraps) and the hook gains C5/C8 (§A1.3).
+> **Addendum A (2026-10-20):** `before_iteration` no longer writes; `install()` gains R8 (two wraps) and the hook gains C5/C8 (§A1.3). G13 trims the `/status` template (§A11).
 
 `agent_hooks()` → `[]` (reserved). `turn_hook_factories()` → `[BuddyTurnHook.factory]`.
 
@@ -1203,7 +1203,7 @@ never leave Buddy's process or files.
 
 ### 5.19 Proposals, nonce, approval record, card
 
-> **Addendum A (2026-10-20):** automatic resend of a lost answer, and the code is never printed (§A5).
+> **Addendum A (2026-10-20):** automatic resend of a lost answer, and the code is never printed (§A5). G13 removes the card's "Research now" line (§A11).
 
 Store: `<home>/state/proposals.sqlite3` (0600, WAL, `synchronous=FULL`):
 `proposals(id TEXT PRIMARY KEY, action TEXT, requester_hash TEXT, nonce_sha256 TEXT,
@@ -1498,6 +1498,8 @@ QA records the actual split in TEST_REPORT.md.
 
 ### 8.2 Gate map
 
+> **Addendum A (2026-10-20):** proposed gate G13 (off-box content) and its tests are in §A11.
+
 | Gate | Proof | Level |
 |---|---|---|
 | G1 | §8.3 L1–L3 in airgapped; S-FLIP-01: five flips, each ≤ 60 s from flip to zero Telegram sockets (`lsof`), worst case recorded | unit + system |
@@ -1787,6 +1789,7 @@ carries a one-line pointer under its heading.
 | G3 | Accepted as debt D23, with a duty at every pin move. P0 stays Buddy-only. | §A3 |
 | G4 | All ten ratified. Corrections to 1 (`/stop` also passes a closed gate; a late stop names its time) and 10 (the default label is never `answer`). Items 5 and 8 add members to the seam list. | §A4 |
 | G5 | The code is never printed. On a lost answer Buddy resends the stored approval record once, automatically. Telegram re-delivery also resends it. A new card is the human retry. | §A5 |
+| Harness | The operator's harness page is mapped onto S1. Four differences are recorded, and a gate is proposed: G13, off-box content. | §A11 |
 | Rest | B7 splits: B7a (mechanism) now, against a test World; B7b after C3/C4. The contract changes additively, so A5 is re-run. Ten new failure modes, F46–F55. | §A6–§A8 |
 
 ### A1. G1 — the turn carrier
@@ -2124,6 +2127,7 @@ equal sha256.
 | D24 | In Buddy's nanobot, `contextWindowTokens` is a switch (compaction off), not a context size. The edge's 24,000-character cap is the only prompt limit, and the window is sized to it. | ARAIL reports the brain's context size in the handshake; both limits are then derived from it. |
 | D25 | nanobot's session store keeps every message until `/new`; only replay is windowed. | An S2 retention policy, or a session-size alarm. |
 | D26 | The edge reports `stop` for token-capped answers, a deviation from OpenAI (§A2 Δ3). | nanobot makes length recovery configurable. |
+| D27 | Trace lines carry no hash; only the approvals ledger does (§A11). | Adopting the harness Loop module, or 3D.EVAL treating lanes as evidence. |
 
 **Net:** still positive, as §10 said. The stock prompt, memory and skills now really never reach the model, and
 compaction calls are impossible rather than merely unlikely.
@@ -2136,3 +2140,61 @@ gates all stand.
 - The contract changes additively and needs the §9 re-sync.
 - Operator items are unchanged. O4's budget numbers hold only because the window (C6) keeps a turn near §5.6's
   2,000-token estimate.
+
+### A11. Harness alignment (operator steer, 2026-10-20)
+
+**Source:** https://qukaizen.com/harness, read 2026-10-20 and relayed by the orchestrator (this session did not fetch it). It describes `cdarnell/qukaizen-harness`, which does not exist on GitHub yet. This is therefore a mapping, not a cross-repo edge: nothing is imported, vendored or pinned. When the repo exists, the mapping gets a commit pin like any other edge.
+
+| Harness part | S1 today |
+|---|---|
+| **Registry** | No tool reaches the model (R2, T1, edge `tools_not_allowed`). The only action is the frozen action table `{pause_research}` behind the closed `propose` enum, which the contract pins (C-ENUM-01, F18). The future registry is the paperagents `arail-agent` policy (S2). |
+| **Model** | ARAIL's `fast` brain through `brain.chat`. The policy enforced at load is a file: the registry's `fast` binding, re-checked by the edge on every call (local and `ollama_native`, else `brain_not_local`, §5.6 step 8). Residency is not enforced in S1 (difference 1). |
+| **Context** | The sealed `qa-practice` World comes from the pin (S7) as delimited, escaped JSON; nothing is pasted by hand. The order is stable-first at the model: the edge strips the header line, so the persona leads the prompt (`buddy_host/brain.py:248-256`, folded first by `router/backends.py:2041-2045`), then history, then the turn's World block and question. |
+| **Guardrails** | Ollama `format` from `buddy.answer/v1` (`cite` is the World's slug enum; `propose` is closed), re-validated by code. Chips are rendered from sealed bytes (§8.5). "Describes, never prescribes": the model may only propose; code renders the card; a confirmer's tap with the nonce acts; ARAIL re-checks the approval (§6). |
+| **Loop** | S1 Buddy is reactive. Cron, Dream and heartbeat are off (S9, R3). Every step is a `trace.record` event under its trace id. The one action is a row in ARAIL's approvals ledger with `record_sha256` (§5.9). |
+
+**Standing rules.**
+- Met: the shelf rule (Buddy has no write path to the PKB, a World or any shelf, and his one World passed DDaC's gate and is seal-checked at every start); "describes, never prescribes" (propose, then confirm); "a correction becomes code" (every G2/G4 ruling is pinned by a test, and G13's one exception is written as a rule).
+- Not met, or in tension: the resident rule (difference 1), "nothing leaves the machine" (difference 2, G13), and "a ledger line with a hash", which holds for the action but not for turns (difference 3).
+
+**Differences recorded. S1 does not change.**
+1. The page pins an 8–14B resident. S1 uses the 1B `llama-ai-eng` through ARAIL's fast path, per the operator's own steer (about 1B resident, QueueLLM on demand), and nothing stops Ollama from unloading it.
+2. Telegram carries Buddy's replies through servers that are not end-to-end encrypted. Proposed gate G13 bounds what may travel.
+3. Trace lines carry no hash; only the approvals ledger does. **Debt D27.** Trigger: adopting the harness Loop module, or 3D.EVAL treating lanes as evidence.
+4. The page's Buddy "runs the Autoresearch loop and 3DEval between your sessions". S1 Buddy answers, proposes one pause, and stops. That belongs to a later sprint.
+
+**Proposed gate G13: off-box content.** A reply or card sent to Telegram may carry only:
+- (a) sealed World rules, as chips rendered from the pinned bytes;
+- (b) fixed texts: `texts.py` constants and code templates whose only variable slots are clock times, the proposal id, the recipient's own pseudonym, Buddy's own counters, Buddy's pin digests, and the hold, reachability and attribution states that explain whether Buddy answers;
+- (c) the sender's own words, and model sentences whose prompt holds nothing but (a)–(c).
+
+It never carries lab data: experiment names, metrics, goal text, activity, research status, lab mode or tier, model id or backend.
+- **Named rule (receipts):** the four pause-outcome sentences (`texts.py:61-64`) may go to the confirmer, only in reply to his own confirm.
+- **Status:** proposed. QA proves G13 once the operator accepts it in SPRINT.md. The three fixes below are due in B8b/B9b either way, because they return the code to §5.23's fixed text.
+
+| Built code | Text sent | Verdict |
+|---|---|---|
+| `buddy/src/buddy/commands.py:85` (`/status`) | `Lab: <mode>. Lab agents: <running\|on hold>. Research: <status>.` | **Violates.** Becomes `Lab hold: on.`, `Lab hold: off.`, or `Lab hold: unreadable, treated as on.` |
+| `commands.py:88-90` (`/status`) | `Brain: <model_id> (<backend>).` / `not available (<reason>)` | **Violates.** Becomes §5.23's fixed sentence when attribution is Llama, otherwise `Brain: a local model in the lab.`, or `Brain: not available.` (G11 unchanged). |
+| `confirm.py:93` (card) | `Research now: <status>` | **Violates.** The line is removed. |
+| `texts.py:61-64` | pause receipts | Allowed by the receipts rule. |
+| Unreachable, held, stale and sleep times; budget; unknown-sender count; World and contract sha8; privacy lines; nanobot's router and failure sentences | fixed | Comply. The unknown-command reply echoes only the sender's own command token. |
+
+**Step 1 (VISION §2.3) stays within the rules, by input closure.** Its request holds only:
+- C1's system message (the edge strips the header);
+- the World block;
+- the sender's words;
+- Buddy's own earlier rendered answers.
+
+Lab state cannot get in:
+- Command replies persist with `_command` and are skipped on replay (`loop.py:1843-1851`, `session/manager.py:386-387`).
+- Cards and confirm receipts go out through the channel and never enter the session.
+- The edge's flattening adds nothing.
+- ARAIL's router passes `system` and `prompt` to the backend unchanged (`router/core.py:389-396`).
+
+So the answer's sentences cannot carry lab data.
+
+**G13 tests.**
+- **U-G13-01:** render every outbound path under handshakes that differ only in disallowed fields — every `research.status`, `lab.mode` and `tier` value, and canary strings in `model_id` and `backend`. Outputs must be byte-identical and contain no canary.
+- **U-G13-02 (I1):** plant a canary experiment name and goal text in the test lab. It must appear in no edge request and in no Telegram-bound body.
+- **W-run:** QA classes every bot message of the win run as (a), (b) or (c).
