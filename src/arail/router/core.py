@@ -175,6 +175,34 @@ class ModelRouter:
         return slot
 
     @staticmethod
+    def _identity_dict(identity: Optional[tuple]) -> Optional[dict]:
+        if not identity:
+            return None
+        return {"pseudonym": identity[0], "role": identity[1]}
+
+    @staticmethod
+    def _cost_fields(rec: Any, tokens_in: int, tokens_out: int) -> Optional[dict]:
+        """The trace record's ``cost`` (v2). ``simulated_usd`` is the what-if
+        cloud-equivalent figure and says so; ``cash_usd`` is a real charge only
+        for a billed-estimate backend, else 0.0 with a basis that says why.
+        Never raises — a cost field must not be the reason a trace is lost."""
+        try:
+            if rec is None:
+                return None
+            source = getattr(rec, "cloud_cost_source", "unpriced")
+            billed = source == "billed_estimate"
+            cash = getattr(rec, "cloud_cost_usd", None)
+            return {
+                "tokens": int(tokens_in) + int(tokens_out),
+                "simulated_usd": round(float(rec.cloud_equivalent_usd), 6),
+                "cash_usd": float(cash) if billed and cash is not None else 0.0,
+                "cash_basis": "estimate" if billed else ("local" if source == "local" else "unpriced"),
+                "label": "simulated",
+            }
+        except Exception:  # noqa: BLE001 - observability must never break inference
+            return None
+
+    @staticmethod
     def _halted() -> Optional[bool]:
         try:
             from arail import scheduler as _job_scheduler
@@ -191,6 +219,10 @@ class ModelRouter:
             return
         if ctx is not None:
             base = {
+                "record_type": "model_call",
+                "channel": ctx.channel,
+                "identity": self._identity_dict(ctx.identity),
+                "origin": ctx.origin or "in_process",
                 "trace_id": ctx.trace_id,
                 "agent_id": ctx.agent_id,
                 "parent_agent_id": ctx.parent_agent_id,
@@ -207,6 +239,10 @@ class ModelRouter:
             }
         else:
             base = {
+                "record_type": "model_call",
+                "channel": None,
+                "identity": None,
+                "origin": "in_process",
                 "trace_id": None,
                 "agent_id": None,
                 "parent_agent_id": None,
@@ -263,7 +299,7 @@ class ModelRouter:
 
         # Track cost — estimate input tokens from prompt + frozen prefix length
         tokens_in = max((len(prompt) + len(system or "")) // 4, 1)
-        cost_tracker.track(
+        cost_rec = cost_tracker.track(
             backend=response.backend,
             model=response.model,
             tokens_in=tokens_in,
@@ -300,6 +336,7 @@ class ModelRouter:
             latency_ms=response.latency_ms,
             ttft_ms=None, ttft_status="non_streaming",
             bodies=bodies,
+            cost=self._cost_fields(cost_rec, tokens_in, response.tokens_used),
         )
         return response
 
@@ -363,7 +400,7 @@ class ModelRouter:
                         # terminal response.
                         ttft_status = "no_tokens"
                     prefill_ms = getattr(item, "prefill_ms", None)
-                    cost_tracker.track(
+                    cost_rec = cost_tracker.track(
                         backend=item.backend,
                         model=item.model,
                         tokens_in=tokens_in,
@@ -399,6 +436,7 @@ class ModelRouter:
                         prefill_ms=prefill_ms,
                         prefill_source="server_reported" if prefill_ms is not None else None,
                         bodies=bodies,
+                        cost=self._cost_fields(cost_rec, tokens_in, item.tokens_used),
                     )
                 yield item
         except Exception as exc:

@@ -34,7 +34,10 @@ from collections import deque
 from datetime import datetime, timezone
 from typing import Any, AsyncGenerator, Optional
 
-SCHEMA = "arail.agent_trace/v1"
+# v2 (sprint 2026-10-20-buddy-always-on, ARCHITECTURE.md §5.10): every v1 key
+# keeps its name, meaning and position; v2 only appends. A v2 reader treats a
+# missing v2 key as null. 3D.EVAL reads v1 by name (debt D9).
+SCHEMA = "arail.agent_trace/v2"
 
 _log = logging.getLogger(__name__)
 
@@ -54,6 +57,13 @@ _FIELDS: tuple[str, ...] = (
     "halted",
     "outcome", "error_class",
     "bodies", "bodies_purged",
+    # --- v2 (appended) ---
+    # record_type: "model_call" (the router chokepoint) | "event" (the Buddy
+    # edge). None reads as "model_call". identity is {pseudonym, role}, never
+    # a raw platform id. cost is {tokens, simulated_usd, cash_usd, cash_basis,
+    # label}; refusals and errors carry None.
+    "record_type", "event", "channel", "identity", "cost", "origin",
+    "reason", "attrs",
 )
 
 # ---------------------------------------------------------------------------

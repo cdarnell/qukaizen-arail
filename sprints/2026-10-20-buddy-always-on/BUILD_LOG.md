@@ -183,9 +183,9 @@ reachable. They live in the contract and its conformance cases, so they are test
 2. **Retry control (§5.4).** The fixed-message rule cannot cover `error.lab_contract_sha256`
    in the 412 body: a hex digest contains the digit runs 429, 500, 502, 503 or 504 about 7.6% of
    the time, and nanobot's text fallback treats those as transient
-   (`nanobot/providers/base.py:1011-1028`, markers at `:601-613`). nanobot honours an explicit
-   `x-should-retry` first (`providers/base.py:1004-1005`; header read at
-   `openai_compat_provider.py:1864-1872`). The contract therefore requires `X-Should-Retry: false`
+   (`nanobot/providers/base.py:1007-1009`, `:1012-1030`; markers at `:630-645`). nanobot honours an
+   explicit `x-should-retry` first (`providers/base.py:1014-1015`; header read at
+   `openai_compat_provider.py:1870-1878`). The contract therefore requires `X-Should-Retry: false`
    on every error response (`errors.response_headers`), and a test shows the digest hazard
    with nanobot as the oracle.
 3. **Rules the spec leaves open, pinned by conformance cases:** a content array is flattened by
