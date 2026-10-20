@@ -1,7 +1,7 @@
 {
   "schema": "arail.vendor-stamp/v1",
   "source_repo": "cdarnell/qukaizen-buddy",
-  "source_commit": "940cf3490671a65bc56ea4c8ab4f146c9f4056af",
+  "source_commit": "6f7b569ab42bc0468be2873cd49389ed52f68b8a",
   "source_dir": "buddy/src/buddy/contracts",
   "files": {
     "buddy.host.v1.json": "sha256:48481c1d905df6ed8797de91c6db583f3fc7c1d2f9330c46f79f73b12a785516",
@@ -136,10 +136,10 @@
     "conformance/128-brain-chat-refused-header-line-only.json": "sha256:bb0c72872bd9877f82378699703f5a493a4011f89373a643f6c5e4f701d5c73e",
     "conformance/129-brain-chat-ok-finish-reason-stop-when-all-max-tokens-used.json": "sha256:46499a34c38faab91c1af84fbad55eca93fcac9198b258172b81d09037e4b1fa",
     "conformance/130-trace-record-ok-inbound-refused-busy.json": "sha256:5a45ed82086297f5068642c32850f4e0a1df119bb06b74faadb7aa99bf9db43c",
-    "conformance/brain-chat-nanobot-request.json": "sha256:07590e182a241d05fdc97b066beac0e2ace6877776d35dbfeb44bb9b33b5dafd",
-    "conformance/brain-chat-nanobot-turn.json": "sha256:d276e07af1f4feb1273ba9a9b407f2ffb3e11a14a47b9291a734899febe09ebc"
+    "conformance/brain-chat-nanobot-request.json": "sha256:93730cb69e3e12582a043cbe6efc42ee3c1e7cb4888cc247da6bcefe99532aa4",
+    "conformance/brain-chat-nanobot-stock.json": "sha256:e0e64512d991bd42610394cd551486a9e96e460e4b1258eb270b739ea401e256"
   },
-  "tree_digest": "sha256:be0099bfa93046bba92cce2c8f90bd6a1c9e313e997c8c7d124cf1ef2b9aab7c",
+  "tree_digest": "sha256:9ebf15530f1f6d89c78fbd11ad50a316078dd24c096fb4f90fd099b65826bf59",
   "synced_on": "2026-10-20",
   "sync": "python scripts/sync-buddy-contract.py --from \"$QKZ_BUDDY_PATH\"",
   "check": "python scripts/sync-buddy-contract.py --check"

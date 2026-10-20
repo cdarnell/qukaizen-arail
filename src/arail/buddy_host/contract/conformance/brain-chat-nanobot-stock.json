@@ -1,5 +1,5 @@
 {
-  "name": "brain-chat-nanobot-turn",
+  "name": "brain-chat-nanobot-stock",
   "method": "brain.chat",
   "setup": {},
   "request": {
@@ -26,8 +26,8 @@
       "max_tokens": 400,
       "messages": [
         {
-          "role": "system",
-          "content": "BUDDY-TURN/1 {\"trace_id\":\"0123456789abcdef\",\"channel\":\"telegram\",\"identity\":{\"pseudonym\":\"p_0123456789\",\"role\":\"talker\"},\"response_schema\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"kind\",\"answer\",\"cite\",\"propose\"],\"properties\":{\"kind\":{\"enum\":[\"answer\",\"abstain\",\"refuse\",\"escalate\"]},\"answer\":{\"type\":\"string\",\"maxLength\":600},\"cite\":{\"type\":\"array\",\"maxItems\":3,\"uniqueItems\":true,\"items\":{\"enum\":[\"pre-existing-failure\",\"flaky-test\"]}},\"propose\":{\"enum\":[\"none\",\"pause_research\"]}}}}\nYou are Buddy, a QA expert. Answer from the qa-practice World terms only. Built with Llama."
+          "content": "## Runtime\nmacOS arm64, Python 3.12.13\n\n## Workspace\n- Agent profile: SOUL.md and USER.md\n- Long-term memory: memory/MEMORY.md\n- History log: memory/history.jsonl (append-only JSONL; prefer built-in `grep` for search).\n- Custom skills: skills/{skill-name}/SKILL.md\n\nOnly Dream memory-consolidation tasks may edit the profile and long-term memory files listed above.\n\n## Platform Policy (POSIX)\n- You ",
+          "role": "system"
         },
         {
           "content": "If a test also fails on main, can I call it pre-existing?",
@@ -43,19 +43,14 @@
     }
   },
   "expect": {
-    "status": 200,
-    "error_code": null,
-    "body_subset": {},
-    "stream": {
-      "media_type": "text/event-stream",
-      "assembled_content": "$FAKE_REPLY",
-      "finish_reason": "stop",
-      "final_usage": true,
-      "ends_with_done": true
-    },
-    "brain_received": {
-      "system": "You are Buddy, a QA expert. Answer from the qa-practice World terms only. Built with Llama.",
-      "max_tokens": 400
+    "status": 422,
+    "error_code": "turn_header_invalid",
+    "body_subset": {
+      "error": {
+        "type": "buddy_host_error",
+        "code": "turn_header_invalid",
+        "message": "The turn header is missing or invalid."
+      }
     }
   }
 }
