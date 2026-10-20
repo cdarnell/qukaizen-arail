@@ -495,6 +495,10 @@ _PRESENCE_SKIP_PREFIXES = (
     "/metrics",
     "/health",
     "/api/system/health",
+    # Buddy edge (sprint 2026-10-20-buddy-always-on): a 20-second handshake from
+    # a machine is not the operator at the desk. Counted as presence, it would
+    # hold the lab in the interactive profile for ever and starve deep work.
+    "/api/host/v1/",
 )
 
 

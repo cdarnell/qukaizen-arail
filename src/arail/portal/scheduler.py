@@ -68,6 +68,13 @@ FAST_PATH_PREFIXES: tuple[str, ...] = (
     "/api/admin/cleanup",
     "/api/admin/security",
     "/api/admin/agent-lanes",
+    # Buddy edge (sprint 2026-10-20-buddy-always-on). Metrics only: these four
+    # are short. /api/host/v1/brain/ is deliberately NOT here -- brain.chat is
+    # a long-lived SSE call and would inflate fast_path_ms p95.
+    "/api/host/v1/handshake",
+    "/api/host/v1/trace/",
+    "/api/host/v1/hold_all",
+    "/api/host/v1/pause_research",
     "/api/pkb/",
     "/api/research/",
     "/static/",
@@ -176,9 +183,30 @@ def _label_stats(samples: dict[str, deque[float]]) -> dict[str, dict]:
 # Public API
 # ---------------------------------------------------------------------------
 
+def _effective_acquire_timeout_s(override: float | None) -> float:
+    """The per-call override if it is a positive finite number, else the global
+    one. A bad override never disables the timeout."""
+    if override is None:
+        return _acquire_timeout_s()
+    try:
+        val = float(override)
+    except (ValueError, TypeError):
+        return _acquire_timeout_s()
+    if val != val or val <= 0 or val == float("inf"):
+        return _acquire_timeout_s()
+    return val
+
+
 @asynccontextmanager
-async def inference_slot(label: str = "chat") -> AsyncIterator[None]:
+async def inference_slot(
+    label: str = "chat", *, acquire_timeout_s: float | None = None
+) -> AsyncIterator[None]:
     """Acquire one inference slot. Records wait_ms + run_ms per label.
+
+    ``acquire_timeout_s`` (keyword-only) shortens this caller's wait for a
+    slot; ``None`` keeps the global ``ARAIL_INFERENCE_SLOT_TIMEOUT_S``. The
+    Buddy edge passes 8 so a phone question hears "the lab's model is busy"
+    instead of queueing behind a chat turn for minutes.
 
     Postcondition: the slot is always released, even if the body raises.
     The ``try/finally`` guarantees that a handler exception never deadlocks
@@ -206,7 +234,9 @@ async def inference_slot(label: str = "chat") -> AsyncIterator[None]:
     t_wait_start = perf_counter()
 
     try:
-        await asyncio.wait_for(sem.acquire(), timeout=_acquire_timeout_s())
+        await asyncio.wait_for(
+            sem.acquire(), timeout=_effective_acquire_timeout_s(acquire_timeout_s)
+        )
     except asyncio.TimeoutError:
         _PENDING -= 1
         waited_s = perf_counter() - t_wait_start

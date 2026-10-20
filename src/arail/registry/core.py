@@ -160,6 +160,11 @@ def _is_cloud_entry(entry: ModelEntry) -> bool:
     return False
 
 
+# Public name for callers outside this package (the Buddy edge refuses a cloud
+# brain). Same function; the underscore name stays for the existing callers.
+is_cloud_entry = _is_cloud_entry
+
+
 class ModelRegistry:
     """Process-wide registry. Use ``get_registry()``; do not construct."""
 
