@@ -1,7 +1,7 @@
 {
   "schema": "arail.vendor-stamp/v1",
   "source_repo": "cdarnell/qukaizen-buddy",
-  "source_commit": "fcddf1e26491c3eef084d28b06b178e8f7ecc5c3",
+  "source_commit": "fb040a0b58c108b74153628f366b6e0dec5a3b3a",
   "source_dir": "buddy/src/buddy/contracts",
   "files": {
     "buddy.host.v1.json": "sha256:0646dace9a7d69f0bb89e57d2afe0665a819c7c0fb07d7095c8b679eaf871cd3",
@@ -117,7 +117,7 @@
     "conformance/109-pause-refused-role-not-confirmer.json": "sha256:3d37bc8c49f6b21a7aca017727c3ba51e3eec46aab339d46cf80b3afc5b6fa2f",
     "conformance/110-pause-refused-stale-confirmed-at.json": "sha256:f4686672e32cc002d3d119aa2bca0019bdce36aa0b86e8a4b53d1be9191ca620",
     "conformance/111-pause-refused-stale-confirmed-in-future.json": "sha256:8d0c142ac4ad4a4358294038db2c2a0d7670f3949768a147dd3ad789326fa59c",
-    "conformance/112-pause-refused-expired.json": "sha256:17fbf405c17ca6d745b039830aa25f2ef1f4a874e39ffef42a5bd770739b244e",
+    "conformance/112-pause-refused-confirmed-after-expiry.json": "sha256:00342e0cd0cd9fc161a6ac843d33d9a7405099d40999f1ab7f164f6ae7283a1a",
     "conformance/113-pause-refused-ttl-over-600s.json": "sha256:5d5bb5422b94566fff23bb9263bcda74c0bee8a111d22846f844adc642eb29de",
     "conformance/114-pause-refused-confirmed-before-proposed.json": "sha256:25d9e3162f0760f4fa4cd083dc4549c19764e9de778aaa1b036b533821c4c6de",
     "conformance/115-pause-refused-held.json": "sha256:61ab67b67c3b22367e6edbc1bd9d50375cca255b148d24b86b9756586518ec34",
@@ -129,10 +129,11 @@
     "conformance/121-pause-refused-schema-missing-confirm.json": "sha256:e066612e22b491b6a1feb224b721e34d9a9a6bd26e71c1b12617affa1e626732",
     "conformance/122-pause-refused-credential-missing.json": "sha256:b9480c39987d2b6c7538f9ee1fc90793209bbfc2e09316d82959a5943bb5c069",
     "conformance/123-pause-refused-internal.json": "sha256:781730d6852a4b1de429cce725335fe58e92de165762563cb858a0c542bc62ca",
+    "conformance/124-pause-ok-expired-moments-ago-but-confirmed-in-time.json": "sha256:33d88316dc30c1a30381bfe0a159989380960e2bff431372c4c8725838944407",
     "conformance/brain-chat-nanobot-request.json": "sha256:07590e182a241d05fdc97b066beac0e2ace6877776d35dbfeb44bb9b33b5dafd",
     "conformance/brain-chat-nanobot-turn.json": "sha256:d276e07af1f4feb1273ba9a9b407f2ffb3e11a14a47b9291a734899febe09ebc"
   },
-  "tree_digest": "sha256:bd7a43be9287d0d5fa66f7084d53a197468adf622303071d42dff2aacf137a83",
+  "tree_digest": "sha256:6a9dcb58420fd5e102aae153936d235204a73a3a09682a908f7f663f89fa7a39",
   "synced_on": "2026-10-20",
   "sync": "python scripts/sync-buddy-contract.py --from \"$QKZ_BUDDY_PATH\"",
   "check": "python scripts/sync-buddy-contract.py --check"

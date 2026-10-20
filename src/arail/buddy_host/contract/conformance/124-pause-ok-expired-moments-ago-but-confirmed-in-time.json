@@ -1,7 +1,9 @@
 {
-  "name": "pause-refused-expired",
+  "name": "pause-ok-expired-moments-ago-but-confirmed-in-time",
   "method": "pause_research",
-  "setup": {},
+  "setup": {
+    "research_status": "running"
+  },
   "request": {
     "headers": {
       "Content-Type": "application/json",
@@ -15,7 +17,7 @@
       "args": {},
       "proposal": {
         "id": "7f3a9c2e",
-        "proposed_at": "$NOW-200s",
+        "proposed_at": "$NOW-100s",
         "proposed_by": "rule",
         "requested_by": {
           "pseudonym": "p_3f9a1c2e7b",
@@ -29,22 +31,18 @@
           "role": "confirmer"
         },
         "nonce_sha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
-        "confirmed_at": "$NOW-30s",
+        "confirmed_at": "$NOW-50s",
         "via": "tap"
       },
-      "expires_at": "$NOW-10s",
+      "expires_at": "$NOW-45s",
       "trace_id": "0123456789abcdef"
     }
   },
   "expect": {
-    "status": 403,
-    "error_code": "stale_approval",
+    "status": 200,
+    "error_code": null,
     "body_subset": {
-      "error": {
-        "type": "buddy_host_error",
-        "code": "stale_approval",
-        "message": "This approval is no longer fresh."
-      }
+      "outcome": "paused"
     }
   }
 }
