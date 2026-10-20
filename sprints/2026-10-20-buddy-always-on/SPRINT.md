@@ -35,7 +35,7 @@ in `RESEARCH_NOTES.md` §1. Do not design or code until VISION.md is in.
 |---|---|---|---|---|---|---|
 | think | visionary | VISION.md | done | 2026-10-20 11:40 | 2026-10-20 12:05 | proceed (3 preconditions; commit `6a9cbc21`) |
 | plan | architect (design) | ARCHITECTURE.md | done | 2026-10-20 12:30 | 2026-10-20 13:15 | complete, 1,741 lines (commit `b2af01d7`) |
-| build | builder | BUILD_LOG.md | paused (stop point after B9 + B11a) | 2026-10-20 13:20 | — | blocked on C3 World + architect answers G1–G5 |
+| build | builder | BUILD_LOG.md | in progress (resumed after Addendum A) | 2026-10-20 13:20 | — | — |
 | review | architect (review) | REVIEW.md | pending | — | — | — |
 | test | qa | TEST_REPORT.md | pending | — | — | — |
 | ship | — | PR | pending | — | — | — |
@@ -65,6 +65,8 @@ in `RESEARCH_NOTES.md` §1. Do not design or code until VISION.md is in.
 | 2026-10-20 | **Harness alignment** (operator: "see qukaizen.com/harness and update and align accordingly"): S1 mapped onto Registry/Model/Context/Guardrails/Loop; two recorded differences (8–14B resident vs the 1B S1 brain; "nothing leaves the machine" → proposed gate G13: off-box messages carry World rules, fixed texts and the operator's own words, never lab data). `qukaizen-harness` extraction = later sprint (O8). | `HARNESS_ALIGNMENT.md`; architect ratifies G13 in Addendum A. |
 | 2026-10-20 | **C3 done, World merged.** ddac PR #53 merged; ddac `main` = `da2fb18` is the `qa-practice` pin (20 terms, gate ok, roster drift 0, tests 1377/1385 pass = main). Operator's blanket go: "do not stop and you have my approval to make this work." | Unblocks B2/B7. |
 | 2026-10-20 | **Addendum A (architect, `162d9d22`):** G1 = no fourth patch; `install()` R8 wraps `agent.context.build_system_prompt` (header + persona, fail-closed) and `agent._build_transcript_input` (window + scrub); edge requires `messages[0]` system, no other system message, non-empty persona; test U-HDR-03. G3 = P0 stays, deselection is debt D23 paid at each pin move. G5 = code never printed; one automatic resend of the stored approval record 2 s after a lost answer (I-CRASH-02a–d). G2 all ratified; A8 deltas: edge never reports `length`, atomic budget re-check after the slot. G4: `/stop` survives a closed gate; unlabelled replies default to `error`. Contract changed additively → A5 re-run. New failure modes F46–F55. | BUILD_LOG "Architect feedback required" answered. Harness subsection (G13) being appended. |
+| 2026-10-20 | **§A11 harness alignment landed (`4fe3acf6`); G13 accepted** under the operator's instruction "see qukaizen.com/harness and update and align accordingly" + "you have my approval to make this work": off-box messages carry sealed World rules, fixed texts and the operator's own words, never lab data. Built code breaks it in three places (`commands.py:85-90` `/status` lab-mode/research/brain lines; `confirm.py:93` card "Research now" line): builder fixes them in the resumed build. | ARCHITECTURE §A11; HARNESS_ALIGNMENT.md. If the operator rejects G13, those three lines return and the ledger records it. |
+| 2026-10-20 | Build resumed in Addendum A §A6 order: B1d → A5d → A8b; B4b → B8b → B9b; B7a → B10 → B11b → I1–I3; then B2 → B7b → I1 again after C4 (QA's blind set, sha256 into this ledger). | Builder relaunched; qa writes C4 in parallel and seals it. |
 | 2026-10-20 | VISION v1 pass ran first and recommended staying in ARAIL; superseded, not deleted. | The brief changed afterwards (fork base, QA-SME, eval surface). |
 
 ## Skipped phases
