@@ -2032,7 +2032,11 @@ class OllamaNativeBackend(OpenAICompatBackend):
                  top_p: Optional[float] = None,
                  *, system: Optional[str] = None,
                  messages: Optional[list] = None,
-                 think: Optional[bool] = None) -> ModelResponse:
+                 think: Optional[bool] = None,
+                 response_schema: Optional[dict] = None) -> ModelResponse:
+        """``response_schema`` (sprint 2026-10-20-buddy-always-on, A4): a JSON
+        Schema sent as Ollama's ``format`` for grammar-constrained decoding.
+        None (every existing caller) adds nothing to the request body."""
         if system:
             prompt = f"{system}\n\n{prompt}"
         start = time.time()
@@ -2062,6 +2066,8 @@ class OllamaNativeBackend(OpenAICompatBackend):
         # keep their thinking traces.
         if think is not None:
             body["think"] = think
+        if response_schema is not None:
+            body["format"] = response_schema
         keep_alive = self._keep_alive()
         if keep_alive is not None:
             # Wire guard: whatever produced the value, a bare numeric
@@ -2096,9 +2102,11 @@ class OllamaNativeBackend(OpenAICompatBackend):
                         top_p: Optional[float] = None,
                         *, system: Optional[str] = None,
                         messages: Optional[list] = None,
-                        think: Optional[bool] = None) -> Iterator[StreamResult]:
+                        think: Optional[bool] = None,
+                        response_schema: Optional[dict] = None) -> Iterator[StreamResult]:
         """Symmetry with OpenAICompatBackend; chat path only calls complete().
-        Streams via /api/chat with stream:true, yields deltas then ModelResponse."""
+        Streams via /api/chat with stream:true, yields deltas then ModelResponse.
+        ``response_schema``: see complete()."""
         if system:
             prompt = f"{system}\n\n{prompt}"
         start = time.time()
@@ -2121,6 +2129,8 @@ class OllamaNativeBackend(OpenAICompatBackend):
             body["options"] = options
         if think is not None:
             body["think"] = think
+        if response_schema is not None:
+            body["format"] = response_schema
         keep_alive = self._keep_alive()
         if keep_alive is not None:
             # Wire guard — same rule as complete(); see _normalize_keep_alive.

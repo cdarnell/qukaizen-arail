@@ -266,7 +266,12 @@ class ModelRouter:
                  temperature: float = 0.7,
                  top_p: Optional[float] = None,
                  *, system: Optional[str] = None,
-                 messages: Optional[list] = None) -> ModelResponse:
+                 messages: Optional[list] = None,
+                 response_schema: Optional[dict] = None) -> ModelResponse:
+        """``response_schema`` (A4): a JSON Schema for grammar-constrained
+        output. Handed to the backend only when not None, so every existing
+        caller's request is unchanged; only ``OllamaNativeBackend`` accepts it
+        (any other backend raises TypeError, which is traced as an error)."""
         ctx = agent_context.current()
         slot = self._slot_info()
         # F10 (latching): read the recorder flag ONCE at call start and use
@@ -284,11 +289,14 @@ class ModelRouter:
                          ttft_ms=None, ttft_status="non_streaming")
             raise
 
+        backend_kw: dict = {}
+        if response_schema is not None:
+            backend_kw["response_schema"] = response_schema
         agent_context.note_agent_call_entered(ctx)
         try:
             response = self._backend.complete(
                 prompt, max_tokens, temperature, top_p=top_p,
-                system=system, messages=messages,
+                system=system, messages=messages, **backend_kw,
             )
         except Exception as exc:
             self._record(ctx, slot=slot, streamed=False,
@@ -344,7 +352,9 @@ class ModelRouter:
                         temperature: float = 0.7,
                         top_p: Optional[float] = None,
                         *, system: Optional[str] = None,
-                        messages: Optional[list] = None) -> Iterator[StreamResult]:
+                        messages: Optional[list] = None,
+                        response_schema: Optional[dict] = None) -> Iterator[StreamResult]:
+        """See :meth:`complete` for ``response_schema``."""
         ctx = agent_context.current()
         slot = self._slot_info()
         tokens_in = max((len(prompt) + len(system or "")) // 4, 1)
@@ -371,6 +381,9 @@ class ModelRouter:
                          ttft_ms=None, ttft_status=None)
             raise
 
+        backend_kw: dict = {}
+        if response_schema is not None:
+            backend_kw["response_schema"] = response_schema
         agent_context.note_agent_call_entered(ctx)
         try:
             for item in self._backend.stream_complete(
@@ -380,6 +393,7 @@ class ModelRouter:
                 top_p=top_p,
                 system=system,
                 messages=messages,
+                **backend_kw,
             ):
                 if is_first_item:
                     is_first_item = False
