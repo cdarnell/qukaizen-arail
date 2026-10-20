@@ -52,7 +52,7 @@ Status key: `todo` · `done <sha>` · `BLOCKED (reason)`.
 | 5 | A3 | arail | `scheduler.py`, `portal/scheduler.py`, `portal/app.py`, `registry/core.py` + tests | `halt_load_failed`, `inference_slot(acquire_timeout_s)`, presence skip, fast-path prefixes, `is_cloud_entry` | R-PRES-01 style tests | done `c9762089` |
 | 6 | A4 | arail | `router/core.py`, `router/backends.py` + tests | `response_schema` pass-through; Ollama `format` | byte-identical-request test per existing caller path | done `658e9880` |
 | 7 | A5 | arail | `buddy_host/contract/*`, `scripts/sync-buddy-contract.py` + tests | Vendor contract + conformance + `PROVENANCE.json`; sibling-free check | check test | done `80c34c1a` |
-| 8 | A6 | arail | `buddy_host/{__init__,link,__main__}.py`, `arailctl` + tests | `arailctl buddy link/unlink/status` | U-LINK, U-PERM | todo |
+| 8 | A6 | arail | `buddy_host/{__init__,link,__main__}.py`, `arailctl` + tests | `arailctl buddy link/unlink/status` | U-LINK, U-PERM | done `ab6ea498` |
 | 9 | A7 | arail | `portal/host_edge_routes.py`, `buddy_host/{admission,events,ledger}.py`, `app.py` + tests | admission, handshake, trace.record, hold_all, pause_research + ledger | conformance run, I-EDGE | todo |
 | 10 | A8 | arail | `buddy_host/{brain,budget}.py`, routes + tests | brain.chat (header, flatten, brain check, budget, slot, SSE) | conformance run, I-EDGE | todo |
 | 11 | A9 | arail | `docs/buddy-edge.md`, `sprints/BACKLOG.md` | Docs; D1–D14 | doc lint if any | todo |
@@ -178,6 +178,40 @@ registration in A7 must catch that and serve no edge routes rather than fail to 
 `--check` against the sibling checkout in this session folder.
 Commit: `80c34c1a` (arail). (The first version of this commit lacked the BUILD_LOG update its
 message promised; it was amended before anything else was committed.)
+
+### Step 8 (A6, arail: `./arailctl buddy`)
+`arail.buddy_host.link` and `__main__`; `arailctl buddy` is the same thin exec as `world` and
+`nucleus`, plus a help line. Placement checks in the spec's order, each a refusal (exit 3) with
+nothing written and no consent recorded: `ARAIL_INSTANCE`, `BIND_ADDR`, the Buddy home (missing,
+symlink, not a directory, not yours, not 0700), `secrets.env` and Buddy's `link.json` (symlink,
+not yours, not 0600), ARAIL's own `buddy/` directory (symlink), an existing link without
+`--rotate`, no TTY without `--yes`, and any answer but `yes`. Buddy's side is written first so
+"ARAIL is linked" implies Buddy holds the credential. Rotation keeps the consent record and
+needs no confirmation; unlink revokes ARAIL's side before it touches Buddy's. 61 tests.
+Deltas: (1) Buddy's `link.json` (`qukaizen-buddy.link/v1`: edge_base_url, credential_id,
+contract_sha256, linked_at) is a second cross-repo file shape that ARAIL writes and Buddy reads;
+it is not in `buddy.host.v1.json`. It is versioned by its schema string and pinned by tests on
+both sides (B4 reads this exact shape); Phase I exercises it end to end. (2) `status` also
+reports whether the link predates this lab's current contract. (3) `docs/cli.md` is updated in A9
+with the rest of the docs, not here.
+Commit: `ab6ea498` (arail).
+
+### Step 9 (B1c, buddy, and A5b, arail: one conformance case was wrong)
+Running the 74 non-brain cases against the real routes passed 73 and failed one:
+`pause-refused-expired` demanded a refusal for an approval confirmed 30 s ago whose `expires_at`
+was 10 s in the past. The spec's rule (proposed <= confirmed <= expires, ttl <= 600 s,
+|now - confirmed| <= 60 s) accepts that. The case was my error, not the implementation's.
+B1c replaces it with `pause-refused-confirmed-after-expiry` and adds
+`pause-ok-expired-moments-ago-but-confirmed-in-time`; `buddy.host.v1.json` is byte-identical
+(sha256 `0646dace...`). A5b re-vendors (128 files, stamp commit `fb040a0b`). The suite is now 127
+cases. This is the "re-run A5" rule of section 9 working as designed.
+Commits: `fb040a0b` (buddy), `ec35a0f4` (arail).
+
+### Step 10 (test renames, arail)
+The edge tests I had named `test_buddy_*` matched the R-BUDDY-98 glob and would have turned
+"98 passed" into hundreds (and added `node` skips). Renamed to `test_host_*`,
+`test_agent_lanes_phone_steps`; the glob runs the 11 original files again: 100 passed, 1 xfailed.
+Commit: `4024b753` (arail).
 
 ## Architect feedback required
 

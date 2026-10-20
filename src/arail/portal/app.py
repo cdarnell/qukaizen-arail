@@ -1395,6 +1395,19 @@ from arail.portal.openai_compat import register_routes as _register_openai_compa
 _register_openai_compat(app)
 
 
+# ── Buddy host edge — /api/host/v1/* (sprint 2026-10-20-buddy-always-on) ──
+# Loopback-only, capability-credentialed, contract-hashed. If the vendored
+# contract does not match its stamp (arail.buddy_host raises ContractStampError)
+# the portal boots without the edge: Buddy then gets a 404 and fails closed.
+# A broken edge must never stop the lab from starting.
+try:
+    from arail.portal.host_edge_routes import register_routes as _register_host_edge
+    _register_host_edge(app)
+except Exception as _host_edge_exc:  # noqa: BLE001
+    logging.getLogger(__name__).warning(
+        "buddy.host/v1 edge not mounted: %s", type(_host_edge_exc).__name__)
+
+
 # ── First-run welcome / passphrase setup ─────────────────────────────────
 
 @app.get("/welcome", response_class=HTMLResponse)

@@ -39,6 +39,7 @@ from pathlib import Path
 from typing import Any, Optional, TextIO
 
 from arail.buddy_host import CONTRACT_SHA256
+from arail.buddy_host._files import SymlinkRefused, ensure_private_dir, write_private
 
 ARAIL_LINK_SCHEMA = "arail.buddy-link/v1"
 BUDDY_LINK_SCHEMA = "qukaizen-buddy.link/v1"
@@ -216,34 +217,19 @@ def _check_private_file(path: Path, label: str) -> None:
 
 
 def _ensure_arail_dir() -> Path:
-    d = link_dir()
-    if os.path.islink(d):
-        raise PolicyRefusal(f"{d} is a symlink; refusing to write the link through it.")
-    os.makedirs(d, mode=0o700, exist_ok=True)
-    os.chmod(d, 0o700)
-    return d
+    try:
+        return ensure_private_dir(link_dir())
+    except SymlinkRefused as exc:
+        raise PolicyRefusal(str(exc)) from None
 
 
 # --------------------------------------------------------------------------- writing
 def _write_private(path: Path, data: bytes) -> None:
-    """Atomic write, mode 0600, never through a symlink."""
-    if os.path.islink(path):
-        raise PolicyRefusal(f"{path} is a symlink; refusing to write through it.")
-    tmp = path.with_name(f".{path.name}.{secrets.token_hex(4)}.tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    """Atomic write, mode 0600, never through a symlink (a refusal, exit 3)."""
     try:
-        with os.fdopen(fd, "wb") as f:
-            f.write(data)
-            f.flush()
-            os.fsync(f.fileno())
-        os.chmod(tmp, 0o600)
-        os.replace(tmp, path)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+        write_private(path, data)
+    except SymlinkRefused as exc:
+        raise PolicyRefusal(str(exc)) from None
 
 
 def _json_bytes(obj: Any) -> bytes:

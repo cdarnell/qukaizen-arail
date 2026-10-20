@@ -363,6 +363,29 @@ class ModelRegistry:
             return self.entries[eid]
         return self._builtin_binding(profile)
 
+    def peek(self, profile: str, tab: Optional[str] = None) -> Optional[ModelEntry]:
+        """The entry ``resolve()`` would pick, or None -- recording nothing.
+
+        ``resolve()`` writes a fallback event (and an activity-log line) every time
+        the bound entry is unusable. A caller that asks on a timer, like the Buddy
+        edge's 20-second handshake, would turn one down model into thousands of
+        warnings; it asks with ``peek`` and lets the real call path report."""
+        self._ensure_loaded()
+        if profile not in TASK_PROFILES:
+            raise ValueError(f"unknown task profile '{profile}'")
+        with self._lock:
+            requested = self._bound_entry(profile, tab)
+            if requested is None:
+                return None
+            if _gate_reason(requested) is None:
+                return requested
+            for fb_profile in FALLBACK_CHAIN.get(profile, []):
+                candidate = self._bound_entry(fb_profile, tab)
+                if candidate is not None and candidate.id != requested.id \
+                        and _gate_reason(candidate) is None:
+                    return candidate
+            return None
+
     def resolve(self, profile: str, tab: Optional[str] = None, *,
                 allow_fallback: bool = True) -> Resolution:
         self._ensure_loaded()
