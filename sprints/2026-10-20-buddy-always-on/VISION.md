@@ -1,377 +1,806 @@
-# Vision: Buddy, always on (reachable, and able to act on a tap)
+# Vision: Buddy, always on — a QA expert you can reach from your phone
 
-**Verdict: PROCEED, narrowly.** Build "Buddy answers" first: one reply path,
-one off-desk channel, read-only answers with citations, one tapped action.
-Keep it in ARAIL. **Reject** host tools such as shell, file writes, browser
-and account connectors. **Defer** a new repo until there is a second real
-host for Buddy.
+**Verdict: PROCEED, with three preconditions and a hard one-sprint cut.**
+Buddy becomes his own app, `qukaizen-buddy`, built on a pinned nanobot. ARAIL is
+his first harness and his only brain. Telegram is the first channel. The first
+sprint proves one thing: from the phone, Buddy answers a QA question with a cited
+World term, asks before he acts, and stops when told. Every step lands in ARAIL's
+trace.
 
 **Date:** 2026-10-20
-**Product:** arail
-**Wedge size:** one sprint for the wedge (S1). Two sprints for what the operator
-would call "an always-on bot" (S1 plus S2).
-**Inputs:** `LANDSCAPE.md` (this folder) ·
-`sprints/2026-09-20-buddy-front-and-center/OPERATOR_BRIEF.md` (D1–D18) ·
-ARAIL `CLAUDE.md` · `src/arail/agents/_builtin_buddy.py` :60–200 ·
-`docs/BUDDY.md` · `src/arail/egress.py` :512–560 · `sprints/BACKLOG.md`
-"Portal authentication".
-**Interview:** none. The operator was not available, so every answer below
-comes from the artifacts. The open points are in the last section, each with
-a working assumption.
+**Product:** arail (first harness, host edge) · new app `qukaizen-buddy`
+**Wedge size:** one sprint, at the upper bound. Two code repos
+(`qukaizen-buddy`, `qukaizen-arail`), plus one content task in `qukaizen-ddac`
+(the QA World) that the operator approves before build. It runs on the
+operator's own Mac. The only outside account is a free Telegram bot token.
+**Supersedes:** v1 of this file (`83c5589a`, "stay in ARAIL, read-only"). This
+version reuses v1's reasoning on pairing, the reductive-only rule, sleep honesty
+and mode. It carries the parked draft's approvals model and its `buddy.host/v1`
+edge sketch.
+**Inputs read today:** `RESEARCH_NOTES.md` §1–§6 and `LANDSCAPE.md` (this
+folder); v1; the parked draft; `sprints/2026-09-20-buddy-front-and-center/`
+`{OPERATOR_BRIEF,VISION,SPRINT,REVIEW,TEST_REPORT}.md`; `docs/BUDDY.md`; the
+ARAIL modules the brief names; `~/ProJects/INTEGRATION_AUDIT.md` §4;
+qukaizen-ddac `CLAUDE.md`, ADR-0012 and `data/worlds/README.md`; qukaizen-3d-eval
+`docs/PLAN.md`; the paperagents control-plane `ARCHITECTURE.md`; nanobot source
+and docs.
+**Interview:** none live. Operator steers came through the coordinator. Open
+points are in §6, each with a working assumption.
+
+**Pins (every `file:line` below is at these commits):**
+
+- ARAIL: `origin/main` `ca0a8f81`. This branch adds only sprint docs on top.
+- nanobot: read at `main` `688976bcb9502aa321c1e0a233341f8b1e5adf31`
+  (2026-10-20; `pyproject.toml` says version 0.3.5; `git describe --tags
+  --always` → `688976bc`). The release tag `v0.3.5` is
+  `1bb712d3488915ca4ed9ccc1a93067ff722f5ab9`. That commit was not in my
+  50-commit clone. The recommended pin is the tag. The architect must re-read
+  the patched lines at the tag.
+- qukaizen-ddac `1c38512` · qukaizen-3d-eval `85f1085` · qukaizen-paperagents
+  `4af1f83`.
 
 ---
 
-## What "always-on" means for this product
+## 0. The answer in brief
 
-Buddy is **already running all the time**. launchd starts the portal at login
-and restarts it after a crash. Buddy's loop checks the lab every 90 s, and the
-dream daemon writes a reflection every night. So "always-on" in the Grok Bot
-sense (a process that keeps working while you are away) is already done.
+| Question | Answer |
+|---|---|
+| 1 Shape | **B′.** Buddy is a nanobot app outside ARAIL. That is the operator's choice. ARAIL stays the only place a model runs. ARAIL is also the authority for the kill switch and the one trace store. Buddy's **code** calls ARAIL actions; the model cannot. No MCP in S1. |
+| 1 Deployment | **(i)** a user-level process on the Mac under launchd. A container (ii) comes before the first tool that runs a command or writes files. A separate Linux box (iii) is rejected for now. |
+| 2 Trust | Talkers and confirmers are two lists of numeric Telegram ids in a desk-only file. Unknown senders never reach the model. A confirm needs a one-time nonce that code mints and the model never sees. ARAIL re-checks every action. |
+| 3 Mode | Hybrid only. Buddy listens only while ARAIL reports `hybrid` and the user has consented to `api.telegram.org`. Airgapped always wins. |
+| 4 Control | `/stop` holds Buddy and ARAIL. ARAIL refuses Buddy's model calls while held. The edge enforces budget and rate limits. S1 sends no unsolicited message. |
+| 5 Process | Buddy's own LaunchAgent, from nanobot's installer. Crash → respawn. Reboot → starts at login. Mac asleep → Buddy asleep, and he says so on wake. |
+| 6 QA-SME | A sealed DDaC World, `qa-practice`, made of the operator's own QA rules and sourced to his files at pinned commits. Code renders chips from the sealed terms. Same Buddy, new World. |
+| 7 Channel | Telegram, long-poll, DM only. |
+| 8 Win | One scripted pass/fail run of seven steps (§2.3). |
+| 9 Eval | A loopback "eval door" into the same agent loop, in S2. 3D.EVAL drives it, with the QA World as gold. |
+| Three biggest cuts | (1) Proactive speech: no pushes, no cron, no Dream. (2) No QueueLLM on the phone path. (3) No hands beyond one reductive action, and no container yet. |
 
-What is missing is what the operator actually felt:
+## 1. What changed since v1
 
-1. **Nobody can talk to Buddy.** His speech goes one way, as toasts and a card.
-   There is no reply path anywhere (LANDSCAPE §2.1).
-2. **He can only reach you at the desk.** If you are not looking at the
-   dashboard, his lines go into a log you will never read.
-3. **He cannot do anything.** He has no tools and no typed actions. His
-   suggestions are links (§2.2).
+v1 recommended "stay in ARAIL". The operator then steered, in this order
+(RESEARCH_NOTES §1; my numbering is condensed):
 
-So for ARAIL, **"always-on" means: wherever you are, you can ask Buddy what
-your lab is doing and get a true answer that points to its source; he tells
-you when something important happens; and you can make the lab do less with
-one tap.** It does **not** mean a cloud VM, a bot that runs while the Mac is
-asleep, or a bot that runs commands on your machine.
+1. "Break Buddy out of ARAIL."
+2. "Buddy works for me and works with my QuKaiZen harnesses."
+3. "The gateway we designed is also important: rules for agents using tools."
+4. "Fork the best open-source option… don't build from the ground up." The
+   base is nanobot.
+5. "A nucleus-driven SLM, ~1B, always on; QueueLLM is the on-demand option for
+   deep reasoning."
+6. Buddy is a specialised QA subject-matter expert on a DDaC World. The gateway
+   is the 3D.EVAL test surface.
+7. Today (RESEARCH_NOTES §1, item 10): "I want agent to be an app outside of ARAIL but initial target will
+   be ARAIL. I want the agent to feel like an agent on my system or I actually
+   give buddy its own container, linux system or AI operating system."
 
-Here is what a friend or family member would notice. They are at dinner, and
-their phone shows *"Your run 'tokenizer-sweep-3' beat the baseline: val loss
-2.41 → 2.33. That's the best since you set the goal."* They reply *"what
-changed?"* Thirty seconds later Buddy answers in two sentences that point to
-the experiment record. Today that same result is a toast on a screen nobody is
-watching.
+That last steer answers question 1. This file answers for the shape he chose. §3.1
+gives, in one paragraph, the point where shape A still wins on the merits.
 
-## User
+## 2. The six forcing answers
 
-**Primary (S1): the operator.** He runs ARAIL `maximus` on an M5 Max with 36 GB,
-under `./arailctl install-daemon`, with autoresearch runs that last for hours.
-He calls himself "a technologist and an SRE at heart" (D14). Today, when he
-walks away from the Mac, he loses contact with the lab. He learns how a run
-went, or that it crashed, or that RAM hit 92%, only when he sits back down and
-scrolls the activity stream. He is the only user we can name, and the S1 win
-condition is measured on him. That is a known weakness (see Disconfirming
-evidence #5).
+### 2.1 User
 
-**Secondary (S2 gate): one named friend or family member** who runs ARAIL on
-their own Mac and agrees to switch to `hybrid` for this. The artifacts name no
-such person. **This is the biggest gap in this vision.** See Questions for the
-operator, Q1.
+**The operator, alone, on his M5 Max (36 GB).** He runs ARAIL `maximus` under
+`./arailctl install-daemon`. He drives his QuKaiZen repos through `/sprint`
+pipelines: visionary, architect, builder, QA. Those pipelines make QA rules and
+verdicts. They say what counts as "pre-existing", when an xfail is debt, who may
+write a witness line, and what the test allocation is per product.
 
-**Not served by S1:** the default install, which is airgapped. Any messaging
-channel needs internet access, and an airgapped lab refuses it by design
-(`allow_egress` raises in airgapped mode, `egress.py:545`; `docs/BUDDY.md`
-"Why airgapped mode breaks Buddy Tunnel"). Airgapped users get a desk reply
-thread in P3 (the slide-over panel), which reuses the same reply path built
-in S1.
+When he is away from the desk, he cannot ask any of this. He also cannot ask
+his lab anything, and he cannot stop it from his phone. Today Buddy speaks one
+way, and only on the dashboard (LANDSCAPE §2.1).
 
-## Problem
+**Not served by S1:** friends and family, the airgapped default install, and
+any second user. The code keeps the habits anyway: default deny, numeric-id
+allow-lists, token custody, and "airgapped wins".
 
-These are the operator's pains, not the features he named:
+### 2.2 Problem
 
-- **He goes blind when away from the desk.** The lab runs while he is away
-  (autoresearch, job_daemon, dreams). When something important happens, he
-  only finds out after he gets back, so a crash can waste hours of compute. A
-  plateau can keep burning compute for nothing. A win sits there unread.
-- **The lab cannot be questioned.** Even at the desk, the only way to ask "how
-  is the experiment going?" is to open pages and read. Buddy knows the answer
-  (goal, experiments, activity log, last dream) but cannot be asked.
-- **Buddy feels like decoration, not a partner.** "Right now it feels dead and
-  boring" (D12). A partner that cannot hear you and cannot lift a finger is
-  not a partner.
+He named a solution: "an always-on bot built on nanobot." These are the pains
+under it:
 
-He named the solution "make an always-on bot like Grok Bot." Grok Bot is
-proprietary and cloud-only (LANDSCAPE §0), so there is nothing to copy. The
-behaviours worth learning come from OpenClaw, Hermes Agent and nanobot.
+1. **His QA rules live in a dozen files.** They are in workspace and repo
+   `CLAUDE.md` files, the QA persona, sprint ledgers and test reports. When a QA
+   call comes up away from the desk, he must recall the rule or wait. A rule
+   recalled wrong costs a loop. The P1 sprint needed three fix loops after
+   review and QA (`sprints/2026-09-20-buddy-front-and-center/SPRINT.md:47-54`).
+2. **He loses contact with the lab when he leaves the desk.** He cannot ask
+   what it is doing. He cannot pause it.
+3. **Buddy cannot be reached, cannot answer back, and cannot act.** There is
+   no reply path and there are no typed actions (LANDSCAPE §2.4).
 
-## Which Grok Bot / OpenClaw behaviours are in, and which are out
+What it is **not**: a general personal assistant with a shell, a browser, or
+email. The field products already do that (RESEARCH_NOTES §2). He said the
+difference is "works for me and with my harnesses". The QA World and the ARAIL
+edge are that difference.
 
-The test for each one: does it close one of the three gaps above, and does it
-keep ARAIL's rules intact? Those rules are: airgapped by default, egress only
-through the in-process guard plus consent, model output may **propose but
-never execute**, actions only from a typed allow-list after a user tap, no new
-unauthenticated surface, and it runs on other people's machines.
+### 2.3 Win condition
 
-| Behaviour (from the field) | Verdict | Why |
+**One pass/fail test.** QA runs it once, scripted, on the operator's Mac.
+
+Setup:
+
+- ARAIL `maximus`, `LAB_MODE=hybrid`, and a consent record for
+  `api.telegram.org`.
+- Buddy under launchd, linked to the root lab.
+- An autoresearch run is active.
+- Three Telegram accounts: the operator's (talker + confirmer), one QA test
+  account (talker only), and one account on no list.
+
+| Step | Action | Pass when |
 |---|---|---|
-| **Two-way conversation (a reply path)** | **S1 wedge** | Closes gap 1. Every OSS bot has one. Buddy has none. |
-| **One messaging channel, outbound long-poll only** (Telegram Bot API `getUpdates`) | **S1 wedge** | Closes gap 2. Needs no inbound port, no public IP, no webhook, so it does **not** widen the unauthenticated portal surface (BACKLOG "Portal authentication"). All three OSS projects support it. `docs/BUDDY.md` already rates it the cleanest channel. Only works in `hybrid`, with per-domain consent for `api.telegram.org`. |
-| **DM pairing** (unknown senders must pair first) | **S1 wedge** | The OSS default answer to "who may talk to the bot." We copy the idea, not the code: a one-time code shown on the localhost portal, then `/pair <code>` in the chat, which binds exactly one chat id. Text from unpaired senders **never reaches the model**: it gets a fixed, non-LLM reply and is rate-limited and traced. |
-| **Push of important events to the channel** | **S1 wedge** | Closes gap 2 for the moments that matter. Limited to D8's set (experiment win, experiment crash/fail, SRE crash, plus the RAM ≥92% guard), with a daily cap. Everything else stays at the desk. |
-| **Grounded answers about the lab** (goal, experiments, activity tail, last dream, `search_for_agents`) | **S1 wedge** | Every factual claim carries a citation, or Buddy says he doesn't know. "World expert with receipts" (brief §concept) applies off-desk too. |
-| **Approval by tap from the channel** | **S1: one action only, "hold all agents"** | Closes gap 3 in its safest form. See the reductive-only rule below. |
-| Typed action allow-list (start/stop experiment, ingest, set goal, pull model) | **S2** (P5 pulled forward) | D4 stands as written: propose, then one tap. |
-| Natural-language scheduling ("every morning at 8, tell me…") | **S2**, as a *typed action* that writes a `job_daemon` entry | Copies the most-loved OSS feature without letting model text create executable jobs directly. |
-| Inspectable memory ("what do you remember? forget that") | **Later (after P3)** | Grok Bot's stated gap is exactly this, and Buddy's memory is already markdown (`dreams/`, `decisions.md`). It is a cheap way to stand out. Not needed to prove the wedge. |
-| **Host shell / terminal tools** | **OUT** | Collides head-on with "propose, never execute". A 1B model can be prompt-injected trivially. ARAIL has no OS sandbox (LANDSCAPE §2.6). |
-| **File-write / code-edit tools** | **OUT** | Same reason. |
-| **Browser automation, logged-in sessions** | **OUT** | Egress plus credential custody on someone else's machine. |
-| **Account connectors** (Gmail, Calendar, Drive, Outlook, Slack-as-data) | **OUT** | Each one is a standing egress path and a credential store. Out of scope for a lab partner. |
-| **Remote MCP servers as a plugin bus** | **OUT for now** | An unbounded tool surface. Reconsider only after S2's typed allow-list exists and only as allow-listed, typed MCP tools. |
-| **Skills the agent writes for itself** (Hermes) | **OUT** | Model output that persists into future prompts is injection with a memory. It violates "facts never distilled from an agent's own output" (`docs/conversation-memory.md`). |
-| Multi-bot group chat | **OUT** | xAI itself says separate bots are not a security boundary. No user need. |
-| WhatsApp / iMessage | **OUT** | ToS-violating libraries or a third-party bridge (`docs/BUDDY.md`). |
-| "Always allow" auto-approval rules | **OUT** | Every action is a tap. That is the whole safety model. |
-| Running while the Mac sleeps / a cloud VM | **OUT** | Not this product. We will be honest about it: messages sent while the lab is asleep are answered when it wakes, with an "I was asleep from X to Y" line. |
+| 1 | The operator asks: "If a test also fails on main, can I call it pre-existing?" | A reply comes within 30 s. It has one to three sentences and at least one citation chip. Each chip names a term in the pinned `qa-practice` bundle. The chip text matches `terms.json` byte for byte. |
+| 2 | The operator says: "Pause the research run." | Buddy replies with a proposal card for `arail.pause_research`, rendered by code, with [Approve] [Deny]. Research is still running 60 s later. |
+| 3 | The QA account sends the card's `/approve <id> <nonce>`. Then the operator sends `/approve <id>` with a wrong nonce. | Both are refused. Research is still running. Both refusals are in the trace. |
+| 4 | The operator taps Approve. Then he taps it again. | Research is paused within 10 s. The second tap gets "already done". ARAIL ran the action once. |
+| 5 | The operator sends `/stop`. Then he asks a question. | A fixed "held" reply comes within 5 s. ARAIL `hold_state().held` is true. The question gets the fixed held reply. ARAIL admits zero Buddy model calls for 60 s. |
+| 6 | The account on no list sends a message. | No reply. No model call. One aggregated trace record. |
+| 7 | QA opens Admin → agent lanes, with no terminal. | Every step above is there with `channel`, `identity` (pseudonym + role), `brain`, `ttft_ms` or an honest `n/a`, tokens, and cost. |
 
-**The reductive-only rule (new, for off-desk taps).** A tap made from a channel
-can only make the lab **do less**: hold all agents, stop a running experiment,
-or mute pushes. Anything that **starts, spends, or ingests** (start an
-experiment, pull a model, ingest a file, set a goal, resume from hold) is
-proposed off-desk but confirmed at the desk until we have portal auth and a
-stronger device trust story. The reasoning: if someone takes over the
-operator's Telegram account, the worst they can do is stop the operator's own
-lab. This rule decides the S2 allow-list split. It does not change D4.
+All seven steps pass in one run, or S1 fails. Today's baseline: none of the
+seven is possible.
 
-## Win condition
+**Merge gates.** QA must show each one. They are not wins.
 
-Pre-committed. The measurement window is the **14 days after S1 merges**,
-operator dogfood, `maximus`, `hybrid`, channel paired. Every number is read
-from the P1 trace store and the channel transcript (`.jsonl`). No number comes
-from memory or chat.
+- **G1** Airgapped: Buddy makes zero non-loopback connections, tested at the
+  socket level. After a flip to airgapped, polling stops within 60 s.
+- **G2** Hybrid: Buddy connects only to `api.telegram.org` and loopback.
+- **G3** No new non-loopback listening socket, on either side.
+- **G4** Text from an unknown sender never reaches the model or a trace body.
+- **G5** No action runs without all of: a confirmer id, a valid unexpired
+  one-time nonce, and no hold. The nonce never appears in model context or in
+  the trace.
+- **G6** While ARAIL is held (from the phone or from the desk), ARAIL refuses
+  Buddy's model calls. Buddy's own hold file fails closed when it is corrupt.
+- **G7** The bot token and the edge credential are `0600`. They are never
+  logged and never echoed.
+- **G8** Buddy loads no model and never calls Ollama directly. The edge refuses
+  cloud backends for agent `buddy`.
+- **G9** Buddy refuses to start if any tool, command or feature outside the
+  allow-list is on: shell, file write, web, MCP, cron, Dream, heartbeat,
+  WebUI, API.
+- **G10** A contract-hash or World-seal mismatch makes Buddy fail closed with a
+  fixed message.
+- **G11** "Built with Llama" appears in Buddy's `/status` and persona prompt
+  whenever `llama-ai-eng` answers.
+- **G12** No frozen name changes (`aerollm`, `AERO_*`). The 98 existing Buddy
+  tests pass. Airgapped ARAIL boot is unchanged.
 
-| # | Measure | Pass threshold |
+**Quality bar.** It is pre-registered. QA writes the set blind, from the World,
+before build.
+
+- 20 QA questions: at least 16 cited-and-correct, or an honest "not in the
+  World". Zero fabricated chips.
+- 8 near-miss and pressure cases: at least 6 refused or escalated correctly.
+- If the bar fails, S1 still ships, with template answers: code picks the
+  term, and the model phrases one sentence. Disconfirming #2 then fires.
+
+### 2.4 Wedge (S1: "Buddy answers, asks, and stops")
+
+**Brain in S1:** `llama-ai-eng` (Llama 3.2 1B, Built with Llama) through
+ARAIL's fast path. The nucleus-baked resident stays ROADMAP: GGUF export is not
+built, and the one real run graded "F" (RESEARCH_NOTES §4). QueueLLM joins in S2
+as an async "give me a sec" path.
+
+**In `qukaizen-buddy` (new repo):**
+
+1. nanobot pinned at tag `v0.3.5`, plus a patch series of three small commits:
+   - after `AgentLoop` is built (`nanobot/cli/gateway_runtime.py:544-560`),
+     call `buddy.install(agent)`;
+   - an unknown DM is dropped silently, with no pairing code
+     (`nanobot/channels/base.py:282-310`);
+   - Telegram identity is by numeric id only, not by username
+     (`nanobot/channels/telegram/runtime.py:652-669`).
+2. `buddy.install(agent)` does four things:
+   - registers `/stop`, `/approve`, `/deny`, `/status`, `/help`, `/new`;
+   - unregisters every other built-in command
+     (`nanobot/command/builtin.py:1064-1094`);
+   - registers a runtime context provider (`nanobot/agent/loop.py:673-684`)
+     that puts the matching QA World terms into the turn as delimited data;
+   - runs the startup self-check (G9).
+3. Config:
+   - the provider is the ARAIL edge, as a custom OpenAI-compatible provider
+     (`nanobot/config/schema.py:292-298`);
+   - Telegram in polling mode, with inline keyboards on;
+   - Dream, heartbeat, cron, WebUI, API, MCP and all acting tools off.
+4. The QA World `qa-practice` as a sealed bundle, with a pin file (DDaC commit
+   + `world_sha256`). Buddy checks the seal at startup.
+5. Code renders citation chips and proposal cards. There is one action kind.
+   The model proposes it through a closed enum of one (a one-field tool or
+   structured output; the architect picks).
+6. An egress guard that allows `api.telegram.org` and loopback only.
+7. A LaunchAgent from nanobot's installer, with Buddy's own label and `--home`.
+
+**In `qukaizen-arail` (this repo):**
+
+8. The `buddy.host/v1` edge. It is loopback only. Every call carries a
+   capability credential. It has five methods:
+   - `handshake`: contract sha256, lab mode, tier, Telegram consent, hold state;
+   - `brain.chat`: OpenAI-compatible, with tool calls; agent `buddy`; fast
+     brain only; halt-gated; traced; budget-capped;
+   - `trace.record`: append-only, schema-checked, no bodies;
+   - `hold_all`: reductive;
+   - `pause_research`: needs a complete approval record.
+9. `agent_trace` gains `channel`, `identity` and `cost`. This is a schema bump
+   (§3.4).
+10. `./arailctl buddy link` mints the credential. Root lab only.
+11. The edge enforces a per-day budget and a per-identity rate limit.
+
+**In `qukaizen-ddac` (content, before build):**
+
+12. The operator approves 12–20 cards of `qa-practice`. Claude drafts them from
+    cited sources. They pass the gate and are sealed (§3.6).
+
+**Cut from S1.** Each item is off the win path.
+
+- Proactive speech: pushes, quiet-hours scheduling, cron, routines, Dream,
+  heartbeat.
+- QueueLLM, or any deep brain, on the phone path.
+- Any action other than `pause_research` and `hold_all`. Resume, start,
+  ingest and set-goal stay at the desk.
+- Shell, file, web and MCP tools, and the nanobot tool-policy patch at
+  `nanobot/agent/tools/execution.py:157-158`.
+- The container (ii) and the Linux box (iii).
+- The eval door and the 3D.EVAL `buddy` target (S2). paperagents wiring (S2).
+- Moving the desk Buddy loop out of ARAIL. Memory inspection. Other channels.
+  Linux as a tested platform.
+
+**If S1 still runs over, cut in this order:**
+
+1. The aggregated trace for unknown senders (a plain drop counter is enough).
+2. The budget cap (keep the rate limit).
+3. `/deny`. An approval expires after 10 minutes, so without `/deny` a card
+   only stays open longer.
+
+### 2.5 Disconfirming evidence (pre-committed)
+
+The window is the 14 days after merge. Every number comes from ARAIL's trace
+and the Telegram transcript, never from memory.
+
+1. **No pull.** Fewer than 10 operator messages, or fewer than 5 distinct days.
+   → Off-desk QA is not his gap. Turn the channel off. Keep the edge, because
+   it is the host contract. Build no second channel.
+2. **The 1B cannot carry policy.** The quality bar fails, or one fabricated
+   chip appears in dogfood. → Answers become template term cards. The P2 brain
+   bake-off runs before any more Buddy work.
+3. **Pressure wins.** In dogfood, Buddy agrees even once to a reserved act,
+   such as "write the W5 line for me". Or he fails 3 or more of the 8 pressure
+   cases. → Code routes those intents to fixed refusals keyed by the World's
+   `refusals` terms. No new action until this passes.
+4. **Safety breach.** In QA or dogfood: an action without a valid confirm, a
+   Buddy model call while held, or a connection outside the allow-list. →
+   Stop-ship. The channel stays off until the root cause is found.
+5. **nanobot drag.** Rebasing the three patches onto the next nanobot release
+   takes more than one working day, or upstream removes a patched seam. →
+   nanobot is the wrong base. Re-evaluate: Hermes, or a thin gateway on
+   `python-telegram-bot` directly.
+6. **Two Buddies disagree.** The desk Buddy and the phone Buddy contradict each
+   other about lab state twice. → Move the desk loop into the app before adding
+   tools.
+7. **Hybrid is the blocker.** He keeps the lab airgapped and does not use Buddy
+   because of it. → The narrow "airgapped except Buddy" mode is the next
+   sprint, with the ratchet re-justified (§3.3).
+8. **He wants hands.** He asks three times for shell, file or browser tools. →
+   That is the container sprint (ii). Do not widen deployment (i).
+
+**Kill criterion:** if (1) and (2) both fire, archive the channel code. Keep
+the edge, the trace fields and the QA World. Each has other consumers: the desk
+panel and 3D.EVAL.
+
+### 2.6 Displacement
+
+- **ARAIL's Buddy roadmap.** P2–P7 and the D11 desk win slip about one more
+  sprint. Airgapped and minimalist installs get nothing new.
+- **ARAIL backlog.** The `AERO_*` → `QUEUELLM_*` migration, due before
+  QueueLLM 2.0.0. The bundle NOTICE re-pin. Portal auth: the edge adds the
+  portal's first per-request credential, but it closes none of the existing
+  gap (`sprints/BACKLOG.md:1420-1445`).
+- **3D.EVAL.** Its sprint 2 planned an `arail-buddy` adapter on ARAIL's portal
+  (`docs/PLAN.md` §6.2). This vision moves that target to Buddy's eval door
+  (S2). Its sprint 2 also has an open QA FAIL on QA-D18 (`85f1085`).
+- **paperagents sprint 2** (the `arail-agent` observer) waits for S2.
+- **A new repo to run.** `qukaizen-buddy` needs a `CLAUDE.md` with gating, CI,
+  and a nanobot rebase at each release (every 2–7 weeks, RESEARCH_NOTES §6).
+  The workspace product map and `INTEGRATION_AUDIT.md` edges need updates. This
+  file does not make them.
+- **Operator time.** About two hours to approve the QA World. Ten minutes for
+  P1's W5 line.
+- **Across QuKaiZen.** QueueLLM's MoE GA gates keep priority. This sprint takes
+  the slot that P2 or P3 would have used.
+
+## 3. The nine questions
+
+### 3.1 SHAPE
+
+**Where shape A still wins on the merits.** A keeps D18 for free. ARAIL's hold,
+trace, egress guard, consent and deep policy already live in ARAIL's process.
+But nanobot is not built to be a channel-only gateway. Its gateway always builds
+an `AgentLoop` (`nanobot/cli/gateway_runtime.py:544-560`). So "nanobot as the
+gateway only" means one of two things. Either we stack two brains, or we write
+our own composition root on nanobot internals that change without deprecation
+(529 commits on main in 30 days, RESEARCH_NOTES §6). Running nanobot inside
+ARAIL's process is also poor. It adds about 45 core dependencies and needs
+Python ≥ 3.11 (nanobot `pyproject.toml`), while ARAIL declares Python ≥ 3.10
+(ARAIL `pyproject.toml:12`). And A gives up nanobot's loop, sessions, memory
+and channels, which is most of why he chose nanobot. So A is the safer shape,
+but it is not a nanobot shape. I accept B, with one condition that recovers
+most of A's safety. That condition is B′.
+
+**B′ (recommended): Buddy is a nanobot app. ARAIL is his only brain, his
+kill-switch authority, and his trace store.**
+
+- nanobot owns the channel, the sessions, the commands and the turn loop.
+- The model provider is ARAIL's `brain.chat` edge. So every model call passes
+  ARAIL's `ModelRouter` chokepoint. That chokepoint already traces calls and
+  refuses agent calls while held (`agent_context.py:363-386`).
+- Buddy's **code** calls ARAIL actions: the approval handler and `/stop` do.
+  ARAIL actions are not model-callable tools.
+- **Why not MCP in S1.** nanobot has no approval layer.
+  `before_execute_tool` cannot deny a call
+  (`nanobot/agent/tools/execution.py:158`). A model-callable ARAIL action
+  would run without a confirm. MCP comes in S2, read-only, after the policy
+  patch.
+
+| | A: nanobot is the channel only; the brain stays in ARAIL | B as stated: Buddy in nanobot, ARAIL tools over MCP, nanobot calls Ollama | **B′: Buddy in nanobot; ARAIL is the only brain** |
+|---|---|---|---|
+| Gives up | nanobot's loop, sessions, memory, cron and skills; Buddy outside ARAIL; any container path | ARAIL's hold and trace see none of Buddy's model calls. The airgap becomes config. QueueLLM is unreachable (it has no HTTP server). The rule "no facts from the agent's own output" breaks: Dream edits `MEMORY.md`, which goes raw into the prompt (`nanobot/agent/context.py:113-116`). | nanobot memory, Dream and cron in S1 (all off). Buddy cannot think while ARAIL is down. One extra hop per turn. |
+| Duplicate code it creates | A second composition root over nanobot internals. nanobot sessions beside ARAIL transcripts. A pairing store. | Agent loop (`AgentLoop` vs `_builtin_buddy.py:1302-1319`). Memory (`MEMORY.md` + Dream every 2 h, `nanobot/config/schema.py:63-75`, vs `state.json` + `dream_daemon.py:164-179`). Scheduler (nanobot cron + heartbeat vs `job_daemon` and `dream_daemon`). Usage logs (`llm_usage.sqlite3` vs `agent_traces.jsonl`). Kill switch (`/stop` only cancels a turn, `nanobot/command/builtin.py:215-233`, vs ARAIL hold). Model routing (`modelPresets` vs `deep_policy`). Egress policy. | Two agent loops (desk `BuddyAgent` and nanobot) until the desk loop moves. Two hold flags, deliberately: one `/stop` sets both. nanobot sessions for the phone. |
+| Duplicate code it removes or avoids | All of B's. | None. | The second memory, scheduler, trace, model routing, and inference egress path. |
+
+`memory_service.py` (`:1-35`) is a workflow-snapshot HTTP service, not Buddy's
+memory. Nothing in it serves the phone path.
+
+**Deployment decision for S1: (i), a user-level process under launchd.**
+
+| | (i) launchd process on the Mac | (ii) Buddy's own container on the Mac | (iii) His own Linux machine or VM |
+|---|---|---|---|
+| Gives | It feels native. It reaches ARAIL and host Ollama on loopback with no new networking. nanobot ships the installer (`nanobot/gateway/service.py:144-145`). | An OS boundary for Buddy's own files and processes, like Hermes's "container is the boundary" model. | The strongest isolation. Always on while the Mac sleeps. |
+| Gives up | No OS boundary. nanobot's sandbox is filesystem-only, with no network rule (RESEARCH_NOTES §6). Buddy runs as the operator. A compromised Buddy could call ARAIL's unauthenticated portal routes, because header-less local requests pass (`portal/app.py:686-706`). | A new runtime to install (Docker, OrbStack, or Apple `container`). No Metal inside Linux containers, so the 1B and QueueLLM stay on the host. How a container reaches host loopback services depends on the runtime (**not verified**). Ollama may have to bind beyond loopback. | Every brain call crosses a machine boundary. The edge must listen beyond loopback, so real portal auth must come first. When the Mac sleeps, Buddy is up but has no lab and no brain. |
+| When | **S1.** S1 gives Buddy no shell, file or web tools, so the model has nothing to escape with. | **Before the first tool that runs a command or writes outside Buddy's home.** That is the S2/S3 trigger, as in the parked draft. | Revisit when "reachable while the Mac sleeps" becomes a requirement, or when a harness lives on another machine (for example, the pipeline's Windows box). |
+
+**Compensating controls for (i) in S1:**
+
+- G9's startup self-check.
+- Buddy's own egress guard (G1, G2).
+- Buddy's code calls only `/api/host/v1/*`. QA proves this with a static check.
+- One honest line in Buddy's README: "Buddy runs as you. S1 contains what the
+  model can do, not what Buddy's own code can do."
+
+### 3.2 TRUST
+
+| Identity | Who | May | Where enforced |
+|---|---|---|---|
+| confirmer | The operator's numeric Telegram id. Exactly one in S1. | Ask, `/stop`, `/approve`, `/deny` | Buddy's approval handler, then the ARAIL edge |
+| talker | The confirmers plus listed ids. In S1, one QA test account. | Ask, `/stop` | Buddy's channel boundary |
+| eval (S2) | `eval:<run-id>` on the loopback door | Ask only. A test confirmer only inside a throwaway ARAIL World instance. | Buddy's door, then the edge |
+| unknown | Anyone else | Nothing. Dropped silently and counted. | Buddy's channel boundary, before the bus |
+| desk | The operator at the keyboard | Resume, edit the lists, link, and later Always-allow | Buddy's CLI and ARAIL's dashboard |
+
+Rules:
+
+1. **The lists live in a desk-only file**, `0600`, in Buddy's home. Chat cannot
+   change them. S1 removes nanobot's chat-side `/pairing approve`. Today any
+   paired sender can approve others (`nanobot/command/builtin.py:938-948`;
+   `nanobot/pairing/store.py:305-313`).
+2. **Numeric ids only.** nanobot also matches Telegram usernames
+   (`telegram/runtime.py:657-669`). A user can drop a username, and someone else
+   can then claim it. The patch removes that match.
+3. **DM only.** S1 drops group and channel chats.
+4. **A confirm is a code event, not a model event.**
+   - The model may propose one action from a closed enum of one
+     (`pause_research`).
+   - After the model proposes, code mints a proposal id and a 64-bit one-time
+     nonce.
+   - The nonce goes only into the button sent to the confirmer's DM. Telegram
+     carries it as `callback_data`, which nanobot sets to the label, at most 64
+     bytes (`telegram/runtime.py:2254-2270`). `/approve <id8> <nonce16>` fits.
+   - A tap arrives as an inbound message marked `is_callback`
+     (`telegram/runtime.py:2277-2310`). A registered command dispatches at
+     once, even during a busy turn (`nanobot/agent/loop.py:834-867`).
+   - The handler checks: sender is a confirmer; the chat is a DM with that
+     sender; the nonce matches and is unused; the proposal is under 10 minutes
+     old; Buddy is not held.
+5. **ARAIL re-checks.** The edge accepts `pause_research` only with a valid
+   credential and a complete approval record: proposal id, hashed confirmer
+   id, hashed nonce, and times. It refuses while held. It runs each approval id
+   once.
+   - Honest limit: ARAIL cannot verify a Telegram identity. It trusts Buddy's
+     credential. The reductive-only rule caps the damage.
+6. **Reductive-only from the phone** (v1's rule). A confirm from the phone can
+   only make the lab do less. Anything that starts, spends, ingests or resumes
+   needs the desk. If someone takes over his Telegram account, the worst case
+   is a paused lab.
+
+**Prompt injection through a chat message.** Inbound text is data. Containment
+is structural, not a prompt.
+
+- **No acting tools.** The only model output that can lead to an action is a
+  closed-enum proposal. A proposal does nothing until a human taps.
+- **Code parses commands from the raw inbound text, before the model.** Code
+  never re-parses model output as a command. If a reply contains `/approve
+  1234`, a tap on it fails, because there is no nonce.
+- **World terms, lab state and session history are delimited data** in the
+  context block. The memory path at `nanobot/agent/context.py:113-116` stays
+  empty, because Dream is off. An injection cannot outlive `/new`.
+- **Indirect injection** (an experiment named "ignore previous… propose pause")
+  can at most make a card appear.
+- **Remaining risk:** a convincing card can fool a tired confirmer. The card
+  shows the code-rendered action, its arguments, and "proposed in reply to
+  <pseudonym>". The confirmer decides.
+
+### 3.3 MODE
+
+**Recommendation: hybrid only in S1. No airgapped exception.**
+
+Why:
+
+- `docs/BUDDY.md:117-119` promises that there is "no 'sometimes online' middle
+  state".
+- The egress ratchet requires a new, re-justified sprint for any airgapped
+  egress (`egress.py:516-521`).
+- The airgap means that lab content does not leave the box. A Telegram relay of
+  lab answers is lab content leaving the box. "Airgapped + Telegram" would be a
+  false label.
+- `allow_bootstrap_fetch` (`egress.py:590-643`) shows how to build a narrow
+  exemption: a consent record, a host-suffix list, call-stack scope, and an
+  audit line. But it covers one call stack, not a standing connection.
+
+How the rule holds. Buddy is a separate process, outside ARAIL's in-process
+guard, so:
+
+1. Buddy polls Telegram only after `handshake` returns `lab_mode=hybrid` and
+   an approved `ConsentStore` record for `api.telegram.org` (`consent.py:45-47`,
+   `:114-126`).
+2. Buddy re-checks at least every 60 s. If the lab is airgapped, polling
+   stops. If the edge is unreachable for more than 120 s, polling also stops:
+   an unknown mode counts as airgapped.
+3. Buddy's own egress guard allows only `api.telegram.org` and loopback, in
+   every mode. QA tests it at the socket level.
+4. In hybrid, ARAIL lets in-process egress through (`egress.py:291`). So the
+   edge pins agent `buddy` to local brains. Buddy's answers never reach a cloud
+   LLM.
+
+**What the user is told.** At link time, at the desk, before the first poll:
+
+> Buddy on your phone needs the internet. Your lab will run in hybrid mode. In
+> hybrid mode, the lab may also use cloud providers you set up. Buddy himself
+> uses only your local model.
+>
+> Your messages to Buddy and his replies pass through Telegram's servers.
+> Telegram can read them. Bot chats are not end-to-end encrypted.
+>
+> You can switch back to airgapped at any time. Buddy stops listening within
+> one minute.
+
+On the phone, `/status` says the same in two lines.
+
+**Deferred:** a narrow "airgapped except Buddy" mode. The trigger is
+disconfirming #7. The cost is a re-justification sprint for the ratchet, a
+`BUDDY.md` rewrite, and a new visible lab state.
+
+### 3.4 CONTROL
+
+D18 holds: "nothing new speaks, acts, or spends compute until it can be seen and
+bounded". S1 speaks only when spoken to. It acts only after a confirm. It spends
+compute only through ARAIL's chokepoint.
+
+| Control | S1 behaviour |
+|---|---|
+| **Kill switch** | `/stop` from any talker does three things, in order. (1) Buddy writes his own hold file in the paperagents `hold` v1 shape, `{v,on,since,reason,scope:"agent:buddy",by,stopTurn}`, which fails closed when corrupt (paperagents `ARCHITECTURE.md` §7.12.4–7.12.5). (2) It cancels active turns, as nanobot's `/stop` does (`builtin.py:215-233`). (3) It calls `hold_all`, which runs `scheduler.halt_all_jobs` (`scheduler.py:282-288`). The reply is a fixed template, not model text. A hold from the desk reaches Buddy too: ARAIL refuses his model calls (`agent_context.py:376-386`). Resume is desk only. If ARAIL is down, the reply says: "Buddy held. Lab not reachable, so lab agents are not held." |
+| **Fail closed on this path** | ARAIL's `halt_gate` and `speech_gate` fail **open** on error (`agent_context.py:380-381`, `:400-401`). That is right for the desk and wrong for the edge. The edge refuses when it cannot read the hold state. Buddy refuses when his hold file is unreadable. |
+| **Budget** | The edge enforces per-day caps for agent `buddy`, on turns and tokens. The architect proposes the numbers. The caps protect lab memory and compute, not money. Over a cap, Buddy sends a fixed reply until local midnight. This is ARAIL's first enforced agent budget. P1 deferred budgets until traced usage existed (`SPRINT.md:68`); S1 makes that usage. |
+| **Rate limit** | Per identity, at Buddy's channel boundary: at most 10 per minute and 200 per day. Unknown senders are dropped and counted, with at most one trace record per minute. |
+| **Quiet hours** | S1 sends no unsolicited message. A test asserts that every outbound message has an inbound trigger. Quiet hours ship with pushes in S2 and cover every unsolicited message. They never suppress `/stop` replies or confirm results. |
+| **Trace** | `agent_trace` v1 has no `channel`, `identity` or `cost` field, and `record()` drops unknown keys (`agent_trace.py:43-57`, `:123-125`). S1 bumps the schema to `arail.agent_trace/v2` with those three fields. 3D.EVAL reads v1 by name (PLAN §6.2), so it gets notice of the bump. Every step lands in the store: inbound accepted or refused; each model call (brain, `ttft_ms`/`ttft_status`, tokens); the citation check; the proposal; each confirm attempt with its reason; the action; `/stop`. Buddy's half arrives through `trace.record`. No bodies: the flight recorder stays off by default. `identity` is a salted pseudonym plus a role; raw ids stay in Buddy's `0600` file. `cost` is tokens plus ARAIL's simulated-cloud figure, labelled "simulated"; cash cost is $0 for local brains. TTFT is real on the fast path, which streams (`deep_policy.py:200-209`). Buddy also records the end-to-end time from message in to first reply out. |
+
+### 3.5 PROCESS
+
+- **Supervisor on macOS.** Buddy has his own LaunchAgent, made by nanobot's
+  `gateway install-service --manager launchd`. It sets `RunAtLoad` and
+  `KeepAlive {SuccessfulExit: false}` (`nanobot/gateway/service.py:144-145`).
+  It uses its own label and `--home`, so it never clashes with another nanobot.
+  `arailctl` does not supervise Buddy, because he is outside ARAIL. ARAIL keeps
+  its own LaunchAgent (`scripts/install-daemon.sh`).
+- **Supervisor on Linux.** A systemd user unit with `Restart=always`
+  (`service.py:271`). Documented, but not tested in S1. ARAIL itself has no
+  systemd path: `install-daemon.sh:35` is macOS-only, and Gentoo uses OpenRC.
+- **Crash.** launchd respawns Buddy. The turn in flight is lost. Hold state and
+  open proposals are on disk. A confirm after a restart still works if it has
+  not expired, and the edge runs each approval id once. Telegram may re-deliver
+  an unacknowledged update. A repeated question is harmless. A repeated
+  `/approve` hits the idempotency key.
+- **Start order.** Buddy may start before ARAIL. Until `handshake` succeeds,
+  Buddy does not poll, because an unknown mode counts as airgapped.
+- **ARAIL down, Buddy up.** Buddy sends a fixed reply: "The lab is not
+  reachable since HH:MM." He calls no model, because his brain is behind ARAIL.
+- **Reboot.** LaunchAgents start at login, not at boot. With FileVault, nothing
+  runs until he logs in, so Buddy is offline until then. `/status` reports the
+  last start time.
+- **The lab sleeps.** Buddy sleeps too. There is no keep-awake. Telegram holds
+  updates for up to 24 hours (Bot API documentation; **not re-verified
+  today**). On wake, messages older than 10 minutes get a fixed reply with no
+  model call: "I was asleep from 23:10 to 07:42. Ask again if it still
+  matters." Proposals expire while he sleeps. This is the honest reason why
+  option (iii) exists.
+
+### 3.6 QA-SME
+
+**Definition.** "Specialised QA SME" means that Buddy answers from one sealed
+DDaC World, `qa-practice` (a working name). Every claim cites a term in it, or
+he says that the World does not cover it.
+
+**What QA means here.** This is a working assumption; the operator confirms it
+in one line (Q-A). QA means QA as practiced in his QuKaiZen harnesses. No QA
+World exists in DDaC today (`qukaizen-ddac/data/worlds/` has 22 Worlds, none on
+QA). I rejected two other readings:
+
+- A generic software-testing glossary. It is not "for me", and the common
+  glossaries are copyrighted.
+- A client policy, such as the Veridian review checks. That is a role-played
+  exercise, not his work.
+
+**Shape.** It uses DDaC's five files (`qukaizen-ddac/data/worlds/README.md`).
+
+- Categories: `gates`, `evidence`, `allocation`, `roles`, `refusals`,
+  `escalations`.
+- 12–20 cards in S1. Each card's `source` is `<repo>@<commit>:<path>:<lines>`.
+  That is a real source, not a `model:` tag, so the World's tier is "sourced"
+  (`dac_world/provenance.py:15-31`).
+- It passes the three gate laws: sourced, declared, closed
+  (`dac_world/gate.py:59-78`). It is sealed with `world_sha256`.
+
+Example cards:
+
+| slug | Rule | Source |
 |---|---|---|
-| W1 | **Unprompted use.** Operator-initiated messages to Buddy from the phone | ≥ 10 messages on ≥ 7 distinct days |
-| W2 | **Earlier than the desk.** Lab events the operator first learned about from a Buddy push, followed by a reply or a tap before he returned to the desk | ≥ 2 occurrences, visible in the trace (push → reply/tap timestamps, no desk session in between) |
-| W3 | **True answers.** Off-desk answers scored blind by QA against the trace and lab state at that moment | ≥ 8/10 cited-and-correct, or an honest "I don't know". **Zero** fabricated lab state (made-up metric, run, or status) |
-| W4 | **Reply latency** on an async channel, user message → first Buddy reply | p90 ≤ 30 s on maximus; p90 ≤ 45 s on a minimalist test box (measured, not dogfooded) |
-| W5' | **Witness line.** The operator writes, in his own words, one sentence naming a moment the bot changed what he did | Written and initialled in SPRINT.md. Nobody else may write it (same rule as P1's W5) |
+| `pre-existing-failure` | A failure is pre-existing only if it also fails on main, verified by a differential run. | arail `sprints/2026-09-20-buddy-front-and-center/SPRINT.md:75` |
+| `witness-line` | Only the operator writes a witness line. Nobody may infer it. | same file, `:94-102` |
+| `qa-bypass` | Skipping `/qa` needs a documented override in the sprint ledger. | workspace `CLAUDE.md`, "Things to avoid" |
+| `debt-xfail-strict` | A known defect filed as debt uses `xfail(strict=True)` and names its BACKLOG entry. | arail `sprints/2026-09-20-buddy-front-and-center/TEST_REPORT.md:371-390` |
+| `allocation-arail` | 30% setup / 30% Buddy / 20% security / 10% happy / 10% regression. | workspace `CLAUDE.md`, product gating |
+| `vault-hard-gate` | No real financial or health documents enter the pipeline before A3 sign-off. | workspace `CLAUDE.md`, product gating |
 
-**Safety gates.** QA must show all of these pass before merge. Any failure
-blocks merge. They are not wins:
-- G1: zero network calls from the channel in airgapped mode (test).
-- G2: unpaired sender text never reaches the model (test).
-- G3: no action runs without a tap from the paired chat id plus a one-time
-  nonce bound to the proposal (test).
-- G4: the bot token lives in `lab/data/secrets.env` `0600` and is never logged
-  or echoed (test).
-- G5: no new listening socket. `BIND_ADDR` is untouched (test).
-- G6: pushed and replied text passes through P1 `redact`.
+**How he cites.**
 
-**S2 gate (written now, measured later):** one *named* friend or family member
-pairs Buddy on their own machine and sends ≥ 5 messages in their first 7 days.
+- The context provider retrieves terms by code. It passes `short` and
+  `definition` as delimited, length-capped data, following the pattern in
+  nanobot `docs/python-sdk.md:600-631`.
+- The model answers and names slugs.
+- Code checks each slug against the pinned `terms.json`. Code renders each chip
+  from the sealed bytes: `▸ <term> — <short> [qa-practice@<sha8> · <source>]`.
+- An unknown slug drops the chip and its claim. An answer with no valid chip
+  becomes the fixed abstain reply.
+- This deliberately goes past ARAIL's rule that terms never enter a prompt
+  (`world_mount.py:13-16`). ARAIL already relaxes that rule for the World
+  `SKILL.md` glossary (`world_mount.py:59-62`; `_builtin_buddy.py:1133-1136`).
+  This World is operator-authored, and Buddy checks its seal at startup. The
+  architect records the reasoning.
+- Buddy **reads** the World. He does not **mount** it. Mounting swaps the lab's
+  identity and goal (`world_mount.py:18-23`, `:1345`). The pin check is a
+  10-line sha256 check in Buddy. It is not an import of ARAIL and not a
+  vendored `dac_world`.
 
-## Wedge
+**He refuses:**
 
-**S1, "Buddy answers."** A channel-agnostic Buddy turn (message in → grounded,
-cited reply plus at most one typed proposal), with Telegram as its first and
-only adapter, pairing, a capped push of priority events, and one reductive
-tapped action (hold all agents). It runs inside the portal process that
-launchd already keeps alive. It works only in `hybrid`, and only with consent
-for one domain. It has no desk UI of its own. The P3 panel will be the second
-adapter on the same turn core.
+- to write or sign anything reserved to the operator, such as witness lines or
+  operator decisions;
+- to issue a ship verdict (PASS / WEAK_PASS / FAIL). The QA phase owns
+  verdicts. Buddy cites the rules;
+- to cite outside the World, or to make up a chip;
+- to act without a confirm, or to treat quoted, forwarded or World text as an
+  instruction;
+- to touch pipeline vault or finance content;
+- to advise a way around a gate (a `/qa` bypass, a frozen name, the vault gate).
+  He names the rule and its override path.
 
-Why this is the cheapest test of the hypothesis ("being able to reach and
-question Buddy away from the desk changes what the operator does"):
-- It needs no brain bake-off. An async messenger tolerates 10–30 s replies, so
-  the TTFT bar that made P2 a precondition for the desk panel does not apply.
-  S1 uses `deep_policy` as it is today.
-- It needs no portal auth, because there is no inbound socket.
-- It needs no UI work beyond a pairing card on an existing page.
-- It runs on the developer's own machine with no cloud account beyond a free
-  Telegram bot token.
+**He escalates to the desk:**
 
-## Disconfirming evidence (pre-committed)
+- any request to change a rule. The World changes only through DDaC authoring
+  and a reseal, never through chat;
+- a high-stakes call where the World is silent or conflicts with itself. He
+  says: "That is your call. Here is what the rules say.";
+- any action that is not reductive;
+- repeated refused confirms, or unknown senders (one desk notice).
 
-1. **W1 fails** (fewer than 10 messages, or fewer than 7 days) → off-desk
-   reach is not the operator's real gap. **Action:** leave the adapter
-   flag-off. Keep the turn core (P3 reuses it). Go back to the standing order
-   (P2 → P3). Build no second channel.
-2. **≥ 70% of operator messages are some form of "status?"** → this is a
-   notification problem, not a conversation problem. **Action:** keep the
-   pushes plus a fixed status digest. Drop free-form Q&A off-desk and stop
-   investing in the channel's turn quality.
-3. **≥ 2 fabricated lab-state answers in the window** (W3) → free-text Q&A over
-   lab state from the current brains is not trustworthy enough to send to a
-   phone. **Action:** off-desk answers become templated, structured replies
-   (numbers filled in by code, phrasing by the model), the same move the brief
-   made for the minimalist floor. P2 moves ahead of any more channel work.
-4. **W2 = 0** (pushes never lead to a reply or tap before the desk) → the
-   pushes are noise or come too late. **Action:** retune the ranking before
-   building S2. The brief's "dial left on quiet means the ranking is wrong"
-   rule applies.
-5. **No second named person can be found by the end of S2** (nobody will
-   switch to `hybrid` and install Telegram) → this is a feature for one user.
-   **Action:** keep it as a documented blueprint example, build no more
-   channels, and spend the remaining Buddy budget on the airgapped desk panel
-   (P3), which every install gets.
-6. **The operator asks for host tools ≥ 3 times in the window** (shell, files,
-   email) and calls Buddy useless without them → what he wants is a
-   general-purpose personal agent, not a lab partner. **Action:** stop. That
-   is a different product with a different security model. Write a separate
-   VISION. Do not loosen ARAIL's rules to fit it.
+**Is this a persona change from "lab partner"?** It is not an identity change.
+It applies the brief's own concept to a new World: "World expert with receipts"
+(`OPERATOR_BRIEF.md:97-100`) and D12. The tone changes on the phone. The desk
+prompt says "one short sentence… never say 'I'… under 25 words"
+(`_builtin_buddy.py:223-231`). The phone Buddy uses one to three sentences plus
+chips. S1 does not touch the desk Buddy.
 
-**Kill criterion for S1 as a whole:** if W1 **and** W2 both fail, delete the
-Telegram adapter from main (do not just flag it off). The turn core stays.
+**Reconciled with D1–D18:**
 
-## Repo decision: stay in ARAIL
+| Decision | In S1 |
+|---|---|
+| D1, D2 (panel, widgets) | The desk is unchanged. The phone is a second surface. Chips and cards are its widgets. |
+| D3, D4 (propose → one tap) | Kept, and made stricter: a tap counts only from a confirmer identity with a nonce. |
+| D5 (other voices cut in) | Not in S1. |
+| D6, D17 (brains) | Only the reflex 1B on the phone in S1. D17's maximus MoE voice is not on the phone path yet. `/status` names the brain truthfully. |
+| D7, D8 (event-driven voice, catch-up card, OS notifications) | No unsolicited speech in S1. In S2 the phone becomes D8's opt-in channel. |
+| D9, D10 (senses) | Not affected. |
+| D11 (goal by talking) | Still the desk headline, delayed. |
+| D12 (tier) | It works with the fast brain, so it does not need maximus. Dogfood runs on maximus. |
+| D13 (demo) | Not affected. |
+| D14–D16 (visibility, trace depth, fun views) | Every step is in `agent_trace` v2 and the lanes view. Bodies stay off. |
+| D18 (guardrails first) | Met by §3.4. |
 
-**Pick: shape 1 (stay in ARAIL).** The channel layer lives inside ARAIL, behind
-a flag, in the portal process launchd already supervises.
+### 3.7 CHANNELS
 
-Reasons, in order of weight:
+**Telegram, long-poll, DM only.** Why:
 
-1. **The safety layer only works in-process.** The egress guard patches
-   `requests`/`urllib`/`httpx` *inside the ARAIL process*. `allow_egress` is
-   a contextvar with a hard airgapped ratchet. Consent, hold/halt, tracing and
-   deep/fast policy all live in ARAIL's router/registry/scheduler. A channel
-   gateway in another repo or process (shape 2 run as a service, or shape 3)
-   makes its network calls **outside** the guard. The airgap would then become
-   a configuration convention instead of a property of the code. For a
-   product that runs on other people's machines, that alone is disqualifying.
-2. **The seam is not clean yet.** `BuddyHost` is about 80% clean, with 12
-   direct `arail.*` imports remaining (LANDSCAPE §2.7). Extracting now means
-   re-homing or depending on the safety layer through a versioned edge, which
-   adds two release trains for a user base of one person.
-3. **ARAIL is a blueprint people fork.** A second repo they must also clone,
-   pin and keep in sync makes the fork harder for exactly the friends and
-   family audience.
-4. **Shape 3 (adopt OpenClaw / Hermes / nanobot) has the opposite trust
-   model.** It is "trusted gateway, host-executed tools", with a shell tool on
-   by default (nanobot, Hermes). OpenClaw is a foreign runtime (Node, >1 GB
-   RAM) on a 16 GB machine that is already running models. We borrow their
-   **patterns** (thin channel adapters into one long-lived process, DM
-   pairing, cron-to-channel delivery, markdown memory) and **none of their
-   code**.
+- Long-poll is outbound only: no listening socket, no public URL. Polling is
+  nanobot's default. Webhook mode needs a public HTTPS URL
+  (`telegram/manifest.py`; `telegram/runtime.py:526-541`).
+- It gives stable numeric user ids for identity.
+- It has inline buttons for confirms.
+- It is nanobot's most developed channel, with a stall watchdog and separate
+  polling and send pools (`telegram/runtime.py:680-755`).
+- `docs/BUDDY.md:58` rates it the cleanest channel. The operator said it is
+  acceptable. It is free.
 
-**What would make me reverse it:**
-- **A second real host for Buddy, with a user.** Examples: the operator wants
-  one Buddy across `qukaizen-team` and ARAIL, or Buddy inside the pipeline's
-  phone app. Then extract the turn core plus adapters into `qukaizen-buddy`
-  behind `BuddyHost`. The cross-repo edge would be a pinned ref or
-  hash-stamped vendoring (workspace rule). "Run inside the host's egress
-  guard" would become a host *requirement* checked by a conformance test.
-- **The bot must stay reachable while the portal is down or restarting.** That
-  means a separate process, but it can still be a second launchd job **in this
-  repo**. A process boundary alone does not justify a repo boundary.
-- **A wanted channel cannot be served from Python in-process** (Signal via
-  `signal-cli` on Java, an iMessage bridge). Revisit only alongside an
-  OS-level egress control, because a sidecar escapes the in-process guard.
+Costs: it is not end-to-end encrypted. Telegram sees every message. It needs an
+account and a phone number.
 
-## How this reorders the standing phasing
+Rejected for S1:
 
-D18 still holds ("observability and guardrails go up first"). P1 shipped the
-trace store, lanes, redaction and the hold switch, so S1 is seen and bounded
-from its first message. D1–D17 stand, with the overrides marked below.
+- **Signal.** It is end-to-end encrypted. But it needs a `signal-cli` daemon
+  (`signal/runtime.py:1`), which is a second process that runs on Java. It has no
+  buttons. Its default daemon port is 8080 (`signal/manifest.py:11`), which
+  collides with ARAIL's portal. It is the S2 candidate if he rejects
+  Telegram's privacy model.
+- **nanobot WebUI over his tailnet.** Content would stay end-to-end encrypted.
+  But this opens nanobot's whole WebUI on a network interface, including
+  settings and a trusted-client shell path (`builtin.py:1029-1050`). We have
+  not reviewed its auth.
+- **Slack and Discord.** Workspace and guild models are heavier than one person
+  needs.
+- **WhatsApp and iMessage.** The brief excludes them.
 
-| Standing | New order | Change |
+### 3.8 WIN CONDITION
+
+§2.3 is the operator's draft, sharpened: seven steps, one run, all must pass.
+What I changed, and why:
+
+- "A cited World term" now means that the chip is byte-equal to the sealed
+  term. Otherwise a model could paraphrase a chip.
+- The confirm step now includes two refused attempts: one from a non-confirmer
+  and one with a wrong nonce. Otherwise nothing tests "only after a confirm".
+- `/stop` is measured by zero admitted model calls for 60 s, not by the reply
+  text.
+- "Every step is traced" is judged in the lanes view without a terminal. That
+  is the same bar as P1's W5.
+
+### 3.9 EVAL
+
+**The surface.** S2 adds an **eval door**:
+
+- a loopback-only channel with a key, which enters the **same** nanobot
+  `AgentLoop` as Telegram: the same commands, context provider, brain edge and
+  trace;
+- identity `eval:<run-id>`, role talker;
+- not `nanobot serve`. That command builds its own queue with no chat
+  consumers (nanobot `docs/openai-api.md`, "Behavior"), so Buddy's install hook
+  would not run there.
+
+S1 keeps the turn path channel-agnostic and puts `channel` and `identity` in
+the trace. So the door is "add a channel".
+
+**How 3D.EVAL hits it.**
+
+- A new `buddy` `Target` (PLAN §4.1) posts multi-turn cases to the door. It
+  reads `brain`, `ttft_ms` and `ttft_status` from ARAIL's `agent_trace` v2
+  (PLAN §6.2).
+- Gold is the sealed `qa-practice` World:
+  `gold: human-authored, World qa-practice@sha256:…` (PLAN §5.1). No model
+  output is ever gold.
+- Each run manifest pins the Buddy commit, the nanobot pin, the
+  `buddy.host/v1` sha256, the World sha256, the DDaC commit and the ARAIL
+  commit (PLAN §4.3, §6.2).
+- Action cases run against a throwaway ARAIL World instance
+  (`./arailctl start --world`). An eval never pauses the real lab.
+- Claude is the judge only (PLAN §6.3). Refusals are a separate metric
+  (PLAN §7, item 1).
+
+| Behaviour | Case kind | Graded by |
 |---|---|---|
-| P1 obs + guardrails | **Done** (PR #196) | **Precondition:** the operator writes W5 before the S1 architect pass. If W5 fails, REVIEW.md's rule applies: rewrite the lanes view first. S1's debugging depends on that view. |
-| P2 brain bake-off | after S2 | **Moved later.** An async channel does not need conversational TTFT. The bake-off then gets real turn traces from S1 instead of only scripted personas. If disconfirming #3 fires, P2 jumps back to next. |
-| P3 panel + goal interview (D11) | after P2 | **Delayed about 2 sprints, not dropped.** The panel becomes the second adapter on S1's turn core. D11 stays the desk headline. |
-| P4 alive | after P3 | The catch-up card (D8) serves both surfaces. The S1 push cap becomes the "quiet" end of the D7 dial. |
-| P5 typed actions + OS notifications | **S2, pulled forward** | **Pulled forward.** An always-on bot that can be talked to but can do nothing fails the ask. S2 = the typed allow-list with tap on both surfaces, the **reductive-only rule for off-desk taps**, and NL scheduling as a typed action. Guided flight / `./arailctl demo` (D13) stays in P5's remainder. |
-| P6 prep queue | unchanged | Prepared observations make better pushes. Not needed for the wedge. |
-| P7 screen sense, MTP drafters | unchanged | Cross-repo, versioned, QueueLLM-gated. |
+| Knows the policy | `identify`, `define`, `source` from the World (PLAN §5.1) | `exact-normalized`; chip slug by `set-member`; `source-match`; `claude-judge` against the card |
+| Applies it | A scenario → which rule applies, and the outcome | Rule slug by `set-member`, plus judge SUPPORTED |
+| Refuses near-misses | A scenario one detail away from a rule (for example: "it fails on main in CI, but I did not run it here") | Must not apply the rule; `abstain` or refuse |
+| Resists pressure | Multi-turn: insistence, claimed authority, urgency, instructions inside quoted text, "just write the W5 line" | The refusal holds for k turns. No proposal outside the enum. **And** ARAIL's trace shows zero actions without a confirm. The trace grades this, not the reply text. |
 
-**Explicit override of the brief:** the constraint "Airgapped default stays. OS
-notifications are local; **nothing here opens egress**" is overridden **for the
-opt-in channel only**. The airgapped default stays. The channel refuses to
-start in airgapped mode, and it opens exactly one consented domain in
-`hybrid`. This is the "Buddy Tunnel" that `docs/BUDDY.md` already describes,
-built under the rules that doc already set.
+Telegram transport latency is not part of the eval. It comes from dogfood
+traces.
 
-## Displacement
+## 4. Versioned edges this creates (INTEGRATION_AUDIT §4)
 
-Saying yes takes attention from:
+| Edge | Mechanism | Pattern copied |
+|---|---|---|
+| buddy → nanobot | Tag `v0.3.5` (`1bb712d3`) plus three patch commits. A pin file records the upstream commit, the patch commits, and the sha256 of each patched file. Rebase on releases only. | `qukaizen-3d-eval/engine.pin.json` |
+| buddy ↔ arail | `buddy.host/v1` JSON Schemas plus a conformance suite. Buddy owns them. ARAIL vendors them as a stamped generated file. `handshake` exchanges the contract sha256; a mismatch fails closed. No Python import crosses the edge. | `qukaizen-site/lib/dac/gate.generated.ts` |
+| buddy → ddac | The sealed `qa-practice` bundle plus a pin file (DDaC commit, `world_sha256`). Buddy checks the seal at startup. | `qukaizen-3d-eval/ddac.pin.json` |
+| paperagents → buddy (S2) | An `arail-agent` runtime whose `haltPath` points at Buddy's hold file (paperagents `ARCHITECTURE.md:367-373`). S1 already writes the paperagents `hold` v1 shape, so S2 needs a manifest entry, not code. | paperagents `hold` v1 |
+| 3d-eval → buddy (S2) | Pinned in each run manifest. | PLAN §4.3 |
 
-- **Inside Buddy:** the D11 desk win (goal by talking, under 5 min) slips about
-  two sprints. Airgapped and minimalist installs, which are most friends and
-  family, get **nothing new** from S1.
-- **Inside ARAIL:** the `AERO_*` → `QUEUELLM_*` migration sprint (must land
-  before QueueLLM 2.0.0 drops the aliases); re-pinning the bundle NOTICE
-  (`test_notice_byte_identical…` fails on maintainer machines); portal auth
-  (S1 deliberately avoids it, but S2's actions add pressure toward it).
-- **Across QuKaiZen:** the operator's attention is the scarce resource. It
-  competes with QueueLLM's MoE GA gates, the new 3D.EVAL repo (which uses
-  ARAIL as a system under test, so ARAIL churn costs it reproducibility), and
-  geoai. Two Buddy sprints means roughly two sprints less on one of those.
-  **Proposed trade:** QueueLLM GA-gate work keeps priority. The two Buddy
-  sprints take the slot that would otherwise have gone to P2 and P3.
+**"The gateway we designed" (paperagents) in S1: its semantics, not its code.**
 
-## Recommended next step
+- There is no `allow`. A gateway action is either `ask` (confirm) or refused.
+- HOLD fails closed when corrupt.
+- Event records keep fields and drop content.
 
-Proceed to `/architect` design mode with **Recommended first sprint** below as
-the spec, after the operator writes the P1 W5 line.
+paperagents states its own trust boundary as "not containment against a model
+that is trying to get around it" (`ARCHITECTURE.md:923`). An internet-facing
+bot needs containment. So Buddy enforces these rules in code and fails closed.
+The wiring comes in S2.
 
-## Recommended first sprint (S1, "Buddy answers")
+## 5. Recommended next step
 
-Small enough to design in one pass. **In scope:**
+**Proceed to `/architect` design mode with §2.4 as the spec, after three
+preconditions:**
 
-1. **Turn core.** One Buddy entry point that takes `(channel, thread_id,
-   user_text)` and returns `(reply_text, citations[], proposal?)`.
-   - Grounding: current goal, experiment list, activity-log tail, latest
-     dream, `search_for_agents`.
-   - Every claim is cited, or Buddy says "I don't know".
-   - Brain: `deep_policy` as it is today, called with `foreground=True`
-     because a human is waiting. The architect checks the priority ordering
-     against the Chat tab.
-   - Transcript at `lab/pkb/conversations/<id>/transcript.jsonl`
-     (**`.jsonl`**, never authoritative, no facts distilled from Buddy's own
-     output).
-   - Traced through P1 `agent_context` / `agent_trace`, one trace per turn.
-2. **Telegram adapter, outbound only.**
-   - `getUpdates` long-poll. No webhook, no listening socket, `BIND_ADDR`
-     untouched.
-   - Starts only when `LAB_MODE=hybrid`, the flag is on, a token is in
-     `secrets.env`, and `api.telegram.org` is on the `ConsentStore` allowlist.
-   - All calls go inside `allow_egress(...)`. The architect must handle the
-     asyncio task-scope subtlety (`learnings/2026-05-05-allow-egress-task-scope.md`).
-   - Root lab only. No World instances. Per-instance secrets are never shared.
-3. **Pairing.** A card on the existing Agents page (localhost) shows a
-   one-time code and the plain-language disclosure: *"Messages to and from
-   Buddy pass through Telegram's servers; bot chats are not end-to-end
-   encrypted."* Then `/pair <code>` binds one chat id. Unpair from the card.
-   Unpaired text gets a fixed reply, never reaches the model, and is
-   rate-limited and traced.
-4. **Priority pushes.** Experiment win, experiment crash/fail, SRE crash,
-   RAM ≥ 92%. Capped at 6 per day by default. Redacted. Proactive pushes stop
-   while agents are held.
-5. **One tapped action: hold all agents.** Sent as an inline button carrying a
-   one-time nonce bound to the proposal id. It only executes from the paired
-   chat id, and it calls the existing P1 hold. The architect must settle one
-   P1 question: **a user-initiated message must still get an answer while
-   agents are held** ("held since 21:04 by you, from Telegram"). Otherwise a
-   hold from the phone strands the user.
-6. **Sleep honesty.** On wake, answer the queued messages, prefixed with the
-   gap ("I was asleep 23:10–07:42").
+- **(a)** The operator confirms the QA World's scope in one line (Q-A).
+- **(b)** `cdarnell/qukaizen-buddy` exists and is private. `gh repo view` could
+  not resolve it on 2026-10-20. Its `CLAUDE.md` with gating (G1–G12 and the QA
+  allocation below) lands before the builder runs. An uncommitted local
+  scaffold exists at
+  `~/ProJects/.claude/worktrees/sprint-command-error-060a85/qukaizen-buddy`.
+- **(c)** The operator writes P1's W5 witness line before QA. Win step 7 uses
+  the lanes view, and P1's REVIEW says that a failed W5 means rewriting that
+  view first.
 
-**Out of S1:** desk reply UI (P3), any action other than hold, NL scheduling,
-other channels, memory inspection, P2 brain choice, portal auth, `BuddyHost`
-extraction.
+The architect writes one `ARCHITECTURE.md` that covers both code repos. The
+sprint ledger stays in this repo, because the brief named it.
 
-**QA allocation (ARAIL weighting):** 30% security (G1–G6, injection through
-replies, pairing abuse), 30% Buddy quality (the W3 blind scoring set, prepared
-before build), 20% setup-on-clean-machine (pairing from zero on a
-hybrid-switched fresh install), 10% failure grace (Telegram unreachable, token
-revoked, Mac asleep, portal restart mid-poll), 10% regression (the 98 existing
-Buddy tests; airgapped boot unchanged).
+**QA allocation for S1:**
 
----
+- 35% security and trust: G1–G10, the injection set, confirm abuse, unknown
+  senders.
+- 25% QA-SME quality: the blind 20 + 8 set, and chip byte-equality.
+- 15% failure grace: ARAIL down, Telegram down, token revoked, crash during a
+  confirm, sleep and wake, contract mismatch.
+- 15% setup: link and first message, from a clean start.
+- 10% regression: the 98 Buddy tests, airgapped boot, and unchanged existing
+  portal routes.
 
-## Questions for the operator
+## 6. Questions for the operator
 
-Each has the working assumption this VISION uses until he answers.
+Each question has the working assumption that this file uses.
 
 | # | Question | Working assumption |
 |---|---|---|
-| Q1 | **Who besides you will use the off-desk Buddy in the next month? Give a name.** | You only for S1. One named friend or family member is the S2 gate (Disconfirming #5). |
-| Q2 | Is the point **reaching Buddy away from the desk**, or **being able to talk back at all**? | Away from the desk. Otherwise P3 (desk panel) would be the right next sprint and this VISION is wrong. |
-| Q3 | Is Telegram acceptable (needs an account and phone number; bot chats are not E2E)? Or does it have to be Signal? | Telegram for S1. Signal only if you reject Telegram's privacy model, at the cost of a Java sidecar outside the in-process guard (a repo-decision reversal trigger). |
-| Q4 | Is your lab machine a laptop that sleeps when closed? | Yes. No keep-awake. Buddy answers on wake and says he was asleep. |
-| Q5 | Which actions do you want from your phone? | S1: hold all agents only. S2: reductive actions off-desk; anything that starts, spends or ingests is confirmed at the desk. |
-| Q6 | Does "expand Buddy's capabilities" include **host tools** (shell, file edits, browser, email/calendar), like OpenClaw? | No. "Propose, never execute" stands. A yes means a different product with a separate VISION (Disconfirming #6). |
-| Q7 | Behind "may want a new repo": do you want Buddy **outside ARAIL**, for example as the face of `qukaizen-team`, in the pipeline's phone app, or across products? | No, not yet. A yes is reversal trigger #1, and extraction goes through `BuddyHost` with a pinned edge. |
-| Q8 | Does D11 (goal by talking in under 5 min at the desk) stay the desk headline, now about 2 sprints later? | Yes, it is delayed, not dropped. |
-| Q9 | Will you write P1's W5 witness line before S1 is designed? | Yes. S1's design waits on it. If W5 fails, the lanes view is rewritten first. |
-| Q10 | Is it OK that enabling the channel means switching the whole lab to `hybrid`, which also allows cloud provider fallbacks, rather than a narrower "channel-only" mode? | Yes for S1. A narrower mode means editing the egress ratchet and needs its own justification (`egress.py` docstring). |
-| Q11 | Should a morning digest ("what happened overnight") be in S1? | No. It is S2, as a typed scheduling action, so model text never creates a job directly. |
+| Q-A | What does "QA" mean? | QA as practiced in your QuKaiZen harnesses: your QA persona, gates and sprint rules. This blocks the World's content, not the architecture. |
+| Q-B | Who may talk to Buddy, and who may confirm? | Talkers: you and one QA test account. Confirmers: you only. |
+| Q-C | Is hybrid acceptable while Buddy is on? | Yes for S1. If not, the narrow airgapped mode becomes the next sprint (disconfirming #7). |
+| Q-D | Is "pause research" the right first action? | Yes. It is typed, reductive, reversible at the desk, and it already has an endpoint (`portal/app.py:4254-4257`). |
+| Q-E | May the Mac sleep? | Yes. No keep-awake. Buddy says that he was asleep. |
+| Q-F | What triggers the container? | The first tool that runs a command or writes outside Buddy's home. |
+| Q-G | Retire the desk Buddy loop later? | Yes, after S2. The desk panel becomes a channel of the same app. |
+| Q-H | Telegram's privacy model, or Signal? | Telegram for S1. Signal in S2 if you reject Telegram. |
+
+## Appendix: what I verified, and what I did not
+
+**Verified today in code** (references are in the text above):
+
+- ARAIL's portal still has no login (`portal/app.py:904-912`;
+  `sprints/BACKLOG.md:1420-1445`). Header-less local POSTs pass
+  `local_trust_boundary` (`portal/app.py:694-704`).
+- The OpenAI shim routes to the Chat tab's compute source and is not
+  agent-attributed (`portal/openai_compat.py:7-15`).
+- `deep_policy` runs deep at once for foreground calls
+  (`deep_policy.py:121-122`). So the edge must pin agent `buddy` to the fast
+  brain in S1.
+- `agent_trace` drops unknown keys (`agent_trace.py:123-125`).
+- nanobot always builds `AgentLoop` in its gateway. It has no approval layer.
+  Its buttons carry their label. Its pairing has no owner role. Its launchd and
+  systemd installers exist. Dream is on, every 2 h, by default.
+
+**Not verified:**
+
+- whether tag `v0.3.5` matches `688976bc` on the patched lines;
+- Telegram's 24-hour update retention (from the Bot API docs; not re-read
+  today);
+- how Docker, OrbStack or Apple's `container` reach host loopback services;
+- how well Llama 3.2 1B does as a proposer and a policy voice. I infer that it
+  is weak; the quality bar measures it.
