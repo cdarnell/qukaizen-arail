@@ -62,6 +62,7 @@ in `RESEARCH_NOTES.md` §1. Do not design or code until VISION.md is in.
 | 2026-10-20 | **Build stop point (by design).** ARAIL A1–A9 landed (`36349f7f` … `2ab0f244`, A5c `4395ca50`); Buddy B1, B3–B6, B8, B9, B11a, P0 (`f84aa75a`), P2 (`f696874d`) landed on `qukaizen/buddy-always-on`. Tests: upstream nanobot 7678 passed + 3 deselected (G3); ARAIL R-BUDDY-98 unchanged (100 passed, 1 xfailed); new ARAIL tests 406 incl. 127 conformance cases; whole ARAIL suite fails the same 70 tests on branch and main (none branch-only); Buddy 1070 passed. | BUILD_LOG.md steps 1–23. Nothing pushed. |
 | 2026-10-20 | Blocked: B2/B7 need the sealed World on ddac main (C2 operator approval → C3); B7/B10/B11b/Phase I also need the architect's answer to **G1** (a `before_iteration` hook cannot rewrite `messages[0]` at the pin: `runner.py:443-447`, `context_governance.py:139-173`), plus ratification of G2/G4 interpretations, G3 (P0 deselects 3 upstream WebUI smoke tests) and G5 (tap removes the keyboard, so a lost edge answer cannot be retried by tap). | BUILD_LOG.md "Architect feedback required". Architect addendum requested. |
 | 2026-10-20 | **C2 (operator): qa-practice cards approved.** Operator's words, verbatim: "approved please go". 20 cards at ddac branch `qukaizen/ddac-qa-practice-world` commit `796c13d`. | Written by the operator in chat; recorded verbatim. Unblocks C3 → B2/B7. |
+| 2026-10-20 | **Harness alignment** (operator: "see qukaizen.com/harness and update and align accordingly"): S1 mapped onto Registry/Model/Context/Guardrails/Loop; two recorded differences (8–14B resident vs the 1B S1 brain; "nothing leaves the machine" → proposed gate G13: off-box messages carry World rules, fixed texts and the operator's own words, never lab data). `qukaizen-harness` extraction = later sprint (O8). | `HARNESS_ALIGNMENT.md`; architect ratifies G13 in Addendum A. |
 | 2026-10-20 | VISION v1 pass ran first and recommended staying in ARAIL; superseded, not deleted. | The brief changed afterwards (fork base, QA-SME, eval surface). |
 
 ## Skipped phases
@@ -86,6 +87,7 @@ in `RESEARCH_NOTES.md` §1. Do not design or code until VISION.md is in.
 | O5 | Accept that proposal cards go only to the confirmer who asked. | nothing |
 | O6 | Accept sha256-pinned sources for unversioned files such as `~/.claude/agents/qa.md`. | C1 |
 | O7 | **Done 2026-10-20** (operator: "Allow groups is off in BotFather"). | — |
+| O8 | Is `qukaizen-buddy` the seed of `qukaizen-harness` (page: "five modules, zero product imports"), or does Buddy later consume a separate harness repo? Working assumption: separate repo, extracted when the TEAM crew needs the same floor. | nothing in S1 |
 
 ## Notes
 
