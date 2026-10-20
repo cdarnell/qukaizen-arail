@@ -59,3 +59,16 @@ def write_hold_all(*, trace_id: str, by: dict, already_held: bool) -> None:
 def write_action_executed(*, trace_id: str, by: dict, outcome: str, approval_id: str, replayed: bool = False) -> None:
     _record("action_executed", trace_id=trace_id, channel=CHANNEL, identity=identity_dict(by), outcome="ok",
             reason=outcome, attrs={"approval_id": approval_id, "action": "arail.pause_research", "replayed": replayed})
+
+
+def write_refused_model_call(code: str, *, trace_id: str, channel: str, pseudonym: str, role: str) -> None:
+    """One ``model_call`` record for a ``brain.chat`` the edge refused after its turn header was valid.
+
+    Before the header is valid there is no trusted identity, so those refusals are
+    ``edge_refused`` events instead. No model was called, so there is no cost.
+    """
+    agent_trace.record(
+        record_type="model_call", kind="agent", agent_id="buddy", label="buddy", attribution="agent:buddy",
+        origin="edge", channel=channel, identity={"pseudonym": pseudonym, "role": role}, trace_id=trace_id,
+        brain="reflex", foreground=True, outcome="refused_" + code, cost=None,
+    )

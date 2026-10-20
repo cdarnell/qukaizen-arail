@@ -11,7 +11,7 @@ import pytest
 from tests.buddy_conformance import World, load_cases
 
 CASES = load_cases()
-IMPLEMENTED = {"handshake", "trace.record", "hold_all", "pause_research"}
+IMPLEMENTED = {"handshake", "trace.record", "hold_all", "pause_research", "brain.chat", "brain.models"}
 
 
 def test_the_vendored_suite_is_the_one_in_the_contract():

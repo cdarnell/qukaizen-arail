@@ -53,7 +53,7 @@ Status key: `todo` · `done <sha>` · `BLOCKED (reason)`.
 | 6 | A4 | arail | `router/core.py`, `router/backends.py` + tests | `response_schema` pass-through; Ollama `format` | byte-identical-request test per existing caller path | done `658e9880` |
 | 7 | A5 | arail | `buddy_host/contract/*`, `scripts/sync-buddy-contract.py` + tests | Vendor contract + conformance + `PROVENANCE.json`; sibling-free check | check test | done `80c34c1a` |
 | 8 | A6 | arail | `buddy_host/{__init__,link,__main__}.py`, `arailctl` + tests | `arailctl buddy link/unlink/status` | U-LINK, U-PERM | done `ab6ea498` |
-| 9 | A7 | arail | `portal/host_edge_routes.py`, `buddy_host/{admission,events,ledger}.py`, `app.py` + tests | admission, handshake, trace.record, hold_all, pause_research + ledger | conformance run, I-EDGE | todo |
+| 9 | A7 | arail | `portal/host_edge_routes.py`, `buddy_host/{admission,events,ledger}.py`, `app.py` + tests | admission, handshake, trace.record, hold_all, pause_research + ledger | conformance run, I-EDGE | done `b69bbf9f` |
 | 10 | A8 | arail | `buddy_host/{brain,budget}.py`, routes + tests | brain.chat (header, flatten, brain check, budget, slot, SSE) | conformance run, I-EDGE | todo |
 | 11 | A9 | arail | `docs/buddy-edge.md`, `sprints/BACKLOG.md` | Docs; D1–D14 | doc lint if any | todo |
 | 12 | B3 | buddy | `guard.py`, `redact.py`, `boot.py` + tests | closed-mode audit-hook guard, redaction | U-GUARD, L1, L2 | todo |
@@ -212,6 +212,48 @@ The edge tests I had named `test_buddy_*` matched the R-BUDDY-98 glob and would 
 "98 passed" into hundreds (and added `node` skips). Renamed to `test_host_*`,
 `test_agent_lanes_phone_steps`; the glob runs the 11 original files again: 100 passed, 1 xfailed.
 Commit: `4024b753` (arail).
+
+### Step 11 (A7, arail: the edge)
+Modules: `buddy_host/{admission,events,ledger,budget,brain,_files,_time}.py`,
+`portal/host_edge_routes.py`, registration in `portal/app.py` (inside a try/except, so a contract
+that fails its stamp means no edge, not a portal that will not boot; tested in a subprocess).
+Admission is in the contract's order; a missing peer address is refused; the body is read through
+`request.stream()` with the size cap so a chunked upload cannot exceed it; errors never echo
+request text (a canary test covers every method). `pause_research`: replay answered from the
+ledger before the hold check (so a retry after `/stop` still reads the stored outcome), then hold,
+role, freshness, insert `executing`, status read, `pause()` only if `running`, `done`; one
+`action_executed` per execution, none per replay; a race of five identical requests pauses once.
+`handshake`: `hold.held` is reported **true** when the file is unreadable ("treated as held");
+the brain choice goes through the new `ModelRegistry.peek`, which is `resolve()` without the
+fallback event and activity line, because `resolve()` on a down model would log a warning every
+20 s; the Ollama version probe is cached and runs off the loop.
+Deltas from the plan: (1) `budget.py` is complete here (the handshake reports the budget), and
+`brain.py` here holds the brain decision and the request helpers; A8 adds the route. (2) The
+registry gains `peek` (a small additive method, `registry/core.py`), not in the spec.
+(3) `edge_refused` events for admission-level refusals are coalesced to one per code per 5 s
+with a count: anything on the loopback can send bad credentials, and an uncoalesced event per
+attempt would let it flush the 500-record ring. (4) A rename commit (Step 10) happened before this.
+The shared harness `tests/buddy_conformance.py` runs the vendored cases against the real portal
+app (a fresh world per case; unknown `expect` keys fail the case). Mutation checks: changing the
+flattening prefix fails 2 cases; silencing the refusal trace fails 16. 74 conformance cases and
+65 edge tests pass here. R-BUDDY-98: 100 passed, 1 xfailed.
+Commit: `b69bbf9f` (arail).
+
+### Step 12 (A8, arail: brain.chat)
+`POST /brain/chat/completions` (SSE, `stream:false`, and `stream_options.include_usage` as nanobot
+sends them) and `GET /brain/models`. Steps 3 to 9 of section 5.6 run in `_core_brain_chat` off the
+event loop; steps 3 to 5 refusals become `edge_refused` events (no trusted identity yet), steps 6 to 9
+become one `model_call` record `refused_<code>` naming pseudonym and role. The slot, the turn count
+and the token count belong to a producer task that outlives the HTTP response, so a client that
+disconnects mid-answer cannot leak the slot. The response does not start until the first token
+arrives, so a backend that fails before it is a clean 424 with `X-Should-Retry: false`; after it the
+stream ends with the contract's `brain_failed` error chunk and `[DONE]`. The OpenAI SDK (nanobot's
+client) is used in tests to read the stream, the usage and an error. The worker thread runs in a
+copied context (F45; tested). Deltas: (1) a turn is **counted when the call is let into inference**,
+not at the budget check (the spec says "at admission"); a call refused because the model is busy costs
+nothing. (2) Usage rides on the final chunk with `finish_reason` (the spec's wording), not a separate
+`choices: []` chunk. (3) `finish_reason` is `length` when the completion used the whole `max_tokens`.
+127 conformance cases and 17 brain tests pass.
 
 ## Architect feedback required
 

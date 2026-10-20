@@ -371,9 +371,9 @@ def test_post_admission_refusals_are_not_coalesced(lab):
 # the portal around the edge
 # ---------------------------------------------------------------------------
 
-def test_the_four_edge_paths_exist_and_nothing_else_under_host(lab):
+def test_the_contracts_routes_exist_and_nothing_else_under_host(lab):
     paths = {p for p in lab.client.app.openapi()["paths"] if p.startswith("/api/host/")}
-    assert paths == {BASE + "/handshake", BASE + "/trace/record", BASE + "/hold_all", BASE + "/pause_research"}
+    assert paths == {BASE + m["path"] for m in CONTRACT["methods"].values()}
 
 
 def test_the_portal_boots_without_the_edge_if_the_contract_cannot_be_trusted():

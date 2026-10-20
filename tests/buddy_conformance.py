@@ -24,6 +24,9 @@ from fastapi.testclient import TestClient
 from arail import agent_trace, config, scheduler
 from arail.buddy_host import CONTRACT, CONTRACT_DIR, CONTRACT_SHA256, admission, brain, budget, ledger, link
 from arail.portal import host_edge_routes
+from arail.portal import scheduler as inference
+from arail.router.backends import BaseBackend, ModelResponse
+from arail.router.core import ModelRouter
 
 CASES_DIR = CONTRACT_DIR / "conformance"
 FAKE_PSEUDONYM = "p_0123456789"
@@ -80,6 +83,30 @@ def subset(actual: Any, expected: Any, path: str = "$") -> list[str]:
             out += subset(actual[i], v, f"{path}[{i}]")
         return out
     return [] if actual == expected else [f"{path}: expected {expected!r}, got {actual!r}"]
+
+
+class FakeOllama(BaseBackend):
+    """Stands in for OllamaNativeBackend: records what it is called with, streams the fake reply."""
+
+    def __init__(self, reply: str) -> None:
+        self.reply = reply
+        self.calls: list[dict] = []
+
+    def complete(self, *a, **kw):  # pragma: no cover - the edge only streams
+        raise NotImplementedError
+
+    def stream_complete(self, prompt, max_tokens=512, temperature=0.7, top_p=None, *, system=None, messages=None,
+                        response_schema=None):
+        self.calls.append({"system": system, "prompt": prompt, "max_tokens": max_tokens,
+                           "response_schema": response_schema})
+        mid = max(1, len(self.reply) // 2)
+        yield self.reply[:mid]
+        yield self.reply[mid:]
+        yield ModelResponse(text=self.reply, model="llama-ai-eng", tokens_used=12, backend="ollama_native",
+                            latency_ms=5.0)
+
+    def health_check(self):
+        return True
 
 
 class FakeResearcher:
@@ -156,6 +183,18 @@ class World:
         if used or calls:
             budget.default_budget()._seed(turns=int(used.get("turns", 0)), tokens=int(used.get("tokens", 0)), calls=calls)
 
+        self.backend = FakeOllama(CONTRACT["conformance"]["fake_reply"])
+        monkeypatch.setattr(brain, "build_router", lambda: ModelRouter.from_backend(self.backend, "ollama_native"))
+        if s.get("slot") == "busy":
+            import contextlib
+
+            @contextlib.asynccontextmanager
+            async def _busy(label="chat", *, acquire_timeout_s=None):
+                raise inference.InferenceSlotTimeout("busy")
+                yield  # pragma: no cover
+
+            monkeypatch.setattr(inference, "inference_slot", _busy)
+
         if s.get("fault") == "internal":
             def boom(*a, **kw):
                 raise RuntimeError("injected fault")
@@ -215,11 +254,42 @@ class World:
             problems += self.check_edge_only(key, want)
         return problems
 
-    def check_stream(self, resp, want: dict) -> list[str]:  # A8
-        raise NotImplementedError("brain.chat streaming is checked from A8")
+    def check_stream(self, resp, want: dict) -> list[str]:
+        from jsonschema import Draft202012Validator
+        problems: list[str] = []
+        ctype = resp.headers.get("content-type", "").split(";")[0].strip()
+        if ctype != want["media_type"]:
+            problems.append(f"media type {ctype!r} != {want['media_type']!r}")
+        frames = [f for f in resp.text.split("\n\n") if f.strip()]
+        if not frames or frames[-1].strip() != "data: [DONE]":
+            problems.append("the stream does not end with data: [DONE]")
+        chunk_schema = Draft202012Validator(CONTRACT["methods"]["brain.chat"]["response"]["stream"]["chunk"])
+        text, finish, usage = "", None, False
+        for f in frames[:-1]:
+            if not f.startswith("data: "):
+                problems.append(f"not an SSE data frame: {f[:60]!r}")
+                continue
+            chunk = json.loads(f[6:])
+            for err in chunk_schema.iter_errors(chunk):
+                problems.append(f"chunk violates the contract: {err.message[:100]}")
+            for ch in chunk.get("choices", []):
+                text += ch["delta"].get("content") or ""
+                finish = ch["finish_reason"] or finish
+            usage = usage or isinstance(chunk.get("usage"), dict)
+        if text != want["assembled_content"]:
+            problems.append(f"assembled content {text!r} != {want['assembled_content']!r}")
+        if finish != want["finish_reason"]:
+            problems.append(f"finish_reason {finish!r} != {want['finish_reason']!r}")
+        if want.get("final_usage") and not usage:
+            problems.append("no chunk carries usage")
+        if want.get("ends_with_done") is False:
+            problems.append("ends_with_done false is not a supported expectation")
+        return problems
 
-    def check_brain(self, want: dict) -> list[str]:  # A8
-        raise NotImplementedError("brain.chat is checked from A8")
+    def check_brain(self, want: dict) -> list[str]:
+        if not self.backend.calls:
+            return ["the fake brain was never called"]
+        return subset(self.backend.calls[-1], want, "brain_received")
 
     def check_edge_only(self, key: str, want: Any) -> list[str]:
         ring = agent_trace.ring(500)
@@ -230,6 +300,9 @@ class World:
             return [] if n == want else [f"ledger has {n} rows, want {want}"]
         if key == "lab_held_after":
             return [] if scheduler.jobs_halted() == want else [f"jobs_halted() is not {want}"]
+        if key == "budget_turns_used_after":
+            used = budget.default_budget().snapshot()["turns_used"]
+            return [] if used == want else [f"budget turns_used is {used}, want {want}"]
         if key == "trace":
             hits = [r for r in ring if not subset(r, want)]
             return [] if hits else [f"no trace record matches {want}"]
