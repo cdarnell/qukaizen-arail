@@ -214,6 +214,8 @@ New facts the VISION did not have:
 
 ## 3. Assumptions
 
+> **Addendum A (2026-10-20):** A8 is false at the pin; the turn carrier is replaced, see §A1.
+
 Each can be wrong. Each has a check.
 
 - **A1** The operator's ARAIL resolves profile `fast` (tab `agents`) to a local
@@ -296,6 +298,8 @@ of the qa-practice cards; the budget numbers in §5.6.
 
 ### 4.2 A question (win step 1)
 
+> **Addendum A (2026-10-20):** step 5 is superseded: the header and persona are composed when the transcript is built, not by the hook (§A1); Intake gains rules (§A4, §A7).
+
 1. Phone → Telegram → PTB `getUpdates` (gate open) → `_on_message` → ordered queue
    → `_process_message_update` (`telegram/runtime.py:1956-2049`).
 2. `is_allowed` (Buddy override): numeric id ∈ talkers. Media is not downloaded
@@ -325,6 +329,8 @@ of the qa-practice cards; the budget numbers in §5.6.
     and gate → sends → trace `reply_sent` with `e2e_ms`.
 
 ### 4.3 Proposal → card → confirm → pause (win steps 2–4)
+
+> **Addendum A (2026-10-20):** a lost pause answer is resent once automatically, and the code is never printed (§A5).
 
 **Rule path (the scripted step 2).** A confirmer's whole message matches
 `^(please\s+)?(pause|hold)\s+(the\s+)?(auto)?research(\s+run)?[.!]?$` (case-insensitive).
@@ -362,6 +368,8 @@ the fixed "needs a confirmer" line; trace `proposal_suppressed`.
    the edge answers from the ledger.
 
 ### 4.4 `/stop` (win step 5)
+
+> **Addendum A (2026-10-20):** `/stop` also passes a closed gate, and a late stop names its time (§A4 item 1).
 
 1. Any talker sends `/stop` → P2 regex → Intake.
 2. Intake writes Buddy's hold file (`on:true`, atomic) **before** anything else.
@@ -617,6 +625,8 @@ family, same rule as `app.py:10591-10597`. `research.status` = `researcher.statu
 does not close the gate: Buddy must still say "held".
 
 ### 5.6 `brain.chat`
+
+> **Addendum A (2026-10-20):** the carrier rules are tightened (§A1.4); `length` is never reported and the budget is re-checked after the slot (§A2).
 
 `POST /api/host/v1/brain/chat/completions` and `GET /api/host/v1/brain/models`
 (returns one model, `buddy-fast`). nanobot's provider uses
@@ -923,6 +933,8 @@ resolution `scripts/status.sh` uses (exact helper **not verified**).
 
 ### 5.13 The nanobot patch set (core diff)
 
+> **Addendum A (2026-10-20):** no new patch; the seam lock grows to 16 seam files plus the patched files (§A1.5).
+
 Three commits on `qukaizen/buddy-always-on`, in this order. Each adds a row to
 `UPSTREAM.md` (file, commit, sha256 after patch, reason). Pre-patch sha256 prefixes
 at the tag, for the reviewer: `__main__.py` `c8e8dce8576f9ea1`,
@@ -1066,6 +1078,8 @@ system-level test (§8.3 L3) is the backstop.
 
 ### 5.16 `buddy.nanobot_seam`: hooks and `install()` (P1)
 
+> **Addendum A (2026-10-20):** `before_iteration` no longer writes; `install()` gains R8 (two wraps) and the hook gains C5/C8 (§A1.3).
+
 `agent_hooks()` → `[]` (reserved). `turn_hook_factories()` → `[BuddyTurnHook.factory]`.
 
 `BuddyTurnHook(AgentHook)` (one per turn; `reraise=True` so a hook error aborts the
@@ -1125,6 +1139,8 @@ term cannot be paraphrased into a chip. The relaxation lives in Buddy's process.
 ARAIL's rule is unchanged.
 
 ### 5.17 `BuddyTelegramChannel` and Intake
+
+> **Addendum A (2026-10-20):** G4 rulings and new Intake rules (redaction, one turn in flight, `/stop` placement, no reply context) are in §A4 and §A7.
 
 `BuddyTelegramChannel(TelegramChannel)` in `buddy/src/buddy/channel.py`:
 
@@ -1186,6 +1202,8 @@ is `BUDDY_PSEUDONYM_SALT` (32 random bytes, hex, made by `buddy setup`). Raw ids
 never leave Buddy's process or files.
 
 ### 5.19 Proposals, nonce, approval record, card
+
+> **Addendum A (2026-10-20):** automatic resend of a lost answer, and the code is never printed (§A5).
 
 Store: `<home>/state/proposals.sqlite3` (0600, WAL, `synchronous=FULL`):
 `proposals(id TEXT PRIMARY KEY, action TEXT, requester_hash TEXT, nonce_sha256 TEXT,
@@ -1282,6 +1300,8 @@ manifest.world_sha256 == manifest.files["terms.json"]` (same law as
 "Buddy's qa-practice World does not match its seal. Buddy is not running." and exit 0.
 
 ### 5.22 Buddy home, config files, LaunchAgent
+
+> **Addendum A (2026-10-20):** `contextWindowTokens` is 200000, not 8192 (§A1.3 C7).
 
 | Path (default home `~/.qukaizen-buddy`, `0700`) | Mode | What |
 |---|---|---|
@@ -1407,6 +1427,8 @@ the VISION's fallback, and it fires disconfirming #2.
 ---
 
 ## 7. Failure modes
+
+> **Addendum A (2026-10-20):** F6, F16 and F34 are amended, and F46–F55 are added, in §A7.
 
 Every row has a test (§8). "Contain" says what limits the damage.
 
@@ -1619,6 +1641,8 @@ lesson, `../2026-09-20-buddy-front-and-center/SPRINT.md:74`).
 
 ## 9. Build order
 
+> **Addendum A (2026-10-20):** B7 splits into B7a and B7b, and the contract re-sync order is in §A6.
+
 Atomic commits, dependency order. Branches: `qukaizen/buddy-always-on`
 (qukaizen-buddy), this branch (qukaizen-arail), `qukaizen/ddac-qa-practice-world`
 (qukaizen-ddac). Nothing in `nanobot/` changes outside P0–P2.
@@ -1674,6 +1698,8 @@ have equal sha256 on both sides.
 ---
 
 ## 10. Tech debt
+
+> **Addendum A (2026-10-20):** D4 and D6 change, D15 closes, and D23–D26 are added (§A9).
 
 **Added (knowingly):**
 
@@ -1739,3 +1765,374 @@ allow-list) — that is disconfirming #4, stop-ship.
 | O5 | Accept that cards go only to the confirmer who asked (§2.4 item 9). | Nothing |
 | O6 | Accept sha256-pinned file sources for unversioned files such as `~/.claude/agents/qa.md`. | C1 |
 | O7 | In BotFather, turn "Allow groups" off for Buddy's bot. | Setup |
+
+---
+
+## Addendum A — builder gaps G1–G5
+
+**Date:** 2026-10-20
+**Inputs:** BUILD_LOG.md at `d913f526` ("Architect feedback required" G1–G5, "Remaining work"); built code at
+qukaizen-buddy `4eb49bca` (`qukaizen/buddy-always-on`) and qukaizen-arail `d913f526` (this branch).
+**Pin:** every nanobot `file:line` below is at `v0.3.5` = `1bb712d3`. The branch differs from the tag only by
+P0 (`__main__.py`) and P2 (`telegram/runtime.py:693`, one line, line count unchanged), so the line numbers are
+the tag's. Where this addendum and an earlier section disagree, this addendum wins; each superseded section
+carries a one-line pointer under its heading.
+
+### A0. Decisions in brief
+
+| Gap | Decision | Where |
+|---|---|---|
+| G1 | The carrier is two **instance-level wraps installed by `install()`** (new R8). There is no nanobot patch. `agent.context.build_system_prompt` returns Buddy's header + persona. `agent._build_transcript_input` returns windowed, scrubbed history. The builder's `build_transcript` wrap is accepted in kind but corrected in two ways: it must not drop messages, and per-turn values come from nanobot's own request context, not from a ContextVar set by a factory. | §A1 |
+| G2 | All ratified, plus one addition (the `brain_failed` chunk must be free of retry markers). A8's Step 12 deltas: Δ1 ratified with an atomic re-check, Δ2 ratified, Δ3 **reversed** (the edge never reports `length`). | §A2 |
+| G3 | Accepted as debt D23, with a duty at every pin move. P0 stays Buddy-only. | §A3 |
+| G4 | All ten ratified. Corrections to 1 (`/stop` also passes a closed gate; a late stop names its time) and 10 (the default label is never `answer`). Items 5 and 8 add members to the seam list. | §A4 |
+| G5 | The code is never printed. On a lost answer Buddy resends the stored approval record once, automatically. Telegram re-delivery also resends it. A new card is the human retry. | §A5 |
+| Rest | B7 splits: B7a (mechanism) now, against a test World; B7b after C3/C4. The contract changes additively, so A5 is re-run. Ten new failure modes, F46–F55. | §A6–§A8 |
+
+### A1. G1 — the turn carrier
+
+**A1.1 What is true at the pin.** This confirms the builder's G1 and adds the facts that constrain the fix.
+
+1. A `before_iteration` write to `messages[0]` or to history never reaches the request. `from_transcript`
+   deep-copies system + history into `accepted_messages` once, when the transcript is built
+   (`agent/context_governance.py:139-163`). Each iteration then sends `accepted_messages + raw[boundary:]`
+   (`:166-173`; `agent/runner.py:443-451`). Reads of `context.messages` at iteration 0 are faithful. Writes are lost.
+2. **The message count is load-bearing.** nanobot computes the H/Δ boundary as `1 + len(transcript_input.history)`
+   (`context_governance.py:150`) and the session save boundary from `transcript_input.message_count`
+   (`session/turn_continuation.py:145-154`, `:187-197`; `_save_turn` iterates `messages[skip:]`, `agent/loop.py:2183`).
+   Both come from the *input*, not from what the transcript builder returns. A builder that returns fewer messages
+   than `message_count` silently drops the assistant reply from the session and counts the current message as
+   accepted history. The builder's alternative as worded ("history is trimmed") would do exactly that.
+3. **The World block is persisted and replayed.** The runtime-context block is appended to the user message that
+   nanobot persists (`loop.py:705-711`, `runtime_context.py:120-145`). `get_history` replays it by default
+   (`loop.py:1887`; `session/manager.py:344-442`). Without a strip, each history turn carries a World block of up to
+   7,000 characters, and requests exceed the edge's 24,000-character cap within a few turns.
+4. **Nothing bounds history replay.** `loop.py:1887` calls `get_history` with no `max_messages`. nanobot bounds
+   growth by in-turn compaction (`context_governance.py:521-591`), and compaction calls the model through the
+   consolidator (`agent/memory.py:909-921`).
+5. nanobot binds a per-turn `RequestContext` that holds the inbound metadata, including Intake's stamps
+   (`loop.py:731-750`). It binds it before `runner.run` (`:1133`) and resets it afterwards (`:1223`); the getter is
+   `agent/tools/context.py:69-70`. Turn-hook factories are skipped silently when they raise, and are not run for
+   ephemeral turns (`agent/turn_hooks.py:51-52`, `:67-84`).
+6. Single call sites:
+   - `ContextBuilder` is constructed once (`loop.py:374`).
+   - `build_system_prompt` has one caller (`context.py:289`, inside `build_transcript`).
+   - `build_messages`, which the consolidator captured at `loop.py:436`, calls `self.build_transcript` (`context.py:245`).
+   - `_build_transcript_input` has one call site (`loop.py:1971`). Its result feeds the runner (`:1176`) and the save boundary.
+
+   Each of these is looked up on the instance at call time, so an instance attribute shadows it on every path.
+
+**A1.2 Options weighed.**
+
+| Option | For | Against | Verdict |
+|---|---|---|---|
+| (a) Instance-level wraps, installed by `install()` | No nanobot change. Acts once, at the source of the transcript, before nanobot copies it. So H, Δ, the save boundary and compaction rebuilds (`_summary_transcript`, `context_governance.py:420-436`) stay consistent by construction. Same kind of seam as R1/R2/R5 (public attributes of the live agent). | One wrap is on a private method. Six files join the seam lock (D4). | **Chosen** |
+| (b) P3: a patch in `runner.py` that rewrites `request_messages` on every iteration | Explicit on every request path | A fourth patch in the most volatile seam file. It rewrites a deep copy *after* compaction bookkeeping, so it must stay in step with `accept_request` (`runner.py:458-463`) at every rebase. It does not solve A1.1 items 2–4. | Rejected |
+| (c) Header check on the edge side only | No Buddy seam | Without a carrier the edge cannot know the trace id or identity. It cannot author Buddy's persona or "Built with Llama.". The 8.7 KB stock prompt would still be sent unless the edge discards `messages[0]`, which would make ARAIL the author of Buddy's prompt. | Rejected |
+
+**A1.3 The carrier, exactly.** `buddy.nanobot_seam.install()` gains **R8**, after R6 and before the exec guard arms.
+
+- **C1 System message.** `agent.context.build_system_prompt = <Buddy's composer>` (instance attribute). The composer
+  ignores its keyword arguments and returns `"BUDDY-TURN/1 " + header_json + "\n" + persona`. Nothing of nanobot's
+  stock prompt is computed: no identity, bootstrap files, tool contract, memory, skills or summary.
+  `build_transcript` stays nanobot's, so nanobot sets the message count and order by construction.
+- **C2 Per-turn values** come from `nanobot.agent.tools.context.current_request_context()`. `channel` must be
+  `"telegram"`. `metadata["buddy_trace_id"]` must be 16 hex. `metadata["buddy_identity"]` must be a valid
+  `{pseudonym, role}`. `response_schema` is `buddy.answer/v1` with the pinned World's slug enum (`null` in template
+  mode). The header is one-line JSON with compact separators, UTF-8.
+- **C3 Fail closed.** The composer raises `BuddySeamError` on any of these: no request context, wrong channel, a
+  missing or malformed stamp, no cached handshake attribution, or no live Buddy turn for this trace id (C5).
+  - The exception escapes `runner.run` before any request is built: `runner.py:310` runs before the `try` at `:316`.
+    nanobot then sends its fixed "Sorry, I encountered an error." (`agent/turn_delivery.py:336-344`).
+  - So a transcript built outside a Buddy turn cannot obtain a header: the consolidator's `archive_session` and token
+    probe (`memory.py:1053`, `:1186`), the SDK's `Nanobot.run`, or any caller upstream adds later.
+- **C4 G11.** Whenever the cached handshake says `brain.attribution == "Built with Llama"`, the persona ends with the
+  exact line `Built with Llama.`. T4 becomes a precondition of C1; C8 re-checks it.
+- **C5 Hook liveness.** `BuddyTurnHook.factory` registers its trace id in an in-process set; the hook's `on_finally`
+  removes it. C1 refuses a trace id that is not registered. So a factory that raised, and that nanobot then skipped,
+  means no model call at all, not an unrendered answer (F52).
+- **C6 History window.** `agent._build_transcript_input = <Buddy's wrapper>`. The wrapper calls the stock method and
+  returns `dataclasses.replace(stock, history=window(stock.history))`, so nanobot computes every boundary from the
+  windowed input. `window()` works on deep copies and does three things, in this order:
+  1. Removes a trailing runtime-context block from each `user` entry. It cuts from the last
+     `"\n\n" + RUNTIME_CONTEXT_TAG` to the end, and only when the content ends with `RUNTIME_CONTEXT_END`. The constants
+     are nanobot's own (`runtime_context.py:17-18`). The World block escapes brackets, so the tag cannot occur inside it.
+  2. Replaces `/(approve|deny)\s+\S+\s+\S+` with `/approve <id> <nonce>`. This is defence in depth; F49 makes Intake the
+     primary scrub.
+  3. Keeps the newest messages that fit both limits, starting at a `user` message:
+     - at most **8 messages**;
+     - at most the **character budget** `24,000 − len(system message) − len(current message with its World block) − 256`.
+
+  `ctx.runtime_context_blocks` is resolved before this call (`loop.py:1912` runs before `:1971`). The system message
+  length comes from C1's composer run on a dummy stamp of the same shape; every stamp has a fixed width.
+- **C7 No compaction.** `buddy configure` writes `contextWindowTokens: 200000` (nanobot's own default,
+  `config/schema.py:103`) instead of 8192.
+  - With C6, every request is at most 24,000 characters, which is at most 96,000 UTF-8 bytes.
+  - nanobot's estimator counts at most one token per byte plus 4 per message (`utils/helpers.py:719-760`).
+  - nanobot's input budget is 200,000 − 400 − 1,024 tokens.
+  - So `request_pressure` is always `None`, and nanobot's model-calling compaction cannot run.
+
+  `contextWindowTokens` reaches no request (§5.6 field list); the only real prompt limit is the edge's. S9 pins the value.
+- **C8 Verification, read-only.** At iteration 0, `BuddyTurnHook.before_iteration` runs before the request
+  (`runner.py:441` precedes `:443`) and asserts:
+  - **T5:** `messages[0]` has role `system`; its first line parses as the header and carries this turn's trace id
+    and identity; the rest equals the composed persona.
+  - `len(messages) ≤ 10`.
+  - `RUNTIME_CONTEXT_TAG` occurs only in the last message.
+  - No message matches the confirm pattern.
+  - The summed text is ≤ 24,000 characters.
+  - **T4:** "Built with Llama." is present when required.
+
+  A failure raises (`reraise=True`), which aborts the turn before the request. `before_iteration` writes nothing.
+  This replaces §5.16's `before_iteration` bullet.
+- **R8 install checks.** After assignment, both attributes are Buddy's functions. `type(agent.context)` is
+  `ContextBuilder`. The composer's output for a dummy stamp validates against the contract's header schema.
+  Failure is a fixed message and exit 0, like R1–R7.
+
+**A1.4 What the edge's `turn_header_invalid` check must see.** This is step 5 of §5.6: contract `turn_header`, ARAIL
+`buddy_host/brain.py:226-245`.
+
+1. `messages[0].role == "system"`. *New:* today `parse_header` reads `messages[0]` whatever its role.
+2. No message after index 0 has role `system`. *New:* otherwise the flattening would put a `### system` block into the prompt.
+3. The text of `messages[0]` is a string, or text parts joined by LF. Its first line, up to the first LF, is
+   `BUDDY-TURN/1 ` followed by one-line JSON that is valid against the header schema. `response_schema` is
+   ≤ 4,096 bytes and uses only local `#` refs. *As built.*
+4. The rest after that LF is not empty after stripping whitespace. *New.*
+
+Any failure gives 422 `turn_header_invalid` and one coalesced `edge_refused` event with no identity (unchanged). The
+position is unchanged too: after size (step 4), before hold (step 6). The edge cannot tell Buddy's persona from
+nanobot's stock prompt. That is proven on Buddy's side (A1.6), not guessed at the edge.
+
+**A1.5 Seam lock and UPSTREAM.md.** No nanobot patch is added. UPSTREAM.md's patch table stays P0–P2, and
+`buddy/tests/test_upstream_md.py` keeps asserting it. `buddy/src/buddy/pins/nanobot.pin.json` changes as follows.
+
+- `seam_files` gains six files: `nanobot/agent/context.py`, `nanobot/agent/context_governance.py`,
+  `nanobot/agent/tools/context.py`, `nanobot/agent/turn_hooks.py`, `nanobot/session/turn_continuation.py` and
+  `nanobot/session/manager.py`. That makes 16 seam files plus 3 patched files, so 19 files are hashed at start (was 13).
+- `seams` entries, per file:
+
+  | File | Entries |
+  |---|---|
+  | `agent/context.py` | `build_transcript calls self.build_system_prompt`; `build_messages calls self.build_transcript`; `TranscriptInput fields and message_count` |
+  | `agent/loop.py` | `ContextBuilder built once`; `_build_transcript_input: one call site, result feeds runner and save boundary`; `get_history at turn start`; `bind/reset_request_context around runner.run`; `follow-ups to a busy session go to the pending queue` |
+  | `agent/runner.py` | The old `before_iteration before request` entry becomes `transcript built before before_run; before_iteration reads the raw transcript before the request`. Add `finish_reason length triggers recovery`. |
+  | `agent/context_governance.py` | `from_transcript copies H once`; `request_messages = H + Δ` |
+  | `agent/tools/context.py` | `current_request_context` |
+  | `agent/turn_hooks.py` | `factory skipped on raise; none for ephemeral` |
+  | `session/turn_continuation.py` | `save boundary from message_count` |
+  | `session/manager.py` | `get_history replays runtime context` |
+  | `channels/telegram/runtime.py` | Add `_on_callback_query`, `_add_reaction`, `_remove_reaction`, `_extract_reply_context` (§A4, F54) |
+
+- UPSTREAM.md's "Upstream-PR candidates" list gains two items:
+  - a per-request system-prompt provider (removes C1's wrap);
+  - a caller-owned history window, with a runtime-context replay switch, on `AgentLoop` (removes C6's wrap).
+    `get_history` already takes `max_messages`, `max_tokens` and `include_runtime_context` (`manager.py:344-351`).
+
+**A1.6 The proof: U-HDR-03, `buddy/tests/test_turn_carrier.py` (B7a, completed in B10).**
+
+*Setup.*
+- It reuses `buddy/tools/capture_brain_chat.py`'s loopback fake server.
+- It runs a real `AgentLoop` built from Buddy's generated `nanobot.json`, with the fake server as `apiBase`.
+- It installs R2, R5, R6 and R8 through Buddy's real `install()` code path: the same functions, not test copies.
+- It uses a test World fixture and a test channel registered as `telegram`.
+- Two `InboundMessage`s on one session key each carry Intake's three stamps, with different trace ids. They travel
+  over the bus through AgentLoop's normal message path.
+- They do **not** go through `Nanobot.run`. That path cannot carry Intake's metadata, and U-HDR-05 shows it produces
+  zero requests.
+
+*For each of the two captured request bodies, assert:*
+
+a. `messages[0].role == "system"`. Its first line is `BUDDY-TURN/1 ` plus JSON that validates against the vendored
+   contract's header schema. `trace_id` and `identity` equal that turn's stamps, and turn 1's trace id differs from turn 2's.
+b. The rest of `messages[0].content` equals the composed persona byte for byte and ends with `Built with Llama.`
+   (attribution cached as Llama). A second run with attribution `null` has neither that line nor a refusal.
+c. **The stock prompt is absent.** Render nanobot's own prompt for the same workspace through the unwrapped class
+   method, `ContextBuilder.build_system_prompt(ContextBuilder(ws))`. No line of it that is 20 characters or longer
+   appears in any message of either body. The check is derived from nanobot, not from a hard-coded marker list.
+d. Turn 2's `messages` are exactly `[system, user₁, assistant₁, user₂]`. `user₁` has no runtime-context block.
+   `RUNTIME_CONTEXT_TAG` occurs once per body, in the last message.
+e. The edge's validator accepts both bodies. Turn 2's body becomes the conformance case
+   `brain-chat-nanobot-request.json`, replacing the hand-spliced one, and both FakeHost and ARAIL's real routes must
+   accept it. The stock capture stays as the refused case.
+f. After turn 2, nanobot's session store holds exactly `[user₁, assistant₁, user₂, assistant₂]` (F46).
+
+Mutation checks: removing either wrap must fail (a)–(d) or (f).
+
+*Companion tests:*
+
+| Test | Asserts |
+|---|---|
+| **U-HDR-04** window | With 6 prior pairs, turn 7 sends 1 + 8 + 1 messages, starting at a user message. With long prior messages, history shrinks to fit the character budget. The session still holds every message. |
+| **U-HDR-05** fail closed | `Nanobot.run`, `agent.context.build_messages(...)` outside a turn, and `consolidator.archive_session(...)` each produce zero requests. |
+| **U-HDR-06** no compaction | For the largest request C6 can build (4,096-character text, a full World block, 4-byte characters, a full window), nanobot's `ContextGovernor.request_pressure` returns `None`. A 7-turn session sends exactly 7 requests. |
+| **U-HDR-07** hook absent | A factory forced to raise gives zero requests and nanobot's fixed error sentence, traced `reply_sent error`. |
+
+**A1.7 Rows affected.**
+- B1 (contract delta §A8 and the re-captured case), then A5 (re-vendor), then A8b (A1.4 at the edge).
+- B4b: C7 in `configure` and S9.
+- B7a: composer, `persona.py`, `turn_hook.py` with C5 and C8.
+- B10: R8 in `install()`; the upstream-mode plugin's flag skips R8 like R1–R7.
+- ARAIL backlog D15 ("G1") is closed by this section; the builder updates it.
+
+### A2. G2 rulings, and A8's Step 12 deltas
+
+| # | Builder's reading | Ruling |
+|---|---|---|
+| G2.1 | The schema accepts any `tools` array and any part with a string `type`. Step 3 refuses with `tools_not_allowed` / `content_not_allowed`. | **Ratified.** Every §5.4 code must be reachable, and the 256 KiB body cap bounds what the schema lets through. |
+| G2.2 | `X-Should-Retry: false` on every error response | **Ratified.** nanobot reads the header first (`providers/openai_compat_provider.py:1870-1877`, `providers/base.py:1012-1015`). **Addition:** the mid-stream `brain_failed` chunk arrives on a 200 stream with no header, so nanobot falls back to its text markers (`base.py:1017-1028`). Its fixed message must pass the same marker oracle in C-ERR-01. |
+| G2.3a | A content array is flattened by joining its text parts with LF | **Ratified.** |
+| G2.3b | A last message that is not `user` is `schema_invalid` | **Ratified.** |
+| G2.3c | `approval_id != proposal.id` is `schema_invalid` | **Ratified.** It is a structural self-contradiction; `approval_conflict` stays for ledger conflicts. |
+| G2.3d | `max_tokens` falls back to 400; `max_completion_tokens` is honoured | **Ratified.** When both are present the smaller applies (as built, `brain.py:258-260`). |
+| G2.3e | A brain the edge refuses shows in the handshake as `available:false`, with the code in `reason` | **Ratified.** |
+| G2.3f | `trace.record` is accepted while held or airgapped | **Ratified.** It records the stop and the flip, with no model call and no egress. |
+| G2.3g | `hold_all` is accepted when the hold state is unreadable | **Ratified** (reductive). |
+| G2.3h | The 422 carries `error.record_index` | **Ratified** (§5.7 already says so). |
+| A8 Δ1 | A turn counts when it is let into inference, not at the budget check | **Ratified with a correction.** The check at step 9 (`host_edge_routes.py:270`) and the count after the slot (`:295`) are separate, so calls queued on the slot can overshoot the cap. Count with an atomic check-and-count after the slot is acquired (refusal `budget_exhausted`, as a model-call record). Re-check `lab_mode()` at the same point, since the slot wait can be 8 s. Test I-EDGE-14: two concurrent calls at `turns_used = 299` give one ok and one `budget_exhausted`. |
+| A8 Δ2 | Usage rides on the final chunk with `finish_reason` | **Ratified** (§5.6 wording; the OpenAI SDK test reads it). |
+| A8 Δ3 | `finish_reason: length` when the completion used all of `max_tokens` (`host_edge_routes.py:339`) | **Reversed.** nanobot treats `length` as "continue". It appends its own continuation prompt and calls again, up to 3 times (`runner.py:72`, `:631-655`). One Buddy turn becomes several admitted model calls, each on a prompt nanobot wrote and each under the turn's header. The edge reports `stop` for every completed answer. Truncation stays visible in the model-call record (`tokens_out == max_tokens`), and Buddy's parser turns truncated JSON into an abstain. The contract and `docs/buddy-edge.md` state this deviation from OpenAI (F55, D26). |
+
+### A3. G3 ruling
+
+**Accepted. P0 is unchanged.**
+- The three deselected tests (`tests/webui/test_gateway_webui_smoke.py`) start a WebUI gateway. Buddy removes that
+  transport (R1) and its bind guard refuses it.
+- A narrower P0, inert for configs that are not Buddy's, would give a stock, unguarded nanobot to anything that edits
+  the LaunchAgent's `--config`. That is the off switch the builder rightly refused.
+- The plugin's guards stay as built: every listed id must exist, the list must equal the tests in files that spawn
+  `python -m nanobot`, and the pytest header says how many are deselected.
+- A spawn the regex misses still fails loudly (exit 2), so no deselection can be silent.
+
+**Debt D23.** Coverage of nanobot's WebUI gateway path stays upstream's, not Buddy's. Triggers to pay it down:
+(a) any sprint that enables the WebUI, the websocket channel or a second channel in Buddy; P0 then gets a narrower,
+tested form. (b) Every pin move: UPSTREAM.md records that the three tests passed at the bare new tag (upstream CI, or a
+local run with P0 reverted) before P0 is re-applied.
+
+### A4. G4 rulings (§5.17)
+
+| # | Builder's reading | Ruling |
+|---|---|---|
+| 1 | `/stop` skips rate (4) and stale (6) | **Ratified and corrected** in three ways. **(i) Closed gate.** A `/stop` from a talker in a DM also passes branch 1 (gate closed). During the ≤ 15 s teardown PTB still hands over updates it has fetched, and those are normally confirmed to Telegram by its next long poll, so an update Intake drops is gone. A stop must never be lost. New order: 2 (identity), 3 (DM), `/stop`, then 1, 4, 5, 6 and the rest. The hold file is written and `hold_all` is attempted (the edge accepts it airgapped, conformance case 096). The closed gate suppresses the reply, traced `outbound_suppressed gate_closed`. **(ii) Late stop.** A stale `/stop` (Telegram `date` more than 600 s old) is honoured in full, but its reply names the original time: "Held. Your /stop from HH:MM arrived late; Buddy and the lab's agents are now on hold. Resume both at the desk." A lab hold that lands hours later must not look like a fresh action. **(iii) Repeats.** A repeat `/stop` within 60 s of a successful `hold_all` does not call the edge again. |
+| 2 | `/status` and `/help` skip 10–12 | **Ratified.** They are still rate-limited. |
+| 3 | A shared location counts as media | **Ratified.** A venue also matches `filters.LOCATION` (`telegram/runtime.py:706-716`) and follows the same rule. Contacts, polls and stickers have no upstream handler, so they never arrive. |
+| 4 | The daily cap has its own sentence | **Ratified.** |
+| 5 | A tap from an unknown sender is counted, not acknowledged | **Ratified.** `_on_callback_query` joins the seam list (§A1.5). |
+| 6 | `/new` marks the session archived before calling `cmd_new` | **Ratified.** C3 is now a second barrier: `archive_session` builds its prompt through `build_messages` and would raise. |
+| 7 | The stale reply names its cause only when the gate recorded one | **Ratified.** |
+| 8 | Reactions are disabled | **Ratified.** `_add_reaction` and `_remove_reaction` join the seam list. |
+| 9 | Unknown slash commands are left to nanobot's router | **Ratified.** The router replies with fixed text and never calls the model (`command/router.py:110-163`). The only user text it echoes is the sender's own command token, at most 33 characters. |
+| 10 | `reply_sent` reason `refuse` for rate limits, media and needs-confirmer; `help` for `/new` | **Ratified with two rules.** **(i)** Every Intake `refuse` reply has exactly one companion record with the same trace id that names the cause: `inbound_refused <reason>`, or for needs-confirmer, `proposal_suppressed requester_not_confirmer`. Test U-INT-LABEL. **(ii) Correction:** `send()` labels an outbound with no note and no `buddy_reply_reason` as `answer` (`buddy/src/buddy/channel.py:206`). The default must be `error`; only the renderer sets `answer`, through `note_reply` (F53). |
+
+### A5. G5 ruling (§4.3 step 6, §5.19, F6)
+
+1. **The code is never printed** in the card text. Card text is what nanobot copies into reply context
+   (`telegram/runtime.py:1687-1709`), what Telegram shows in notification previews, and what forwards carry. The
+   button label stays the only place the plaintext nonce exists.
+2. **Re-rendering the same card is impossible by design**, because only `sha256(nonce)` is stored. An `approval_id`
+   is bound to one record forever: a new nonce under the same id is `approval_conflict` at the edge.
+3. **Automatic resend.** This applies when the edge call for a confirmed proposal ends in `EdgeUnreachable`, a timeout,
+   or `EdgeProtocolError` — a lost answer, not a refusal.
+   - Buddy waits 2 s and resends the stored write-ahead record **once**: byte-identical body, same `approval_id`.
+   - The resend falls inside the edge's 60 s freshness window (5 s timeout + 2 s).
+   - It is part of the same human confirm, not a new action. §5.19's "no automatic resubmission at startup" stands.
+   - There is no resend while Buddy's hold is on.
+   - If the first call landed, the edge answers from its ledger (`replayed: true`); if not, it executes once.
+4. **If the answer is still lost,** the state becomes `edge_unknown` and the reply is "The lab did not answer. Check
+   research at the desk; if it is still running, ask again for a new card."
+   - A Telegram re-delivery of the same update resends the stored record (as built, F3).
+   - A new card is the human retry; `pause` is idempotent on the research state.
+5. **F6 tests**, against FakeHost now and the real edge in Phase I:
+
+| Test | Scenario | Expected |
+|---|---|---|
+| **I-CRASH-02a** | The answer is lost after the edge acted | Exactly 2 calls with identical bodies, the second `replayed: true`. One ledger row, one `action_executed`, reply "Research paused…", state `executed`. |
+| **I-CRASH-02b** | The edge is down for 90 s | Exactly 2 calls, the fixed reply, state `edge_unknown`. A new card's tap gives `paused` or `already_paused`, and `pause()` ran at most once. |
+| **I-CRASH-02c** | A refusal (`held`, `stale_approval`, `role_not_confirmer`) | Exactly 1 call. |
+| **I-CRASH-02d** | Restart with a `confirmed` row | 0 edge calls until a human event. |
+| **U-NONCE-03** | Every outbound message body, cards included | No 16-hex string. |
+
+### A6. Remaining work: what needs a decision
+
+| Row | Decision |
+|---|---|
+| B2 | None. It is blocked on the operator (C2/C3). It hashes the seam list of §A1.5. The World pin's `repo` stays `cdarnell/qukaizen-dac`, the frozen GitHub name. |
+| B7 | **Split.** **B7a, now,** against a test World fixture under `buddy/tests/fixtures/` (a hand-built bundle whose hashes pass S7): the composer and `persona.py`, the two wrap functions, `turn_hook.py` (T1–T5, C5, C8), `answer.py` (parse, render, chips, abstain) and `world.py`'s provider code. **B7b, after B2 and C4:** load the real pin, tune K on the dev set, and settle the persona wording. No persona wording or K tuning happens before C4's sha256 is in SPRINT.md, so §8.4's pre-registration holds. |
+| B10 | Unblocked by B7a. `install()` gains R8. P1 is as specified. |
+| B11b | `qa_harness` builds through the same `install()`, R8 included, registers its test channel as `telegram`, and publishes Intake-stamped messages on the bus. It never uses `Nanobot.run`, which C3 refuses. |
+| Phase I | I1 runs with the test World after B10/B11b, and again with the real pin after B2/B7b. I2 runs after the contract delta (§A8). I3 is unchanged. |
+
+**Order:**
+1. B1d (contract delta) → A5d (re-vendor; equal sha256 on both sides) → A8b (A1.4, A2 Δ1 and Δ3).
+2. B4b (C7) → B8b (F49, F50, F54, G4 corrections) → B9b (§A5).
+3. B7a → B10 → B11b → I1, I2, I3.
+4. After C2–C4: B2 → B7b → I1 again.
+
+The builder files D23–D26 in `sprints/BACKLOG.md` and `buddy/docs/DEBT.md`, and closes D15.
+
+### A7. Failure modes: amendments and additions to §7
+
+**Amended:**
+
+- **F6**, pause side: containment is §A5 (one automatic resend of the stored record, then `edge_unknown` and the desk).
+  Tests I-CRASH-02a–d.
+- **F16**: Intake redacts confirm strings and live nonces before publishing (F49). The history window scrubs again
+  (C6), and C8 asserts none remain. "T-hook scrubs" is withdrawn.
+- **F34**: C1 composes the carrier when the transcript is built. The edge requires `messages[0]` to be `system` and
+  accepts no other `system` message (A1.4). Tests U-HDR-03, C-HDR-01..03.
+
+**Added:**
+
+| # | Failure | Detection | Containment | Test |
+|---|---|---|---|---|
+| F46 | **The carrier changes the message count.** Assistant replies go missing from the session, and the current message is counted as accepted history. | Session contents after a turn; C8 length check | C1 leaves `build_transcript` to nanobot; the window acts on `TranscriptInput` (C6) | U-HDR-03(f), U-HDR-04 |
+| F47 | **A transcript built outside a Buddy turn gets a header:** the consolidator's archive or token probe, the SDK `run`, or a future upstream caller. | — | C3: without a Buddy-stamped request context the composer raises; the edge refuses requests with no header | U-HDR-05 |
+| F48 | **In-turn compaction calls the model under the turn's header** (`context_governance.py:521-591`, `memory.py:909-921`). | Two model-call records for one trace id | C6 window + C7 `contextWindowTokens`, so `request_pressure` is always `None` | U-HDR-06 |
+| F49 | **A confirm string or a live nonce inside an ordinary message is published** — typed mid-text, pasted bare, or carried in by reply context — and so is stored at rest in `sessions.sqlite3` and sent in the edge request. | Grep of request bodies and sessions (S-LEAK-02) | Before publishing, Intake works on the fully assembled content. It replaces `/(approve\|deny)\s+\S+\s+\S+`, and any 16-hex token whose sha256 equals a stored proposal's `nonce_sha256`. | U-NONCE-02 |
+| F50 | **A follow-up sent while a turn is running is injected into that turn** (`loop.py:1336-1372`). It is answered under the first message's trace id, because the header cannot change mid-turn. | `inbound_accepted` with no model call of its own | One turn in flight per chat. A non-command text that arrives before the previous trace's `reply_sent` or `outbound_suppressed` (or within 60 s) gets "One message at a time. I am still on your last one." and `inbound_refused busy`. Priority commands are unaffected. | U-INT-BUSY; I-INJECT-01 (two quick messages: 2 model-call records, 2 trace ids, no pending-queue routing) |
+| F51 | **The edge accepts a malformed carrier:** the header in a non-`system` message, a later `system` message that reaches the prompt as `### system`, or an empty persona. | Conformance | A1.4 rules 1, 2 and 4 | C-HDR-01..03 |
+| F52 | **Buddy's turn hook is absent for a turn** (its factory raised and nanobot skipped it, `turn_hooks.py:67-84`), so the model's raw output goes out unrendered. | A model-call trace with no `citation_check` | C5: no registered hook means no header, so no request | U-HDR-07 |
+| F53 | **An unrendered outbound** (nanobot's error sentence, a router reply) **is traced as `reply_sent answer`.** | Lanes view | The default label is `error`; `answer` is set only through `note_reply` | U-LABEL-01 |
+| F54 | **Reply context copies the replied-to text, plus the sender's Telegram username or first name, into the prompt** (`telegram/runtime.py:1687-1709`, inserted at `:1998-2008`). | Request capture | `BuddyTelegramChannel._extract_reply_context` returns `None`; in S1 Buddy answers the message on its own | U-REPLYCTX-01 |
+| F55 | **`finish_reason: length` makes nanobot call again** on its own continuation prompt (`runner.py:631-655`). | Several model-call records per trace id | The edge reports `stop` (§A2 Δ3) | I-EDGE-13 |
+
+### A8. Contract delta (B1d), then §9's re-sync rule
+
+Every change is additive or tightening; `buddy.host/v1` keeps its name.
+
+1. `turn_header`: rules 1, 2 and 4 of A1.4. Cases C-HDR-01..03.
+2. `brain.chat` response: a completed answer always ends with `finish_reason: "stop"`, with usage on that chunk;
+   `length` is never sent, and the contract states this as a deviation from OpenAI. Case: a fake brain that uses all of
+   `max_tokens`.
+3. `brain.chat` budget: a turn is counted, with an atomic re-check of the cap, when it is let into inference. The
+   concurrency is tested in ARAIL (I-EDGE-14); the conformance DSL cannot express it.
+4. `trace.record`: `inbound_refused` gains reason `busy`. Case: one record with it, accepted. (`self_check_failed`
+   already admits `r8` and `t5`, pattern `^[rt][0-9]{1,2}$`.)
+5. Conformance: `brain-chat-nanobot-request.json` is replaced by U-HDR-03's turn-2 capture. The stock capture stays as
+   the refused case.
+
+A5d then re-vendors. Both suites must pass the same cases, and `scripts/sync-buddy-contract.py --check` must report
+equal sha256.
+
+### A9. Tech debt delta (vs §10)
+
+| # | Debt | Trigger that pays it down |
+|---|---|---|
+| D4 (grows) | 16 seam-locked files (was 10). Two instance wraps, one of them on a private method (`AgentLoop._build_transcript_input`). Four more private overrides in the channel. | Unchanged, plus the two upstream-PR candidates of §A1.5. |
+| D6 (same kind) | The header still rides in the system message; a wrapped `build_system_prompt` now composes it. | Upstream per-request metadata, or a system-prompt provider. |
+| D15 (ARAIL backlog) | Closed by §A1. | — |
+| D23 | Three upstream WebUI gateway smoke tests are deselected under P0 (§A3). | WebUI or a second channel in Buddy; and every pin move. |
+| D24 | In Buddy's nanobot, `contextWindowTokens` is a switch (compaction off), not a context size. The edge's 24,000-character cap is the only prompt limit, and the window is sized to it. | ARAIL reports the brain's context size in the handshake; both limits are then derived from it. |
+| D25 | nanobot's session store keeps every message until `/new`; only replay is windowed. | An S2 retention policy, or a session-size alarm. |
+| D26 | The edge reports `stop` for token-capped answers, a deviation from OpenAI (§A2 Δ3). | nanobot makes length recovery configurable. |
+
+**Net:** still positive, as §10 said. The stock prompt, memory and skills now really never reach the model, and
+compaction calls are impossible rather than merely unlikely.
+
+### A10. What this reopens
+
+**Nothing at the VISION or §0 level.** The three patches, the loopback edge, structured-output proposals and the
+gates all stand.
+- G1 changes the mechanism (transcript-time wraps instead of a per-iteration hook) and grows the seam surface (D4).
+- The contract changes additively and needs the §9 re-sync.
+- Operator items are unchanged. O4's budget numbers hold only because the window (C6) keeps a turn near §5.6's
+  2,000-token estimate.
