@@ -51,7 +51,7 @@ Status key: `todo` · `done <sha>` · `BLOCKED (reason)`.
 | 4 | A2 | arail | `agent_trace.py`, `portal/app.py`, `portal/templates/admin.html` + tests | `recent`, model-call counting, `related`, "Buddy on the phone" block | lanes/endpoint tests | done `75ce05c5` |
 | 5 | A3 | arail | `scheduler.py`, `portal/scheduler.py`, `portal/app.py`, `registry/core.py` + tests | `halt_load_failed`, `inference_slot(acquire_timeout_s)`, presence skip, fast-path prefixes, `is_cloud_entry` | R-PRES-01 style tests | done `c9762089` |
 | 6 | A4 | arail | `router/core.py`, `router/backends.py` + tests | `response_schema` pass-through; Ollama `format` | byte-identical-request test per existing caller path | done `658e9880` |
-| 7 | A5 | arail | `buddy_host/contract/*`, `scripts/sync-buddy-contract.py` + tests | Vendor contract + conformance + `PROVENANCE.json`; sibling-free check | check test | todo |
+| 7 | A5 | arail | `buddy_host/contract/*`, `scripts/sync-buddy-contract.py` + tests | Vendor contract + conformance + `PROVENANCE.json`; sibling-free check | check test | done `80c34c1a` |
 | 8 | A6 | arail | `buddy_host/{__init__,link,__main__}.py`, `arailctl` + tests | `arailctl buddy link/unlink/status` | U-LINK, U-PERM | todo |
 | 9 | A7 | arail | `portal/host_edge_routes.py`, `buddy_host/{admission,events,ledger}.py`, `app.py` + tests | admission, handshake, trace.record, hold_all, pause_research + ledger | conformance run, I-EDGE | todo |
 | 10 | A8 | arail | `buddy_host/{brain,budget}.py`, routes + tests | brain.chat (header, flatten, brain check, budget, slot, SSE) | conformance run, I-EDGE | todo |
@@ -163,6 +163,21 @@ a `git archive` snapshot before the change, and compared on every run; a schema 
 one key (`format`). Legacy backends (no `**kw`) keep working; a schema sent to one raises
 TypeError and is traced once. 39 tests.
 Commit: `658e9880` (arail).
+
+### Step 7 (A5, arail: vendor the contract)
+`src/arail/buddy_host/contract/` = the contract plus its 126 cases byte for byte (127 files)
+and `PROVENANCE.json` (`arail.vendor-stamp/v1`, source commit `fcddf1e2...`, per-file sha256,
+`tree_digest` = sha256 over the sorted lines `"<path> <hex>\n"`). `scripts/sync-buddy-contract.py`:
+`--from` copies and stamps (refuses a dirty source; removes stale cases), `--check` is
+sibling-free (edited, missing, extra, tampered-stamp and missing-stamp all exit 1) and with the
+sibling present also compares bytes (exit 3 on drift, a one-line note when only the source commit
+moved). `--vendor-dir` exists so the tests can run against copies. `arail.buddy_host`'s
+`__init__` loads the contract once and raises `ContractStampError` on a mismatch; the portal
+registration in A7 must catch that and serve no edge routes rather than fail to boot.
+`pyproject.toml` gets package-data for the vendored JSON. 19 tests, including a real
+`--check` against the sibling checkout in this session folder.
+Commit: `80c34c1a` (arail). (The first version of this commit lacked the BUILD_LOG update its
+message promised; it was amended before anything else was committed.)
 
 ## Architect feedback required
 
