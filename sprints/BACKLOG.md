@@ -2157,3 +2157,35 @@ earlier router. Either way it is outside nucleus.
 
 The fallback in §7.2 remains valid for CI: CI runs `tests/nucleus` alone, on ubuntu, where `_auto_detect`
 never picks `mlx`.
+
+---
+
+## Buddy always-on (S1): tech debt D1 to D14
+
+**Filed by:** `sprints/2026-10-20-buddy-always-on/` (ARCHITECTURE.md §10, filed at build step A9).
+Fourteen deliberate deferrals the design accepted knowingly. Each row names the trigger that pays it down.
+
+| # | Debt | Trigger that pays it down |
+|---|---|---|
+| D1 | **No OS boundary.** Buddy runs as the operator. S1 limits what the model can do, not what Buddy's own code can do. | The first tool that runs a command or writes outside Buddy's home: a container sprint. |
+| D2 | **Two hold flags** (Buddy's `<home>/state/hold.json` and ARAIL's `halt.json`); resume needs two desk actions. | S2's paperagents `arail-agent` runtime with `haltPath`, or one desk "resume Buddy and lab" control. |
+| D3 | **Unauthenticated portal routes** stay reachable by any local process, including a compromised Buddy. The edge is the portal's first per-request credential and closes none of that. | Any Buddy tool, or the container, or the portal-auth sprint, whichever comes first. |
+| D4 | **Fast-changing upstream seam.** Patches to nanobot plus a seam lock over the files Buddy depends on; every upstream release needs a review. | Disconfirming #5 (a rebase takes more than a day): re-evaluate the base. Upstream PRs shrink the patch set. |
+| D5 | **Private-method overrides** in `BuddyTelegramChannel`. | Upstream accepts a channel intake hook. |
+| D6 | **Turn metadata rides in a system-message header**, because nanobot's provider has no per-request metadata. | Upstream per-request headers or `extra_body`. |
+| D7 | **The edge flattens messages into one prompt**; ARAIL's Ollama backend ignores `messages` and `temperature`. | An ARAIL backend task to send real chat messages and options. |
+| D8 | **Two Buddy loops** (the desk `BuddyAgent` and the phone) in one lane. | Disconfirming #6, or S2's "desk as a channel". |
+| D9 | **`agent_trace` v2**; 3D.EVAL reads v1 by name. | 3D.EVAL sprint 2: its adapter accepts v1 and v2. (Notice to 3D.EVAL is relayed by the orchestrator, not made from this repo.) |
+| D10 | **ARAIL's own `halt.json` fails open when corrupt**; only the Buddy edge compensates (`scheduler.halt_load_failed()`). | The next ARAIL hardening sprint. |
+| D11 | **`api.telegram.org` on the shared consent allowlist**; other ARAIL agents could auto-approve fetches there. | Per-agent consent scoping. |
+| D12 | **launchd logs in `~/.nanobot/logs/`** (nanobot's installer hard-codes the path). | Upstream log-path option, or Buddy's own plist writer. |
+| D13 | **Lanes `recent` is 50 records inside a 500-record ring.** Long sessions evict. | The W5-driven lanes rewrite. |
+| D14 | **Sleep detection relies on macOS clock semantics.** | Linux becomes a tested platform. |
+
+**Added during the build (BUILD_LOG.md "Architect feedback required"):**
+
+| # | Debt | Trigger |
+|---|---|---|
+| D15 | **The turn header cannot be written by a `before_iteration` hook at nanobot v0.3.5** (the runner sends the compaction state's accepted copy of the system message). Resolution pending the architect. | G1 in BUILD_LOG.md. |
+| D16 | **Buddy's `link.json` is a second cross-repo file shape** (`qukaizen-buddy.link/v1`), written by ARAIL and read by Buddy, outside the contract. | Move it into the contract the next time the contract version changes. |
+| D17 | **Admission-level refusals are coalesced** to one `edge_refused` event per code per 5 s, so a flood cannot flush the trace ring; the count is in `attrs`. | Per-caller rate limiting once the portal has real auth (D3). |

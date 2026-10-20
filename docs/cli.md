@@ -744,6 +744,19 @@ another `pkb reembed` already running against this root) · `2` the given
 DaC WorldBundle ops — passthrough to `python -m arail.world_mount`.
 Unchanged.
 
+### `buddy <verb>`
+
+Link a Buddy (the always-on QA expert you reach from your phone) to this lab through the
+loopback edge `buddy.host/v1` — passthrough to `python -m arail.buddy_host` (`0` ok · `2`
+usage · `3` refused by policy). It never prints the credential. See `docs/buddy-edge.md`.
+
+| Verb | What it does |
+|----|--------------|
+| `link --buddy-home PATH [--yes]` | Shows the consent text, records consent to `api.telegram.org`, mints the credential (ARAIL keeps only its sha256) and writes it to Buddy's `secrets.env` (`0600`). Root lab only, portal bound to loopback. |
+| `link --rotate --buddy-home PATH` | New credential; the old one dies at once |
+| `unlink [--buddy-home PATH]` | Delete ARAIL's link and revoke consent; with a path, also Buddy's link and credential line |
+| `status [--json]` | Linked? credential id, since when, contract currency, consent |
+
 ### `nucleus <verb>`
 
 Model Forge (local domain distillation) — passthrough to

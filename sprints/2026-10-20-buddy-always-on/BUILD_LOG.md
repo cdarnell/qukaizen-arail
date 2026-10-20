@@ -54,7 +54,7 @@ Status key: `todo` · `done <sha>` · `BLOCKED (reason)`.
 | 7 | A5 | arail | `buddy_host/contract/*`, `scripts/sync-buddy-contract.py` + tests | Vendor contract + conformance + `PROVENANCE.json`; sibling-free check | check test | done `80c34c1a` |
 | 8 | A6 | arail | `buddy_host/{__init__,link,__main__}.py`, `arailctl` + tests | `arailctl buddy link/unlink/status` | U-LINK, U-PERM | done `ab6ea498` |
 | 9 | A7 | arail | `portal/host_edge_routes.py`, `buddy_host/{admission,events,ledger}.py`, `app.py` + tests | admission, handshake, trace.record, hold_all, pause_research + ledger | conformance run, I-EDGE | done `b69bbf9f` |
-| 10 | A8 | arail | `buddy_host/{brain,budget}.py`, routes + tests | brain.chat (header, flatten, brain check, budget, slot, SSE) | conformance run, I-EDGE | todo |
+| 10 | A8 | arail | `buddy_host/{brain,budget}.py`, routes + tests | brain.chat (header, flatten, brain check, budget, slot, SSE) | conformance run, I-EDGE | done `a14fcfd2` |
 | 11 | A9 | arail | `docs/buddy-edge.md`, `sprints/BACKLOG.md` | Docs; D1–D14 | doc lint if any | todo |
 | 12 | B3 | buddy | `guard.py`, `redact.py`, `boot.py` + tests | closed-mode audit-hook guard, redaction | U-GUARD, L1, L2 | todo |
 | 13 | B4 | buddy | `preflight.py`, `configure.py`, `people.py`, `hold.py` + tests | S1 to S12 (S6/S7 read pin files given by path), config generator, people, hold file | U-CFG, U-ID, U-HOLD, U-PERM | todo |
@@ -254,6 +254,16 @@ not at the budget check (the spec says "at admission"); a call refused because t
 nothing. (2) Usage rides on the final chunk with `finish_reason` (the spec's wording), not a separate
 `choices: []` chunk. (3) `finish_reason` is `length` when the completion used the whole `max_tokens`.
 127 conformance cases and 17 brain tests pass.
+Commit: `a14fcfd2` (arail).
+
+### Step 13 (A9, arail: docs and backlog)
+`docs/buddy-edge.md` (the routes, link steps, the consent text verbatim, what each file holds, what
+leaves the box, what Admin shows, limits, the contract sync, a refusal-to-fix table, known limits),
+a `buddy <verb>` entry in `docs/cli.md`, and `sprints/BACKLOG.md` D1 to D14 verbatim from the
+architecture plus three the build added: D15 (G1), D16 (Buddy's `link.json` is outside the
+contract), D17 (coalesced admission refusals). The notice to 3D.EVAL about v2 is not made here
+(touch-only-this-repo rule); D9 names it for the orchestrator to relay. `docs/BUDDY.md` is not
+edited: its "no sometimes online middle state" line stays true (the phone path needs hybrid).
 
 ## Architect feedback required
 
