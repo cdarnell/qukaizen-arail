@@ -34,7 +34,7 @@ in `RESEARCH_NOTES.md` §1. Do not design or code until VISION.md is in.
 | Phase | Subagent | Artifact | Status | Started | Finished | Verdict |
 |---|---|---|---|---|---|---|
 | think | visionary | VISION.md | done | 2026-10-20 11:40 | 2026-10-20 12:05 | proceed (3 preconditions; commit `6a9cbc21`) |
-| plan | architect (design) | ARCHITECTURE.md | pending | — | — | — |
+| plan | architect (design) | ARCHITECTURE.md | in progress | 2026-10-20 12:30 | — | — |
 | build | builder | BUILD_LOG.md | pending | — | — | — |
 | review | architect (review) | REVIEW.md | pending | — | — | — |
 | test | qa | TEST_REPORT.md | pending | — | — | — |
