@@ -219,3 +219,122 @@ Source: `qukaizen-paperagents/sprints/2026-09-28-agent-control-plane/ARCHITECTUR
   while `POST /api/experiments` is typed (`app.py:4715`).
 - A docs-only scaffold for a possible `qukaizen-buddy` repo exists at
   `<session>/qukaizen-buddy` (uncommitted). Its fate follows question 1.
+
+## 6. nanobot source read (landed after §5; `main` at v0.3.5, read via the GitHub API 2026-10-20; line numbers are for current `main`)
+
+**Runtime.** Package `nanobot-ai` 0.3.5, Python ≥3.11, hatchling + custom
+`hatch_build.py`, MIT, status Alpha. Entry points `nanobot = nanobot.cli.entry:main`,
+`nanobot-desktop-tui`. From source: `pip install -e ".[dev]"`, `nanobot onboard`,
+`nanobot gateway` (`--background`, `status`, `logs`, `restart`, `stop`). Bare `nanobot`
+opens the TUI (needs Bun in a source checkout). Telegram's library is not a core
+dependency: `nanobot plugins enable telegram`. Dev checks: `pytest`, `ruff check`,
+strict `basedpyright`, coverage floor 75 %, `scripts.check_import_boundaries`;
+`AGENTS.md` says never run `ruff format`. Paths: `~/.nanobot/config.json`;
+sessions `<config-dir>/sessions/<workspace-id>/sessions.sqlite3`; next to config:
+`delivery/outbox.sqlite3`, `pairing.json`, `llm_usage.sqlite3`; workspace
+`~/.nanobot/workspace/` holds `SOUL.md`, `USER.md`, `AGENTS.md`, `HEARTBEAT.md`,
+`memory/{MEMORY.md,history.jsonl}`, `skills/`, `plugins/`, `cron/{jobs.json,runs/}`,
+`triggers/runs`, a `.git` for memory versions. Ports: health 18790, WebUI 8765,
+API 8900, Telegram webhook 8081 (no clash with ARAIL 8080). Multiple instances via
+`nanobot --home <dir>`; docs say this is data separation, not an OS boundary.
+
+**Extension points.** Tool: subclass `Tool` (`agent/tools/base.py:214`), external
+tools via entry-point group `nanobot.tools` (`loader.py:74`), cannot override
+built-ins (`loader.py:114–119`); `ToolContext` exposes bus, cron, sessions, subagent
+manager, `runtime_control` (`tools/context.py:91–105`). Agent Plugin v1
+(`<workspace>/plugins/<name>/`, agent-plugins.org 1.0.0 schema, `agent/plugins.py:54–68`)
+bundles **skills and stdio MCP servers only**, no Python/hooks/tools; sha256
+fingerprint disables it after any file change; runs with nanobot's full OS
+permissions. MCP: `tools.mcpServers` → same `ToolRegistry`, `mcp_` prefix.
+ChannelPlugin: **in-tree only** (`channels/registry.py:20–27`). ProviderSpec: in-tree,
+but any extra `providers.<name>` config key becomes a custom OpenAI-compatible
+provider (`schema.py:294–298`). Hooks (`AgentHook`, `hook.py:67`): only via SDK
+`run(hooks=)` or `cli/gateway_runtime.py:544–557`; no entry point. Chat commands:
+registered in code on `loop.commands` (`loop.py:460`). Config gotcha: root `Config`
+is pydantic-settings with no `extra` setting (`schema.py:749`), so an unknown
+top-level key likely fails validation; `ToolsConfig` drops unknown keys silently.
+Buddy's config needs its own file.
+
+**Tool-execution chokepoint.** `agent/runner.py:560–572` → `hook.before_execute_tools`
+→ `execute_tool_calls`; the single dispatch point is
+`agent/tools/execution.py::_execute_tool_call` (:107–216): repeated-lookup check →
+`prepare_call` → `hook.before_execute_tool` (:158) → `tool.execute` (:165) →
+after/error hooks. Main loop, subagents (`subagent.py:836`), Dream/cron/heartbeat all
+pass through `AgentRunner`. **No policy layer exists:** `before_execute_tool` returns
+`None`; `CompositeHook` swallows exceptions unless `_reraise=True`, and a re-raise
+aborts the whole turn (`runner.py:324–330`), so hooks cannot soft-deny one call.
+Subagents build their own hook chain and a fresh `ToolRegistry()`
+(`subagent.py:791–806`, `:525`); Dream too (`memory.py:566`). `read_only`/`exclusive`
+only govern parallelism (`execution.py:286–310`); the loop runs
+`concurrent_tools=True` (`loop.py:1325`). Limits that exist:
+`agents.defaults.maxToolIterations` (200 model rounds), `tools.maxSessionMessagesPerMinute`
+(6), repeated-lookup and workspace-violation counters; `llm_usage` is a fail-open
+usage log with **no budgets**. **Smallest fork diff:** ~15 lines in
+`_execute_tool_call` between :157 and :158 calling a pluggable policy loaded via a
+new entry-point group (e.g. `nanobot.policy`) returning allow / deny / ask (ask =
+await an approval future); deny returns `ToolResult.error`. Identity comes from
+`current_request_context()` (session_key, channel, chat_id, sender_id); usage and
+iteration from `AgentHookContext`. Plus one small patch in `gateway_runtime.py`
+after `AgentLoop` is built so Buddy can register commands and hooks. Upstream-PR
+candidate: let `before_execute_tool` return a result to short-circuit the call.
+
+**Approvals today: none.** `ask_user` was removed in v0.2.0. Enforced: shell `exec`
+regex deny/allow patterns (`shell.py:226–245, 808–835`); `restrictToWorkspace`
+path checks (`workspace_policy.py:96–128`, "not an OS sandbox"); `sandbox.py` wraps
+shell only, bwrap (Linux) / seatbelt (macOS), filesystem-restricted, **no network
+restriction**; SSRF guard on web fetch and HTTP MCP; `goal_permission.py`.
+Telegram buttons: `inlineKeyboards` off by default; `callback_data` **is the label**
+(≤64 bytes, `telegram/runtime.py:2254–2270`); a tap arrives as an inbound message
+with `is_callback` (:2277–2310); if the session is busy it is queued into the running
+turn unless it is a registered command (commands dispatch immediately,
+`loop.py:834–867`). So an approval must be a `/approve <id>` command and the button
+label must carry that text. Slash-command regex is hard-coded (`runtime.py:617`).
+
+**Model routing.** `modelPresets` + `agents.defaults.modelPreset` + `fallbackModels`
+(fallback only on provider errors). `/model <preset>` per session (next turn);
+SDK `run(model_preset=…)` (`model_runtime.py:233`). **No per-turn router**: the
+runtime is fixed at turn start (`loop.py:1316–1319`); subagents inherit the parent
+model; Dream uses `dream.modelOverride`. Ollama spec `registry.py:849–859`
+(`localhost:11434/v1`); no keep-alive key (use `extraBody` or `OLLAMA_KEEP_ALIVE`).
+Custom deep endpoint: `custom` spec (`registry.py:217–225`) or a named extra provider.
+
+**Telegram + pairing.** Keys: `token`, `allowFrom`, `proxy`, `groupPolicy`, `mode`
+(polling/webhook), `streaming`, `inlineKeyboards`, `richMessages`, `webhook*`
+(`telegram/manifest.py`). With `allowFrom` omitted the bot is pairing-only: unknown
+DM → code `ABCD-EFGH`, 10-minute expiry (`pairing/store.py:29`), approved senders in
+`pairing.json`. **No owner/admin concept**: anyone who can reach the bot can run
+`/pairing approve|deny|revoke` (`command/builtin.py:938–948`). First approval from
+the CLI: `nanobot agent -m "/pairing approve CODE"`.
+
+**Cron / triggers / goals.** `CronJob` (`cron/types.py:26–177`): schedule
+(`at`/`every`/`cron` + tz), payload `agent_turn`, run history, `deleteAfterRun`;
+`<workspace>/cron/jobs.json`. Delivery to the creating session via a durable outbox
+(retry every 30 s, up to 1 h). **Missed runs are not replayed.** Local triggers: a
+durable at-least-once queue that waits for session idle. `/goal` via
+`CreateGoalTool`/`UpdateGoalTool` (`long_task.py:144, 275`); subagents running at
+restart are marked interrupted. **No general FIFO task queue with pause/resume.**
+
+**Memory.** `context.py:78` loads `AGENTS.md`, `SOUL.md`, `USER.md`; `MEMORY.md` is
+pasted raw into the system prompt (:113–116). Dream: on by default every 2 h
+(`schema.py:68–69`), reads ≤20 new `history.jsonl` entries (`memory.py:526`), edits the
+three files with its own tools (:558–600), commits to the workspace `.git`, runs via
+`process_direct` on the Dream preset (`gateway_runtime.py:594–612`). Heartbeat: on by
+default every 1800 s, reads `## Active Tasks` from `HEARTBEAT.md`.
+
+**Fork hygiene.** Releases every 2–7 weeks; **529 commits on `main` in the last 30
+days**; every release has "Upgrade Notes" with data moves and config migrations kept
+~2 releases; internal Python APIs change without deprecation. Size: 781 files under
+`nanobot/`, 411 non-test `.py`, ~5.2 MB (~130k LOC est.); `loop.py` ~120 KB.
+`nanobot/web/dist` is git-ignored, built by the hatch hook with Bun; TUI needs Bun.
+External calls: PyPI version check, skills.sh and skillhub.cn marketplaces, ClawHub
+skill, DuckDuckGo; no HKUDS telemetry found.
+
+**Risks noted by the reader.** (1) The policy check needs a core patch in a
+fast-changing file. (2) An "ask" locks the session while the turn timeout runs;
+parallel tool batches mean several cards at once. (3) The card flow depends on
+in-tree Telegram code. (4) No owner role: Buddy must check the approver is the
+owner. (5) A 1B model facing 30+ tool schemas is a poor tool-caller and router;
+routing should be deterministic code. (6) Buddy config cannot live in
+`config.json`. (7) Crash-safe queueing must be built. (8) Dream on
+`dream.modelOverride` would wake the deep model every 2 h. (9) No network sandbox;
+Agent Plugins run with full permissions.
