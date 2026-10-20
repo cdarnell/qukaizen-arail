@@ -252,7 +252,7 @@ def _core_brain_chat(adm: Admitted) -> ChatPlan:
         brain.check_shape(body)
         brain.check_tools_and_content(body)
         brain.check_size(body)
-        header = brain.parse_header(body["messages"][0]["content"])
+        header = brain.parse_header(body["messages"])
     except EdgeError as exc:
         note_refusal(exc.code)
         raise
@@ -285,6 +285,21 @@ def _drain(plan: ChatPlan, loop: asyncio.AbstractEventLoop, queue: "asyncio.Queu
         loop.call_soon_threadsafe(queue.put_nowait, item)
 
 
+def _enter_inference(h: brain.TurnHeader) -> None:
+    """The last gate, passed with the inference slot in hand (ARCHITECTURE Addendum A, section A2 delta 1).
+
+    Step 9 looked at the caps before the wait for the slot, and the wait can take 8 s, so calls queued on the slot
+    could each have passed it. Lab mode is read again for the same reason. Then the caps are re-checked and the turn
+    counted in one atomic step. A call that fails here is refused and costs nothing."""
+    from arail import airgap
+    if h.channel == "telegram" and airgap.lab_mode() != "hybrid":
+        raise EdgeError("mode_airgapped")
+    try:
+        budget.default_budget().claim_turn(h.pseudonym)
+    except budget.BudgetRefused as refused:
+        raise EdgeError(refused.code) from None
+
+
 async def _produce(plan: ChatPlan, queue: "asyncio.Queue") -> None:
     """Holds the inference slot, runs the model, feeds ``queue``. Always ends with ``_END``."""
     from arail.router.backends import ModelResponse
@@ -292,7 +307,7 @@ async def _produce(plan: ChatPlan, queue: "asyncio.Queue") -> None:
     h = plan.header
     try:
         async with inference.inference_slot("buddy-edge", acquire_timeout_s=SLOT_WAIT_S):
-            budget.default_budget().begin_turn(h.pseudonym)  # a turn counts once it is let into inference
+            _enter_inference(h)
             with agent_context.agent_call("buddy", brain="reflex", foreground=True, trace_id=h.trace_id,
                                           channel=h.channel, identity=(h.pseudonym, h.role), origin="edge"):
                 ctx = contextvars.copy_context()  # F45: the worker thread must carry the attribution
@@ -311,6 +326,9 @@ async def _produce(plan: ChatPlan, queue: "asyncio.Queue") -> None:
     except inference.InferenceSlotTimeout:
         _refuse(h, "brain_busy")
         queue.put_nowait(_Fail("brain_busy"))
+    except EdgeError as exc:  # the checks made once the slot was ours (the wait can be 8 s)
+        _refuse(h, exc.code)
+        queue.put_nowait(_Fail(exc.code))
     except agent_context.AgentHeldError:
         queue.put_nowait(_Fail("held"))  # the chokepoint already wrote refused_halted
     except Exception as exc:  # noqa: BLE001 - class name only: a backend message could carry prompt text
@@ -336,7 +354,9 @@ def _usage_and_finish(plan: ChatPlan, final: Any) -> tuple[dict, str]:
     completion = int(getattr(final, "tokens_used", 0) or 0)
     prompt_tokens = brain.estimate_prompt_tokens(plan.system, plan.prompt)
     usage = {"prompt_tokens": prompt_tokens, "completion_tokens": completion, "total_tokens": prompt_tokens + completion}
-    return usage, ("length" if completion >= plan.max_tokens else "stop")
+    # Always "stop" (Addendum A, section A2 delta 3): nanobot reads "length" as "continue" and calls again on a
+    # prompt it wrote (runner.py:631-655). A token-capped answer stays visible as tokens_out == max_tokens.
+    return usage, "stop"
 
 
 async def _stream_body(plan: ChatPlan, first: Any, queue: "asyncio.Queue") -> AsyncIterator[bytes]:

@@ -415,6 +415,54 @@ def test_budget_counts_checks_and_resets_at_local_midnight(tmp_path):
     b.check("p_a")
 
 
+def test_claim_turn_checks_and_counts_as_one_step(tmp_path):
+    """Addendum A section A2 delta 1: the claim made with the slot in hand is the check that holds."""
+    b = budget.Budget(tmp_path / "budget.json", day=lambda: "d")
+    b._seed(turns=299)
+    b.claim_turn("p_a")
+    assert b.snapshot()["turns_used"] == 300
+    with pytest.raises(budget.BudgetRefused) as e:
+        b.claim_turn("p_b")
+    assert e.value.code == "budget_exhausted"
+    assert b.snapshot()["turns_used"] == 300          # a refusal counts nothing
+
+
+def test_claim_turn_refuses_on_the_token_cap_and_on_the_per_person_rate(tmp_path):
+    b = budget.Budget(tmp_path / "budget.json", day=lambda: "d", clock=lambda: 0.0)
+    b.add_tokens(600_000)
+    with pytest.raises(budget.BudgetRefused) as e:
+        b.claim_turn("p_a")
+    assert e.value.code == "budget_exhausted"
+    c = budget.Budget(tmp_path / "other.json", day=lambda: "d", clock=lambda: 0.0)
+    for _ in range(20):
+        c.claim_turn("p_a")
+    with pytest.raises(budget.BudgetRefused) as e:
+        c.claim_turn("p_a")
+    assert e.value.code == "identity_throttled" and c.snapshot()["turns_used"] == 20
+
+
+def test_claim_turn_is_atomic_under_threads(tmp_path):
+    import threading
+    b = budget.Budget(tmp_path / "budget.json", day=lambda: "d")
+    b._seed(turns=290)
+    outcomes: list = []
+    barrier = threading.Barrier(12)
+
+    def go(i):
+        barrier.wait()
+        try:
+            b.claim_turn(f"p_{i}")
+            outcomes.append("ok")
+        except budget.BudgetRefused as refused:
+            outcomes.append(refused.code)
+
+    threads = [threading.Thread(target=go, args=(i,)) for i in range(12)]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+    assert outcomes.count("ok") == 10 and outcomes.count("budget_exhausted") == 2
+    assert b.snapshot()["turns_used"] == 300
+
+
 def test_budget_token_cap(tmp_path):
     b = budget.Budget(tmp_path / "budget.json", day=lambda: "d")
     b.add_tokens(599_999)

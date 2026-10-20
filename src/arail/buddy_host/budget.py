@@ -5,9 +5,10 @@ local day, and a backstop of **20 admitted calls per minute per pseudonym**
 (``identity_throttled``). The caps protect lab memory and compute, not money.
 
 ``<DATA_DIR>/buddy/budget.json`` (0600) holds ``{"day", "turns", "tokens"}`` and resets at
-local midnight. A turn is checked at admission (:meth:`Budget.check`) and counted when
-the call is let into inference (:meth:`Budget.begin_turn`), so a call refused because the
-model is busy costs nothing; tokens are added when the call completes
+local midnight. A turn is checked at admission (:meth:`Budget.check`) and, once the call
+holds the inference slot, re-checked and counted in one atomic step (:meth:`Budget.claim_turn`),
+so a call refused because the model is busy costs nothing and calls queued on the slot cannot
+overshoot the cap; tokens are added when the call completes
 (:meth:`Budget.add_tokens`). A corrupt file starts the day from zero rather than locking
 Buddy out: the budget guards compute, and the hold switch is the safety control.
 """
@@ -115,10 +116,27 @@ class Budget:
 
     def begin_turn(self, pseudonym: str) -> None:
         with self._lock:
+            self._count_locked(pseudonym)
+
+    def claim_turn(self, pseudonym: str) -> None:
+        """Check the caps and the per-person rate, and count the turn, as one step under the lock.
+
+        Called once the inference slot is held. Step 9's :meth:`check` ran before the wait for the slot, so a few calls
+        queued on the slot could each have passed it; this is the check that holds (ARCHITECTURE Addendum A, A2 delta 1).
+        Raises :class:`BudgetRefused` and counts nothing."""
+        with self._lock:
             st = self._load_locked()
-            st["turns"] += 1
-            self._prune(pseudonym, self._clock()).append(self._clock())
-            self._persist_locked()
+            if st["turns"] >= CAP_TURNS or st["tokens"] >= CAP_TOKENS:
+                raise BudgetRefused("budget_exhausted")
+            if len(self._prune(pseudonym, self._clock())) >= CALLS_PER_MIN:
+                raise BudgetRefused("identity_throttled")
+            self._count_locked(pseudonym)
+
+    def _count_locked(self, pseudonym: str) -> None:
+        st = self._load_locked()
+        st["turns"] += 1
+        self._prune(pseudonym, self._clock()).append(self._clock())
+        self._persist_locked()
 
     def add_tokens(self, n: int) -> None:
         if n <= 0:

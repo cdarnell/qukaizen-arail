@@ -223,11 +223,20 @@ def _has_remote_ref(node: Any) -> bool:
     return False
 
 
-def parse_header(first_content: Any) -> TurnHeader:
-    """Step 5: line 1 of ``messages[0]`` is ``BUDDY-TURN/1 <one-line JSON>``. The edge reads only that line."""
+def parse_header(messages: list) -> TurnHeader:
+    """Step 5 (contract ``turn_header.rules``): the carrier is the system message at index 0.
+
+    1. ``messages[0].role`` is ``system``. 2. No later message is a ``system`` message (the flattening would put a
+    ``### system`` block into the prompt). 3. The first line of its text is ``BUDDY-TURN/1 <one-line JSON>`` valid
+    against the header schema; the schema the header carries is at most 4 KiB with local refs only. 4. A persona
+    follows that line: the rest is not empty after stripping whitespace. The edge reads only the header line; it
+    cannot tell Buddy's persona from nanobot's stock prompt (Buddy proves that on his side)."""
     from jsonschema import Draft202012Validator
-    text = message_text(first_content)
-    line = text.split("\n", 1)[0]
+    first = messages[0]
+    if first["role"] != "system" or any(m["role"] == "system" for m in messages[1:]):
+        raise EdgeError("turn_header_invalid")
+    text = message_text(first["content"])
+    line, _, persona = text.partition("\n")
     if not line.startswith(HEADER_PREFIX):
         raise EdgeError("turn_header_invalid")
     try:
@@ -241,6 +250,8 @@ def parse_header(first_content: Any) -> TurnHeader:
         encoded = json.dumps(schema, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
         if len(encoded) > RESPONSE_SCHEMA_BYTES_MAX or _has_remote_ref(schema):
             raise EdgeError("turn_header_invalid")
+    if not persona.strip():
+        raise EdgeError("turn_header_invalid")
     who = data["identity"]
     return TurnHeader(data["trace_id"], data["channel"], who["pseudonym"], who["role"], schema)
 

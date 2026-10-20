@@ -324,6 +324,189 @@ def test_the_system_text_loses_only_its_header_line(lab):
     body["messages"][0]["content"] = header() + "\nline one\nline two"
     post(lab, body)
     assert lab.backend.calls[-1]["system"] == "line one\nline two"
-    body["messages"][0]["content"] = header()
-    post(lab, body)
-    assert lab.backend.calls[-1]["system"] == ""
+    seen = len(lab.backend.calls)
+    body["messages"][0]["content"] = header()          # a header with no persona behind it is refused (A1.4 rule 4)
+    assert post(lab, body).status_code == 422
+    assert len(lab.backend.calls) == seen
+
+
+# ---------------------------------------------------------------------------
+# ARCHITECTURE Addendum A: section A1.4 (the carrier), A2 delta 1 (the atomic budget), delta 3 (never `length`)
+# ---------------------------------------------------------------------------
+
+def _with_messages(*messages):
+    body = chat()
+    body["messages"] = list(messages)
+    return body
+
+
+SYS = {"role": "system", "content": header() + "\nYou are Buddy."}
+Q = {"role": "user", "content": "q"}
+
+
+def _refused(lab, body, code="turn_header_invalid"):
+    seen = len(lab.backend.calls)
+    r = post(lab, body)
+    assert r.status_code == 422 and r.json()["error"]["code"] == code, r.text
+    assert len(lab.backend.calls) == seen          # the model was never called
+    return r
+
+
+def test_the_carrier_must_be_the_system_message_at_index_zero(lab):
+    """A1.4 rule 1 (C-HDR-01): a valid header and persona in a user-role first message is refused."""
+    _refused(lab, _with_messages({"role": "user", "content": SYS["content"]}, Q))
+    _refused(lab, _with_messages({"role": "assistant", "content": SYS["content"]}, Q))
+
+
+def test_a_later_system_message_is_refused_before_it_can_become_a_system_block_in_the_prompt(lab):
+    """A1.4 rule 2 (C-HDR-02)."""
+    _refused(lab, _with_messages(SYS, Q, {"role": "assistant", "content": "a"}, {"role": "system", "content": "x"}, Q))
+    _refused(lab, _with_messages(SYS, {"role": "system", "content": "x"}, Q))
+
+
+@pytest.mark.parametrize("content", [
+    "", "\n", " \n \t\n", "\u00a0\u2003", "\r\n",
+])
+def test_an_empty_persona_is_refused(lab, content):
+    """A1.4 rule 4 (C-HDR-03): the header line alone, or followed by whitespace only."""
+    _refused(lab, _with_messages({"role": "system", "content": header() + content}, Q))
+
+
+def test_a_persona_in_a_second_text_part_counts(lab):
+    """A1.4 rule 3: text parts are joined by LF, so the header can be one part and the persona the next."""
+    ok = {"role": "system", "content": [{"type": "text", "text": header()}, {"type": "text", "text": "You are Buddy."}]}
+    assert post(lab, _with_messages(ok, Q)).status_code == 200
+    assert lab.backend.calls[-1]["system"] == "You are Buddy."
+    empty = {"role": "system", "content": [{"type": "text", "text": header()}, {"type": "text", "text": "  "}]}
+    _refused(lab, _with_messages(empty, Q))
+
+
+def test_the_carrier_rules_do_not_refuse_a_plain_buddy_turn_with_history(lab):
+    msgs = [SYS, Q, {"role": "assistant", "content": "a"}, {"role": "user", "content": "q2"}]
+    assert post(lab, _with_messages(*msgs)).status_code == 200
+    assert lab.backend.calls[-1]["prompt"].startswith("### user\nq\n\n### assistant\na\n\n### user\nq2")
+
+
+def test_a_refused_carrier_is_an_edge_event_with_no_identity_not_a_model_call(lab):
+    _refused(lab, _with_messages({"role": "user", "content": SYS["content"]}, Q))
+    ring = agent_trace.ring(50)
+    assert not [r for r in ring if r.get("record_type") == "model_call"]
+    assert any(r.get("event") == "edge_refused" and r.get("reason") == "turn_header_invalid" for r in ring)
+
+
+class _UsesAllTokens(BaseBackend):
+    def complete(self, *a, **kw):  # pragma: no cover
+        raise NotImplementedError
+
+    def stream_complete(self, prompt, max_tokens=512, temperature=0.7, top_p=None, *, system=None, messages=None,
+                        response_schema=None):
+        yield REPLY
+        yield ModelResponse(text=REPLY, model="llama-ai-eng", tokens_used=max_tokens, backend="ollama_native",
+                            latency_ms=1.0)
+
+    def health_check(self):
+        return True
+
+
+def test_i_edge_13_a_token_capped_answer_ends_with_stop_so_nanobot_does_not_call_again(tmp_path, monkeypatch):
+    """F55: one answer that used all of max_tokens is one finish_reason `stop`, on both paths and through the SDK."""
+    w = World({}, "brain.chat", tmp_path, monkeypatch)
+    monkeypatch.setattr(brain, "build_router", lambda: ModelRouter.from_backend(_UsesAllTokens(), "ollama_native"))
+
+    async def go():
+        stream = await sdk(w).chat.completions.create(
+            model="buddy-fast", stream=True, stream_options={"include_usage": True}, max_tokens=400,
+            messages=[SYS, Q])
+        return [c async for c in stream]
+
+    chunks = asyncio.run(go())
+    assert [c.choices[0].finish_reason for c in chunks if c.choices][-1] == "stop"
+    assert not [c for c in chunks if c.choices and c.choices[0].finish_reason == "length"]
+    assert [c.usage.completion_tokens for c in chunks if c.usage] == [400]
+    plain = post(w, chat(stream=False)).json()
+    assert plain["choices"][0]["finish_reason"] == "stop" and plain["usage"]["completion_tokens"] == 400
+    recs = [r for r in agent_trace.ring(100) if r.get("record_type") == "model_call"]
+    assert len(recs) == 2 and all(r["tokens_out"] == 400 for r in recs)       # truncation stays visible here
+    assert snapshot_in_flight() == 0
+
+
+def snapshot_in_flight():
+    return inference.snapshot()["in_flight"]
+
+
+def _flag_second_check(monkeypatch, seen):
+    """Set ``seen`` once two brain.chat calls have passed step 9 (both look fine; the slot is what separates them)."""
+    real = budget.Budget.check
+    count = [0]
+    lock = threading.Lock()
+
+    def check(self, pseudonym):
+        real(self, pseudonym)
+        with lock:
+            count[0] += 1
+            if count[0] >= 2:
+                seen.set()
+
+    monkeypatch.setattr(budget.Budget, "check", check)
+
+
+def test_i_edge_14_two_calls_at_299_turns_give_one_answer_and_one_budget_exhausted(tmp_path, monkeypatch):
+    """Both calls pass step 9 (299 < 300) and queue on the slot; the claim made with the slot in hand lets one in."""
+    w = World({"budget_used": {"turns": 299, "tokens": 0}}, "brain.chat", tmp_path, monkeypatch)
+    monkeypatch.setattr(inference, "_SEM", None)
+    monkeypatch.setattr(inference, "_INFLIGHT", 0)
+    both_checked = threading.Event()
+    _flag_second_check(monkeypatch, both_checked)
+    other = chat()
+    other["messages"][0]["content"] = header(identity={"pseudonym": "p_abcdef0123", "role": "talker"},
+                                             trace_id="fedcba9876543210") + "\np"
+
+    async def go():
+        transport = httpx.ASGITransport(app=w.client.app, client=("127.0.0.1", 9))
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as c:
+            async with inference.inference_slot("test-holder"):         # the slot is busy while both calls arrive
+                a = asyncio.create_task(c.post(BASE + "/brain/chat/completions", content=json.dumps(chat()), headers=H()))
+                b = asyncio.create_task(c.post(BASE + "/brain/chat/completions", content=json.dumps(other), headers=H()))
+                assert await asyncio.get_running_loop().run_in_executor(None, both_checked.wait, 5)
+            return await a, await b
+
+    a, b = asyncio.run(go())
+    codes = sorted((r.status_code, r.json()["error"]["code"] if r.status_code >= 400 else "ok") for r in (a, b))
+    assert codes == [(200, "ok"), (403, "budget_exhausted")]
+    loser = a if a.status_code == 403 else b
+    assert loser.headers["x-should-retry"] == "false"
+    assert budget.default_budget().snapshot()["turns_used"] == 300
+    refused = [r for r in agent_trace.ring(100) if r.get("outcome") == "refused_budget_exhausted"]
+    assert len(refused) == 1 and refused[0]["identity"] is not None
+    assert len(w.backend.calls) == 1
+    assert snapshot_in_flight() == 0
+
+
+def test_lab_mode_is_read_again_after_the_wait_for_the_slot(tmp_path, monkeypatch):
+    """A8 delta 1: the slot wait can be 8 s, so a flip to airgapped during it must stop the call."""
+    w = World({}, "brain.chat", tmp_path, monkeypatch)
+    monkeypatch.setattr(inference, "_SEM", None)
+    monkeypatch.setattr(inference, "_INFLIGHT", 0)
+    gate = _Gate()
+    monkeypatch.setattr(brain, "build_router", lambda: ModelRouter.from_backend(gate, "ollama_native"))
+    both_checked = threading.Event()
+    _flag_second_check(monkeypatch, both_checked)
+    other = chat()
+    other["messages"][0]["content"] = header(identity={"pseudonym": "p_abcdef0123", "role": "talker"}) + "\np"
+
+    async def go():
+        transport = httpx.ASGITransport(app=w.client.app, client=("127.0.0.1", 9))
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as c:
+            first = asyncio.create_task(c.post(BASE + "/brain/chat/completions", content=json.dumps(chat()), headers=H()))
+            await asyncio.get_running_loop().run_in_executor(None, gate.entered.wait, 5)
+            second = asyncio.create_task(c.post(BASE + "/brain/chat/completions", content=json.dumps(other), headers=H()))
+            assert await asyncio.get_running_loop().run_in_executor(None, both_checked.wait, 5)
+            monkeypatch.setenv("LAB_MODE", "airgapped")
+            gate.release.set()
+            return await first, await second
+
+    first, second = asyncio.run(go())
+    assert first.status_code == 200
+    assert second.status_code == 403 and second.json()["error"]["code"] == "mode_airgapped"
+    assert budget.default_budget().snapshot()["turns_used"] == 1          # the refused call counted nothing
+    assert len([r for r in agent_trace.ring(100) if r.get("outcome") == "refused_mode_airgapped"]) == 1

@@ -88,8 +88,9 @@ def subset(actual: Any, expected: Any, path: str = "$") -> list[str]:
 class FakeOllama(BaseBackend):
     """Stands in for OllamaNativeBackend: records what it is called with, streams the fake reply."""
 
-    def __init__(self, reply: str) -> None:
+    def __init__(self, reply: str, *, uses_all_max_tokens: bool = False) -> None:
         self.reply = reply
+        self.uses_all_max_tokens = uses_all_max_tokens
         self.calls: list[dict] = []
 
     def complete(self, *a, **kw):  # pragma: no cover - the edge only streams
@@ -102,7 +103,8 @@ class FakeOllama(BaseBackend):
         mid = max(1, len(self.reply) // 2)
         yield self.reply[:mid]
         yield self.reply[mid:]
-        yield ModelResponse(text=self.reply, model="llama-ai-eng", tokens_used=12, backend="ollama_native",
+        used = max_tokens if self.uses_all_max_tokens else 12
+        yield ModelResponse(text=self.reply, model="llama-ai-eng", tokens_used=used, backend="ollama_native",
                             latency_ms=5.0)
 
     def health_check(self):
@@ -183,7 +185,8 @@ class World:
         if used or calls:
             budget.default_budget()._seed(turns=int(used.get("turns", 0)), tokens=int(used.get("tokens", 0)), calls=calls)
 
-        self.backend = FakeOllama(CONTRACT["conformance"]["fake_reply"])
+        self.backend = FakeOllama(CONTRACT["conformance"]["fake_reply"],
+                                  uses_all_max_tokens=s.get("brain_tokens", "few") == "max")
         monkeypatch.setattr(brain, "build_router", lambda: ModelRouter.from_backend(self.backend, "ollama_native"))
         if s.get("slot") == "busy":
             import contextlib
