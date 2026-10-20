@@ -55,10 +55,10 @@ Status key: `todo` · `done <sha>` · `BLOCKED (reason)`.
 | 8 | A6 | arail | `buddy_host/{__init__,link,__main__}.py`, `arailctl` + tests | `arailctl buddy link/unlink/status` | U-LINK, U-PERM | done `ab6ea498` |
 | 9 | A7 | arail | `portal/host_edge_routes.py`, `buddy_host/{admission,events,ledger}.py`, `app.py` + tests | admission, handshake, trace.record, hold_all, pause_research + ledger | conformance run, I-EDGE | done `b69bbf9f` |
 | 10 | A8 | arail | `buddy_host/{brain,budget}.py`, routes + tests | brain.chat (header, flatten, brain check, budget, slot, SSE) | conformance run, I-EDGE | done `a14fcfd2` |
-| 11 | A9 | arail | `docs/buddy-edge.md`, `sprints/BACKLOG.md` | Docs; D1–D14 | doc lint if any | todo |
-| 12 | B3 | buddy | `guard.py`, `redact.py`, `boot.py` + tests | closed-mode audit-hook guard, redaction | U-GUARD, L1, L2 | todo |
-| 13 | B4 | buddy | `preflight.py`, `configure.py`, `people.py`, `hold.py` + tests | S1 to S12 (S6/S7 read pin files given by path), config generator, people, hold file | U-CFG, U-ID, U-HOLD, U-PERM | todo |
-| 14 | B5 | buddy | `nanobot/__main__.py`, `UPSTREAM.md` | **P0** | upstream suite | todo |
+| 11 | A9 | arail | `docs/buddy-edge.md`, `sprints/BACKLOG.md` | Docs; D1–D14 | doc lint if any | done `2ab0f244` |
+| 12 | B3 | buddy | `guard.py`, `redact.py`, `boot.py` + tests | closed-mode audit-hook guard, redaction | U-GUARD, L1, L2 | done `d5e5b9d0` |
+| 13 | B4 | buddy | `preflight.py`, `configure.py`, `people.py`, `hold.py` + tests | S1 to S12 (S6/S7 read pin files given by path), config generator, people, hold file | U-CFG, U-ID, U-HOLD, U-PERM | done `ed70b193` |
+| 14 | B5 | buddy | `nanobot/__main__.py`, `UPSTREAM.md` | **P0** | upstream suite | done `f84aa75a` |
 | 15 | B6 | buddy | `edge_client.py`, `gate.py` + tests | handshake, trace + spool, hold_all, pause_research client; ModeGate and sleep detection | `FakeHost` over conformance, I-GATE, I-SLEEP | todo |
 | 16 | B8 | buddy | `channel.py`, `intake.py`, `unknown.py`, `nanobot/channels/telegram/runtime.py`, `UPSTREAM.md` | `BuddyTelegramChannel`, Intake, aggregator, **P2** | U-INT, U-ID, fake PTB updates; upstream suite | todo |
 | 17 | B9 | buddy | `proposals.py`, `confirm.py`, `commands.py` + tests | proposal store, nonce, confirm checks, six commands | F1 to F5, F19, F20 | todo |
@@ -264,6 +264,52 @@ architecture plus three the build added: D15 (G1), D16 (Buddy's `link.json` is o
 contract), D17 (coalesced admission refusals). The notice to 3D.EVAL about v2 is not made here
 (touch-only-this-repo rule); D9 names it for the orchestrator to relay. `docs/BUDDY.md` is not
 edited: its "no sometimes online middle state" line stays true (the phone path needs hybrid).
+Commit: `2ab0f244` (arail).
+
+### Step 14 (B3, buddy: the guard, the redaction, buddy.boot)
+`guard.py`: one audit hook; the policy is state in a `Guard`, so it is tested as a decision table
+(93 unit tests) and again in fresh `python -I` subprocesses against real sockets (L1 closed, L2 open
+with a faked resolver; the parent's listeners prove a refused connect never arrived). Stricter than the
+spec in three small ways, all on the side of refusing: a numeric non-loopback address is refused at
+`getaddrinfo` (so `create_connection("1.1.1.1")` fails before any connect), Telegram's learned addresses
+are allowed on **443 only**, and any malformed audit-event argument is a refusal, not a pass. DNS names
+`localhost`, loopback literals and (open mode) `api.telegram.org` only; connect to `AF_UNIX` and to
+loopback on the edge and health ports; bind to loopback on the health port; send to loopback or unix; exec
+events refused once armed. `redact.py`: exact secrets, token and edge-credential shapes, and
+`/approve|/deny <id> <nonce>`, per line on stdout/stderr and as a loguru patcher (tested with print,
+logging, loguru, `logger.exception` and an uncaught traceback). `boot.py`: inert unless the process is
+`python -m nanobot` (`sys.modules["__main__"].__spec__.name`), so P0 cannot follow a test runner around;
+it imports nothing from nanobot, httpx or PTB (tested). 31 + 93 + 7 tests.
+Commit: `d5e5b9d0` (buddy).
+
+### Step 15 (B4, buddy: preflight, configure, people, hold, boot's entry steps)
+S1 to S12 as in the architecture; every failure is a fixed line with the check id and no value, exit 0.
+Deltas: (1) `boot.apply()` (steps 2 to 4 of section 5.14) lands here, not in B3, because it calls the preflight;
+it exports the `BUDDY_*` secrets only after the preflight passes (the spec loads them first, but S2 has not then
+vouched for the file). (2) `buddy.toml` is parsed in `configure.py` (no extra module); its ranges cannot exceed
+what keeps G1's 60 s (handshake interval <= 20 s, unreachable window <= 40 s). (3) S9 is exact equality with what
+`configure` generates now, plus a second look at the config object nanobot's own loader returns, so a default that
+upstream later turns on is caught even though the JSON never mentions it. (4) `hold.json` also reads as ON when it is
+not owned by us or is group/other-writable (anyone could have cleared it). (5) Tool flag names were verified in the
+build (`tools.exec|web|file|cliApps|my.enable`, `tools.imageGeneration.enabled`) and all builtin skills are listed in
+`disabledSkills` (the spec's `<all>` placeholder). (6) nanobot's pairing store lives at `<config dir>/pairing.json`,
+which is Buddy's home, so S12 checks `<home>/pairing.json`. 77 + 29 + 183 tests (the S9 table has 40 deviations).
+S6 and S7 take their pin files as arguments; the real pins are B2.
+Commit: `ed70b193` (buddy).
+
+### Step 16 (B5a, buddy: the upstream-mode plugin; and B5, P0)
+Not in the plan as such: with P0 applied `python -m nanobot` accepts only Buddy's own command, and 3 upstream tests
+(`tests/webui/test_gateway_webui_smoke.py`) start a gateway as a subprocess with a WebUI config. They failed
+(7678 passed, 3 failed) with P0 applied and would pass only if the guard had an off switch. The architecture's
+`buddy.testing.upstream_mode` plugin is specified for P1 only. I built the plugin now (it was a B10 file) and made it
+deselect exactly those three node ids and say so in the pytest header; a test pins the list to the files that really
+spawn `python -m nanobot`. **Spec gap G3** below. The plugin lands first (`5be62a4f`) so the upstream suite is green at
+every commit. P0 is one added line (`nanobot/__main__.py`) with the pyright ignores the upstream strict config needs
+(without them basedpyright reports 2 new errors); ruff clean, basedpyright identical to the pin's 16 errors, upstream
+7678 passed + 3 deselected = 7681. A commit cannot name its own hash, so the P0 row in `UPSTREAM.md` was completed in
+the next commit (`a8701ab5`), together with `buddy/tests/test_upstream_md.py`, which checks every patch row against the
+tree and git (one file changed under `nanobot/`, blob hash, pre-patch hash at the tag, nothing else differs).
+Commits: `5be62a4f` (plugin), `f84aa75a` (P0), `a8701ab5` (row + test) (buddy).
 
 ## Architect feedback required
 
@@ -348,6 +394,15 @@ reachable. They live in the contract and its conformance cases, so they are test
    held or airgapped (Buddy must be able to record the flip and the stop); `hold_all` is allowed when
    the hold state is unreadable (it is the reductive direction); the 422 for a bad record carries
    `error.record_index`.
+
+
+### G3. P0 makes `python -m nanobot` Buddy-only, so three upstream tests cannot run with P0 applied
+
+`tests/webui/test_gateway_webui_smoke.py` (3 tests) starts `python -m nanobot gateway ...` as a subprocess with a
+WebUI/websocket config. With P0 applied that exits 2 by design. ARCHITECTURE §5.13 names the plugin only for P1
+(`_UPSTREAM_TEST_MODE`). Built here: deselect those three by node id in `buddy.testing.upstream_mode`, pinned by a test.
+Rejected: an environment variable that makes `buddy.boot` inert (it would be a kill switch for the guard in production).
+Architect to ratify, or choose another way to run those three.
 
 ## Final state
 
