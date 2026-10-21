@@ -112,6 +112,11 @@ def test_refuses_default_b_over_secondary_cap(client, monkeypatch, tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_settle_default_b_none_is_always_valid(client, monkeypatch, tmp_path):
+    # restart_required is computed from the resident runtime; pin "nothing
+    # resident" so a leftover AeroLLMBackend singleton from another test (seen
+    # after test_aerollm_defaults.py) can't flip it. Same fix as 8b9d5a0e.
+    from arail.router.backends import AeroLLMBackend
+    monkeypatch.setattr(AeroLLMBackend, "_shared", {}, raising=False)
     _mock_ollama_installed(monkeypatch, [
         {"id": "llama-ai-eng", "runtime": "ollama", "size_gb": 0.9,
          "modified": "", "endpoint": "x"}])
