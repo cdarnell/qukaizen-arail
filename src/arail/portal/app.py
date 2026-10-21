@@ -6906,7 +6906,16 @@ async def _warm_slot_b(model: "str | None") -> None:
     """One-shot deep-model warm + outcome record. Never raises."""
     try:
         from arail.portal import model_warmth as _mw
-        _record_warm("b", await _mw.boot_warm_deep(model))
+        status = await _mw.boot_warm_deep(model)
+        _record_warm("b", status)
+        if status == "deferred":
+            # Not just an activity line: say so in the boot strip too.
+            from arail import model_resolve as _mr
+            _mr.last_resolution().setdefault("degraded", []).append({
+                "slot": "b", "kind": "warm_deferred",
+                "detail": f"Deep model {model} was not loaded at boot (another "
+                          "ARAIL instance is loading it, or memory is busy). "
+                          "Pin it again to retry."})
     except Exception:  # noqa: BLE001
         _record_warm("b", "failed")
 

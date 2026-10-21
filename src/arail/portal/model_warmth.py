@@ -44,6 +44,8 @@ import asyncio
 import json
 import logging
 import os
+import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Optional
@@ -289,6 +291,23 @@ async def tier0_keepwatch_loop() -> None:
 
 _SENTINEL_NAME = ".aerollm_boot_warm.inflight"
 
+# A deep load takes minutes, not hours. Older than this, a sentinel is a
+# crash regardless of whether its pid is alive (pids are reused after a
+# reboot, so liveness alone can wedge slot B and hide the crash).
+SENTINEL_MAX_AGE_S = 600.0
+
+
+def _boot_id() -> Optional[str]:
+    """Identifier of the current OS boot (None when it can't be read)."""
+    try:
+        if sys.platform == "darwin":
+            out = subprocess.run(["sysctl", "-n", "kern.boottime"], capture_output=True,
+                                 text=True, timeout=2).stdout.strip()
+            return out or None
+        return Path("/proc/sys/kernel/random/boot_id").read_text().strip() or None
+    except Exception:  # noqa: BLE001
+        return None
+
 
 def sentinel_path() -> Path:
     from arail.config import DATA_DIR
@@ -322,7 +341,8 @@ def write_sentinel(model: str) -> None:
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(json.dumps({"model": model, "pid": os.getpid(),
-                                 "started_at": time.time()}), encoding="utf-8")
+                                 "started_at": time.time(),
+                                 "boot_id": _boot_id()}), encoding="utf-8")
     except OSError as exc:
         log.warning("boot-warm sentinel not written: %s", exc)
 
@@ -334,24 +354,46 @@ def clear_sentinel() -> None:
         pass
 
 
+def _sentinel_is_live(sent: dict) -> bool:
+    """True iff *sent* describes a load in progress in ANOTHER live process:
+    pid alive and not us, written this boot, and younger than
+    ``SENTINEL_MAX_AGE_S``. Anything else is stale (a crash)."""
+    try:
+        pid = int(sent.get("pid") or 0)
+    except (TypeError, ValueError):
+        return False
+    if pid == os.getpid() or not _pid_alive(pid):
+        return False
+    try:
+        age = time.time() - float(sent["started_at"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    if age < 0 or age > SENTINEL_MAX_AGE_S:
+        return False
+    recorded, now_id = sent.get("boot_id"), _boot_id()
+    if recorded and now_id and recorded != now_id:
+        return False
+    return True
+
+
 def crashed_model() -> Optional[str]:
-    """Model named by a stale sentinel (pid dead, not us), else None."""
+    """Model named by a stale sentinel (not our own load, not a live load
+    elsewhere), else None."""
     sent = read_sentinel()
     if not sent or not sent.get("model"):
         return None
-    pid = int(sent.get("pid") or 0)
-    if pid == os.getpid() or _pid_alive(pid):
-        return None
+    try:
+        if int(sent.get("pid") or 0) == os.getpid() or _sentinel_is_live(sent):
+            return None
+    except (TypeError, ValueError):
+        pass
     return str(sent["model"])
 
 
 def _loading_elsewhere() -> bool:
-    """True iff another LIVE process is mid-load (sentinel pid alive, not us)."""
+    """True iff another LIVE process is mid-load (see ``_sentinel_is_live``)."""
     sent = read_sentinel()
-    if not sent:
-        return False
-    pid = int(sent.get("pid") or 0)
-    return pid != os.getpid() and _pid_alive(pid)
+    return bool(sent) and _sentinel_is_live(sent)
 
 
 def _boot_preload_enabled() -> bool:

@@ -9,6 +9,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -29,8 +30,11 @@ def _dead_pid() -> int:
     return proc.pid
 
 
-def _write(p, model, pid):
-    p.write_text(json.dumps({"model": model, "pid": pid, "started_at": 1}))
+def _write(p, model, pid, started_at=None, **extra):
+    body = {"model": model, "pid": pid,
+            "started_at": time.time() if started_at is None else started_at}
+    body.update(extra)
+    p.write_text(json.dumps(body))
 
 
 # ── gate ───────────────────────────────────────────────────────────
@@ -76,6 +80,31 @@ def test_live_pid_or_own_pid_is_not_a_crash(sentinel):
     finally:
         live.kill()
         live.wait()
+
+
+def test_live_but_old_pid_is_a_crash_not_a_wedge(sentinel):  # review B2 (PID reuse)
+    old = time.time() - mw.SENTINEL_MAX_AGE_S - 60
+    _write(sentinel, "Bad-7B", 1, started_at=old)        # pid 1 is always alive
+    assert mw.crashed_model() == "Bad-7B"
+    assert mw._loading_elsewhere() is False
+
+
+def test_sentinel_from_a_previous_boot_is_a_crash(sentinel, monkeypatch):  # review B2
+    monkeypatch.setattr(mw, "_boot_id", lambda: "boot-2")
+    _write(sentinel, "Bad-7B", 1, boot_id="boot-1")      # fresh and pid alive
+    assert mw.crashed_model() == "Bad-7B"
+    assert mw._loading_elsewhere() is False
+
+
+def test_same_boot_fresh_live_pid_still_defers(sentinel, monkeypatch):
+    monkeypatch.setattr(mw, "_boot_id", lambda: "boot-1")
+    _write(sentinel, "M", 1, boot_id="boot-1")
+    assert mw.crashed_model() is None and mw._loading_elsewhere() is True
+
+
+def test_sentinel_without_started_at_is_stale(sentinel):
+    sentinel.write_text(json.dumps({"model": "M", "pid": 1}))
+    assert mw.crashed_model() == "M"
 
 
 def test_missing_or_garbage_sentinel_is_ignored(sentinel):
@@ -184,3 +213,16 @@ def test_api_instance_exposes_warm_a_and_warm_b(monkeypatch):
         body = client.get("/api/instance").json()
     assert body["warm_a"] == "ok" and body["warm_b"] == "deferred"
     assert {"warm", "warm_ms", "warm_skipped", "backend"} <= set(body)
+
+
+def test_deferred_boot_warm_is_visible_in_the_degraded_strip(monkeypatch):  # review B2
+    import arail.portal.app as app_mod
+    from arail import model_resolve as mr
+    mr.last_resolution().clear()
+    mr.last_resolution().update({"degraded": []})
+    monkeypatch.setattr(mw, "boot_warm_deep",
+                        lambda model: asyncio.sleep(0, result="deferred"))
+    asyncio.run(app_mod._warm_slot_b("Some-7B"))
+    kinds = [d["kind"] for d in mr.last_resolution()["degraded"]]
+    assert "warm_deferred" in kinds
+    mr.last_resolution().clear()
