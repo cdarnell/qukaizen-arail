@@ -1,5 +1,75 @@
 # Test report: Buddy, always on (S1 "Buddy answers, asks, and stops")
 
+# Round 2 (2026-10-21, targeted re-test after build round 3)
+
+**Date:** 2026-10-21, runs from 12:44Z to 13:24Z.
+**Build:** BUILD_LOG Steps 38–41.
+- ARAIL `qukaizen/arail-buddy-always-on` at `c94dc603` (fix `496cdb2a`).
+- qukaizen-buddy `qukaizen/buddy-always-on` at `ac3b81e1` (`1c1572c4`, `24b81f1a`, `ac3b81e1`).
+
+**Verdict:** **WEAK_PASS**
+
+**Why.**
+- **Q-8 is fixed and proven on the live system.** Real ARAIL, real Ollama, Ollama killed mid-session, no ARAIL restart: Buddy says
+  "Brain: not available." while Ollama is down, and he answers again **9.4 s after Ollama returns**. While the model was down, 17
+  questions plus the gate's handshakes cost **4 probes in 60 s, at least 12.3 s apart**.
+- The template default and N3 behave as specified. The launchd logs are 0600 after install, after a boot, and after re-creation.
+- Every regression suite is green, and the differential has **0 branch-only** failures.
+- **WEAK_PASS, not PASS,** for two new follow-ups found here, neither a security issue:
+  - **Q-13:** `service install` fails after any `service uninstall`. This is nanobot's installer order, from round 1's code, not a round-3
+    regression;
+  - **Q-14:** the first answered turn after Ollama recovers is composed without "Built with Llama." in the persona: a transient G11
+    lapse, opened by the new recovery path.
+- Plus the gates that only the operator's phone run can prove (unchanged from round 1).
+
+**Not re-run, on purpose:** the blind set. Round 3 did not touch the answer path; only the default `answer_mode` changed, and round 1
+already graded both modes. The captured request body of this round confirms the live mode is template (TEMPLATE persona, no `format`).
+
+## Round 2 results
+
+| # | Check | How | Result |
+|---|---|---|---|
+| 1 | **Q-8 live** | `qa/probes/q8_live.py`: QA's Ollama on a private port behind an access-logging proxy that drops the connection when Ollama is down; ARAIL from the worktree (hybrid, maximus); the whole Buddy through the harness. Ask; `SIGKILL` Ollama; ask; tick; `/status`; 60 s down with a question every 3 s; restart Ollama; ask every 2 s | before: answered. Down: "Something went wrong reaching the lab. Ask again."; `/status` **"Brain: not available."**. Back: **answered 9.4 s after Ollama returned**; ARAIL's activity log "Model 'llama-ai-eng' recovered." at 13:19:42Z; `/status` back to "Brain: llama-ai-eng via ARAIL (local). Built with Llama." at the next handshake; **portal PID 62597 alive throughout (no restart)**. **PASS** |
+| 1b | One probe per 10 s while down | the proxy's access log, 13:18:32Z–13:19:32Z | 4 probes (`GET /v1/models`, all refused) in 60 s, gaps **12.3, 12.3, 21.1 s**, against 17 `brain.chat` attempts (22 refused 424 in all) and 3 handshakes. **PASS** |
+| 1c | Q-8 unit test | `tests/registry/test_qa_buddy_edge_brain_recovery.py`; diff since `14fde006` | the marker is removed, **the body is unchanged**; all 3 pass. The builder's 6 recheck tests pass |
+| 2 | Fresh home | clean venv per README from `ac3b81e1`; `buddy setup --token-stdin`; `./arailctl buddy link --yes`; `configure`; `verify` | `buddy.toml` has `[answer] mode = "template"`; `configure` and `verify` print **no** Note. **PASS** |
+| 2b | Existing home with `mode = "structured"` | copy, set structured, sha256 `buddy.toml`, `configure`, `verify` | both print the one-line `Note: … recommended mode is "template" …`; rc 0; `buddy.toml` sha256 **identical before and after** (`53d82749…`). A home with no `[answer]` loads `template` silently. **PASS** |
+| 3 | Log modes | the real LaunchAgent (`service install`), checked after install, 6 s after the boot, after `chmod 644` + `launchctl kickstart -k`, and after deleting the logs + kickstart (launchd re-creates them) | `-rw-------` at every step. `~/.nanobot/logs` itself is `drwxr-xr-x` (it lists names, not content). **PASS** |
+| 3b | Conversation text in readable files | after the live run, every file under the Buddy homes, `~/.nanobot`, ARAIL's data and lab dirs and the worktree's `logs/`, grepped for this run's questions and a canary phrase | **0** files another user can open hold conversation text. Inside the home, nanobot writes the session store `sessions/<hash>/<chat>.jsonl` **0644** in a 0755 subdirectory; it is unreachable only because `sessions/` and the home are 0700 (S2 enforces the home). Note, low |
+| 4 | Buddy suite | `pytest buddy/tests -n 4 --cov=buddy` | **1980 passed, 1 skipped, 8 xfailed**, 96 % (4476/4661); with QA's new Q-13 test **1981 / 1 / 9** |
+| 4b | nanobot upstream + P0–P2 | `-p buddy.testing.upstream_mode … tests nanobot/channels` | **7678 passed, 11 skipped**; 3 files +9/−3; `make_nanobot_pin.py --check` ok; ruff clean |
+| 4c | ARAIL R-BUDDY-98 | `pytest tests/test_*buddy*.py` | **102 passed, 1 xfailed** (100 + QA's 2 route tests; S3) |
+| 4d | ARAIL new tests + QA's + `tests/registry` | as in round 1 | **490 passed**; contract `--check` ok (134 files) |
+| 4e | **Differential** vs `origin/main` | fresh `git archive ca0a8f81` / `HEAD` (`c94dc603`), sequential, **QA's daemon down** | main 64 failed / 6917 passed / 32 skipped; branch 63 / 7372 / 27. **Fail on both 63, branch-only 0**, main-only 1 (`test_eject_ollama_rejects_injection_before_any_subprocess[`id`]`, environment-dependent, as in round 1). Environment: someone else's Homebrew `ollama serve` (launchd `homebrew.mxcl.ollama`, started 12:50:58Z, PPID 1) answered on 11434 in 54 of 66 samples, on both sides; not QA's, left alone |
+
+**QA's Ollama windows (round 2), private port 11534:**
+- 13:18:22Z to 13:18:31Z, killed on purpose (`SIGKILL`) for Q-8;
+- 13:19:33Z to 13:20:46Z.
+
+No other client used it. The differential ran before both windows.
+
+## Round 2 findings
+
+| # | Severity | What | Minimal repro |
+|---|---|---|---|
+| Q-8 | **closed** | see #1 above | `qa/probes/q8_live.py` |
+| **Q-13** | debt (medium): fix or document before the operator's win run | **`python -m buddy service install` fails after any `service uninstall`.** nanobot's uninstaller runs `launchctl disable gui/$UID/<label>`; its installer runs `bootstrap` **before** `enable`; launchd refuses to bootstrap a disabled label: "Bootstrap failed: 5: Input/output error", a `CalledProcessError` traceback, rc 1, the plist left written. Round 1's own uninstall had left that override on this Mac, so round 2's first install failed. **QA cleared it** (`launchctl enable`; the override now reads `enabled`), so the operator's first install works | `service install`, `service uninstall`, `service install` → fails. Workaround: `launchctl enable gui/$UID/ai.nanobot.qukaizen.buddy` before installing. Test: `buddy/tests/test_qa_service_reinstall.py` (strict xfail on the dry-run command order) |
+| **Q-14** | debt (low); the architect may rule it a G11 matter | **The first answered turn after the brain comes back carries no "Built with Llama."** The carrier composes the persona from Buddy's last handshake, which still says the brain is unavailable (no attribution), while the edge, having re-probed, already serves `llama-ai-eng`. Seen in the captured Ollama bodies: 13:18:30Z with the line, **13:19:42Z without it** (the recovery answer), 13:19:44Z with it again after the gate's tick. T4 did not stop the turn, because it checks against the same stale handshake | `q8_live.py`; read `round2/q8.bodies.jsonl`. Fix direction (the builder's call): refresh the handshake when an answer arrives while the last handshake said no brain, or have the edge refuse a Llama answer whose persona lacks the line |
+| — | note (low) | Session files 0644 inside a 0700 home | §3b |
+
+**Operator's remaining items (unchanged from round 1, plus one):**
+- W5 witness line (O1);
+- accounts B and C (O2);
+- the phone win run, by the script below, which now covers socket-level S-FLIP, 10-minute hybrid L3, F13 and W-1;
+- set `[answer] mode = "template"` in your own `buddy.toml` if it already exists (the Note will remind you);
+- D35's content decision before S2;
+- **new:** if you ever uninstall Buddy's service, run `launchctl enable gui/$UID/ai.nanobot.qukaizen.buddy` before reinstalling, until
+  Q-13 is fixed.
+
+---
+
+# Round 1
+
 **Date:** 2026-10-21 (runs from 11:09Z to 12:25Z)
 **Build:** [BUILD_LOG.md](./BUILD_LOG.md) Final state. ARAIL `qukaizen/arail-buddy-always-on` at `907baae1` (code at `e31b0d59`, review `c479750d`);
 qukaizen-buddy `qukaizen/buddy-always-on` at `2e6ffc77`. Spec read: REVIEW.md round 2, ARCHITECTURE §8 and §A11, VISION §2.3, BUILD_LOG Final state,
