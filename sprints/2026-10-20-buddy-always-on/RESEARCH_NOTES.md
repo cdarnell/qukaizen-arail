@@ -37,6 +37,10 @@ the brief's nine questions.
    target will be ARAIL. I want the agent to feel like an agent on my system or I
    actually give buddy its own container, linux system or AI operating system."
 
+11. (2026-10-21, during build round 2) "So really nanobot is just the gateway" (agreed: gateway + turn loop + sessions + service shell in S1; brain, World, policy, ledger are ours). "We take nanobot; need something to settle the hard part of talking to devices and having an agent that can take over a computer, probably prefer doing so having their own system."
+12. (2026-10-21) "Each team has their own network. That should be a default recommendation out of paperagents."
+13. (2026-10-21) "paperagents is the swarm tech integration crew."
+
 ## 2. The field (verified against each repo via the GitHub API today)
 
 | | nanobot (HKUDS) | Hermes Agent (Nous) | OpenClaw | OpenBot (nightly-labs) |
