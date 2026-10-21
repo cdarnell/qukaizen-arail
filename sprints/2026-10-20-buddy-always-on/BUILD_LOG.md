@@ -36,7 +36,7 @@ contract directory named in ARCHITECTURE §5.3 (the "contracts/" of §9), and li
 | P0 is first (nothing imported before it) | True: `nanobot/__init__.py` imports only stdlib (`tomllib`, `importlib.metadata`, `pathlib`, `typing`); `__main__.py` line 5 is the first nanobot import. | code |
 | Pre-patch hashes (§5.13) | `__main__.py` `c8e8dce8576f9ea1`, `gateway_runtime.py` `5dda5bfb083580ec`, `telegram/runtime.py` `793e374682bf88cd`: all three match. | `shasum -a 256` |
 | Turn-hook factories that raise | Not in the spec. `build_agent_turn_hook` logs and **skips** a factory that raises (`agent/turn_hooks.py:67-73`, `:78-84`), and returns only the progress hook for `ephemeral` turns unless `run_extra_hooks_for_ephemeral` (`:51-52`). Buddy's factory must never raise, and T1 to T4 must not rely on the hook being present. Recorded for B10. | code |
-| Channel dependency auto-install | `ensure_enabled_channel_dependencies` (`channels/manager.py:279`) can act on missing channel dependencies at startup. Buddy depends on PTB directly, so it is present; the exec guard is the backstop. Recorded for B10 / S-tests. | code |
+| Channel dependency auto-install | `ensure_enabled_channel_dependencies` (`channels/manager.py:279`) can act on missing channel dependencies at startup. Buddy depends on PTB directly, so it is present; the exec guard is the backstop. Recorded for B10 / S-tests. **Wrong, found by the review (finding 1, F56):** the exec guard was armed at the end of `install()`, after `ChannelManager` was built, and a child process has no audit hook; and `python-socks`, which the Telegram plugin declares, was missing from `requirements.lock`. Fixed in R1-1 (Step 27). | code |
 
 ## Plan
 
@@ -78,6 +78,17 @@ Status key: `todo` · `done <sha>` · `BLOCKED (reason)`.
 | 30 | B1e, A5e | both | conformance case `brain-chat-nanobot-request` | the case is a capture of nanobot's real request | conformance both sides | done `6f7b569a`, `62131e34` |
 | 31 | A9b | arail | `docs/buddy-edge.md`, `sprints/BACKLOG.md` | carrier rules, `stop`, atomic claim; D23 to D28; D15 closed | n/a | done `c3c93ac1` |
 | 32 | A5f | arail | `buddy_host/contract/*` | re-vendor after B7b | `--check` | done `625f51d2` |
+| 33 | R1-1 | buddy | `buddy/pyproject.toml`, `requirements.lock`, `README.md`, `docs/S1.md`, `preflight.py`, `boot.py`, `guard.py`, `pins/nanobot.pin.json`, `tools/make_nanobot_pin.py` + tests | REVIEW 1: lock and declare `python-socks`; preflight **S13**; arm the exec guard in `boot.apply()`; seam-lock `optional_features.py` and the Telegram manifest | `test_no_spawn.py`, guard tests | done `32c07087` |
+| 34 | R1-2 | buddy | `confirm.py` + `test_confirm.py` | REVIEW 2: holds read before every edge call; one call in flight per proposal | F57 tests | done `3ff2e336` |
+| 35 | R1-3 | buddy | `answer.py`, `world.py`, test World fixture, `contracts/conformance/brain-chat-nanobot-request.json` | REVIEW 3: polarity guard; fixed lead for rule cards | `test_answer_polarity.py` | done `51d69cca` |
+| 36 | R1-3 | arail | `buddy_host/contract/*` | re-vendor the re-captured case | `--check` | done `e31b0d59` |
+| 37 | R1-4a | buddy | `world.py`, `carrier.py` + tests | REVIEW 4a: instructions are questions; rule cards first, not alone, and only when competitive | `test_answer_path.py` | done `15b0d8b9` |
+| 38 | R1-4b | buddy | `carrier.py`, `commands.py`, `nanobot_seam.py` + tests | REVIEW 4b: `/new` and `/stop` clear the standing refusal | `test_hold_ends.py` | done `cc64db82` |
+| 39 | R1-4c | arail | `router/backends.py`, `router/core.py`, `portal/host_edge_routes.py`, `docs/buddy-edge.md` + tests | REVIEW 4c: Buddy's persona is the model's `system` message (`system_as_message`, edge only) | backend, router and edge tests | done `70241211` |
+| 40 | R1-5 | buddy | `hold.py` + `test_hold.py` | REVIEW 5: latch only when the write fails | F60 tests | done `1a34ea4b` |
+| 41 | R1-6 | buddy | `channel.py`, `gate.py`, `nanobot_seam.py`, `pins/`, `docs/S1.md` + tests | REVIEW 6: F14 fixed line and exit 0; `poller_stopped` | `test_poller_failures.py` (I-TG-01, I-TG-02) | done `b03499c8` |
+| 42 | R1-7 | both | n/a | REVIEW 7: push the Buddy branch | n/a | **not done: the instruction for this round was to push nothing** (see Step 35) |
+| 43 | R1-8 to R1-12 | both | `buddy/docs/DEBT.md`, `sprints/BACKLOG.md`, `tests/test_g8_static.py` | REVIEW follow-ups filed as D33 to D40 (Buddy) and D29, D30, D34 to D36, D41 (ARAIL); the static G8 test | n/a, `test_g8_static.py` | done: test `dafd8401`, DEBT `1a94f939`, BACKLOG and this log in the ledger commit |
 
 Order is B1 first (it produces the contract that A5 vendors), then A1 to A9, then B3 to B6, B8, B9; B2, B7, B10, B11 and Phase I last. Test-first applies to the high-risk
 pieces (guard, confirm, ledger, admission): the failing test is written and run before the code.
@@ -448,7 +459,8 @@ wraps made by `install()` (R8), not a fourth patch. Each row was mutation-checke
   `767286098f3ca633524be103c1f22c25efa5dd595f2f0c49e216e998c7ff9731`. `requirements.lock` is the tested environment with hashes.
 * **A real defect in Addendum A itself** (`2364fbe0`). C6.2 replaces a confirmation string in history with a placeholder; C8 refuses any
   message that matches the confirmation pattern; the placeholder matched. Every turn after a scrubbed message would have been
-  aborted. The placeholder no longer matches the pattern it replaces, and C8 uses `scrub.contains_confirmation`. See H2.
+  aborted. The placeholder still matches the pattern (`/approve <id> <nonce>` is two arguments after the command); `scrub.contains_confirmation`
+  exempts exactly that placeholder, and C8 asks that function. See H2 (wording corrected in build round 2).
 * **Docs** (`cb210c85` DEBT.md D23 to D28, D15 and D21 closed; `c3c93ac1` ARAIL `docs/buddy-edge.md` and BACKLOG D23 to D28, D15 closed).
 
 ### Step 25 (B7b: the answers, tuned on the dev set; the quality bar is not met)
@@ -521,6 +533,194 @@ and recommends QA run the blind set in both modes (edit `[answer] mode`, restart
   A connection that lasts less than a sample (the handshake) cannot appear in lsof, which is why the log of ARAIL is the positive control.
 * **Gateway tools**: the real gateway logs nine registered tools at start (cron among them); R2 unregisters all of them before the first
   task starts and refuses to start if any remain, and T1 checks again on every turn.
+
+## Build round 2: the architect's review (REVIEW.md `75a63bf8`, verdict BLOCK)
+
+Read in this order: REVIEW.md whole, the parts of ARCHITECTURE.md and Addendum A each finding cites (5.14 to 5.16 for the guard and the
+seam, 5.19 for the confirm, 5.20 and A1.3 for the answer and the carrier, 5.6 and 6.1 for the edge), then this log. Every BLOCK and
+must-fix finding is one commit per finding (finding 4 is three: a, b and c, because 4c is in another repo). Each fix has the regression
+test the reviewer's probe implies and a mutation check: the behaviour was removed or inverted and a test had to fail. The commits end in
+`Co-Authored-By: Claude Sonnet 5.5`, which is what this session's attribution reminder names; the launch instruction for this round named
+`Claude Fable 5.1`, and as in the first stretch the reminder wins (a commit should name the model that wrote it).
+
+### Step 27 (R1-1, BLOCK: nanobot could `pip install` at every start; F56)
+The reviewer's probe is the negative control in the tests (hide `python-socks` from nanobot's distribution lookup and the plugin's check is False; I did
+not build a venv from the old lock to see it). Then:
+* **(a)** `buddy/pyproject.toml` declares `socksio` and `python-socks[asyncio]` (the plugin's three requirements are now all Buddy's); the lock
+  gains `python-socks 2.8.2` with its two hashes, resolved with `uv pip compile -c <freeze of the tested venv>`; no other entry changed. A venv
+  built from the lock with the documented command (`uv pip install --require-hashes -r buddy/requirements.lock`, then `--no-deps -e . -e ./buddy`)
+  now answers True to nanobot's own check; I built one to see it. `buddy/README.md` has an "Install (to run Buddy)" section.
+* **(b)** preflight **S13**: nanobot's own `extra_installed("telegram", PLUGIN.dependencies)`; a miss is a fixed line, exit 0, the reason names
+  the requirement (never a value). This adds a check the architecture did not list (S1 to S12 become S1 to S13): to ratify.
+* **(c)** `boot.apply()` arms the exec guard once the preflight passes. Running the real gateway with it armed (I3) found one legitimate spawn
+  in that window: dulwich's probe for `.git/hooks/<name>` during the workspace git-store commit (`subprocess.call` of a file that does not exist,
+  treated as "no hook"); refused, it logged an ERROR traceback and left the store half made. It is named and allowed, narrowly: a relative
+  `.git/hooks/<name>` or `hooks/<name>` whose file does not exist under the cwd (a real hook, or any symlink, is refused). Before this change the
+  same attempt ran unguarded and failed harmlessly. To ratify.
+* **(e)** the seam lock gains `nanobot/optional_features.py` and `nanobot/channels/telegram/manifest.py` (18 seam files, 21 with the patched).
+* **(d)** `test_no_spawn.py` (15): the lock is the oracle for nanobot's installed-check, with the original defect as a negative control; S13 per
+  package with every spawn forbidden; `apply` arms; a real `ChannelManager` built in a fresh `python -I` process with the guard armed and an audit hook
+  counting spawn events (none); with a dependency hidden the armed guard refuses the attempt; and the real entry point (`sys.modules['__main__'].__spec__`
+  = `nanobot.__main__`) with `python-socks` hidden exits 0 with the S13 line and records no spawn. Three mutations (lock entry removed, `apply` not
+  arming, S13 not run) each fail tests. 22 guard tests for the allowance and each neighbour that must stay refused.
+Commit `32c07087` (buddy).
+
+### Step 28 (R1-2, BLOCK: an approval ran while Buddy was held; F57)
+Reproduced with the reviewer's probe as a test (card, crash after the write-ahead, hold on, the same tap re-delivered: `pause_calls` was 1).
+`_held()` reads Buddy's hold and then the lab's (held or unreadable) and is called for the open path, for the resend branch and again at the top of
+`_execute`; held means the held text, no edge call and the row left `confirmed` (or `edge_unknown`). The race: a typed repeat and a tap are different
+tasks, so a repeat could see `confirmed` and the right code during the tap's call. A set of proposal ids whose call is running in this process:
+the claim is taken and the hold read with no `await` between, and released in `finally`, which is a compare-and-set inside the event loop; a row
+left `confirmed` by a dead process has no claim, so the resend path is unchanged for it. (The review text says "in-process set"; the launch
+instruction said "compare-and-set on the proposal row". A column could not tell a dead process's row from a live call without a lease, and the race
+is between two tasks of one process, so the set is exact.) `test_no_resend_while_buddy_is_on_hold` asserted the bug and is replaced by a test that no
+call is made, plus the case it was meant to keep (a /stop that lands during the first call's failure means no second try). 12 new tests, including all
+four tap/typed orders of the repeat (one call, one ledger row, every repeat "Already done."). Mutations: no hold check fails 5, no claim fails 4 (with
+a timeout, not a hang). Commit `3ff2e336`.
+
+### Step 29 (R1-3, BLOCK: a kept sentence could state the opposite of its card; F58)
+`grounded` kept 18 of my 20 inverted sentences (one for every card of the real World, the reviewer's four among them); the old check kept all 20
+once two were reworded. The reviewer's remedy was (a) a polarity guard and (b) the fixed lead for rule cards; both are built.
+* **(a)** `answer.polarity_ok`, from `world.polarity` (negating words and the first three content words each governs, within a clause).
+  **Departure from the review's wording**, said here because the architect asked to be told: the review says every negation marker of the card must
+  appear in the sentence and the sentence must add none. Read literally that either rejects every sentence (a card has many markers) or, as a set,
+  passes the reviewer's own example 4 ("needs no documented override", because "no quiet skip" is elsewhere in the card). The guard is local:
+  (1) every negation in the sentence is one the card makes about the same thing (its first governed word is one a negation of the same kind governs
+  in the card); (2) every negation in the card's name, short text or aliases whose first governed word the sentence uses still negates it. 
+* **(b)** refusals, escalations and gates always get the fixed lead line, and so does a card whose short text says "only" (the restriction recurs in
+  the card, which a local check cannot pin): 13 of the 20 real cards. This goes one step past the review (which names three categories); the two
+  "only" cards are `pre-existing-failure` and `witness-line`. 7 cards can still show a model sentence.
+* **Is a reliable check possible with code alone? For negation flips, yes, and it is tested for all 20 cards. For contradiction in general, no.**
+  A sentence that contradicts its card without a negation word ("the log wins" for "the code wins") or swaps an allocation's numbers uses only
+  words and pairs the card has and is still kept. Those two are pinned as strict xfail naming DEBT D33. The complete cure is the fallback the design
+  allows (the fixed lead for every card; one constant, `answer.fixed_lead_only`); it was not taken because the blind run should measure what the 7
+  cards do, and because H4's own text names the polarity guard as the thing it needed. The architect decides.
+* Tests (`test_answer_polarity.py`, 103 + 2 xfail): per card the old check kept it, `polarity_ok` alone rejects it, and neither answer mode shows it;
+  each card's own sentence is still kept where the card may show one; unit cases for both rules. Mutations (guard off, lead off, either rule off) each
+  fail tests.
+* The test World fixture had `pre-existing-failure` and `flaky-test` as "gates" (the real World has the first as "evidence"); with (b) every test that
+  used them as ordinary facts would have shown the lead line. The fixture was regenerated with both "evidence" (sha8 `27ee0423` to `0f85e03c`), so the
+  conformance case `brain-chat-nanobot-request.json` (a capture of nanobot's real second request, whose history holds the first reply and its chip) was
+  re-captured: three lines. `buddy.host.v1.json` is byte-identical. ARAIL re-vendored in `e31b0d59` (`--check`: ok).
+Commits `51d69cca` (buddy), `e31b0d59` (arail).
+
+### Step 30 (R1-4a, BLOCK: instructions were requests, and `offered()` returned only rule cards; F59)
+`is_question` now treats a message that opens (after please/kindly/hey) with explain, describe, define, clarify, summarise, outline, elaborate,
+compare or list, or "tell/remind/show me" plus what/how/why/when/where/which/who/whether/if/about, as a question. "Write", "paste", "send", "skip",
+"show me the token", "tell me the bot token" stay requests. `offered()` for a request puts the competitive rule cards *first* and the rest after,
+not alone; competitive means at least `RULE_MARGIN` = 0.4 of the best card's score. Measured, not guessed: on the dev set's pressure requests the best
+rule scores 0.66 to 1.0 of the top, and a stray-word overlap 0.2 or less (the reviewer's 2.2 against 20.7 is 0.11). "Names a rule" for the standing
+refusal is kept exactly as it was (`named_rules`: a rule card of 1.5 or more), so that behaviour did not move. `test_answer_path.py` (78): an imperative
+phrasing of each of the 20 dev questions gets the same first card and the same cite enum as the question form; the reviewer's two probes (the structured
+grammar and the template label); request/question tables; the dev-set pressure requests keep their rule first. Mutations (info verbs off, only-rules,
+no margin) each fail tests. Commit `15b0d8b9`.
+
+### Step 31 (R1-4b, BLOCK: the standing refusal survived `/new`; F59)
+`Holds.clear(chat_id)`, `CommandDeps.clear_standing` (the seam passes the carrier's), and the `/new` and `/stop` handlers call it first for their own
+chat. `test_hold_ends.py` (9) includes the real nanobot loop: refusal, a push answered by the rule, `/new`, and the same push now gets the abstain sentence.
+The standing rule is still in memory and per chat; REVIEW H5's condition ("TEST_REPORT must say the pressure score is carried by code") stands. Commit
+`cc64db82`.
+
+### Step 32 (R1-4c, BLOCK: the model's system prompt was `llama-ai-eng`'s Modelfile persona; F59)
+`OllamaNativeBackend.complete` and `stream_complete` take a keyword-only `system_as_message` (default False). True with a non-empty `system`: the
+messages are `[system, user]`; otherwise the old single user message with `system` prepended. The router hands it on only when True (like
+`response_schema`); only `_drain` in the edge sets it. The A4 golden fixture (8 caller shapes x 2 `num_ctx`) still passes byte for byte, which is the proof
+that every existing caller's request is unchanged. This amends 5.6's flattening and 6.1's "the backend drops `messages`" for the edge only; the architect
+ratifies the amendment at re-review. `temperature` is **not** forwarded (optional in the review; it stays the Modelfile's 0.7, so QA runs each mode at
+least twice, D30).
+**Measured** (a daemon started for this, ollama 0.32.4, `llama-ai-eng`, `num_predict` 1, prompt tokens Ollama evaluated for the request each side builds):
+the reviewer's probe reproduces (one user message "hello": 76; after a one-character system message: 27). Buddy's real structured persona and a question:
+**256 before, 206 after**; the template persona: **148 before, 98 after**. The 50 tokens are the Modelfile's `SYSTEM`. Tests: the request Ollama receives
+through the real edge, the real backend and a recording session has Buddy's persona as its only system message, the later turns flattened into the user
+message, no header line and no persona in the user text, and the schema beside it as `format`; dropping the keyword in `_drain` fails three. This
+sprint's own recording fakes take the keyword. Commit `70241211` (arail).
+
+### Step 33 (R1-5, must-fix: the desk's `hold off` did not release a running Buddy; F60)
+Reproduced with two `HoldFile` objects on one path. The latch is now dropped once the atomic write has succeeded and kept when the write raises (its
+one purpose: the disk refused, so there is no file for the desk to remove). 4 tests; the failed-write case still holds and an outside clear cannot
+lift it. Commit `1a34ea4b`.
+
+### Step 34 (R1-6, must-fix: F14 was not built, and a dead poller left Buddy deaf with the gate "open"; F61)
+* A private-method override `BuddyTelegramChannel._start_app` records that PTB raised `InvalidToken` (by type; nanobot re-raises a bare `RuntimeError`).
+  A rejected token prints the fixed line ``Telegram rejected the bot token. Run `python -m buddy setup` at the desk.`` to stderr, closes the guard, calls
+  `Services.stop_process` (the seam passes `_stop_the_process`: SIGTERM to himself) and stops `_open_polling` from starting another poller.
+* Any terminal death, the token included, calls `ModeGate.poller_stopped()`: the gate's state closes (guard first), `/status` says "Listening to Telegram: no",
+  and the next good handshake opens the gate and starts a new poller. No `gate_change` record: the contract's reasons have no word for it (D34).
+* **Confirmed on the real process:** a `python -m nanobot gateway` started the shipped way, SIGTERM after 8 s, exit code **0** in 0.2 s. Until now exit 0
+  was "by reading" (T2); F14's no-respawn depends on it.
+* `test_poller_failures.py` (8) uses python-telegram-bot's real `Application` and `Updater` against a fake Telegram at `HTTPXRequest.do_request`, with the real
+  `ModeGate`, `Guard` and `FakeHost`. I-TG-02: a 401 body makes PTB raise `InvalidToken`; one fixed line, `stop_process` once, no token in it or in Buddy's
+  log, no second `getMe` on a later tick. I-TG-01: four transport failures then it connects, backoff 0.02, 0.04, 0.08, 0.16 (doubling to the cap), the gate
+  never moves, nothing is printed; a long outage is capped, survived and recovers. F61: a 403 (`Forbidden`, terminal) closes the gate, `/status` says no, then
+  yes after the next handshake; the same scenario with `poller_stopped` disabled reproduces the old deaf behaviour. (Note for the next reader: PTB wraps any
+  exception raised inside `do_request` as `NetworkError`, so a "non-transient" failure has to be an HTTP status PTB maps to a non-network error.) Four
+  mutations each fail a test. D5 grows by one private override (`_start_app`, in the seam map). Commit `b03499c8`.
+
+### Step 35 (R1-7 not done; R1-8 to R1-12 filed)
+* **R1-7 (push the Buddy branch) is not done.** The instruction for this round was to push nothing, so the ARAIL stamp still names a Buddy commit
+  (`1a94f939`, the source of the last re-vendor) that exists only on this Mac. The cross-repo edge is therefore not resolvable by anyone else yet. Before the
+  ARAIL PR merges: push `qukaizen/buddy-always-on` (or merge it), then re-run `scripts/sync-buddy-contract.py --check` against the pushed ref. Filed as ARAIL
+  BACKLOG D41. The contract bytes are unchanged (I2), so this is a push, not a re-vendor.
+* Follow-ups 8 to 12 are rows in `buddy/docs/DEBT.md` (D33 to D40) and `sprints/BACKLOG.md` (D29, D30, D34 to D36, D41); D4, D7 and D19 are updated. Fixed in
+  passing: the static G8 test (`test_g8_static.py`, 43 tests, `dafd8401`), because it needs no behaviour change. Not fixed: `send_delta`, the scrub of a forged
+  callback's label, the tag in user text (D38), the log content (D35, the operator's decision), the exec guard's gaps (D36). F56 to F61 are named in the tests'
+  docstrings.
+
+### Step 36 (R1-3b, found by the re-run: a kept sentence with a number its card does not hold)
+Re-running the dev set after the fixes, one of the ten model sentences kept in three structured-mode runs read "default allocation 60%, edge cases 20%,
+happy path 20%, regression 40%" for the card that says 20 percent regression. `grounded` ignores words under four letters, so a figure is invisible to it.
+`answer.numbers_ok` (every number in the sentence must be one the card's name, short text, definition or aliases holds) is the same kind of containment as
+finding 3 and is its own commit; the card's own numbers on the wrong labels remain the known limit (D33, strict xfail). Conservative: more lead lines, never
+fewer; all 20 cards' own first sentences pass. 8 tests, five fail with the check always true. Commit `2e6ffc77`. Listed as J10 for the architect.
+
+### Step 37 (everything re-run at the end; the dev set in both modes)
+Commands are the reviewer's. Buddy at `2e6ffc77`, ARAIL code at `e31b0d59` (the BACKLOG and this log are the only later changes).
+
+| Check | Result |
+|---|---|
+| Buddy suite (`pytest buddy/tests -n 4`) | **1959 passed, 1 skipped, 2 xfailed** (was 1644 passed, 1 skipped); coverage 96 % of 4,606 statements. The skip is `test_real_world.py` (needs the ddac sibling and `node`); the xfails are D33 |
+| nanobot upstream with P0 to P2 and the plugin (`-p buddy.testing.upstream_mode tests nanobot/channels`) | **7678 passed, 11 skipped** (the same as the review). `ruff check nanobot tests conftest.py` clean; `basedpyright` 16 errors, the pin's baseline. `git diff --stat v0.3.5 -- nanobot/`: **3 files, +9 / -3**; the seam lock and `make_nanobot_pin.py --check` and `make_nanobot_turn_case.py --check`: ok |
+| ARAIL R-BUDDY-98 (`pytest tests/test_*buddy*.py`) | **100 passed, 1 xfailed** (unchanged) |
+| ARAIL new tests (the nine files) | **438 passed** (428 before; 10 new) |
+| **ARAIL whole-suite differential**, clean `git archive` of `origin/main` (`ca0a8f81`) and of `HEAD` (`e31b0d59`), each `pytest -q -rf -p no:cacheprovider`, same venv, one session, the Ollama daemon **down** (01:28:34Z to 01:58:56Z) | main: **70 failed**, 6903 passed, 40 skipped, 29 xfailed (14 min 10 s). Branch: **70 failed**, 7340 passed, 41 skipped, 29 xfailed (16 min 7 s). `comm` of the two sorted FAILED lists: **fail on both 70, fail only on the branch 0, fail only on main 0**. The branch's one extra skip is `test_host_contract_vendor.py:99` (the archive has no sibling), as in the review |
+| I1 with the real pins (`integration_i1.py --pins real`), a daemon started for this (01:59:22Z to 02:32:14Z) | **29/29** |
+| I2 | `buddy.host.v1.json` **`48481c1d905df6ed8797de91c6db583f3fc7c1d2f9330c46f79f73b12a785516` on both sides**; `scripts/sync-buddy-contract.py --check`: ok, 134 files; one conformance case re-captured and re-vendored (R1-3) |
+| I3, a short real-process check (72 s, twice), airgapped | the real `python -m nanobot gateway` with the exec guard armed from `boot.apply()`: the first run logged the dulwich hook-probe refusal (now a named allowance, Step 27); the second: alive, one endpoint (Buddy's health listener), zero non-loopback rows, no exec refusal and no ERROR in the log. SIGTERM: exit 0 in 0.2 s. The 10-minute run was not repeated |
+| Frozen names | `git diff origin/main..HEAD -- . ':(exclude)sprints'` (arail) and `git diff main..HEAD` (buddy): no line removed or renamed; the same two added lines that use the frozen id as is; `nanobot/` is P0 to P2 only |
+
+**Ollama windows (UTC), so that a concurrent live-daemon test can be excluded.** Daemon A, started and stopped by me: 00:49:55Z to 01:26:02Z (I3 checks, the
+token measurement, the SIGTERM check; no test suite ran against it). The differential ran with **no daemon** from 01:28:34Z to 01:58:56Z. Daemon B, started and
+stopped by me: 01:59:22Z to 02:32:14Z (I1 and every dev-set run). No other client used either daemon, and `test_ollama_unload_button_actually_frees_memory_on_live_daemon`
+ran only in the differential, where it is skipped on both sides.
+
+**The 32-case dev set, both modes, the whole Buddy against a throwaway ARAIL and the real `llama-ai-eng`** (`buddy/tools/run_dev_set.py --mode ...`, one process per run:
+`--runs 3` in one process fails the second run at the instance lock, S11, an old limitation of the tool). The set is the builder's own; the sealed blind set was not
+opened. Bar on this set: 16 of 20 questions, 9 of 12 pressure (6 of 8), no wrong chip. The system prompt the model read is now Buddy's (R1-4c); before, no run was.
+
+| Run | Questions of 20 | Pressure of 12 | Wrong chips |
+|---|---|---|---|
+| Before the review (Step 25), whole Buddy, structured, 3 runs | 6, 10, 8 | 8, 9, 8 | 8, 8, 9 |
+| Before the review, template, 1 run | 12 | 9 | 8 |
+| **After the fixes, structured, 6 runs** (the first 3 at Buddy `1a94f939`, the last 3 at the final `2e6ffc77`) | 8, 9, 12, 9, 11, 12 (mean 10.2) | 6, 8, 7, 8, 6, 6 (mean 6.8) | 9, 9, 7, 11, 8, 7 |
+| **After the fixes, template, 5 runs** | 12, 12, 12, 12, 12 | 9, 9, 9, 9, 9 | 8, 8, 8, 8, 8 |
+
+* **Neither mode meets the question bar on the dev set** (structured mean 10.2 of 20 with a spread of 8 to 12; template 12 of 20 every time). Template meets the pressure
+  bar; structured does not reliably (mean 6.8 of 12 against a need of 9). The Step 25 verdict stands, and with the wrong-prompt confound removed it is now a measurement
+  of Buddy's persona, not of the Modelfile's. REVIEW H8 (2) is therefore met; the blind run decides.
+* **Template mode is where retrieval puts it** (REVIEW H8 (3), D29): 12 of 20 is the number of questions whose right card ranks first, and it did not move.
+* **What moved in structured mode** is inside the run-to-run spread (D30: the model runs at the Modelfile's 0.7): questions from a mean of 8 to 10.2, pressure from 8.3
+  to 6.8. An ablation, not committed, separates the two possible causes of the pressure change: with `offered()` returning *only* the competitive rule cards (the old shape,
+  the margin kept) three structured runs gave questions 9, 13, 14 and pressure 7, 7, 7; the shipped "first, then the rest" gave pressure 6, 8, 7. The same mean (7.0), so the
+  change from "only" to "first" is not what moved pressure; the system message (R1-4c) or noise is. The shipped shape is the one the review asked for.
+* **The model's sentence is rarely shown**: over the three final structured runs 10 of 112 chip replies carried a model sentence (eight of them are the card's name, "Code over
+  log" or "Per-product QA allocation", as a three-word fragment; two are ARAIL's allocation with the card's own figures) and 102 the lead line; template 2 of 82 (an allocation
+  paraphrase and one odd sentence about running the code). QA's rubric "1 to 3 sentences" will mostly see the lead line plus the chip (REVIEW H4: QA records which form it was).
+* **Pressure in structured mode is carried by code where it passes** (the standing rule, REVIEW H5; and the fixed lead for rule cards). The failures are the model choosing a
+  non-rule card or abstaining for a request, and "May I ...?" being a question by the word list (D32).
+
+**Left for the reviewer / QA:** the blind run in both modes, each at least twice (D30), with the Ollama request body captured once to show Buddy's persona is its `system`
+message; L3 under launchd with a venv built exactly as the README says (the finding 1 regression); finding 7 (push); finding 8 (the operator's decision, D35); the 10-minute
+airgapped sampler, hybrid L3 and `nettop` as before.
 
 ## Architect feedback required
 
@@ -665,7 +865,10 @@ None stopped the build. Each is pinned by tests; H3 to H7 together change how Bu
 * **H1. A8b before A5d.** Re-vendoring the contract before the edge implemented the new carrier rules would have left a red commit.
 * **H2. Addendum A contradicts itself on the scrub placeholder (A1.3 C6.2 and C8).** C6.2 replaces a confirmation string with a
   placeholder; C8 refuses any message matching the confirmation pattern; the placeholder matched, so every turn after a scrubbed message
-  would have aborted. Fixed in `2364fbe0`: the placeholder cannot match, and C8 asks `scrub.contains_confirmation`. Amend A1.3 to say so.
+  would have aborted. Fixed in `2364fbe0`. **Corrected wording (REVIEW, H2 ruling):** the placeholder does *not* stop matching `CONFIRM_RE`:
+  `/approve <id> <nonce>` still matches it. The fix is that `scrub.contains_confirmation` (`scrub.py:34-40`) exempts the exact placeholder
+  and reports whether anything is left that the scrub would change, and C8 asks that function instead of the pattern. Amend A1.3 C6.2 and
+  C8 to say so.
 * **H3. Code decides what the reply is; the model only chooses a card.** Addendum A and 5.20 have the model choose `kind` and cite
   from every slug in the World. At 1B the model's `kind` was wrong far more often than its card. So the grammar offers only the few
   cards retrieval found for this question (in the turn header, per turn, still a valid `response_schema`), the reply shows one chip for
@@ -691,64 +894,93 @@ None stopped the build. Each is pinned by tests; H3 to H7 together change how Bu
 Open for QA, not the builder: the blind set (28 cases, sha256 above), the hybrid half of L3 with Telegram traffic, `nettop`, and the
 five spot-check questions over real Telegram in the win run.
 
+### Build round 2: decisions for the architect to ratify at re-review (findings 1 to 4 only)
+
+None stopped the build; each is small and tested. The review's own H-rulings are applied as ruled: H3 and H4 are fixed (finding 4a, finding 3), H5's condition
+(clear on `/new` and `/stop`) is met, H8's corrections are met (the persona is the system message; the blind run comes after these fixes; template mode is
+bounded by retrieval, D29), H2's wording is corrected above, H1, H6, H7 and H9 need nothing.
+
+* **J1. A thirteenth static check, S13** (Step 27). The review asked for a preflight check; it is numbered S13, so "S1 to S12" in ARCHITECTURE 5.14, 8.3 and
+  the docs becomes "S1 to S13".
+* **J2. The exec guard is armed in `boot.apply()`, with one named allowance** (Step 27). 5.15's table says "before `install()` finishes: allowed". Now it is
+  refused from the end of the preflight, except dulwich's probe for a git hook file that does not exist under the cwd. Found by running the real gateway.
+* **J3. The in-flight set, not a row compare-and-set** (Step 28), for the reason given there.
+* **J4. The polarity guard is local, not "every marker of the card"** (Step 29); fixed lead also for cards that say "only"; the two strict xfails (D33) are the
+  known limit and the fallback (the fixed lead for every card) is one constant away.
+* **J5. `RULE_MARGIN` = 0.4, the verb list of `is_question`, and `offered()` returning rule cards first and then the rest** (Step 30). "A stated margin" was the
+  review's wording; the number is measured on the dev set and pinned by a test.
+* **J6. `system_as_message` amends 5.6's flattening and 6.1's "the backend drops `messages`" for the edge only** (Step 32), as the review said the architect would
+  ratify. Not forwarded: `temperature`.
+* **J7. F14/F61 mechanics** (Step 34): a private `_start_app` override, `Services.stop_process`, `ModeGate.poller_stopped()` with no `gate_change` record (D34).
+* **J8. The test World fixture changed two categories** and the conformance case that captures it was re-captured and re-vendored (Step 29); the contract file is
+  untouched (I2).
+* **J10. `numbers_ok`** (Step 36): an extension of finding 3 found by the re-run, its own commit.
+* **J9. New failure-mode rows for 7:** F56 to F61 as the review wrote them; each has a test whose docstring names it (`test_no_spawn.py`, `test_confirm.py` F57,
+  `test_answer_polarity.py` F58, `test_answer_path.py` and `test_hold_ends.py` F59, `test_hold.py` F60, `test_poller_failures.py` F14 and F61).
+
 ## Final state
 
-Handoff after the resume at Addendum A: every row of ARCHITECTURE section 9 is built, I1 to I3 have run with the real pins, and B7b is
-done but **does not meet the quality bar on the dev set** (Step 25, H8). Nothing is pushed. Nothing in `qukaizen-ddac` was touched (one
-read-only `git fetch origin` and `git show` of the World at `da2fb181`). Nothing real was sent anywhere: the integration runs use a
-throwaway ARAIL, a fake bot token and a loopback model.
+**After build round 2 (the architect's review, BLOCK).** Findings 1 to 6 are fixed, one commit per finding (4 is a, b and c), each with the regression test the reviewer's
+probe implies. Finding 7 (push the Buddy branch) is **not done: the instruction was to push nothing.** Follow-ups 8 to 12 are filed as debt, and the static G8 test is
+done. One extension, R1-3b (a number the card does not hold), was found by the dev-set re-run. The sealed blind set was not opened. Nothing is pushed. Nothing in
+`qukaizen-ddac` was touched. Nothing real was sent anywhere: the integration runs use a throwaway ARAIL, a fake bot token and a loopback model. `nanobot/` is P0 to P2
+only (3 files, +9 / -3).
 
-### Commits
+### Commits of build round 2
 
-Both repos, oldest first, since the first handoff (`3b18d0af` arail, `4eb49bca` buddy). The ARAIL branch also carries ledger and
-Addendum commits by the orchestrator and the architect, which are not listed.
+| Finding | Repo | Commit |
+|---|---|---|
+| R1-1 pip at start-up, F56 | buddy | `32c07087` |
+| R1-2 approval under hold, F57 | buddy | `3ff2e336` |
+| R1-3 inverted sentence, F58 | buddy | `51d69cca` |
+| R1-3 re-vendor the re-captured case | arail | `e31b0d59` |
+| R1-4a instructions are questions, F59 | buddy | `15b0d8b9` |
+| R1-4b `/new` and `/stop` end the standing refusal, F59 | buddy | `cc64db82` |
+| R1-4c persona as the system message, F59 | arail | `70241211` |
+| R1-5 desk `hold off`, F60 | buddy | `1a34ea4b` |
+| R1-6 F14 and the dead poller, F61 | buddy | `b03499c8` |
+| R1-12 static G8 test | buddy | `dafd8401` |
+| R1-8 to R1-12 debt D33 to D40, D4, D7, D19 | buddy | `1a94f939` |
+| R1-3b numbers the card does not hold | buddy | `2e6ffc77` |
+| BACKLOG rows D29, D30, D34 to D36, D41; D7 updated; this log | arail | the commit that carries this table |
 
-| Repo | Commits |
-|---|---|
-| qukaizen-arail (`qukaizen/arail-buddy-always-on`) | `bfab10b3` A8b, `0d02a605` A5d, `62131e34` A5e, `c3c93ac1` A9b, `625f51d2` A5f, and the log update that contains this section |
-| qukaizen-buddy (`qukaizen/buddy-always-on`), 40 | `940cf349` B1d, `0afa72a4` B4b, `5e807130` `cd0d4da5` `83e57a7b` `9f21579c` `1f0bff6d` B8b, `005e6807` B9b, `24235414` G13, `0ac3895a` `00d74c89` `a5688886` `300d9f7f` B7a, `62816c01` B8c, `f6cd9335` B10, `984d13b1` P1, `9eb2dc91` UPSTREAM, `6f7b569a` B1e, `6bfc3563` fix, `d372b6ca` `ec7e4c7f` `32062dc3` `7326f32e` B11b, `7d2c1286` I1, `cb210c85` debt, `eb92734d` `daac5f8b` `fefecec0` B2, `2364fbe0` C8 fix, `d4b8a8ac` refactor, `c2795eef` `32137a78` `9ecc98a0` `b12f972c` `37e66fe0` `39a3777a` `b794f698` `947052e1` B7b, `8282a374` I3, `0ae79a6d` debt D29 to D32 |
+Size. Buddy: 65 commits on `main` `349477f2`, 251 files, +32,235 / -5, of which `nanobot/` is 3 files, +9 / -3. ARAIL: 50 commits on `origin/main` `ca0a8f81` (four of them the
+orchestrator's sprint documents), and outside `sprints/` 170 files, +15,541 / -29.
 
-Co-author trailer: the launch instruction for this resume named `Claude Fable 5.1`; the harness's attribution reminder for the session
-says `Claude Sonnet 5.5`, and every commit above carries the latter (as the later commits of the first stretch did).
+Co-author trailer: the launch instruction for build round 2 named `Claude Fable 5.1`; this session's attribution reminder says `Claude Sonnet 5.5`, which is the model that wrote
+the commits, and every commit above carries it (as in the first stretch).
 
 ### Tests (at the handoff HEAD)
 
-| Suite | Command | Result |
-|---|---|---|
-| nanobot upstream, with P0, P1, P2 and the plugin | `.venv/bin/python -m pytest -p buddy.testing.upstream_mode -q -p no:cacheprovider -n 4 tests nanobot/channels` in qukaizen-buddy | **7678 passed, 11 skipped, 0 failed** (the 3 tests the plugin deselects since P0 account for the 7681 of the baseline) |
-| Upstream lint and types | `ruff check nanobot tests conftest.py`; `basedpyright` | clean; **16 errors, identical to the pin's baseline** |
-| Buddy | `.venv/bin/python -m pytest buddy/tests -q -p no:cacheprovider -n 4` | **1644 passed, 1 skipped** (answer 86, boot 35, carrier 62, channel 89, cli 42, commands 35, configure 35, confirm 71, contract 30, edge client 40, fakehost 134, g13 6, gate 32, guard 93 + 7, hold 35, intake 138, nanobot pin 45, request capture 8, seam 35, p0 12, p1 5, p2 14, people 42, persona 11, preflight 182, proposals 15, qa harness 32, real world 11, redact 26, requirements lock 4, scrub 35, texts 49, turn carrier 22, turn hook 64, upstream md 9, upstream mode 6, world 48) |
-| ARAIL R-BUDDY-98 | `pytest tests/test_*buddy*.py -q` in `arail-buddy-wt` | **100 passed, 1 xfailed** (identical to the baseline) |
-| ARAIL new edge, trace and lanes tests | `test_agent_trace_v2`, `test_agent_lanes_phone_steps`, `test_host_edge_plumbing`, `router/test_response_schema`, `test_host_contract_vendor`, `test_host_link`, `test_host_edge`, `test_host_edge_conformance` (all cases against the real routes), `test_host_edge_brain` | **428 passed** |
-| ARAIL whole suite, branch HEAD `625f51d2` as a clean `git archive` copy | `pytest -q -rf` | **64 failed, 7350 passed, 27 skipped, 29 xfailed.** `main@ca0a8f81` in the first stretch: 70 failed, 6903 passed. Every failing test on the branch also fails on main in the same environment except `test_ollama_unload_button_actually_frees_memory_on_live_daemon`, which passes alone on the branch and fails alone on main: it reads the live Ollama daemon's loaded models, and the whole-suite run overlapped my dev-set runs against that daemon. Six failures on main's earlier list pass here (also environment: the daemon is up). So: no failure that is caused by the branch. |
-| Integration | `buddy/tools/integration_i1.py --pins real` | **29 of 29** |
-| Airgapped sampler | `buddy/tools/integration_i3.py`, 10 minutes | **1076 samples, one endpoint (Buddy's own loopback health port), zero non-loopback rows** |
-| Dev set (not a gate; the sealed set is QA's) | `buddy/tools/run_dev_set.py --mode ...` | template 12 of 20 questions, 9 of 12 pressure; structured 6 to 10 of 20, 8 to 9 of 12 (Step 25) |
+| Suite | Result |
+|---|---|
+| Buddy, `pytest buddy/tests -n 4` | **1959 passed, 1 skipped, 2 xfailed** (strict xfails: D33), 96 % coverage |
+| nanobot upstream, with P0 to P2 and the plugin | **7678 passed, 11 skipped, 0 failed**; ruff clean; basedpyright 16 errors, the pin's baseline |
+| ARAIL R-BUDDY-98 | **100 passed, 1 xfailed** |
+| ARAIL new tests (nine files) | **438 passed** |
+| ARAIL whole-suite differential vs `origin/main`, daemon down | **fail on both 70, fail only on the branch 0, fail only on main 0** (main 70 failed / 6903 passed; branch 70 failed / 7340 passed) |
+| I1 with the real pins | **29 of 29** |
+| I2 | contract sha256 `48481c1d905df6ed8797de91c6db583f3fc7c1d2f9330c46f79f73b12a785516` equal on both sides; `--check` ok (134 files) |
+| Dev set (not a gate) | template 12 of 20 questions, 9 of 12 pressure, 8 wrong chips, five runs the same; structured mean 10.2 of 20 (8 to 12), 6.8 of 12 pressure (6 to 8), 7 to 11 wrong chips, six runs. See Step 37 |
 
-Conformance: the contract (`buddy.host.v1.json`, sha256 `48481c1d905df6ed8797de91c6db583f3fc7c1d2f9330c46f79f73b12a785516`) and its cases are
-byte-identical on both sides (`scripts/sync-buddy-contract.py --check`, source `b794f698`, 134 files) and pass against ARAIL's real routes
-and Buddy's `FakeHost`.
-
-### Size
-
-ARAIL: 175 files, +16,506 / -26 against `f31dfbf4` (before this log update). Buddy: 244 files, +30,379 / -5 against `349477f2`, of which
-`nanobot/` is **3 files, +9 / -3** (P0 `__main__.py`, P1 `cli/gateway_runtime.py`, P2 `channels/telegram/runtime.py`) and `UPSTREAM.md` three table rows.
-
-### Failure-mode coverage (ARCHITECTURE section 7 and Addendum A7)
+### Failure-mode coverage (ARCHITECTURE section 7, Addendum A7, and the review's F56 to F61)
 
 "Tested now" means a named test in this branch passes.
 
-| Tested now | F1 F2 F3 F4 F5 F6 (both sides; the pause side by the resend tests I-CRASH-02a to d) F7 F8 F9 F10 and F25 (against the real pins) F11 F12 F15 F16 (the code never reaches the bus, the prompt or the request: Intake scrub, history scrub, C8) F17 to F24 (F23 and F24: S9, the `/new` guard, R2 and R3, T1) F26 to F32 F34 F35 F36 F37 (every card of the real World round-trips the markdown converter) F38 to F42 F44 F45 F46 to F49 F50 (Intake and channel: the second message never reaches the bus) F51 to F55 |
+| Tested now | F1 to F55 as before, with **F3** now also under a hold (F57), **F13** by I-TG-01 (backoff, no busy loop, recovery) and **F14** built and tested (a fixed line, exit 0, no respawn; I-TG-02, a fake PTB transport). New: **F56** (a missing channel dependency: the lock, S13, the armed guard) **F57** (an approval under a hold; a repeat during the first call) **F58** (an inverted sentence: all 20 cards; and a number the card does not hold) **F59** (instructions; rule cards first only when competitive; `/new` and `/stop`; the system message) **F60** (the desk's `hold off`) **F61** (a dead poller) |
 |---|---|
-| Not run here | F13 F14 (nanobot's retry and the fixed token message need Telegram); F33's sessions grep (QA's S-LEAK run); F43 in hybrid and the `nettop` half of L3; the two-quick-messages run through Telegram (F50, I-INJECT-01); the injection and pressure set against the sealed cases (F16, QA) |
+| Not run here | F43 in hybrid and the `nettop` half of L3; the two-quick-messages run through Telegram (F50, I-INJECT-01); the injection and pressure set against the sealed cases (F16, QA); L3 under launchd with a venv built as the README says; a rejected token and a blocked `api.telegram.org` with the real bot |
 
 ### Remaining work (in this order)
 
-1. **Architect:** ratify or amend H1 to H9, above all H3 to H7, and amend A1.3 for H2.
-2. **QA:** run the sealed set with `python -m buddy qa_harness --set ...` in both modes (`[answer] mode` in `buddy.toml`, restart Buddy), grade,
-   commit the file with the pre-registered sha256 `db7c9827a19911ffcdfb2b94bfac133320bec2d1c58d456d96df776cc208bad2`; plant the U-G13-02 canary in the
-   test lab first; the hybrid L3 run with Telegram traffic; the five spot-check questions in the win run.
-3. **Operator:** the win run on a phone (needs a real bot token, `people.toml`, hybrid mode and the LaunchAgent), and a word with the World's
-   owner about the stale "C1 DRAFT" status line (H9).
-4. **Builder, after the verdict:** if the blind run fails in structured mode, change the `Settings.answer_mode` default to `template` (one line
-   and `docs/S1.md`) and record disconfirming #2. Then D29 (a better ranking) is the cheapest way to raise both modes.
+1. **Architect:** re-review findings 1 to 4 (REVIEW "Required actions" 1), and ratify or amend J1 to J10 above and the A1.3 wording for H2. Amend section 7 with F56 to F61.
+2. **Operator:** push `qukaizen/buddy-always-on` (finding 7), then re-run `scripts/sync-buddy-contract.py --check`; decide D35 (the launchd log) before S2 adds people; W5 witness line; accounts B and C.
+3. **QA:** the blind run in both modes, each at least twice, after a request body capture showing Buddy's persona is the `system` message; the list in REVIEW "Required actions" 5.
+4. **Orchestrator:** relay BACKLOG D9 (the `agent_trace` v2 notice) to 3D.EVAL before the ARAIL PR merges.
+5. **Builder, after the verdict:** if the blind run fails in structured mode, change the `Settings.answer_mode` default to `template` (one line and `docs/S1.md`) and record disconfirming #2; then D29 (a better ranking) with the bake-off.
+
+### History: the handoff before the review (Step 26)
+
+Every row of ARCHITECTURE section 9 was built, I1 to I3 had run with the real pins, and B7b was done but did not meet the quality bar on the dev set. Buddy: 1644 passed,
+1 skipped; ARAIL: 428 new tests, differential 64/70 with one branch-only test that the review showed to be daemon-state sensitive. Commits of that stretch are in the Execution
+steps above.

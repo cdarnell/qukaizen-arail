@@ -2173,7 +2173,7 @@ Fourteen deliberate deferrals the design accepted knowingly. Each row names the 
 | D4 | **Fast-changing upstream seam.** Patches to nanobot plus a seam lock over the files Buddy depends on; every upstream release needs a review. | Disconfirming #5 (a rebase takes more than a day): re-evaluate the base. Upstream PRs shrink the patch set. |
 | D5 | **Private-method overrides** in `BuddyTelegramChannel`. | Upstream accepts a channel intake hook. |
 | D6 | **Turn metadata rides in a system-message header**, because nanobot's provider has no per-request metadata. | Upstream per-request headers or `extra_body`. |
-| D7 | **The edge flattens messages into one prompt**; ARAIL's Ollama backend ignores `messages` and `temperature`. | An ARAIL backend task to send real chat messages and options. |
+| D7 | **The edge flattens the conversation into one user prompt**; ARAIL's Ollama backend ignores `messages` and `temperature`. **Paid for the system message only (review round 1, R1-4c, 2026-10-20):** `OllamaNativeBackend` takes `system_as_message`, which the edge sets, so Buddy's persona is the model's `system` message and the Modelfile's own `SYSTEM` is no longer substituted (about 50 prompt tokens). History roles are still `### <role>` blocks in one user message, and `temperature` is still the Modelfile's 0.7. | An ARAIL backend task to send real chat messages and options. |
 | D8 | **Two Buddy loops** (the desk `BuddyAgent` and the phone) in one lane. | Disconfirming #6, or S2's "desk as a channel". |
 | D9 | **`agent_trace` v2**; 3D.EVAL reads v1 by name. | 3D.EVAL sprint 2: its adapter accepts v1 and v2. (Notice to 3D.EVAL is relayed by the orchestrator, not made from this repo.) |
 | D10 | **ARAIL's own `halt.json` fails open when corrupt**; only the Buddy edge compensates (`scheduler.halt_load_failed()`). | The next ARAIL hardening sprint. |
@@ -2208,3 +2208,14 @@ Fourteen deliberate deferrals the design accepted knowingly. Each row names the 
 | # | Debt | Trigger |
 |---|---|---|
 | D28 | **A lab that has not been onboarded answers every `/api` route, the edge's included, with `401 lab_not_onboarded`**, a body that is not a contract error, so Buddy cannot tell it from an unreachable lab and reports "The lab is not reachable". The TestClient tests never see it. It is correct (an un-onboarded lab is not usable) but unhelpful. | An `edge` error code for it in the next contract version, or an exemption of `/api/host/v1/` from the onboarding gate (a decision for the portal's owner). |
+
+**Found by the architect's review, round 1 (2026-10-20); the Buddy-side rows are D33 to D40 in `qukaizen-buddy/buddy/docs/DEBT.md`:**
+
+| # | Debt | Trigger that pays it down |
+|---|---|---|
+| D29 | **Retrieval is lexical** (Buddy's `world.py`); on the 20 dev questions the right card ranks first for 12, which is what bounds template mode. Filed in Buddy's DEBT.md; named here because the fix may be an edge route (embeddings), which is a contract change and so ARAIL's. | An embedding ranking, or the World authors' `aka` fields; scheduled with disconfirming #2's bake-off, not after it. |
+| D30 | **A model-using run varies by about two cases** because `temperature` is ignored (D7 above): `llama-ai-eng` answers at its Modelfile's 0.7. QA runs each mode at least twice. | The backend forwards options. |
+| D34 | **The contract's `gate_change` reasons have no "poller died".** Buddy closes its gate without a record. | The next contract version; re-vendor here with equal sha256. |
+| D35 | **The launchd log holds phone text, Telegram ids and usernames** (Buddy's `~/.nanobot/logs/`). The operator decides before S2 adds people. | See Buddy's DEBT.md. |
+| D36 | **Buddy's exec guard misses `_posixsubprocess.fork_exec`; `ctypes` bypasses its socket guard.** Not ARAIL's, but it is the layer under G1/G9 on the Mac. | Buddy's container sprint (D1). |
+| D41 | **The vendored contract's `PROVENANCE.json` names a Buddy commit that exists only on the builder's Mac** until `qukaizen/buddy-always-on` is pushed (review finding 7). Re-run `scripts/sync-buddy-contract.py --check` against the pushed ref. | **Before the ARAIL PR merges:** push the Buddy branch (or merge it) and re-check. Not done in build round 2: the instruction was to push nothing. |
