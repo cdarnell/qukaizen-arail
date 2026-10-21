@@ -41,9 +41,14 @@ Two independent loops:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
+import subprocess
+import sys
 import time
+from pathlib import Path
+from typing import Optional
 
 log = logging.getLogger(__name__)
 
@@ -269,3 +274,195 @@ async def tier0_keepwatch_loop() -> None:
         except Exception as exc:  # noqa: BLE001
             log.warning("tier0 keepwatch tick failed: %s", exc)
         await asyncio.sleep(_tier0_keepwatch_interval())
+
+
+# ---------------------------------------------------------------------------
+# One-shot boot warm of the deep slot + crash sentinel
+# (sprints/2026-10-20-boot-model-autoresolve, FM5 / FM6 / FM17)
+# ---------------------------------------------------------------------------
+#
+# Loading the deep model in-process can SIGABRT the portal (Metal assertion);
+# Python cannot catch that. Before the load we leave a sentinel file naming
+# the model and our pid. Success or a Python-level failure removes it. If the
+# NEXT boot finds a sentinel whose pid is dead, that model crashed (or was
+# killed during) its load: it is skipped -- never retried automatically --
+# until the pin/model changes or the operator retries via POST
+# /api/models/pin (which clears the sentinel).
+
+_SENTINEL_NAME = ".aerollm_boot_warm.inflight"
+
+# A deep load takes minutes, not hours. Older than this, a sentinel is a
+# crash regardless of whether its pid is alive (pids are reused after a
+# reboot, so liveness alone can wedge slot B and hide the crash).
+SENTINEL_MAX_AGE_S = 600.0
+
+
+def _boot_id() -> Optional[str]:
+    """Identifier of the current OS boot (None when it can't be read)."""
+    try:
+        if sys.platform == "darwin":
+            out = subprocess.run(["sysctl", "-n", "kern.boottime"], capture_output=True,
+                                 text=True, timeout=2).stdout.strip()
+            return out or None
+        return Path("/proc/sys/kernel/random/boot_id").read_text().strip() or None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def sentinel_path() -> Path:
+    from arail.config import DATA_DIR
+    return Path(DATA_DIR) / _SENTINEL_NAME
+
+
+def _pid_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except (OSError, OverflowError, ValueError):
+        return False        # out-of-range pid (> INT_MAX) is stale, not an error
+    return True
+
+
+def read_sentinel() -> Optional[dict]:
+    try:
+        data = json.loads(sentinel_path().read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def write_sentinel(model: str) -> None:
+    p = sentinel_path()
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps({"model": model, "pid": os.getpid(),
+                                 "started_at": time.time(),
+                                 "boot_id": _boot_id()}), encoding="utf-8")
+    except OSError as exc:
+        log.warning("boot-warm sentinel not written: %s", exc)
+
+
+def clear_sentinel() -> None:
+    try:
+        sentinel_path().unlink()
+    except OSError:
+        pass
+
+
+def _sentinel_is_live(sent: dict) -> bool:
+    """True iff *sent* describes a load in progress in ANOTHER live process:
+    pid alive and not us, written this boot, and younger than
+    ``SENTINEL_MAX_AGE_S``. Anything else is stale (a crash)."""
+    try:
+        pid = int(sent.get("pid") or 0)
+    except (TypeError, ValueError):
+        return False
+    if pid == os.getpid() or not _pid_alive(pid):
+        return False
+    try:
+        age = time.time() - float(sent["started_at"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    if age < 0 or age > SENTINEL_MAX_AGE_S:
+        return False
+    recorded, now_id = sent.get("boot_id"), _boot_id()
+    if recorded and now_id and recorded != now_id:
+        return False
+    return True
+
+
+def crashed_model() -> Optional[str]:
+    """Model named by a stale sentinel (not our own load, not a live load
+    elsewhere), else None."""
+    sent = read_sentinel()
+    if not sent or not sent.get("model"):
+        return None
+    try:
+        if int(sent.get("pid") or 0) == os.getpid() or _sentinel_is_live(sent):
+            return None
+    except (TypeError, ValueError):
+        pass
+    return str(sent["model"])
+
+
+def _loading_elsewhere() -> bool:
+    """True iff another LIVE process is mid-load (see ``_sentinel_is_live``)."""
+    sent = read_sentinel()
+    return bool(sent) and _sentinel_is_live(sent)
+
+
+def _boot_preload_enabled() -> bool:
+    return _enabled()      # ARAIL_AEROLLM_PRELOAD=0 per-slot opt-out
+
+
+async def boot_warm_deep(model: Optional[str]) -> str:
+    """Load the deep model once at boot. Returns one of
+    ``ok|skipped|failed|deferred|disabled`` (the /api/instance vocabulary).
+    Never raises."""
+    from arail.activity import activity_log
+    if not model:
+        return "skipped"
+    if not _boot_preload_enabled():
+        return "disabled"
+    try:
+        from arail.agents import deep_policy
+        from arail.portal import scheduler
+        from arail.registry import health as reg_health
+        from arail.registry.store import TIER1_ID
+
+        ok, code, detail = deep_policy.boot_warm_gate()
+        if not ok:
+            status = "deferred" if code == "deferred_now" else "skipped"
+            if code == "disabled":
+                status = "disabled"
+            activity_log.emit("registry", f"Deep model not warmed at boot: {detail}.",
+                              "info")
+            return status
+        if _tier1_resident():
+            return "ok"
+        if _loading_elsewhere():
+            activity_log.emit(
+                "registry", "Another ARAIL instance is loading the deep model "
+                "-- deferring this one.", "info")
+            return "deferred"
+
+        reg_health.mark_warming(TIER1_ID)
+        try:
+            async with scheduler.inference_slot("aerollm-boot-warm"):
+                again, _c, detail = deep_policy.boot_warm_gate()
+                if not again:
+                    return "deferred"
+                write_sentinel(model)
+                router = await asyncio.to_thread(deep_policy.get_deep_router)
+        finally:
+            reg_health.clear_warming(TIER1_ID)
+        clear_sentinel()   # reached only if the process survived the load
+
+        from arail.registry import get_registry
+        reg = get_registry()
+        reg._ensure_loaded()
+        entry = reg.entries.get(TIER1_ID)
+        if entry is not None:
+            try:
+                entry.health = reg_health.probe_entry(entry)
+            except Exception:  # noqa: BLE001
+                pass
+        if router is None:
+            activity_log.emit(
+                "registry", "Deep model failed to load at boot -- deep calls "
+                "will fall back visibly.", "warn",
+                {"model_event": {"kind": "boot_warm_failed", "entry_id": TIER1_ID}})
+            return "failed"
+        activity_log.emit("registry", "Deep model loaded at boot -- Tier 1 is "
+                          "resident and ready.", "success",
+                          {"model_event": {"kind": "boot_warm_ok", "entry_id": TIER1_ID}})
+        return "ok"
+    except Exception as exc:  # noqa: BLE001
+        clear_sentinel()
+        log.warning("deep boot warm failed: %s", exc)
+        return "failed"

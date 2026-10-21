@@ -294,6 +294,7 @@ markers = [
     "qa: paranoid QA edge-case tests (slow; may be excluded with -m 'not qa')",
     "live_stt: tests needing real audio + a local Whisper model / afconvert; skipped in CI (run with -m live_stt)",
     "live_ocr: tests needing real Apple Vision + swiftc compile + a real image; skipped in CI (run with -m live_ocr)",
+    "real_resolver_net: opt out of conftest's hermetic boot-model stubs (arail.model_resolve network reads, ARAIL_BOOT_WARM=0)",
     "requires_ollama: tests needing a reachable local Ollama with the spec's embedding model pulled; auto-skipped when arail.dbspec.embed.probe() fails (FM18)",
     "requires_mlx: tests needing a real mlx/mlx-lm install and Apple Silicon; skipped in CI",
     "requires_aerollm: tests needing a real aerollm_api extension build; skipped in CI",

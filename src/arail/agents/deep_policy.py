@@ -100,6 +100,41 @@ def background_safe() -> bool:
     return _background_gate()[0]
 
 
+def boot_warm_gate() -> "tuple[bool, str, str]":
+    """Gate for the one-shot boot warm of the deep slot (sprints/2026-10-20-
+    boot-model-autoresolve): ``(ok, reason_code, detail)``.
+
+    Same tier / wheel checks as explain(), plus the gentle Metal memory-
+    pressure ceiling -- but deliberately NOT operator presence, halted jobs
+    or the active window: the operator is always present at boot, so
+    background_safe() would never pass. Model fit is decided by the boot
+    resolver before this is asked. The interval preload loop keeps the full
+    background gate as the later re-warmer.
+    """
+    from arail.tier import is_maximus
+    if not _enabled():
+        return (False, "disabled",
+                "ARAIL_AGENT_DEEP is off (agent deep-inference kill switch)")
+    if not is_maximus():
+        return (False, "tier_locked", "deep inference needs the maximus tier")
+    if not _aerollm_importable():
+        return (False, "wheel_missing", "aerollm_api is not installed")
+    try:
+        from arail.router.mlx_guard import metal_memory_pressure
+        pressure = metal_memory_pressure()
+    except Exception:  # noqa: BLE001
+        pressure = None
+    if pressure is not None and pressure >= _bg_pressure_ceiling():
+        return (False, "deferred_now",
+                f"memory pressure {pressure:.0%} is above the boot-warm ceiling")
+    return True, "ok", "deep model can warm at boot"
+
+
+def boot_warm_safe() -> bool:
+    """Boolean projection of boot_warm_gate()."""
+    return boot_warm_gate()[0]
+
+
 def explain(*, foreground: bool) -> "tuple[bool, str, str]":
     """``prefer_deep`` with its reason: ``(ok, reason_code, detail)``.
 

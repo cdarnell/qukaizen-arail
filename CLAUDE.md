@@ -231,6 +231,12 @@ parts.
   `lab/pkb/agents/<id>/AGENT.md` + `lab/pkb/agents/<id>/<id>.py`. The
   loader discovers them on start. Don't shortcut by editing the
   built-in agents.
+- **Boot auto-resolves models; `model_defaults.yaml` = pins + last-resolved cache.**
+  Slot A (fast, Ollama) and slot B (deep, aerollm) are chosen by
+  `arail.model_resolve` at portal start (pin > `.env` > auto > none) and
+  warmed by default (`ARAIL_BOOT_WARM=0` opts out). The yaml is never a
+  gate and there is no "drift" state; `POST /api/models/pin` is the only
+  override. See `docs/cli.md` §start.
 - **Conversation memory is PKB-rooted and gated.** Chat transcripts live at
   `lab/pkb/conversations/<id>/transcript.jsonl` — **`.jsonl`, never `.json`**,
   because `_PKB_TEXT_SUFFIXES` (`pkb.py:376`) includes `.json` and would

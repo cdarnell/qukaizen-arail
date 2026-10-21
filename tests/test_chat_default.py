@@ -19,6 +19,18 @@ if os.path.join(_REPO_ROOT, "src") not in sys.path:
     sys.path.insert(0, os.path.join(_REPO_ROOT, "src"))
 
 
+def _deep_slot_resolvable(monkeypatch, tmp_path, model):
+    """Machine facts that let the resolver accept *model* as slot B."""
+    from arail import model_resolve as mr
+    models = tmp_path / "models"
+    (models / model).mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("ARAIL_MODELS_DIR", str(models))
+    monkeypatch.setattr(mr, "_deep_slot_available", lambda: None)
+    monkeypatch.setattr(mr, "_scan_models_dir", lambda: [{"id": model, "size_gb": 2.0}])
+    monkeypatch.setattr(mr, "_total_ram_gb", lambda: 32.0)
+    monkeypatch.setattr(mr, "_secondary_cap_b", lambda: 14.0)
+
+
 def _make_client(monkeypatch, lab_mode="hybrid"):
     monkeypatch.setenv("LAB_MODE", lab_mode)
     from fastapi.testclient import TestClient
@@ -218,6 +230,12 @@ def test_chat_default_deep_slot_refuses_when_not_on_disk(monkeypatch, isolated_s
 
 def test_chat_default_deep_slot_success_updates_env_and_registry(monkeypatch, isolated_secrets, tmp_path):
     _isolate_registry(monkeypatch, tmp_path)
+    _deep_slot_resolvable(monkeypatch, tmp_path, "Qwen2.5-3B-Instruct-4bit")
+    # requires_restart is now computed from the resident runtime (it used to
+    # be a constant False); pin "nothing resident" so another test's leftover
+    # AeroLLMBackend singleton can't change the answer.
+    from arail.router.backends import AeroLLMBackend
+    monkeypatch.setattr(AeroLLMBackend, "_shared", {}, raising=False)
     from arail.portal import app as portal_app
     with patch.object(portal_app, "_aerollm_model_ready", return_value=True):
         client = _make_client(monkeypatch, lab_mode="airgapped")
@@ -236,6 +254,10 @@ def test_chat_default_deep_slot_success_updates_env_and_registry(monkeypatch, is
     reg._ensure_loaded()
     assert reg.entries["tier1-aerollm"].model_id == "Qwen2.5-3B-Instruct-4bit"
     assert reg.entries["tier1-aerollm"].source == "user"
+    # The pick is a pin, so it survives a reboot (it used to live only in
+    # env + registry and was lost when the registry was re-seeded).
+    from arail import model_defaults
+    assert model_defaults.read()["pins"]["b"] == "Qwen2.5-3B-Instruct-4bit"
 
 
 def test_chat_default_resident_write_through_for_small_ollama_model(monkeypatch, isolated_secrets, tmp_path):

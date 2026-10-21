@@ -1,7 +1,7 @@
 """Warm-up (sprints/2026-07-29-elite-cli/ARCHITECTURE.md §11, Ruling 6 — WP6).
 
-Covers the Python-side half of the gate list: T22 (``_boot_warm_explicit()``
-gating, ``_warm_primary_router()`` timing/backend recording, the
+Covers the Python-side half of the gate list: T22 (startup scheduling of the
+boot warm, ``_warm_primary_router()`` timing/backend recording, the
 ``/api/instance`` field set), F16 (no model id leaks), and T29 (the
 onboarding allow-list is unchanged by this sprint — the warm signal rides
 the endpoint that was already allow-listed, per A6).
@@ -54,40 +54,16 @@ def wired(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# _boot_warm_explicit() — the new gate function itself
+# Startup scheduling (replaces the _boot_warm_explicit() gate tests: boot warm
+# is default-on now, so there is no "explicit request" gate left to test)
 # ---------------------------------------------------------------------------
 
-def test_boot_warm_explicit_unset_is_false(monkeypatch):
-    from arail.portal import app as app_mod
-    monkeypatch.delenv("ARAIL_TIER0_BOOT_WARM", raising=False)
-    assert app_mod._boot_warm_explicit() is False
-
-
-@pytest.mark.parametrize("val", ["1", "true", "True", "yes", "on"])
-def test_boot_warm_explicit_truthy_values(monkeypatch, val):
-    from arail.portal import app as app_mod
-    monkeypatch.setenv("ARAIL_TIER0_BOOT_WARM", val)
-    assert app_mod._boot_warm_explicit() is True
-
-
-@pytest.mark.parametrize("val", ["0", "false", "no", "garbage", ""])
-def test_boot_warm_explicit_falsy_or_explicit_zero(monkeypatch, val):
-    """An explicit '0'/'false'/'no' must NOT count as an explicit warm
-    request (§11.1: '=0 still disables') — distinct from 'unset'."""
-    from arail.portal import app as app_mod
-    monkeypatch.setenv("ARAIL_TIER0_BOOT_WARM", val)
-    assert app_mod._boot_warm_explicit() is False
-
-
-def test_startup_schedules_warm_on_autochecks_or_explicit_request():
-    """Pins the coupling _boot_warm_explicit() must have with _startup()'s
-    scheduling decision — mirrors the source-inspection pattern this repo
-    already uses for boot-task gating (tests/test_boot_security_scan.py's
-    'we can't easily run the FastAPI startup hook here' note) rather than
-    driving the actual fire-and-forget asyncio.create_task through
-    TestClient's sync wrapper, which does not reliably give a scheduled task
-    a chance to run before the test client tears the loop down.
-    """
+def test_startup_schedules_boot_models_task_unconditionally():
+    """Boot warm is default-on and independent of ARAIL_AUTOCHECKS
+    (sprints/2026-10-20-boot-model-autoresolve): _startup() must schedule
+    _boot_models() with no autochecks/explicit-warm condition. Replaces the
+    old 'if _autochecks_on or _boot_warm_explicit()' pin (T22) — opting out
+    is ARAIL_BOOT_WARM=0, handled inside _boot_models()."""
     text = APP_PY.read_text(encoding="utf-8")
     tree = ast.parse(text)
     startup_src = None
@@ -96,17 +72,8 @@ def test_startup_schedules_warm_on_autochecks_or_explicit_request():
             startup_src = ast.get_source_segment(text, node)
             break
     assert startup_src, "_startup() not found in app.py"
-    assert re.search(
-        r"if\s+_autochecks_on\s+or\s+_boot_warm_explicit\(\)\s*:",
-        startup_src,
-    ), (
-        "_startup()'s warm-scheduling condition no longer reads "
-        "'_autochecks_on or _boot_warm_explicit()' — quiet-boot-with-"
-        "explicit-warm-override (T22) has regressed"
-    )
-    # And the quiet-boot else branch must still flip _MODEL_WARM immediately
-    # (so /api/ready's overlay dismisses even when warming never runs).
-    assert "_MODEL_WARM = True" in startup_src
+    assert re.search(r"^\s*asyncio\.create_task\(_boot_models\(\)\)",
+                     startup_src, re.M)
 
 
 # ---------------------------------------------------------------------------
@@ -224,6 +191,9 @@ def test_api_instance_world_branch_exposes_warm_fields(monkeypatch):
     import arail.portal.app as app_mod
     monkeypatch.setenv("ARAIL_INSTANCE", "finance")
     monkeypatch.setenv("ARAIL_INSTANCE_TOKEN", "abc123")
+    # The startup _boot_models task flips _MODEL_WARM on the portal loop and
+    # can land after the setattrs below; stub it (same fix as bccec418).
+    monkeypatch.setattr(app_mod, "_boot_models", lambda: asyncio.sleep(0))
     with TestClient(app_mod.app) as client:
         # See the sibling root-branch test for why this happens AFTER entry.
         monkeypatch.setattr(app_mod, "_MODEL_WARM", False)

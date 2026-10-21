@@ -137,6 +137,48 @@ def _isolated_env_file(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def _hermetic_boot_models(request, monkeypatch, tmp_path):
+    """Keep the portal's boot model resolution/warm off the real machine.
+
+    Starting the app (``with TestClient(app)``) now resolves the two model
+    slots and warms them by default (sprints/2026-10-20-boot-model-
+    autoresolve). Tests must never talk to a developer's real Ollama or load
+    weights, so: warm is off (ARAIL_BOOT_WARM=0) and the resolver's two
+    network reads report "Ollama unreachable". Tests that exercise the
+    resolver patch these themselves (their patch runs after this one);
+    ``@pytest.mark.real_resolver_net`` opts out entirely.
+    """
+    # The resolver stamps MODEL_NAME / AEROLLM_MODEL (and remembers the .env
+    # values in ARAIL_ENV_PREF_*) straight into os.environ, bypassing
+    # monkeypatch -- restore them by hand, as isolated_secrets does.
+    _stamped = ("MODEL_NAME", "AEROLLM_MODEL", "ARAIL_ENV_PREF_A", "ARAIL_ENV_PREF_B")
+    saved = {k: os.environ.get(k) for k in _stamped}
+    os.environ.pop("ARAIL_ENV_PREF_A", None)
+    os.environ.pop("ARAIL_ENV_PREF_B", None)
+    if not request.node.get_closest_marker("real_resolver_net"):
+        monkeypatch.setenv("ARAIL_BOOT_WARM", "0")
+        from arail import model_resolve
+        monkeypatch.setattr(model_resolve, "_fetch_ollama_tags", lambda: None)
+        monkeypatch.setattr(model_resolve, "_fetch_capabilities", lambda name: None)
+    # Pins/cache and the crash sentinel are per-test, never the session's or
+    # a developer's real files.
+    monkeypatch.setenv("ARAIL_MODEL_DEFAULTS_FILE",
+                       str(tmp_path / "model_defaults.yaml"))
+    from arail.portal import model_warmth as _mw
+    monkeypatch.setattr(_mw, "sentinel_path",
+                        lambda: tmp_path / ".aerollm_boot_warm.inflight")
+    from arail import model_resolve as _mr
+    _mr.last_resolution().clear()
+    yield
+    _mr.last_resolution().clear()
+    for k, v in saved.items():
+        if v is None:
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = v
+
+
+@pytest.fixture(autouse=True)
 def _no_ambient_lab_mode_env(monkeypatch):
     """Delete (and restore after the test) the lab-mode/identity env keys.
 

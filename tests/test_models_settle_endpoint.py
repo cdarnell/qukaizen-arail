@@ -1,6 +1,12 @@
-"""POST /api/models/settle — writes the boot model-selection slots,
-refusing any choice that isn't actually installed/on-disk, or that
-violates the answering-model ceiling (arail.registry.ceiling).
+"""POST /api/models/settle -- DEPRECATED alias (one release) for two pin
+writes via POST /api/models/pin, kept working with the same refusals.
+Refuses any choice that isn't actually installed/on-disk, or that violates
+the answering-model ceiling (arail.registry.ceiling).
+
+Changed from the PR #186 suite: the success path now also asserts the
+Deprecation/Link headers and ``deprecated: true`` (new), the file assertion
+checks v2 pins instead of v1 keys, and "mode == hidden afterwards" is "no
+degraded notes". The old "settled" activity event text is kept.
 """
 from __future__ import annotations
 
@@ -15,6 +21,8 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setenv("ARAIL_MODEL_REGISTRY_FILE", str(tmp_path / "model_registry.json"))
     monkeypatch.setenv("ARAIL_MODEL_DEFAULTS_FILE", str(tmp_path / "model_defaults.yaml"))
     monkeypatch.setenv("ARAIL_MODELS_DIR", str(tmp_path / "models"))
+    # tier 0 follows slot A only when the primary backend fronts Ollama (QA-1)
+    monkeypatch.setenv("MODEL_BACKEND", "ollama_native")
     monkeypatch.setenv("ARAIL_DATA_DIR", str(tmp_path / "data"))
     (tmp_path / "models").mkdir()
     reg_core.reset_registry()
@@ -31,6 +39,14 @@ def client(monkeypatch, tmp_path):
 
 def _mock_ollama_installed(monkeypatch, models):
     monkeypatch.setattr("arail.chat._ollama_installed_models", lambda *a, **kw: models)
+    # The re-resolve after a pin reads the resolver's own view of the machine.
+    from arail import model_resolve as mr
+    tags = [{"id": m["id"], "size_gb": m.get("size_gb"), "family": "llama",
+             "parameter_size": ""} for m in models]
+    monkeypatch.setattr(mr, "_fetch_ollama_tags", lambda: tags)
+    monkeypatch.setattr(mr, "_fetch_capabilities", lambda n: ["completion"])
+    monkeypatch.setattr(mr, "_total_ram_gb", lambda: 32.0)
+    monkeypatch.setattr(mr, "_deep_slot_available", lambda: None)
 
 
 # ---------------------------------------------------------------------------
@@ -98,6 +114,11 @@ def test_refuses_default_b_over_secondary_cap(client, monkeypatch, tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_settle_default_b_none_is_always_valid(client, monkeypatch, tmp_path):
+    # restart_required is computed from the resident runtime; pin "nothing
+    # resident" so a leftover AeroLLMBackend singleton from another test (seen
+    # after test_aerollm_defaults.py) can't flip it. Same fix as 8b9d5a0e.
+    from arail.router.backends import AeroLLMBackend
+    monkeypatch.setattr(AeroLLMBackend, "_shared", {}, raising=False)
     _mock_ollama_installed(monkeypatch, [
         {"id": "llama-ai-eng", "runtime": "ollama", "size_gb": 0.9,
          "modified": "", "endpoint": "x"}])
@@ -106,10 +127,17 @@ def test_settle_default_b_none_is_always_valid(client, monkeypatch, tmp_path):
     body = r.json()
     assert body["ok"] is True
     assert body["restart_required"] is False
+    assert body["deprecated"] is True
+    assert r.headers["Deprecation"] == "true"
+    assert 'rel="successor-version"' in r.headers["Link"]
+    assert "/api/models/pin" in r.headers["Link"]
 
     written = (tmp_path / "model_defaults.yaml").read_text(encoding="utf-8")
-    assert "default_a: llama-ai-eng" in written
-    assert "default_b: null" in written
+    # v2 file: settle maps to pins; an omitted B is the explicit "none" pin
+    # (replaces the v1 `default_a:` / `default_b: null` assertions).
+    import yaml
+    data = yaml.safe_load(written)
+    assert data["pins"] == {"a": "llama-ai-eng", "b": "none"}
 
 
 def test_settle_writes_file_and_updates_registry_immediately(client, monkeypatch, tmp_path):
@@ -131,6 +159,8 @@ def test_settle_writes_file_and_updates_registry_immediately(client, monkeypatch
     # no request-scoped staleness from the boot endpoint's candidate cache.
     r2 = client.get("/api/models/boot")
     assert r2.json()["mode"] == "hidden"
+    assert r2.json()["resolution"]["b"]["model"] == "Qwen2.5-7B-Instruct-4bit"
+    assert r2.json()["resolution"]["b"]["source"] == "pin"
 
 
 def test_settle_short_ollama_tag_matches_full_installed_tag(client, monkeypatch):

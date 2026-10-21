@@ -1,17 +1,17 @@
-"""DOM/structure + escaping assertions for _model_boot_banner.html.
+"""DOM/structure assertions for _model_boot_banner.html (the degraded strip).
 
 The template is a standalone fragment (no {% extends %}, no Jinja
 variables) so it renders cleanly with an empty context, same as
 _airgap_modal.html's test convention (test_airgap_modal_dom.py).
 
-Covers:
-  - Required ids exist (strip, panel, both slot lists, confirm/not-now/
-    fix/dismiss buttons, error box).
-  - Every place the script writes model-derived text via innerHTML routes
-    through the esc() helper first (source-level check — this is plain
-    JS with no server round-trip, same convention
-    test_aerollm_model_ready.py already uses for chat.html).
-  - hf links always carry rel="noopener noreferrer" and target="_blank".
+Rewritten for sprints/2026-10-20-boot-model-autoresolve. Removed assertions
+and replacements:
+  * picker ids (mbb-a-list, mbb-b-list, mbb-confirm, mbb-not-now, mbb-fix,
+    mbb-panel, mbb-error)  -> the picker is gone; test_no_picker_markup
+  * esc()-before-innerHTML check -> the strip writes only via textContent;
+    test_strip_writes_only_via_textcontent is strictly stronger
+  * hf link rel/target check -> no links at all (test_no_links_when_airgapped)
+  * fetchBoot(false) exactly-once -> test_fetch_once_no_polling
 """
 from __future__ import annotations
 
@@ -30,84 +30,74 @@ TEMPLATE_PATH = (
 def _render() -> str:
     loader = jinja2.FileSystemLoader(str(TEMPLATE_PATH.parent))
     env = jinja2.Environment(loader=loader, autoescape=True)
-    tmpl = env.get_template(TEMPLATE_PATH.name)
-    return tmpl.render()
+    return env.get_template(TEMPLATE_PATH.name).render()
 
 
-class _IDCollector(HTMLParser):
+def _script() -> str:
+    return _render().split("<script>", 1)[1].rsplit("</script>", 1)[0]
+
+
+class _Collector(HTMLParser):
     def __init__(self):
         super().__init__()
         self.ids: set[str] = set()
+        self.tags: list[str] = []
 
     def handle_starttag(self, tag, attrs):
-        attrs_dict = dict(attrs)
-        if "id" in attrs_dict:
-            self.ids.add(attrs_dict["id"])
+        self.tags.append(tag)
+        d = dict(attrs)
+        if "id" in d:
+            self.ids.add(d["id"])
 
 
-def test_template_renders_with_empty_context():
+def test_template_is_small_and_renders_with_empty_context():
+    assert "<script>" in _render()
+    assert len(TEMPLATE_PATH.read_text().splitlines()) <= 60
+
+
+def test_required_ids_present_and_banner_starts_hidden():
+    c = _Collector()
+    c.feed(_render())
+    assert {"model-boot-banner", "mbb-strip", "mbb-strip-text",
+            "mbb-change", "mbb-dismiss"} <= c.ids
+    tag = re.search(r'<div id="model-boot-banner"[^>]*>', _render()).group(0)
+    assert "hidden" in tag
+
+
+def test_no_picker_markup():
+    c = _Collector()
+    c.feed(_render())
+    for gone in ("mbb-panel", "mbb-a-list", "mbb-b-list", "mbb-confirm",
+                 "mbb-not-now", "mbb-fix", "mbb-error"):
+        assert gone not in c.ids
+    assert "input" not in c.tags and "select" not in c.tags
+    assert "/api/models/settle" not in _render()
+
+
+def test_strip_writes_only_via_textcontent():
+    script = _script()
+    assert "innerHTML" not in script and "insertAdjacentHTML" not in script
+    assert "textContent" in script
+
+
+def test_only_shown_for_degraded_mode():
+    script = _script()
+    assert "p.mode !== 'degraded'" in script
+
+
+def test_no_links_when_airgapped():  # FM14
     html = _render()
-    assert "<script>" in html
+    assert "<a " not in html and "huggingface" not in html
+    assert "target" not in _script()
 
 
-def test_required_ids_present():
-    parser = _IDCollector()
-    parser.feed(_render())
-    required = {
-        "model-boot-banner", "mbb-strip", "mbb-strip-text", "mbb-fix",
-        "mbb-dismiss", "mbb-panel", "mbb-a-list", "mbb-b-list",
-        "mbb-error", "mbb-not-now", "mbb-confirm",
-    }
-    missing = required - parser.ids
-    assert not missing, f"missing required ids: {missing}"
+def test_fetch_once_no_polling():
+    script = _script()
+    assert "setInterval" not in script and "EventSource" not in script
+    assert len(re.findall(r"fetch\(", script)) == 1
+    assert "/api/models/boot" in script
 
 
-def test_banner_and_panel_start_hidden():
-    html = _render()
-    banner_tag = re.search(r'<div id="model-boot-banner"[^>]*>', html).group(0)
-    panel_tag = re.search(r'<div id="mbb-panel"[^>]*>', html).group(0)
-    strip_tag = re.search(r'<div id="mbb-strip"[^>]*>', html).group(0)
-    assert "hidden" in banner_tag
-    assert "hidden" in panel_tag
-    assert "hidden" in strip_tag
-
-
-def test_source_uses_esc_helper_before_every_innerhtml_write():
-    """Every `.innerHTML =` assignment in the script must build its string
-    through esc() somewhere in the same statement, OR assign a value that
-    is itself entirely composed of esc()-wrapped pieces plus static
-    markup. We check the weaker, robust invariant: every innerHTML target
-    line (or the statement it's part of) contains at least one esc(...)
-    call, for every server/user-derived write. main.textContent (used for
-    names) is exempt — textContent is inherently safe."""
-    html = _render()
-    script = html.split("<script>", 1)[1].rsplit("</script>", 1)[0]
-    # Grab each `.innerHTML = ...;` assignment (may span multiple source
-    # lines — join and match up to the terminating semicolon).
-    assignments = re.findall(r"\.innerHTML\s*=\s*(.+?);", script, re.DOTALL)
-    assert assignments, "expected at least one .innerHTML assignment to check"
-    for stmt in assignments:
-        # Assignments that are pure static/reset strings (e.g. clearing to
-        # '') carry no interpolation and don't need esc().
-        if "esc(" not in stmt and "+" not in stmt:
-            continue
-        assert "esc(" in stmt, (
-            f"innerHTML assignment concatenates data without esc(): {stmt!r}")
-
-
-def test_hf_link_carries_safe_rel_and_target():
-    html = _render()
-    script = html.split("<script>", 1)[1].rsplit("</script>", 1)[0]
-    assert 'rel = \'noopener noreferrer\'' in script or 'rel="noopener noreferrer"' in script
-    assert "target = '_blank'" in script or 'target="_blank"' in script
-
-
-def test_fetch_boot_called_exactly_once_unconditionally_on_load():
-    """No polling, no setInterval, no EventSource — the fetch-once
-    contract this file's docstring commits to."""
-    html = _render()
-    script = html.split("<script>", 1)[1].rsplit("</script>", 1)[0]
-    assert "setInterval" not in script
-    assert "EventSource" not in script
-    # The unconditional bootstrap call at the end of the IIFE.
-    assert re.search(r"fetchBoot\(false\);\s*\}\)\(\);", script)
+def test_change_opens_the_resident_chip_or_goes_to_chat():
+    script = _script()
+    assert "model-picker" in script and "/chat" in script

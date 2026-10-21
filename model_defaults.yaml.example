@@ -1,42 +1,35 @@
-# ARAIL's model defaults — the ONE file to check for what's active.
+# ARAIL's model defaults -- pins plus the last-resolved cache, in one file.
 #
-# Historically "which model does chat use by default" and "which model
-# does AeroLLM (the 2nd inference / deep backend) load" were each
-# answered by a chain of .env vars, hardcoded fallback constants, and
-# installed-model detection spread across app.py and router/backends.py.
-# Nobody could answer "what's actually active" without reading code —
-# which is exactly how a machine ended up trying to load a 13GB model
-# that was never downloaded, silently, on every chat page visit.
+# You normally do not need this file. At every start the portal works out
+# the two models itself:
+#   A -- the fast, resident chat model (an installed Ollama tag)
+#   B -- the deep model AeroLLM streams in (a directory under
+#        ARAIL_MODELS_DIR; maximus tier + the aerollm_api wheel only)
+# choosing from what is installed and what this machine can hold, then loads
+# them. Precedence per slot:  pin (below)  >  .env (MODEL_NAME /
+# AEROLLM_MODEL)  >  auto  >  none. A pin that is not installed, too big or
+# over the RAM budget never blocks boot -- it is skipped, and the portal's
+# strip tells you why and how to fix it.
 #
-# This file replaces that scatter for these two settings specifically.
-# Its values are stamped into the same environment variables every
-# existing part of the codebase already reads (MODEL_NAME, AEROLLM_MODEL)
-# — early, once, at process start — so they win over anything .env sets
-# for these two keys. Copy this file to model_defaults.yaml (gitignored,
-# like .env — it's per-machine) and edit it directly.
-#
-# You don't have to hand-edit this, though: the portal shows a two-slot
-# picker banner (under the statusbar, every page) until this file exists
-# with a real default_a — "Confirm" there writes it for you via
-# POST /api/models/settle, with size/on-disk/RAM-fit shown per candidate
-# and the exact download command when one's missing. `./arailctl start`'s
-# readiness banner reads the same file back (read-only, never prompts) via
-# `python -m arail.model_defaults --banner`.
-#
-# THIS FILE'S EXISTENCE (with a truthy default_a) IS THE "SETTLED" SIGNAL
-# the boot picker uses to stop asking. Delete it to re-arm the picker on
-# the next portal page load.
+# Copy to model_defaults.yaml (gitignored, per-machine like .env) only to
+# PIN a slot. Edit `pins` only: the `resolved` section is a cache that ARAIL
+# rewrites on every boot (it is never a gate and never compared for drift).
+# You can also pin from the portal (Resident chip / POST /api/models/pin).
+# Deleting the file just means "re-resolve with no pins".
 
-# default_a — the primary, fast, always-resident chat model
-# (Chat Studio's Box A / "1st inference"). Must be an already-installed
-# Ollama model tag (see `ollama list`).
-default_a: llama-ai-eng
+version: 2
 
-# default_b — the model AeroLLM (Box B / "2nd inference") loads. This is
-# NOT an Ollama tag — it's a directory name under lab/models/ (or
-# ARAIL_MODELS_DIR), holding real MLX-format weights AeroLLM can read.
-# `./arailctl doctor` (or `ls lab/models/`) lists what's actually
-# downloaded. Leave this null/commented until you've verified a specific
-# model fits in memory on this machine alongside everything else you
-# run — ARAIL will say "not ready" honestly rather than guess.
-default_b: null
+pins:
+  # a -- the fast, always-resident chat model: an installed Ollama tag
+  # (see `ollama list`), under the 8B primary ceiling. null = auto.
+  a: null
+  # b -- the deep model: a directory name under lab/models/ (or
+  # ARAIL_MODELS_DIR). null = auto, `none` = keep the deep slot OFF (use
+  # this if a deep model crashes ARAIL while loading).
+  b: null
+
+# resolved:   # written by ARAIL -- do not edit
+#   resolved_at: 2026-10-20T19:02:11-0700
+#   a: {model: llama-ai-eng:latest, source: auto, reason: null, size_gb: 1.3}
+#   b: {model: null, source: pin, reason: pinned off, size_gb: null}
+#   warm: {a: ok, b: skipped}

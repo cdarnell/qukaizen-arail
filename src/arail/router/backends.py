@@ -1922,6 +1922,29 @@ def _normalize_keep_alive(value: "str | int") -> "str | int":
         return value
 
 
+
+def _raise_for_status_with_detail(resp) -> None:
+    """``raise_for_status`` that keeps Ollama's own ``error`` text.
+
+    A bare "400 Bad Request" hid the real cause of the keep_alive bug;
+    the JSON body names it. Truncated to 160 chars; only the response
+    body is read, never request headers.
+    """
+    try:
+        resp.raise_for_status()
+    except Exception as exc:  # noqa: BLE001
+        detail = ""
+        try:
+            payload = resp.json()
+            if isinstance(payload, dict):
+                detail = str(payload.get("error") or "")
+        except Exception:  # noqa: BLE001
+            detail = ""
+        if detail:
+            raise type(exc)(f"{exc}: {detail[:160]}") from exc
+        raise
+
+
 class OllamaNativeBackend(OpenAICompatBackend):
     """Talks to Ollama's NATIVE /api/chat endpoint (not the OpenAI /v1 shim).
 
@@ -1965,24 +1988,21 @@ class OllamaNativeBackend(OpenAICompatBackend):
           1. ARAIL_OLLAMA_KEEP_ALIVE, if set at all (including "" — omit
              keep_alive entirely, falling back to Ollama's own default).
              An explicit operator override always wins.
-          2. "-1" (pin forever) when ARAIL_RESIDENT_PIN is truthy
+          2. -1 (int; pin forever) when ARAIL_RESIDENT_PIN is truthy
              (default on) AND this instance's model is the registry's
              tier0/resident entry — the "in the GPU at all times" story
              the two-slot redesign (sprints/2026-08-11-two-slot-chat-
              models Part 3) promises for the resident slot specifically.
           3. "2h" otherwise (any other model, or pin disabled).
 
-        Pinning forever used to be rejected as a *default* because it
-        fights the aeroLLM preload's 0.60 memory-pressure ceiling and the
-        0.75 chat guard on 16 GB boxes — but that objection assumed an
-        arbitrarily large resident model. The resident slot the picker
-        offers by default is capped at <=3B (never past the <8B primary
-        ceiling), so pinned residency is ~1-2 GB: pinned tier0 (~2 GB) +
-        a resident aeroLLM 7B (~4 GB) is still well under 0.60 * 16 GB.
-        Only the model that's actually the registry's tier0 pins — every
-        other Ollama model (picked ad hoc from the rail, or used as a
-        one-off) keeps the old 2h behavior. ARAIL_RESIDENT_PIN=0 restores
-        the pre-Part-3 default everywhere.
+        Pinned residency counts against the boot resolver's RAM budget
+        (A + B together stay under 0.60 x total RAM, A first), so a larger
+        resident model simply makes the resolver drop the deep slot rather
+        than fight the aeroLLM preload's memory-pressure ceiling. Only the
+        model that's actually the registry's tier0 pins -- every other Ollama
+        model (picked ad hoc from the rail, or used as a one-off) keeps the
+        old 2h behavior. ARAIL_RESIDENT_PIN=0 restores the pre-Part-3
+        default everywhere.
         """
         raw = os.getenv("ARAIL_OLLAMA_KEEP_ALIVE")
         if raw is not None:
@@ -2075,7 +2095,7 @@ class OllamaNativeBackend(OpenAICompatBackend):
             json=body,
             timeout=120,
         )
-        resp.raise_for_status()
+        _raise_for_status_with_detail(resp)
         data = resp.json()
         # Ollama native response shape: {message: {role, content}, done: bool}
         text = (data.get("message") or {}).get("content") or ""
@@ -2137,7 +2157,7 @@ class OllamaNativeBackend(OpenAICompatBackend):
             timeout=120,
             stream=True,
         ) as resp:
-            resp.raise_for_status()
+            _raise_for_status_with_detail(resp)
             for line in resp.iter_lines(decode_unicode=True):
                 if not line:
                     continue

@@ -893,7 +893,6 @@ async def _startup():
         activity_log.emit("system",
             f"Egress guard install failed: {_eg_err}", "warn")
 
-    global _MODEL_WARM
     from arail import autochecks
     _autochecks_on = autochecks.enabled()
 
@@ -917,12 +916,6 @@ async def _startup():
     activity_log.emit("system",
                       f"{_boot_ident.name} portal started — {intent_name} lab.",
                       "success")
-
-    # Registry env convergence — local-only, unconditional (see docstring;
-    # deliberately NOT gated behind _autochecks_on, which is about remote
-    # probes, not this). Must run before anything below could construct a
-    # backend off MODEL_NAME/AEROLLM_MODEL.
-    _export_registry_env()
 
     # Model registry: startup preflight (both tiers) + interval health loop.
     # Gated behind ARAIL_AUTOCHECKS (default off) — a quiet boot never probes
@@ -1029,21 +1022,13 @@ async def _startup():
             _log.warning("Shipped-World seal check skipped: %s", e)
 
     asyncio.create_task(_check_shipped_worlds())
-    # Boot model-warm issues a real 1-token completion (loads weights) — a
-    # probe/warmer, so it's gated behind the autochecks master switch. When
-    # skipped, flip _MODEL_WARM now so the /api/ready overlay dismisses
-    # instantly instead of waiting for a warm that will never run.
-    #
-    # `or _boot_warm_explicit()` (sprints/2026-07-29-elite-cli ARCHITECTURE.md
-    # §11.1): `./arailctl start --warm` sets ARAIL_TIER0_BOOT_WARM=1 on this
-    # process's own env specifically to ask for a warm-up report even on an
-    # otherwise-quiet boot (autochecks off). Quiet boot is preserved exactly
-    # for everyone else: unset + autochecks off ⇒ _boot_warm_explicit() is
-    # False ⇒ this branch is unchanged from before.
-    if _autochecks_on or _boot_warm_explicit():
-        asyncio.create_task(_warm_primary_router())
-    else:
-        _MODEL_WARM = True
+    # Boot model resolution + warm (sprints/2026-10-20-boot-model-autoresolve):
+    # resolve slots A/B from what is installed and what fits, persist the
+    # cache, stamp env + registry, then warm A. Local-only work (loopback
+    # Ollama + disk), so it is NOT gated by ARAIL_AUTOCHECKS (which is about
+    # remote probes); opt out with ARAIL_BOOT_WARM=0. Runs as a task so boot
+    # never waits on it; _MODEL_WARM flips when it finishes either way.
+    asyncio.create_task(_boot_models())
     asyncio.create_task(_inbox_watcher_loop())
     # 'Grows while you sleep' now lives inside the Librarian agent (started
     # with the other agents via start_all_auto) — it owns the whole compiled-
@@ -3480,6 +3465,10 @@ async def api_instance():
         "warm_ms": _MODEL_WARM_MS,
         "warm_skipped": _MODEL_WARM_SKIP_REASON,
         "backend": _MODEL_WARM_BACKEND,
+        # Additive, closed vocabulary ok|skipped|failed|deferred|disabled
+        # (None while the boot warm is still pending); no model ids.
+        "warm_a": _BOOT_WARM.get("a"),
+        "warm_b": _BOOT_WARM.get("b"),
     }
     slug = os.getenv("ARAIL_INSTANCE", "").strip()
     if not slug:
@@ -7049,58 +7038,113 @@ def _get_primary_router():
     return _ROUTER_CACHE
 
 
-def _export_registry_env() -> None:
-    """Converge env readers on the registry's tier0/tier1 model identity
-    (sprints/2026-08-11-two-slot-chat-models Part 4).
+_BOOT_WARM: dict[str, str | None] = {"a": None, "b": None}
+_WARM_VOCAB = ("ok", "skipped", "failed", "deferred", "disabled")
 
-    ``lab/data/secrets.env`` is never loaded into the process environment
-    at boot — it's read on demand, per call, via ``_read_secrets()`` — and
-    the registry is the only thing a UI model pick (Phase 5's picker,
-    ``POST /api/chat/default`` with ``slot=``) writes to. Without this, a
-    pick would be invisible to every OTHER env reader in the same process
-    (``AeroLLMBackend._cache_key``, the residency/health probes,
-    ``_resilient_chat_default``) until the operator also hand-edited .env
-    to match — the registry would say one model, the runtime would answer
-    with another. Runs once per process, early in startup, before
-    anything that could construct a backend off these vars.
 
-    Local-only (no network); safe to run regardless of the autochecks
-    "quiet boot" gate, which is specifically about remote probes. Never
-    raises — a registry hiccup here must not block startup.
-    """
+def _boot_warm_enabled() -> bool:
+    """ARAIL_BOOT_WARM=0 turns off the boot warm for both slots."""
+    return os.getenv("ARAIL_BOOT_WARM", "1").strip().lower() not in ("0", "false", "no")
+
+
+def _record_warm(slot: str, status: str) -> None:
+    """Remember a slot's warm outcome (closed vocabulary) in memory and in
+    the yaml cache's ``resolved.warm``. Never raises."""
+    if status not in _WARM_VOCAB:
+        status = "failed"
+    _BOOT_WARM[slot] = status
     try:
-        from arail.registry import get_registry
-        from arail.registry.store import TIER0_ID, TIER1_ID
-        reg = get_registry()
-        reg._ensure_loaded()
-        t1 = reg.entries.get(TIER1_ID)
-        if t1 is not None and t1.model_id:
-            os.environ["AEROLLM_MODEL"] = t1.model_id
-        t0 = reg.entries.get(TIER0_ID)
-        if (t0 is not None and t0.model_id
-                and t0.backend in ("ollama_native", "openai_compat")):
-            os.environ["MODEL_NAME"] = t0.model_id
-    except Exception as e:  # noqa: BLE001
-        activity_log.emit("registry", f"Registry env export skipped: {e}", "warn")
+        from arail import model_defaults as _md
+        from arail import model_resolve as _mr
+        _mr.last_resolution().setdefault("warm", {})[slot] = status
+        _md.update_warm(slot, status)
+    except Exception:  # noqa: BLE001
+        pass
 
 
-def _boot_warm_explicit() -> bool:
-    """True only when ARAIL_TIER0_BOOT_WARM is EXPLICITLY set to a truthy
-    value in this process's environment (sprints/2026-07-29-elite-cli
-    ARCHITECTURE.md §11.1).
+async def _boot_models() -> None:
+    """Resolve both model slots, then warm A and B (_warm_slot_a / _warm_slot_b).
 
-    Deliberately distinct from _warm_primary_router()'s own read of the same
-    variable (which defaults to truthy when unset, so the completion fires
-    whenever warming runs at all) — this one answers a different question:
-    "did the caller explicitly ask to warm on an otherwise-quiet boot?".
-    Unset ⇒ False, so a plain quiet boot (no --warm, autochecks off) is
-    completely unaffected. An explicit "0"/"false"/"no" also answers False
-    (not-explicitly-true), matching autochecks.py's own _TRUTHY convention.
+    Replaces the old registry->env export + autochecks-gated warm: the
+    resolver (arail.model_resolve) is now the single source of truth and
+    stamps env + registry itself. Never raises; always flips _MODEL_WARM so
+    the cold-start overlay can't trap the user.
     """
-    raw = os.getenv("ARAIL_TIER0_BOOT_WARM")
-    if raw is None:
-        return False
-    return raw.strip().lower() in ("1", "true", "yes", "on")
+    global _MODEL_WARM, _MODEL_WARM_SKIP_REASON
+    b: dict = {}
+    try:
+        from arail import model_resolve as _mr
+        from arail.portal import model_warmth as _mw
+        skip_b = await asyncio.to_thread(_mw.crashed_model)
+        res = await asyncio.to_thread(_mr.resolve_and_apply, skip_b=skip_b)
+        a = (res.get("a") or {})
+        b = (res.get("b") or {})
+        activity_log.emit(
+            "registry",
+            f"Models resolved at boot: fast={a.get('model') or '(none)'} "
+            f"[{a.get('source')}], deep={b.get('model') or '(none)'} "
+            f"[{b.get('source')}].", "info",
+            {"model_event": {"kind": "boot_resolved", "a": a.get("model"),
+                             "b": b.get("model")}})
+        if res.get("migrated"):
+            activity_log.emit(
+                "registry", "model_defaults.yaml upgraded to v2 (old copy kept "
+                "as .model_defaults.v1.bak).", "info")
+        for d in res.get("degraded") or []:
+            activity_log.emit("registry", d.get("detail") or d.get("kind"), "warn")
+    except Exception as e:  # noqa: BLE001
+        a, b = {}, {}
+        activity_log.emit("registry",
+                          f"Model resolution skipped: {type(e).__name__}: {e}", "warn")
+
+    if not _boot_warm_enabled():
+        # Quiet opt-out: leave the skip-reason globals untouched (same as the
+        # old quiet boot) so /api/instance's closed vocabulary is unchanged.
+        _record_warm("a", "disabled")
+        _record_warm("b", "disabled")
+        _MODEL_WARM = True
+        return
+    if not a.get("model"):
+        _MODEL_WARM_SKIP_REASON = "no fast model resolved"
+        _record_warm("a", "skipped")
+        _MODEL_WARM = True
+    else:
+        await _warm_slot_a()
+    # Slot B after A, so a chat turn arriving at boot queues behind at most
+    # one warm. A crash in this load is caught by the sentinel next boot.
+    await _warm_slot_b(b.get("model"))
+
+
+async def _warm_slot_a() -> None:
+    """Warm slot A through the single warm path (_warm_primary_router) and
+    record its outcome in the closed vocabulary. Never raises."""
+    await _warm_primary_router()
+    if _MODEL_WARM_MS is not None:
+        _record_warm("a", "ok")
+    elif _MODEL_WARM_SKIP_REASON == _MODEL_WARM_SKIP_REASON_ON_EXCEPTION:
+        _record_warm("a", "failed")
+    elif _MODEL_WARM_SKIP_REASON == "ARAIL_TIER0_BOOT_WARM=0":
+        _record_warm("a", "disabled")
+    else:
+        _record_warm("a", "skipped")
+
+
+async def _warm_slot_b(model: "str | None") -> None:
+    """One-shot deep-model warm + outcome record. Never raises."""
+    try:
+        from arail.portal import model_warmth as _mw
+        status = await _mw.boot_warm_deep(model)
+        _record_warm("b", status)
+        if status == "deferred":
+            # Not just an activity line: say so in the boot strip too.
+            from arail import model_resolve as _mr
+            _mr.last_resolution().setdefault("degraded", []).append({
+                "slot": "b", "kind": "warm_deferred",
+                "detail": f"Deep model {model} was not loaded at boot (another "
+                          "ARAIL instance is loading it, or memory is busy). "
+                          "Pin it again to retry."})
+    except Exception:  # noqa: BLE001
+        _record_warm("b", "failed")
 
 
 async def _warm_primary_router() -> None:
@@ -8069,44 +8113,6 @@ def _apply_chat_defaults(
         return backend, model, runtime
 
 
-def _registry_write_through_resident(model_id: str) -> bool:
-    """Promote *model_id* to the registry's tier0-local entry (sprints/
-    2026-08-11-two-slot-chat-models Part 4) — so the nav's model switcher
-    and every other registry reader agree with what chat just set as its
-    default, by construction, instead of two systems that can disagree.
-
-    Only called for ollama-runtime picks that already passed the primary
-    ceiling. Never raises; returns False (no-op) on any failure — the
-    chat default itself is already set by the caller regardless.
-    """
-    try:
-        from arail.registry import get_registry
-        from arail.registry.store import TIER0_ID
-        from arail.model_specs import resolve_params_b as _resolve_params_b
-        from dataclasses import replace as _replace
-
-        reg = get_registry()
-        reg._ensure_loaded()
-        existing = reg.entries.get(TIER0_ID)
-        if existing is None:
-            return False
-        params_b, _source = _resolve_params_b(model_id)
-        endpoint = f"http://127.0.0.1:{os.getenv('OLLAMA_PORT', '11434')}/v1"
-        reg.add_entry(_replace(
-            existing,
-            model_id=model_id,
-            backend="ollama_native",
-            endpoint=endpoint,
-            display_name=_compact_model_label(model_id) or model_id,
-            params_b=params_b,
-            source="user",
-        ))
-        return True
-    except Exception as e:  # noqa: BLE001
-        activity_log.emit("registry", f"Resident write-through skipped: {e}", "warn")
-        return False
-
-
 @app.post("/api/chat/default")
 async def chat_default(request: Request):
     """Set or clear the chat-wide default provider+model (L4), or set one
@@ -8169,29 +8175,17 @@ async def chat_default(request: Request):
                 ),
             }
 
-        os.environ["AEROLLM_MODEL"] = model_id
+        # A chip pick must survive a reboot: it is a pin (model_defaults.yaml),
+        # and the resolver stamps env + registry from it (one direction).
         registry_updated = False
         try:
-            from arail.registry import get_registry
-            from arail.registry.store import TIER1_ID
-            from arail.model_specs import resolve_params_b as _resolve_params_b
-            from dataclasses import replace as _replace
-
-            reg = get_registry()
-            reg._ensure_loaded()
-            existing = reg.entries.get(TIER1_ID)
-            if existing is not None:
-                params_b, _source = _resolve_params_b(model_id)
-                reg.add_entry(_replace(
-                    existing,
-                    model_id=model_id,
-                    display_name=_compact_model_label(model_id) or model_id,
-                    params_b=params_b,
-                    source="user",
-                ))
-                registry_updated = True
+            from arail.portal import models_api as _models_api
+            out = await _models_api.apply_pin("b", model_id)
+            registry_updated = True
+            requires_restart = bool(out.get("restart_required"))
         except Exception as e:  # noqa: BLE001
-            activity_log.emit("registry", f"Deep write-through skipped: {e}", "warn")
+            requires_restart = False
+            activity_log.emit("registry", f"Deep pin skipped: {e}", "warn")
 
         activity_log.emit("chat", f"Deep slot default set: model={model_id}", "info")
         return {
@@ -8199,7 +8193,7 @@ async def chat_default(request: Request):
             "slot": "deep",
             "model": model_id,
             "registry_updated": registry_updated,
-            "requires_restart": False,
+            "requires_restart": requires_restart,
         }
 
     # ── RESIDENT SLOT (default) — original behavior, plus write-through ─
@@ -8238,9 +8232,13 @@ async def chat_default(request: Request):
         from arail.registry.ceiling import ModelCeilingViolation, resolve_answering_model
         try:
             resolve_answering_model(model_id, role="primary", backend="ollama_native")
-            registry_updated = _registry_write_through_resident(model_id)
+            from arail.portal import models_api as _models_api
+            await _models_api.apply_pin("a", model_id)
+            registry_updated = True
         except ModelCeilingViolation:
             pass  # chat default still set; just not promoted to tier0
+        except Exception as e:  # noqa: BLE001 -- the chat default itself is already set
+            activity_log.emit("registry", f"Resident pin skipped: {e}", "warn")
 
     activity_log.emit("chat", f"Chat default set: provider={provider} model={model_id}", "info")
     return {

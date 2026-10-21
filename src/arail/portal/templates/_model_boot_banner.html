@@ -1,310 +1,56 @@
 {#
-  Boot model-selection banner (included by _nav.html on EVERY page, right
-  after _model_switcher.html). Answers two questions in plain language:
-  which model loads into GPU/memory now (slot A), and which model
-  aeroLLM should reference for deep answers (slot B) — showing size,
-  on-filesystem presence, RAM fit, and an install command / HF link when
-  a candidate is missing.
-
-  Modes (from GET /api/models/boot):
-    • hidden  — settled once (model_defaults.yaml exists) and healthy;
-      render nothing.
-    • picker  — never settled yet; show the full two-slot picker
-      immediately. "Confirm" writes model_defaults.yaml via
-      POST /api/models/settle. "Not now" dismisses for this browser tab
-      only (sessionStorage, keyed to the server's settlement stamp — a
-      new stamp, e.g. after the picker was confirmed elsewhere or a
-      config change, un-dismisses it).
-    • problem — settled but something broke since (the configured model
-      vanished from disk/Ollama, no longer fits, or .env drifted away
-      from what was settled): a compact strip with "Fix…" (expands into
-      the same full picker, pre-filled) and "Dismiss".
-
-  Fetch-once by design: one GET on page load, no polling, no SSE — the
-  lab's quiet-boot contract (see _boot_overlay.html's docstring) applies
-  here too. "Fix…" and "Confirm" are the only other network calls this
-  file ever makes, both user-initiated.
-
-  All styling via v2 tokens — no literals, no style=.
+  Boot model strip (included by _nav.html on EVERY page). ARAIL resolves the
+  fast (A) and deep (B) models itself at start; this strip is hidden unless
+  GET /api/models/boot reports mode "degraded" -- something the operator can
+  act on (Ollama down, a pin that isn't installed, not enough RAM for the deep
+  model, a model that crashed last boot). It states the problem in one line
+  and offers "Change…", which opens the existing Resident chip in Chat.
+  Fetch-once: one GET on page load, no polling/SSE (quiet-boot contract).
+  Details come from the server as plain text and are written with
+  textContent only. Install commands are shown as text, never as links, so an
+  airgapped lab is never nudged toward a download. v2 tokens only.
 #}
 <style>
   #model-boot-banner{border-bottom:1px solid color-mix(in srgb, var(--accent) 45%, transparent);
     background:color-mix(in srgb, var(--accent) 8%, transparent);}
   #model-boot-banner[hidden]{display:none;}
-
   #mbb-strip{display:flex;align-items:center;gap:.6rem;padding:.3rem .9rem;
     font-size:.74rem;color:var(--text);}
-  #mbb-strip[hidden]{display:none;}
   #mbb-strip-text{flex:1 1 auto;}
-
-  #mbb-panel{padding:.8rem 1rem 1rem;}
-  #mbb-panel[hidden]{display:none;}
-  .mbb-head strong{font-size:.92rem;display:block;}
-  .mbb-sub{font-size:.74rem;color:var(--text-muted);}
-
-  .mbb-cols{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:.6rem;}
-  @media (max-width: 720px){ .mbb-cols{grid-template-columns:1fr;} }
-  .mbb-col-title{font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;
-    color:var(--text-muted);margin-bottom:.4rem;}
-  .mbb-optional{text-transform:none;letter-spacing:normal;}
-  .mbb-list{display:flex;flex-direction:column;gap:.3rem;max-height:280px;
-    overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-m);
-    padding:.4rem;}
-  .mbb-row{display:flex;gap:.5rem;align-items:flex-start;font-size:.78rem;
-    padding:.25rem .3rem;border-radius:var(--radius-m);cursor:pointer;}
-  .mbb-row:hover{background:var(--surface2);}
-  .mbb-row-disabled{opacity:.55;}
-  .mbb-row input[type=radio]{margin-top:.2rem;}
-  .mbb-row-main{display:flex;flex-direction:column;gap:.1rem;flex:1 1 auto;min-width:0;}
-  .mbb-row-name{font-weight:600;}
-  .mbb-row-meta{font-size:.68rem;color:var(--text-muted);font-family:var(--font-mono);
-    font-variant-numeric:tabular-nums;}
-  .mbb-ok{color:var(--positive);}
-  .mbb-missing{color:var(--warn);}
-  .mbb-fit-fits{color:var(--positive);}
-  .mbb-fit-too_big{color:var(--danger);}
-  .mbb-fit-unknown{color:var(--text-muted);}
-  .mbb-cmd{margin-top:.25rem;font-size:.7rem;}
-  .mbb-cmd summary{cursor:pointer;color:var(--accent);}
-  .mbb-cmd code{display:block;margin-top:.3rem;padding:.4rem .5rem;
-    background:var(--surface2);border-radius:var(--radius-m);
-    font-family:var(--font-mono);white-space:pre-wrap;word-break:break-all;}
-  .mbb-hf-link{display:inline-block;margin-top:.3rem;color:var(--accent);}
-
-  .mbb-error{margin-top:.6rem;padding:.4rem .6rem;border-radius:var(--radius-m);
-    border:1px solid color-mix(in srgb, var(--danger) 45%, transparent);
-    background:color-mix(in srgb, var(--danger) 12%, transparent);font-size:.76rem;}
-  .mbb-error[hidden]{display:none;}
-  .mbb-success{padding:.4rem .6rem;font-size:.8rem;color:var(--positive);}
-
-  .mbb-actions{display:flex;align-items:center;gap:.6rem;margin-top:.8rem;}
-  .mbb-grow{flex:1 1 auto;}
 </style>
-
 <div id="model-boot-banner" hidden>
-  <div id="mbb-strip" hidden>
-    <span aria-hidden="true">⚠</span>
+  <div id="mbb-strip" role="status">
     <span id="mbb-strip-text"></span>
-    <button class="btn btn-sm" id="mbb-fix">Fix…</button>
-    <button class="btn btn-sm" id="mbb-dismiss"
-            title="Hide until this changes again">Dismiss</button>
-  </div>
-
-  <div id="mbb-panel" hidden>
-    <div class="mbb-head">
-      <strong>Choose your models</strong>
-      <span class="mbb-sub">Which model should load into GPU/memory right
-        now, and which one should QueueLLM reference for deep answers?</span>
-    </div>
-    <div class="mbb-cols">
-      <div class="mbb-col">
-        <div class="mbb-col-title">A — load in GPU/memory now</div>
-        <div id="mbb-a-list" class="mbb-list"></div>
-      </div>
-      <div class="mbb-col">
-        <div class="mbb-col-title">B — QueueLLM deep reference
-          <span class="mbb-optional">(optional)</span></div>
-        <div id="mbb-b-list" class="mbb-list"></div>
-      </div>
-    </div>
-    <div id="mbb-error" class="mbb-error" hidden></div>
-    <div class="mbb-actions">
-      <button class="btn btn-sm" id="mbb-not-now">Not now</button>
-      <span class="mbb-grow"></span>
-      <button class="btn btn-sm btn-primary" id="mbb-confirm">Confirm</button>
-    </div>
+    <button type="button" class="icon-btn" id="mbb-change">Change…</button>
+    <button type="button" class="icon-btn" id="mbb-dismiss">Dismiss</button>
   </div>
 </div>
-
 <script>
 (function(){
-  var payload = null;
-  var selected = {a: null, b: undefined};  // undefined b = "not chosen yet, use server default"
-
-  function esc(s){ var d=document.createElement('div'); d.textContent=String(s==null?'':s); return d.innerHTML; }
-  function fmtGb(x){ return (typeof x === 'number') ? x.toFixed(1)+' GB' : 'size unknown'; }
-  function dismissKey(stamp){ return 'arail-boot-banner-dismissed:'+stamp; }
-
-  function fitLabel(fit){
-    if(!fit) return 'fit unknown';
-    if(fit.verdict === 'fits') return 'fits';
-    if(fit.verdict === 'too_big') return 'too big'+(fit.detail?' — '+fit.detail:'');
-    return 'fit unknown';
+  var banner = document.getElementById('model-boot-banner');
+  var text = document.getElementById('mbb-strip-text');
+  var key = null;
+  function hide(){ if(banner) banner.hidden = true; }
+  function apply(p){
+    if(!banner || !text || !p || p.mode !== 'degraded' || !p.degraded.length) return hide();
+    var msg = p.degraded.slice(0, 2).map(function(d){ return d.detail || d.kind; }).join(' · ');
+    key = 'mbb-dismissed:' + msg;
+    if(sessionStorage.getItem(key)) return hide();
+    text.textContent = msg;
+    banner.hidden = false;
   }
-
-  function renderRow(slotKey, c, isSelected){
-    var radioDisabled = !!(c.fit && c.fit.verdict === 'too_big');
-    var row = document.createElement('label');
-    row.className = 'mbb-row' + (radioDisabled ? ' mbb-row-disabled' : '');
-
-    var radio = document.createElement('input');
-    radio.type = 'radio'; radio.name = 'mbb-slot-'+slotKey; radio.value = c.id;
-    radio.disabled = radioDisabled;
-    radio.checked = !!isSelected;
-    radio.addEventListener('change', function(){ selected[slotKey] = c.id; updateConfirmState(); });
-    row.appendChild(radio);
-
-    var main = document.createElement('span'); main.className = 'mbb-row-main';
-    var nameSpan = document.createElement('span'); nameSpan.className = 'mbb-row-name';
-    nameSpan.textContent = c.name || c.id;
-    main.appendChild(nameSpan);
-    var meta = document.createElement('span'); meta.className = 'mbb-row-meta';
-    meta.innerHTML = esc(fmtGb(c.size_gb)) + ' &middot; ' +
-      (c.present ? '<span class="mbb-ok">on disk</span>'
-                 : '<span class="mbb-missing">not downloaded</span>') +
-      ' &middot; <span class="mbb-fit-' + esc((c.fit && c.fit.verdict) || 'unknown') + '">' +
-      esc(fitLabel(c.fit)) + '</span>';
-    main.appendChild(meta);
-    row.appendChild(main);
-
-    if(!c.present && (c.install_command || c.hf_url)){
-      var det = document.createElement('details'); det.className = 'mbb-cmd';
-      var summary = document.createElement('summary'); summary.textContent = 'Show command';
-      det.appendChild(summary);
-      if(c.install_command){
-        var code = document.createElement('code'); code.textContent = c.install_command;
-        det.appendChild(code);
-      }
-      if(c.hf_url){
-        var a = document.createElement('a'); a.href = c.hf_url;
-        a.target = '_blank'; a.rel = 'noopener noreferrer';
-        a.className = 'mbb-hf-link'; a.textContent = 'View on Hugging Face ↗';
-        det.appendChild(a);
-      }
-      row.appendChild(det);
-    }
-    return row;
-  }
-
-  function renderNoneRow(isSelected){
-    var row = document.createElement('label'); row.className = 'mbb-row';
-    var radio = document.createElement('input');
-    radio.type = 'radio'; radio.name = 'mbb-slot-b'; radio.value = '';
-    radio.checked = !!isSelected;
-    radio.addEventListener('change', function(){ selected.b = null; updateConfirmState(); });
-    row.appendChild(radio);
-    var main = document.createElement('span'); main.className = 'mbb-row-main';
-    var nameSpan = document.createElement('span'); nameSpan.className = 'mbb-row-name';
-    nameSpan.textContent = 'None — no deep model configured';
-    main.appendChild(nameSpan);
-    row.appendChild(main);
-    return row;
-  }
-
-  function updateConfirmState(){
-    var btn = document.getElementById('mbb-confirm');
-    if(btn) btn.disabled = !selected.a;
-  }
-
-  function renderPanel(){
-    var aList = document.getElementById('mbb-a-list');
-    var bList = document.getElementById('mbb-b-list');
-    if(!aList || !bList || !payload) return;
-    aList.innerHTML = ''; bList.innerHTML = '';
-    var aCands = payload.slots.a.candidates || [];
-    var bCands = payload.slots.b.candidates || [];
-    if(!selected.a){ selected.a = payload.slots.a.configured || (aCands[0] && aCands[0].id) || null; }
-    if(selected.b === undefined){ selected.b = payload.slots.b.configured || null; }
-    aCands.forEach(function(c){ aList.appendChild(renderRow('a', c, c.id === selected.a)); });
-    if(payload.slots.b.allow_none){ bList.appendChild(renderNoneRow(!selected.b)); }
-    bCands.forEach(function(c){ bList.appendChild(renderRow('b', c, c.id === selected.b)); });
-    updateConfirmState();
-  }
-
-  function problemText(){
-    var probs = (payload.settlement && payload.settlement.problems) || [];
-    if(!probs.length) return '';
-    return probs.map(function(p){
-      var slotLabel = p.slot === 'a' ? 'Slot A' : 'Slot B';
-      return '<b>' + esc(slotLabel) + '</b> (' + esc(p.model || '') + '): ' +
-        esc(p.detail || p.kind);
-    }).join(' &nbsp;·&nbsp; ');
-  }
-
-  function showStrip(text){
-    var banner = document.getElementById('model-boot-banner');
-    var strip = document.getElementById('mbb-strip');
-    var panel = document.getElementById('mbb-panel');
-    var txt = document.getElementById('mbb-strip-text');
-    if(!banner || !strip || !panel) return;
-    banner.hidden = false; strip.hidden = false; panel.hidden = true;
-    if(txt) txt.innerHTML = text;
-  }
-  function showPanel(){
-    var banner = document.getElementById('model-boot-banner');
-    var strip = document.getElementById('mbb-strip');
-    var panel = document.getElementById('mbb-panel');
-    if(!banner || !strip || !panel) return;
-    banner.hidden = false; strip.hidden = true; panel.hidden = false;
-    renderPanel();
-  }
-  function hideAll(){
-    var banner = document.getElementById('model-boot-banner');
-    if(banner) banner.hidden = true;
-  }
-
-  function applyPayload(){
-    if(!payload) return;
-    if(payload.mode === 'hidden'){ hideAll(); return; }
-    var key = dismissKey(payload.stamp);
-    if(sessionStorage.getItem(key)){ hideAll(); return; }
-    if(payload.mode === 'picker'){ showPanel(); return; }
-    showStrip(problemText());  // mode === 'problem'
-  }
-
-  function fetchBoot(full){
-    fetch('/api/models/boot' + (full ? '?full=1' : ''), {cache: 'no-store'})
-      .then(function(r){ return r.ok ? r.json() : null; })
-      .then(function(p){ if(p){ payload = p; applyPayload(); } })
-      .catch(function(){});
-  }
-
-  var fixBtn = document.getElementById('mbb-fix');
-  if(fixBtn) fixBtn.addEventListener('click', function(){ fetchBoot(true); });
-
-  var dismissBtn = document.getElementById('mbb-dismiss');
-  if(dismissBtn) dismissBtn.addEventListener('click', function(){
-    if(payload) sessionStorage.setItem(dismissKey(payload.stamp), '1');
-    hideAll();
+  var change = document.getElementById('mbb-change');
+  if(change) change.addEventListener('click', function(){
+    var chip = document.getElementById('model-picker');
+    if(chip) chip.click(); else window.location.href = '/chat';
   });
-
-  var notNowBtn = document.getElementById('mbb-not-now');
-  if(notNowBtn) notNowBtn.addEventListener('click', function(){
-    if(payload) sessionStorage.setItem(dismissKey(payload.stamp), '1');
-    hideAll();
+  var dismiss = document.getElementById('mbb-dismiss');
+  if(dismiss) dismiss.addEventListener('click', function(){
+    if(key) sessionStorage.setItem(key, '1');
+    hide();
   });
-
-  var confirmBtn = document.getElementById('mbb-confirm');
-  if(confirmBtn) confirmBtn.addEventListener('click', function(){
-    var errEl = document.getElementById('mbb-error');
-    if(errEl){ errEl.hidden = true; errEl.textContent = ''; }
-    confirmBtn.disabled = true;
-    fetch('/api/models/settle', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({default_a: selected.a, default_b: selected.b || null})
-    }).then(function(r){
-      return r.json().then(function(j){ return {ok: r.ok, body: j}; });
-    }).then(function(res){
-      confirmBtn.disabled = false;
-      if(!res.ok){
-        if(errEl){ errEl.textContent = res.body.detail || 'Could not settle model selection.'; errEl.hidden = false; }
-        return;
-      }
-      var panel = document.getElementById('mbb-panel');
-      if(panel){
-        var msg = document.createElement('div'); msg.className = 'mbb-success';
-        msg.textContent = 'Settled.' + (res.body.restart_required
-          ? ' The deep model change applies on the next start.' : '');
-        panel.innerHTML = ''; panel.appendChild(msg);
-      }
-      if(window.ARAIL_MODELS && window.ARAIL_MODELS.refresh) window.ARAIL_MODELS.refresh();
-      setTimeout(hideAll, 6000);
-    }).catch(function(){
-      confirmBtn.disabled = false;
-      if(errEl){ errEl.textContent = 'Network error — could not reach the lab.'; errEl.hidden = false; }
-    });
-  });
-
-  fetchBoot(false);
+  fetch('/api/models/boot', {cache: 'no-store'})
+    .then(function(r){ return r.ok ? r.json() : null; })
+    .then(apply).catch(function(){});
 })();
 </script>

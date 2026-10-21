@@ -1,25 +1,32 @@
-"""ARAIL's model defaults — the one file to check for what's active.
+"""ARAIL's model defaults — pins plus the last-resolved cache, in one file.
 
-Historically "which model does chat use by default" and "which model
-does AeroLLM load" were each answered by a chain of .env vars, hardcoded
-fallback constants, and installed-model detection spread across
-app.py/router/backends.py — nobody could answer "what's active" without
-reading code. `model_defaults.yaml` (repo root, gitignored, per-machine
-like .env — see model_defaults.yaml.example) is now the single,
-authoritative source for these two settings.
+``model_defaults.yaml`` (repo root, gitignored, per-machine like .env —
+see model_defaults.yaml.example) has two sections (schema ``version: 2``):
+
+* ``pins``     — operator intent, preserved across boots. ``null`` means
+  "auto". Slot B may be the literal ``none`` to keep the deep slot off.
+* ``resolved`` — a cache of what the portal's boot resolver
+  (``arail.model_resolve``) picked last time. Rewritten every boot, never a
+  gate, never compared for "drift".
 
 Deliberately NOT a rewrite of the ~30 call sites that read MODEL_NAME /
-AEROLLM_MODEL: `apply()` stamps this file's values into those SAME env
-vars, once, at import — every existing reader sees the new source of
-truth for free, and nothing downstream needs to change. A missing or
-malformed file is not an error; it just means nothing is overridden and
-today's .env-based defaults keep working exactly as before.
+AEROLLM_MODEL: ``apply()`` stamps the cached values into those SAME env
+vars, once, at import, so CLI tools and agents in non-portal processes see
+the last-resolved models. The portal re-resolves at startup (the only
+resolver; there is no second implementation here). A missing or malformed
+file is not an error.
+
+A legacy v1 file (top-level ``default_a`` / ``default_b``, no ``version``)
+is read as pins; it is migrated to v2 by ``migrate_v1`` (portal only).
 """
 from __future__ import annotations
 
 import logging
 import os
 import tempfile
+import threading
+import time
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -30,104 +37,188 @@ _log = logging.getLogger(__name__)
 # pytest's rootdir) already runs with CWD at the repo root.
 _DEFAULT_PATH = Path("model_defaults.yaml")
 
+# Serialises read-modify-write cycles within this process so a pin write can
+# never be lost to a concurrent cache write (FM13). Cross-process writers are
+# last-writer-wins on `resolved`; pins are only ever written by write_pin.
+_WRITE_LOCK = threading.RLock()
 
-def apply(path: Path | None = None) -> dict[str, Any]:
-    """Load model_defaults.yaml (if present) and stamp its values into
-    os.environ. Returns what it found (possibly empty); never raises.
+VERSION = 2
+NONE_PIN = "none"
 
-    - default_a → MODEL_NAME (Chat Studio's Box A / primary model)
-    - default_b → AEROLLM_MODEL (Box B / AeroLLM's deep model)
+# apply() overwrites MODEL_NAME / AEROLLM_MODEL; remember what .env had so
+# the resolver can treat it as a preference ("not stamped by us").
+_ENV_PREF = {"a": ("MODEL_NAME", "ARAIL_ENV_PREF_A"),
+             "b": ("AEROLLM_MODEL", "ARAIL_ENV_PREF_B")}
 
-    An explicit `null`/blank default_b clears any .env-set AEROLLM_MODEL
-    rather than leaving a stale value able to silently win — "not
-    configured" must stay honestly "not configured".
+_HEADER = (
+    "# ARAIL model defaults — managed by ARAIL. `resolved` is rewritten on\n"
+    "# every boot; edit only `pins` (null = auto; slot b may be `none`).\n"
+    "# See model_defaults.yaml.example. Deleting this file just means\n"
+    "# \"re-resolve with no pins\".\n"
+)
 
-    Path resolution, mirroring config.py's ARAIL_ENV_FILE pattern exactly
-    (same bug class, same fix): ``ARAIL_MODEL_DEFAULTS_FILE`` overrides
-    the default CWD-relative lookup when set. Without this, importing
-    arail.config in a test process would hydrate whatever's on THIS
-    machine's real model_defaults.yaml into every test — the exact
-    "developer's real .env leaks into the test suite" bug that
-    ARAIL_ENV_FILE / tests/conftest.py's session-level isolation already
-    exists to prevent for .env. `path=` (explicit arg) always wins over
-    both, for direct unit tests.
-    """
+
+def _path(path: "Path | None" = None) -> Path:
     if path is not None:
-        p = path
-    else:
-        override = os.getenv("ARAIL_MODEL_DEFAULTS_FILE", "").strip()
-        p = Path(override) if override else _DEFAULT_PATH
-    if not p.exists():
-        return {}
+        return path
+    override = os.getenv("ARAIL_MODEL_DEFAULTS_FILE", "").strip()
+    return Path(override) if override else _DEFAULT_PATH
+
+
+_OLLAMA_FRONTED = ("ollama_native", "openai_compat")
+
+
+def primary_is_ollama() -> bool:
+    """True iff MODEL_BACKEND fronts Ollama (slot A's runtime). Unset means
+    ``mlx`` -- the same default the registry seed and ModelRouter use.
+    MODEL_NAME is an Ollama tag only in that case; with mlx/cuda/cpu it is a
+    local-runtime repo id and must never be overwritten with a tag."""
+    return (os.getenv("MODEL_BACKEND") or "mlx").strip().lower() in _OLLAMA_FRONTED
+
+
+def _norm_pin(slot: str, v: Any) -> "str | None":
+    if v is None:
+        return None
+    s = str(v).strip()
+    if not s or s.lower() == "auto":
+        return None
+    if s.lower() == NONE_PIN:
+        return NONE_PIN if slot == "b" else None
+    return s
+
+
+def read(path: "Path | None" = None) -> dict[str, Any]:
+    """Normalised view of the file; never raises.
+
+    ``{"exists", "version", "legacy", "ok", "pins": {a, b}, "resolved": {},
+    "pin_notes": {}}``. A v1 file reports ``legacy=True`` with
+    ``default_a`` as pin a and a present-but-null ``default_b`` as pin b
+    ``"none"`` (the operator's crash workaround survives migration).
+    """
+    p = _path(path)
+    out: dict[str, Any] = {"exists": p.exists(), "version": None, "legacy": False,
+                           "ok": True, "pins": {"a": None, "b": None},
+                           "resolved": {}, "pin_notes": {}}
+    if not out["exists"]:
+        return out
     try:
         import yaml
         data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
     except Exception as e:  # noqa: BLE001 — a bad file must never block boot
         _log.warning("model_defaults: failed to read %s: %s", p, e)
-        return {}
+        out["ok"] = False
+        return out
     if not isinstance(data, dict):
         _log.warning("model_defaults: %s did not parse to a mapping — ignoring", p)
+        out["ok"] = False
+        return out
+    if data.get("version") == VERSION or "pins" in data or "resolved" in data:
+        out["version"] = VERSION
+        pins = data.get("pins") if isinstance(data.get("pins"), dict) else {}
+        out["pins"] = {"a": _norm_pin("a", pins.get("a")),
+                       "b": _norm_pin("b", pins.get("b"))}
+        res = data.get("resolved")
+        out["resolved"] = res if isinstance(res, dict) else {}
+        notes = data.get("pin_notes")
+        out["pin_notes"] = notes if isinstance(notes, dict) else {}
+        return out
+    if "default_a" in data or "default_b" in data:
+        out["legacy"] = True
+        out["pins"]["a"] = _norm_pin("a", data.get("default_a"))
+        if "default_b" in data:
+            b = data.get("default_b")
+            out["pins"]["b"] = _norm_pin("b", b) if b else NONE_PIN
+    return out
+
+
+def _resolved_model(resolved: dict, slot: str) -> "tuple[bool, str | None]":
+    """(present, model) for a slot in a ``resolved`` block."""
+    s = resolved.get(slot)
+    if isinstance(s, dict) and "model" in s:
+        return True, (str(s["model"]) if s.get("model") else None)
+    return False, None
+
+
+def apply(path: "Path | None" = None) -> dict[str, Any]:
+    """Stamp the cached (or, failing that, pinned) models into os.environ.
+    Returns what was stamped (possibly empty); never raises.
+
+    - slot a → MODEL_NAME (Chat Studio's Box A / primary model)
+    - slot b → AEROLLM_MODEL (Box B / AeroLLM's deep model); a "none"
+      slot clears any .env-set AEROLLM_MODEL so "not configured" stays
+      honestly "not configured".
+
+    Path resolution: explicit ``path`` > ``ARAIL_MODEL_DEFAULTS_FILE`` >
+    CWD default (mirrors config.py's ARAIL_ENV_FILE pattern, so importing
+    arail.config in a test never hydrates a developer's real file).
+    """
+    data = read(path)
+    if not data["exists"] or not data["ok"]:
         return {}
 
+    desired: dict[str, "tuple[bool, str | None]"] = {}
+    for slot in ("a", "b"):
+        present, model = _resolved_model(data["resolved"], slot)
+        if not present:
+            pin = data["pins"][slot]
+            if pin is None:
+                present, model = False, None
+            else:
+                present, model = True, (None if pin == NONE_PIN else pin)
+        desired[slot] = (present, model)
+
+    return stamp_env({slot: {"model": desired[slot][1]}
+                      for slot in ("a", "b") if desired[slot][0]})
+
+
+def stamp_env(resolved: dict[str, Any]) -> dict[str, Any]:
+    """Stamp a ``resolved``-shaped mapping (``{a: {model}, b: {model}}``)
+    into MODEL_NAME / AEROLLM_MODEL. A slot whose model is empty clears
+    its env var. Slots absent from *resolved* are left alone. Remembers
+    the pre-stamp value once (see ``env_preference``)."""
     result: dict[str, Any] = {}
-
-    default_a = data.get("default_a")
-    if default_a:
-        os.environ["MODEL_NAME"] = str(default_a)
-        result["default_a"] = str(default_a)
-
-    if "default_b" in data:
-        default_b = data.get("default_b")
-        if default_b:
-            os.environ["AEROLLM_MODEL"] = str(default_b)
-            result["default_b"] = str(default_b)
+    for slot, key in (("a", "default_a"), ("b", "default_b")):
+        s = resolved.get(slot)
+        if not isinstance(s, dict) or "model" not in s:
+            continue
+        model = str(s["model"]) if s.get("model") else None
+        if slot == "a" and not primary_is_ollama():
+            continue            # MODEL_NAME belongs to the mlx/cuda/cpu backend
+        env_name, marker = _ENV_PREF[slot]
+        os.environ.setdefault(marker, os.environ.get(env_name, ""))
+        if model:
+            os.environ[env_name] = model
+        elif slot == "b":
+            os.environ.pop(env_name, None)
         else:
-            os.environ.pop("AEROLLM_MODEL", None)
-            result["default_b"] = None
-
+            continue            # an unresolved A never erases MODEL_NAME
+        result[key] = model
     return result
 
 
-def write_defaults(
-    default_a: str, default_b: "str | None" = None, path: Path | None = None
-) -> Path:
-    """Atomically write default_a/default_b to model_defaults.yaml.
+def env_preference() -> dict[str, "str | None"]:
+    """What .env / the shell asked for, ignoring values apply() stamped."""
+    out: dict[str, "str | None"] = {}
+    for slot, (env_name, marker) in _ENV_PREF.items():
+        raw = os.environ[marker] if marker in os.environ else os.environ.get(env_name, "")
+        out[slot] = raw.strip() or None
+    if not primary_is_ollama():
+        out["a"] = None         # an MLX repo id is not an Ollama slot-A preference
+    return out
 
-    Mirrors apply()'s path resolution exactly (explicit arg >
-    ARAIL_MODEL_DEFAULTS_FILE > CWD default) so a write always lands
-    where the next apply() call reads it back from.
 
-    File existence (with a truthy ``default_a``) IS the "boot picker has
-    been settled" signal the boot banner uses — deliberately no separate
-    marker file. Deleting this file is the supported way to re-run the
-    picker on the next boot.
-    """
-    if path is not None:
-        p = path
-    else:
-        override = os.getenv("ARAIL_MODEL_DEFAULTS_FILE", "").strip()
-        p = Path(override) if override else _DEFAULT_PATH
+# ── writers ────────────────────────────────────────────────────────
 
+def _dump(pins: dict, resolved: dict, notes: dict) -> str:
     import yaml
-    body = yaml.safe_dump(
-        {"default_a": default_a, "default_b": default_b},
-        sort_keys=False, default_flow_style=False,
-    )
-    header = (
-        "# ARAIL's model defaults — the ONE file to check for what's active.\n"
-        "# Written by the boot model-selection banner "
-        "(POST /api/models/settle) —\n"
-        "# see model_defaults.yaml.example for the full explanation.\n"
-        "# Delete this file to re-run the boot picker on the next start.\n"
-        "#\n"
-        "# default_a — the primary, fast, always-resident chat model\n"
-        "#             (an installed Ollama model tag).\n"
-        "# default_b — the model QueueLLM (the deep / 2nd inference) loads\n"
-        "#             (a directory name under ARAIL_MODELS_DIR), or null\n"
-        "#             for \"no deep model configured\".\n"
-    )
-    content = header + body
+    body: dict[str, Any] = {"version": VERSION, "pins": {"a": pins.get("a"), "b": pins.get("b")}}
+    if notes:
+        body["pin_notes"] = dict(notes)
+    body["resolved"] = resolved or {}
+    return _HEADER + yaml.safe_dump(body, sort_keys=False, default_flow_style=False)
 
+
+def _atomic_write(p: Path, content: str) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=str(p.parent), prefix=".model_defaults.", suffix=".tmp")
     try:
@@ -140,40 +231,180 @@ def write_defaults(
         except OSError:
             pass
         raise
+
+
+def _backup_unreadable(p: Path) -> "Path | None":
+    """Copy an unreadable file to ``.model_defaults.corrupt.bak`` beside it
+    (the operator's pins may be in there). An existing backup with
+    different bytes is kept and the new copy gets a timestamp suffix."""
+    try:
+        data = p.read_bytes()
+        bak = p.with_name(".model_defaults.corrupt.bak")
+        if bak.exists() and bak.read_bytes() != data:
+            bak = p.with_name(f".model_defaults.corrupt.{int(time.time())}.bak")
+        if not bak.exists():
+            bak.write_bytes(data)
+        return bak
+    except OSError as e:
+        _log.warning("model_defaults: couldn't back up %s: %s", p, e)
+        return None
+
+
+def _write_cache_unlocked(resolution: dict[str, Any], path: "Path | None" = None) -> bool:
+    """Replace the ``resolved`` block (atomic); pins are re-emitted as read.
+    *resolution* is ``BootResolution.to_dict()`` (plus optional ``warm``).
+    Returns False (after one warning) when the file can't be written —
+    a read-only checkout must never block boot (FM10). An existing but
+    unreadable file is NEVER overwritten (its pins are the operator's
+    crash workaround): the cache is simply not saved."""
+    p = _path(path)
+    cur = read(p)
+    if cur["exists"] and not cur["ok"]:
+        _log.warning("model_defaults: %s is unreadable -- cache not saved, "
+                     "file left untouched", p)
+        return False
+    pins = cur["pins"]
+    resolved = {k: v for k, v in resolution.items() if k != "degraded"}
+    resolved.setdefault("warm", (cur["resolved"].get("warm") or {}))
+    try:
+        _atomic_write(p, _dump(pins, resolved, cur["pin_notes"]))
+        return True
+    except OSError as e:
+        _log.warning("model_defaults: couldn't save model cache to %s: %s", p, e)
+        return False
+
+
+def _update_warm_unlocked(slot: str, status: str, path: "Path | None" = None) -> bool:
+    """Record a slot's warm outcome inside ``resolved.warm``."""
+    p = _path(path)
+    cur = read(p)
+    if not cur["ok"]:
+        return False
+    resolved = dict(cur["resolved"])
+    warm = dict(resolved.get("warm") or {})
+    warm[slot] = status
+    resolved["warm"] = warm
+    try:
+        _atomic_write(p, _dump(cur["pins"], resolved, cur["pin_notes"]))
+        return True
+    except OSError as e:
+        _log.warning("model_defaults: couldn't record warm state: %s", e)
+        return False
+
+
+def _write_pin_unlocked(slot: str, value: "str | None", path: "Path | None" = None) -> Path:
+    """Set one pin. *value*: a model id, ``"none"`` (slot b only), or
+    ``None`` / ``"auto"`` to clear. Preserves the other pin and the cache.
+    A legacy v1 file is upgraded in the same write. Raises ValueError for
+    a bad slot / ``none`` on slot a, OSError if unwritable."""
+    if slot not in ("a", "b"):
+        raise ValueError(f"slot must be 'a' or 'b', got {slot!r}")
+    if (value is not None and str(value).strip().lower() == NONE_PIN and slot == "a"):
+        raise ValueError("slot a cannot be pinned to 'none'")
+    p = _path(path)
+    cur = read(p)
+    if cur["exists"] and not cur["ok"]:
+        _backup_unreadable(p)       # an explicit pin may replace it, never silently
+    pins = dict(cur["pins"]) if cur["ok"] else {"a": None, "b": None}
+    pins[slot] = _norm_pin(slot, value)
+    notes = dict(cur["pin_notes"])
+    notes.pop(slot, None)
+    _atomic_write(p, _dump(pins, cur["resolved"] if cur["ok"] else {}, notes))
     return p
 
 
-def resolve_slots() -> dict[str, Any]:
-    """What's actually configured for each slot right now.
+def _migrate_v1_unlocked(path: "Path | None" = None) -> bool:
+    """Rewrite a legacy v1 file as v2 (portal resolver only). Keeps a
+    one-time ``.model_defaults.v1.bak`` beside it. True iff migrated."""
+    p = _path(path)
+    cur = read(p)
+    if not cur["legacy"]:
+        return False
+    notes = {}
+    if cur["pins"]["b"] == NONE_PIN:
+        notes["b"] = "migrated from v1 default_b: null"
+    try:
+        bak = p.with_name(".model_defaults.v1.bak")
+        if not bak.exists():
+            bak.write_bytes(p.read_bytes())
+        _atomic_write(p, _dump(cur["pins"], {}, notes))
+    except OSError as e:
+        _log.warning("model_defaults: couldn't migrate %s: %s", p, e)
+        return False
+    return True
 
-    Deliberately routes through ``arail.config`` (lazy import — avoids the
-    circular import at module load time, since config.py itself imports
-    this module) rather than re-implementing the .env → model_defaults.yaml
-    precedence: importing it applies both layers exactly the way the
-    running portal does, so this report can never disagree with what
-    actually answers a chat request.
+
+def write_cache(resolution: dict[str, Any], path: "Path | None" = None) -> bool:
+    """Replace the ``resolved`` block (atomic); pins are re-emitted as read.
+    *resolution* is ``BootResolution.to_dict()`` (plus optional ``warm``).
+    Returns False (after one warning) when the file can't be written --
+    a read-only checkout must never block boot (FM10)."""
+    with _WRITE_LOCK:
+        return _write_cache_unlocked(resolution, path)
+
+
+def update_warm(slot: str, status: str, path: "Path | None" = None) -> bool:
+    """Record a slot's warm outcome inside ``resolved.warm``."""
+    with _WRITE_LOCK:
+        return _update_warm_unlocked(slot, status, path)
+
+
+def write_pin(slot: str, value: "str | None", path: "Path | None" = None) -> Path:
+    """Set one pin. *value*: a model id, ``"none"`` (slot b only), or
+    ``None`` / ``"auto"`` to clear. Preserves the other pin and the cache.
+    A legacy v1 file is upgraded in the same write. Raises ValueError for
+    a bad slot / ``none`` on slot a, OSError if unwritable."""
+    with _WRITE_LOCK:
+        return _write_pin_unlocked(slot, value, path)
+
+
+def migrate_v1(path: "Path | None" = None) -> bool:
+    """Rewrite a legacy v1 file as v2 (portal resolver only). Keeps a
+    one-time ``.model_defaults.v1.bak`` beside it. True iff migrated."""
+    with _WRITE_LOCK:
+        return _migrate_v1_unlocked(path)
+
+
+def write_defaults(
+    default_a: str, default_b: "str | None" = None, path: "Path | None" = None
+) -> Path:
+    """DEPRECATED shim — maps to ``write_pin`` for both slots (a missing
+    default_b becomes the ``none`` pin, as the old explicit-null did).
+    Remove next release."""
+    warnings.warn("model_defaults.write_defaults() is deprecated; use write_pin()",
+                  DeprecationWarning, stacklevel=2)
+    write_pin("a", default_a, path)
+    return write_pin("b", default_b or NONE_PIN, path)
+
+
+# ── reporting ──────────────────────────────────────────────────────
+
+def resolve_slots() -> dict[str, Any]:
+    """What's active for each slot right now, with where it came from.
+
+    Routes through ``arail.config`` (lazy import — avoids the circular
+    import at module load time) so importing it applies both .env and this
+    file exactly the way the running portal does.
     """
     import arail.config  # noqa: F401 — import side effect: applies .env + this file
 
-    default_a = os.environ.get("MODEL_NAME") or "llama-ai-eng"
-    default_b = os.environ.get("AEROLLM_MODEL") or None
+    p = _path()
+    data = read(p)
+    res = data["resolved"]
 
-    override = os.getenv("ARAIL_MODEL_DEFAULTS_FILE", "").strip()
-    p = Path(override) if override else _DEFAULT_PATH
-    settled = False
-    if p.exists():
-        try:
-            import yaml
-            data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
-            settled = isinstance(data, dict) and bool(data.get("default_a"))
-        except Exception:  # noqa: BLE001
-            pass
+    def _meta(slot: str) -> dict[str, Any]:
+        s = res.get(slot) if isinstance(res.get(slot), dict) else {}
+        return {"source": s.get("source"), "reason": s.get("reason"),
+                "size_gb": s.get("size_gb")}
 
     return {
-        "settled": settled,
         "path": str(p),
-        "default_a": default_a,
-        "default_b": default_b,
+        "version": data["version"],
+        "pins": data["pins"],
+        "default_a": os.environ.get("MODEL_NAME") or "llama-ai-eng",
+        "default_b": os.environ.get("AEROLLM_MODEL") or None,
+        "a": _meta("a"),
+        "b": _meta("b"),
     }
 
 
@@ -182,118 +413,46 @@ def _fmt_gb(x: "float | None") -> str:
 
 
 def _gather_slot_facts() -> dict[str, Any]:
-    """Presence / size / fit for whatever resolve_slots() reports.
-
-    Best-effort throughout: any lookup failure degrades to "unknown"
-    rather than raising — this feeds a boot-time report that must never
-    crash the banner it's printed from.
-    """
+    """Projection of the cached resolution (no network, no second
+    computation). A resolved slot is installed and fits by construction."""
     slots = resolve_slots()
-    a = slots["default_a"]
-    a_present = False
-    a_size_gb: "float | None" = None
-    try:
-        from arail.chat import _ollama_installed_models
-        short_a = a.split(":", 1)[0] if a else ""
-        for m in _ollama_installed_models():
-            if m["id"] == a or m["id"].split(":", 1)[0] == short_a:
-                a_present = True
-                a_size_gb = m.get("size_gb")
-                break
-    except Exception:  # noqa: BLE001
-        pass
-
-    a_fit = "unknown"
-    if a:
-        try:
-            from arail import model_specs as _specs
-            from arail.registry.ceiling import PRIMARY_CEILING_B
-            a_params, _a_src = _specs.resolve_params_b(a)
-            if a_params is not None:
-                a_fit = "fits" if a_params < PRIMARY_CEILING_B else "too_big"
-        except Exception:  # noqa: BLE001
-            pass
-
-    b = slots["default_b"]
-    b_present = False
-    b_size_gb: "float | None" = None
-    b_path: "str | None" = None
-    if b:
-        models_dir = os.getenv("ARAIL_MODELS_DIR", "lab/models")
-        b_path = b if os.path.isabs(b) else os.path.join(models_dir, b)
-        b_present = os.path.isdir(b_path)
-        if b_present:
-            try:
-                total = sum(
-                    f.stat().st_size for f in Path(b_path).rglob("*") if f.is_file()
-                )
-                b_size_gb = round(total / (1024 ** 3), 1) if total else None
-            except OSError:
-                pass
-
-    b_fit = "unknown"
-    b_cap: "float | None" = None
-    if b:
-        try:
-            from arail import hardware as _hw
-            from arail import model_specs as _specs
-            b_cap = _hw.secondary_model_cap_b()
-            params, _src = _specs.resolve_params_b(b, b_path if b_present else None)
-            if params is not None:
-                b_fit = "fits" if params <= b_cap else "too_big"
-        except Exception:  # noqa: BLE001
-            pass
-
+    a_model, b_model = slots["default_a"], slots["default_b"]
+    a_hint = None
+    if slots["a"]["source"] in (None, "none") or not a_model:
+        a_hint = ("ollama pull llama3.2:1b && ollama create llama-ai-eng "
+                  "-f models/ai-eng/Modelfile.default")
     return {
-        "a": {
-            "model": a, "present": a_present, "size_gb": a_size_gb,
-            "fit": a_fit,
-            "install_command": (
-                f"ollama pull {a}" if a and not a_present else None),
-        },
-        "b": ({
-            "model": b, "present": b_present, "size_gb": b_size_gb,
-            "fit": b_fit, "cap_b": b_cap,
-            "install_command": (
-                f"hf download mlx-community/{b} --local-dir {b_path}"
-                if b and not b_present else None),
-        } if b else None),
+        "a": {"model": a_model, "source": slots["a"]["source"],
+              "reason": slots["a"]["reason"], "size_gb": slots["a"]["size_gb"],
+              "install_command": a_hint},
+        "b": ({"model": b_model, "source": slots["b"]["source"],
+               "reason": slots["b"]["reason"], "size_gb": slots["b"]["size_gb"]}
+              if b_model else {"model": None, "source": slots["b"]["source"],
+                               "reason": slots["b"]["reason"], "size_gb": None}),
     }
 
 
-def _fit_label(fit: str, cap_b: "float | None" = None) -> str:
-    if fit == "fits":
-        return "fits"
-    if fit == "too_big":
-        return f"too big (cap ~{cap_b:g}B)" if cap_b else "too big"
-    return "unknown"
-
-
 def report() -> str:
-    """The honest per-slot lines for the CLI readiness banner: name,
-    size, on-disk?, fits?, plus the install command when a slot is
-    absent. Never raises."""
+    """The honest per-slot lines for the CLI readiness banner, including
+    where each choice came from. Reads the cache only; never raises."""
     facts = _gather_slot_facts()
-    a = facts["a"]
+    a, b = facts["a"], facts["b"]
     lines = ["  Models:"]
     lines.append(
-        f"    A (resident):  {a['model']:<28} {_fmt_gb(a['size_gb']):>10}   "
-        f"on disk: {'yes' if a['present'] else 'NO':<3}   fits: {_fit_label(a['fit'])}"
-    )
+        f"    A (resident):  {a['model'] or '(none)':<28} {_fmt_gb(a['size_gb']):>10}   "
+        f"source: {a['source'] or 'env/default'}")
+    if a["reason"]:
+        lines.append(f"                   {a['reason']}")
     if a["install_command"]:
         lines.append(f"                   {a['install_command']}")
-
-    b = facts["b"]
-    if b is None:
-        lines.append("    B (QueueLLM):  (not configured)")
-    else:
+    if b["model"]:
         lines.append(
             f"    B (QueueLLM):  {b['model']:<28} {_fmt_gb(b['size_gb']):>10}   "
-            f"on disk: {'yes' if b['present'] else 'NO':<3}   "
-            f"fits: {_fit_label(b['fit'], b['cap_b'])}"
-        )
-        if b["install_command"]:
-            lines.append(f"                   {b['install_command']}")
+            f"source: {b['source'] or 'env/default'}")
+    else:
+        lines.append("    B (QueueLLM):  (none)")
+    if b["reason"]:
+        lines.append(f"                   {b['reason']}")
     return "\n".join(lines)
 
 
@@ -305,9 +464,9 @@ if __name__ == "__main__":  # pragma: no cover — thin CLI shim, exercised via 
     _parser = argparse.ArgumentParser(
         prog="python -m arail.model_defaults",
         description=(
-            "Read-only report of the two model-selection slots "
-            "(default_a / default_b). Never writes anything — used by "
-            "start.sh's readiness banner."
+            "Read-only report of the two model slots (pins + last-resolved "
+            "cache). Never writes and never resolves — the portal is the "
+            "only resolver. Used by start.sh's readiness banner."
         ),
     )
     _parser.add_argument(
@@ -321,12 +480,13 @@ if __name__ == "__main__":  # pragma: no cover — thin CLI shim, exercised via 
     _args = _parser.parse_args()
 
     if _args.get:
-        _slots = resolve_slots()
-        print(_slots.get(_args.get) or "")
+        print(resolve_slots().get(_args.get) or "")
     elif _args.json:
-        _slots = resolve_slots()
-        _slots["facts"] = _gather_slot_facts()
-        print(json.dumps(_slots))
+        _d = read()
+        _s = resolve_slots()
+        print(json.dumps({"version": _d["version"], "path": _s["path"],
+                          "pins": _d["pins"], "resolved": _d["resolved"],
+                          "default_a": _s["default_a"], "default_b": _s["default_b"]}))
     else:
         print(report())
     sys.exit(0)

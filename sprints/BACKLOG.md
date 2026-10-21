@@ -1333,6 +1333,47 @@ on a platform only when the PRODUCT is gated at the same boundary and
 says so (this sprint's own standing rule, ARCHITECTURE.md §10); anything
 gated merely to make CI green needs fixing, not skipping.
 
+## Delete the boot-model deprecation shims (filed 2026-10-20, boot-model-autoresolve)
+
+`POST /api/models/settle` (alias for two pin writes, `Deprecation: true`
+header) and `model_defaults.write_defaults()` (shim to `write_pin`, emits
+`DeprecationWarning`) ship for one release only. Delete both in the
+release after the one that carries sprint 2026-10-20-boot-model-autoresolve,
+along with `tests/test_models_settle_endpoint.py`. Also: the chat gallery's
+`arail.chat._ollama_installed_models` still hardcodes port 11434 (the boot
+resolver honours `OLLAMA_PORT`); route it through the same helper.
+
+Also delete, in the same change (unforeseen debts recorded in the sprint's
+BUILD_LOG.md round 2 and REVIEW.md round 2):
+
+- **Two writers of tier0/tier1 seed state.** `store._seed_from_env`'s "env
+  wins only when env moved" fingerprint survives beside
+  `reconcile_from_resolution`. The latter keeps `seed_state` in step so the
+  former is inert after boot, but it is a second path that must stay
+  consistent. Remove the fingerprint for tier0/tier1 (and rewrite
+  `tests/registry/test_env_write_through.py` accordingly).
+- **Two locks instead of one.** `model_resolve.LOCK` and
+  `model_defaults._WRITE_LOCK` are always taken in that order, but nothing
+  enforces it (ARCHITECTURE.md FM13 specified one lock). Collapse to a single
+  lock once `write_defaults` is gone.
+
+## Boot-model sentinel and strip follow-ups (filed 2026-10-21, boot-model-autoresolve REVIEW round 2 ASKs)
+
+1. **`SENTINEL_MAX_AGE_S` (600 s) can mislabel a slow live deep load as a
+   crash.** A second instance booting while a >600 s load is still running
+   skips B with a false "crashed last boot" note (no double load). Measure a
+   cold 7B aerollm load on the slowest supported disk and set the bound to at
+   least 2x that, or refresh `started_at` as a heartbeat during the load.
+   (`src/arail/portal/model_warmth.py`)
+2. **macOS boot id includes a localtime-rendered ctime.** `sysctl -n
+   kern.boottime` returns `{ sec = N, usec = M } <ctime>`; a TZ/DST change
+   between `write_sentinel` and the check makes a live load read as stale
+   (inside the 10-minute window only). Compare only `sec`/`usec`.
+3. **`_warm_slot_b` appends `warm_deferred` to `last_resolution()["degraded"]`
+   without `model_resolve.LOCK`.** A concurrent pin re-resolve can replace
+   `_LAST` and the note is lost from the strip (nothing is corrupted). Append
+   under the lock or route the note through `resolve_and_apply` state.
+
 ---
 
 ## Autoresearch durability — the Tuning loop's git ledger over the long term
