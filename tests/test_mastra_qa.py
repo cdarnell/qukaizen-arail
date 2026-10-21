@@ -763,3 +763,114 @@ def test_reset_stops_orphaned_studio_group_in_path_with_spaces(tmp_path):
 def test_uv_lock_untouched():
     r = subprocess.run(["git", "diff", "--quiet", "--", "uv.lock"], cwd=str(REPO))
     assert r.returncode == 0
+
+
+# ═══ RE-TEST 2 (after f58e2d37: four-outcome identity, status_unknown) ═══
+
+SEVEN = ["node_missing", "node_too_old", "not_installed", "port_in_use", "status_unknown", "not_running", "running"]
+
+
+@pytest.mark.parametrize("state", SEVEN)
+def test_seven_states_render_safely_and_controls_only_where_valid(client, monkeypatch, state):
+    evil = '<script>alert(1)</script>'
+    monkeypatch.setattr(mb, "resolve_page_state", lambda: {"state": state, "detail": evil})
+    r = client.get("/mastra")
+    html = r.text[r.text.index('id="mastra-page"'):]
+    assert r.status_code == 200 and f'data-state="{state}"' in html
+    assert "<script>alert(1)" not in html and "&lt;script&gt;" in html
+    assert "<iframe" not in html.lower() and ":4111" not in html
+    assert ('id="mst-start"' in html) == (state == "not_running")
+    assert ('id="mst-stop"' in html) == (state == "running")
+    assert ('id="mst-go"' in html) == (state == "running")
+    assert ('id="mst-open"' in html) == (state in ("not_running", "running"))
+
+
+def test_resolve_page_state_unknown_maps_to_status_unknown():
+    st = mb.resolve_page_state(get_node=lambda: (25, 0, 0), installed=lambda: True, running=lambda: "unknown")
+    assert st["state"] == "status_unknown" and "Traceback" not in st["detail"]
+
+
+def test_portal_stop_surfaces_cannot_verify_identity_409(client, monkeypatch):
+    monkeypatch.setattr(mb, "stop_studio", lambda: {"ok": False, "error": "cannot_verify_identity",
+                                                    "message": mb.CANNOT_VERIFY, "status": 409})
+    r = client.post("/api/mastra/stop", json={})
+    assert r.status_code == 409 and r.json() == {"error": "cannot_verify_identity", "message": mb.CANNOT_VERIFY}
+    r = client.post("/api/mastra/stop", json={}, headers={"Origin": "http://127.0.0.1:4111"})
+    assert r.status_code == 403
+
+
+def test_portal_start_refuses_status_unknown_409(client, monkeypatch):
+    monkeypatch.setattr(mb, "resolve_page_state", lambda: {"state": "status_unknown", "detail": "d"})
+    r = client.post("/api/mastra/start", json={})
+    assert r.status_code == 409 and r.json() == {"error": "status_unknown"}
+
+
+def test_stop_keeps_pid_file_and_signals_nothing_when_ps_gives_nothing(tmp_path, monkeypatch):
+    monkeypatch.setattr(mb, "mastra_db_path", lambda: tmp_path / "mastra" / "mastra.db")
+    (tmp_path / "mastra").mkdir()
+    p = subprocess.Popen(["/bin/sleep", "300"], start_new_session=True)
+    try:
+        mb._pid_file().write_text(f"{p.pid} {p.pid}")
+        res = mb.stop_studio(command_of=lambda pid: "", cwd_of=lambda pid: None)
+        assert res["error"] == "cannot_verify_identity" and res["ok"] is False
+        assert mb._pid_file().exists() and p.poll() is None
+    finally:
+        p.kill(); p.wait()
+
+
+def test_listener_state_survives_lsof_timeout(monkeypatch):
+    def hang(*a, **k):
+        raise subprocess.TimeoutExpired(a[0], 10)
+    monkeypatch.setattr(mb.subprocess, "run", hang)
+    monkeypatch.setattr(mb, "port_open", lambda *a, **k: True)
+    monkeypatch.setattr(mb, "_recorded_group", lambda: None)
+    assert mb.listener_state() == "unknown"
+    monkeypatch.setattr(mb, "port_open", lambda *a, **k: False)
+    assert mb.listener_state() == "none"
+
+
+def test_listener_shape_handles_paths_with_spaces(monkeypatch):
+    weird = Path("/tmp/a b/c\td/integrations/mastra-studio")
+    monkeypatch.setattr(mb, "MASTRA_DIR", weird)
+    assert mb._listener_shape(f"/usr/local/bin/node {weird}/.mastra/output/index.mjs")
+    assert not mb._listener_shape(f"python3 {weird}/.mastra/output/index.mjs")
+
+
+def test_defect_cli_stop_exits_zero_when_identity_cannot_be_verified(monkeypatch, capsys):
+    """R2-1 (LOW): `arailctl mastra stop` prints ok:false/cannot_verify_identity but exits 0,
+    so scripts (and reset flows) treat an unverified, still-running Studio as stopped."""
+    from arail import mastra_cli
+    monkeypatch.setattr(mb, "stop_studio", lambda: {"ok": False, "error": "cannot_verify_identity",
+                                                    "message": mb.CANNOT_VERIFY, "status": 409})
+    assert mastra_cli.main(["stop"]) != 0
+
+
+def test_defect_reset_aborts_without_lsof_when_studio_leader_is_live(tmp_path):
+    """R2-2 (LOW): reset.sh runs under `set -euo pipefail`; the cwd probe
+    `$(lsof … | sed | head)` fails with 127 when lsof is absent, so `reset.sh data --yes`
+    ABORTS (rc 127) before wiping anything and Studio keeps running."""
+    fake = tmp_path / "fake repo"
+    (fake / "scripts").mkdir(parents=True)
+    mdir = fake / "integrations" / "mastra-studio"
+    mdir.mkdir(parents=True)
+    (fake / "lab" / "data" / "mastra").mkdir(parents=True)
+    shutil.copy2(REPO / "scripts" / "reset.sh", fake / "scripts" / "reset.sh")
+    if not NODE:
+        pytest.skip("node missing")
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    for t in ("ps", "sed", "head", "rm", "du", "find", "cat", "date", "mkdir", "ls", "awk", "grep", "tr",
+              "uname", "sleep", "wc", "sort", "cut", "dirname", "basename", "stat", "pgrep", "kill"):
+        w = shutil.which(t, path="/usr/bin:/bin:/usr/sbin:/sbin")
+        if w:
+            (bindir / t).symlink_to(w)
+    leader = subprocess.Popen([NODE, "-e", "setInterval(()=>{},1e9)", "mastra", "dev"], cwd=str(mdir),
+                              start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        time.sleep(0.5)
+        (fake / "lab" / "data" / "mastra" / "studio.pid").write_text(f"{leader.pid} {leader.pid}")
+        r = subprocess.run(["/bin/bash", "scripts/reset.sh", "data", "--yes"], cwd=fake, capture_output=True,
+                           text=True, timeout=60, env={"PATH": str(bindir), "HOME": str(tmp_path)})
+        assert r.returncode == 0, (r.returncode, r.stderr[-300:])
+    finally:
+        leader.kill(); leader.wait()

@@ -207,3 +207,68 @@ Also verified:
 2. R-2: fix or ticket it (LOW).
 3. Ticket F-8 (re-lock `uv.lock` for the `mastra` extra) in a dedicated change.
 4. **The owner runs the D1 browser-leg pcap** against `./arailctl mastra open` with the final flags (including the WebRTC flags). It must show zero non-loopback packets from the restricted-browser PIDs. **Not run by QA and not marked passed.** A dirty capture makes the verdict BLOCK, per REVIEW.md. Nothing is left listening on :4111 for that run.
+
+---
+
+## Re-test 2 2026-10-21 against f58e2d37 (R-1 / R-2 fix round): targeted
+
+**Verdict: FAIL** (strict rule: a test is failing).
+- Both remaining failures are **LOW**. R-1 (MEDIUM) and R-2 are fixed and re-verified live, security is clean, and there are no regressions.
+- To reach **WEAK_PASS**, fix R2-1 and R2-2. Alternatively, the owner records them as ticketed follow-ups in the sprint ledger, and the two `test_defect_*` tests are marked `xfail(strict=True)` with the ticket reference.
+- Either way, ship stays conditional on the owner's D1 browser pcap.
+
+### R-1 / R-2: fresh live repros
+
+| Case | Result |
+|---|---|
+| R-1: real Studio started with lsof, then `status` / `start` / `stop` with lsof hidden from PATH | `running` / `already_running` / `was_running: true`. No process left, :4111 free, pid file removed. **Fixed.** |
+| R-1: `kill -9` of the npm leader, then `status` and `stop` without lsof | `running`, then `was_running: true`, port free. **Fixed.** |
+| Foreign `http.server` on 4111, no lsof | `status_unknown`; start refused with `status_unknown` (409); stop returns `cannot_verify_identity` with its message and signals nothing (the server survived). With lsof, the same server reads as `port_in_use`. **Correct.** |
+| R-2: `http.server` started inside `integrations/mastra-studio` | `port_in_use`; stop returns `was_running: false`; the server survived. **Fixed.** |
+| A process whose argv mimics `node …/integrations/mastra-studio/.mastra/output/index.mjs` but whose cwd is `/private/tmp` | `port_in_use`; it survived stop. **Correct.** |
+| A process that mimics the argv AND has its cwd inside the Studio dir | Treated as Studio (`running`) and stopped. **By design.** Shape plus cwd plus loopback is the identity proof. Spoofing it requires local code execution in the repo dir, so this is INFO and not a finding. |
+| A member of the recorded group (node-shaped `mastra dev` leader whose child listens) | `running`; stop kills the whole group; port free. **Correct.** |
+
+### New code attacked
+
+- **Seven page states.** I rendered all 7 with an XSS payload in `detail`:
+  - Escaped everywhere. No iframe and no `:4111` in any state.
+  - Start appears only in `not_running`. Stop and Run appear only in `running`. The open card appears only in `not_running` and `running`. `status_unknown` and `port_in_use` show no controls.
+  - The CSRF and tier gates still apply to every route.
+- **`cannot_verify_identity`.**
+  - Portal stop returns `409 {"error","message"}` verbatim, and a forged Origin still gets 403.
+  - Portal start in `status_unknown` returns `409 {"error":"status_unknown"}`.
+  - When `ps` returns nothing, stop returns `cannot_verify_identity`, **keeps the pid file**, and signals nothing.
+- **lsof hanging or timing out.** `TimeoutExpired` falls through to the connect fallback: `unknown` if something is listening, `none` if not. No exception.
+- **Odd paths.** `_listener_shape` matches with spaces and tabs in the repo path.
+- **Races.**
+  - If the leader dies between the check and the signal, `killpg` still reaches the orphaned members (a pgid cannot be reused while any member lives).
+  - Pid reuse is covered by the argv shape plus cwd, or by the recorded pair when lsof is missing.
+  - The pgid-reuse corner from R-3 is unchanged (INFO).
+- **`reset.sh` with the anchored cwd** (the repo reached through a **symlink**, with **spaces** in both the real and the link path):
+  - An own Studio-shaped leader is stopped (rc 0).
+  - An identical leader in **another repo's** `integrations/mastra-studio` survives (rc 0).
+  - The anchoring works.
+
+### New defects
+
+| # | Severity | Finding | Minimal repro | Failing test |
+|---|---|---|---|---|
+| R2-1 | LOW | **`arailctl mastra stop` exits 0 even when it signalled nothing.** It prints `{"ok": false, "error": "cannot_verify_identity", …}` but exits 0 (`mastra_cli.py` returns 0 unconditionally for `stop`). Scripts read that as "stopped". | Run a foreign listener with no lsof, then `./arailctl mastra stop; echo $?`. It prints the error and `0`. | `test_defect_cli_stop_exits_zero_when_identity_cannot_be_verified` |
+| R2-2 | LOW | **`reset.sh` aborts without lsof while a Studio-shaped leader is live.** The script runs under `set -euo pipefail`, and `studio_cwd="$(lsof … \| sed \| head)"` fails with 127. `reset.sh data --yes` therefore exits **127 before wiping anything**, and Studio keeps running. It fails closed, so nothing is destroyed, but reset is unusable in that state. The Python side handles the missing lsof; reset.sh does not. | Use a PATH without lsof, a live `node … mastra dev` leader recorded in `studio.pid`, then `bash scripts/reset.sh data --yes`. It exits with rc 127 and `lab/data/mastra/studio.pid` is still there. | `test_defect_reset_aborts_without_lsof_when_studio_leader_is_live` |
+
+### Quick regression
+
+- `tests/test_mastra_qa.py` + `test_mastra_bridge.py` + `test_researcher_tool.py`: **257 passed, 2 failed** (R2-1 and R2-2). All earlier `test_defect_*` tests (F-1…F-7, R-1, R-2) pass.
+- Node `qa-run-once.test.mjs`: 6 of 6 pass.
+- Wider portal / tier / CSRF / health / experiments / reset / cli set: **778 passed, 10 failed, 1 skipped, 2 xfailed.** The 10 are exactly the base-20f334b4 failures.
+- **Hygiene:**
+  - `uv.lock` is unmodified; all runs used `--frozen`.
+  - No `logs/` files are tracked. The untracked `logs/scheduler/*.json` that the suites write were deleted and not committed.
+  - At the end no mastra dev, `.mastra/output`, esbuild, http.server, test leader or `researcher_tool` process is running, and **nothing is listening on :4111**. Checked with `pgrep` and `lsof`.
+
+### Remaining ship conditions
+
+1. Fix R2-1 (stop exits nonzero when `ok` is false) and R2-2 (`|| true` on the lsof probe, or a `command -v lsof` guard, so reset falls back to shape plus the recorded pair like the Python side). Alternatively, ticket both and mark their tests `xfail(strict=True)`. Either way the verdict becomes WEAK_PASS.
+2. Ticket F-8: re-lock `uv.lock` for the `mastra` extra in a dedicated change.
+3. **The owner runs the D1 browser-leg pcap** against `./arailctl mastra open` with the final flags. It must show zero non-loopback packets from the restricted-browser PIDs. **Not run by QA and not marked passed.** A dirty capture makes the verdict BLOCK, per REVIEW.md.
