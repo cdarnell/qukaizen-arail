@@ -601,6 +601,7 @@ def resolve_and_apply(*, skip_b: Optional[str] = None,
     (cache written?) and ``migrated`` (v1 file upgraded?)."""
     from arail import model_defaults as md
     with LOCK:
+        prev = {k: (dict(v) if isinstance(v, dict) else v) for k, v in _LAST.items()}
         migrated = md.migrate_v1()
         data = md.read()
         pins = data["pins"] if data["ok"] else {"a": None, "b": None}
@@ -608,7 +609,15 @@ def resolve_and_apply(*, skip_b: Optional[str] = None,
             timeout=timeout, pins=pins, env_pref=md.env_preference(),
             cache=data["resolved"], skip_b=skip_b)
         out = res.to_dict()
-        out["warm"] = {}
+        # A re-resolve (e.g. pinning slot A) must not wipe the warm status of
+        # a slot that is still the same model: carry it forward from this
+        # process's last resolution (never from disk -- that is a prior boot).
+        prev_warm = prev.get("warm") or {}
+        out["warm"] = {
+            s: prev_warm[s] for s in ("a", "b")
+            if prev_warm.get(s)
+            and (prev.get(s) or {}).get("model")
+            and (prev.get(s) or {}).get("model") == (out.get(s) or {}).get("model")}
         out["saved"] = md.write_cache(
             {k: v for k, v in out.items() if k not in ("saved", "migrated")})
         out["migrated"] = migrated

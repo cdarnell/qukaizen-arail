@@ -195,3 +195,31 @@ def test_unwritable_but_readable_yaml_keeps_the_save_wording(booted, monkeypatch
     out = mr.resolve_and_apply()
     note = [d for d in out["degraded"] if d["kind"] == "cache_unsaved"][0]
     assert "couldn't save" in note["detail"]
+
+
+def _with_deep_b(monkeypatch, tmp_path):
+    (tmp_path / "models" / "Good-7B").mkdir(parents=True)
+    monkeypatch.setenv("ARAIL_MODELS_DIR", str(tmp_path / "models"))
+    monkeypatch.setattr(mr, "_deep_slot_available", lambda: None)
+    monkeypatch.setattr(mr, "_scan_models_dir", lambda: [{"id": "Good-7B", "size_gb": 4.0}])
+
+
+def test_reresolve_keeps_warm_of_slot_whose_model_is_unchanged(booted, monkeypatch, tmp_path):  # review A2
+    _with_deep_b(monkeypatch, tmp_path)
+    assert mr.resolve_and_apply()["b"]["model"] == "Good-7B"
+    mr.last_resolution()["warm"] = {"a": "ok", "b": "ok"}
+    out = mr.resolve_and_apply()
+    assert out["warm"] == {"a": "ok", "b": "ok"}
+    assert md.read(booted)["resolved"]["warm"] == {"a": "ok", "b": "ok"}
+
+
+def test_reresolve_drops_warm_of_slot_whose_model_changed(booted, monkeypatch, tmp_path):
+    _with_deep_b(monkeypatch, tmp_path)
+    mr.resolve_and_apply()
+    mr.last_resolution()["warm"] = {"a": "ok", "b": "ok"}
+    monkeypatch.setattr(mr, "_fetch_ollama_tags", lambda: [
+        _tag("llama-ai-eng:latest", 1.3, "1.2B"), _tag("other:1b", 1.0, "1B")])
+    md.write_pin("a", "other:1b", path=booted)
+    out = mr.resolve_and_apply()
+    assert out["a"]["model"] == "other:1b"
+    assert "a" not in out["warm"] and out["warm"]["b"] == "ok"
