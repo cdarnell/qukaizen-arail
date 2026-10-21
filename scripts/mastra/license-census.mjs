@@ -1,6 +1,6 @@
-// Parse package-lock.json license fields; fail on anything outside the allowlist.
+// CC-BY-4.0 allowed for caniuse-lite (data only). Parse package-lock.json license fields; fail on anything outside the allowlist.
 import { readFileSync } from 'node:fs';
-const ALLOW = new Set(['MIT','ISC','Apache-2.0','BSD-2-Clause','BSD-3-Clause','0BSD','BlueOak-1.0.0']);
+const ALLOW = new Set(['MIT','ISC','Apache-2.0','BSD-2-Clause','BSD-3-Clause','0BSD','BlueOak-1.0.0','CC-BY-4.0']);
 const lock = JSON.parse(readFileSync(new URL('../../integrations/mastra-studio/package-lock.json', import.meta.url)));
 const counts = {}; const bad = [];
 for (const [p, m] of Object.entries(lock.packages)) {
