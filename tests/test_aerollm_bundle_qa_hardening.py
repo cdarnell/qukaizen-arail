@@ -477,11 +477,11 @@ def test_setup_failure_message_names_the_outside_user_route():
     channels. See TEST_REPORT.md finding Q7.
     """
     setup = (REPO / "scripts" / "setup.sh").read_text()
-    idx = setup.find("AeroLLM not installed")
-    assert idx != -1, "the AeroLLM failure warning moved — retarget this test"
+    idx = setup.find("QueueLLM not installed")
+    assert idx != -1, "the QueueLLM failure warning moved — retarget this test"
     window = setup[idx: idx + 400]
     assert "deep install" in window, (
-        "setup.sh's AeroLLM failure message does not name `./arailctl deep "
+        "setup.sh's QueueLLM failure message does not name `./arailctl deep "
         "install`, the outside-user route this sprint exists to add:\n" + window
     )
 

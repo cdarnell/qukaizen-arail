@@ -25,6 +25,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Red
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from arail import activity
 from arail.activity import activity_log
 from arail.agent_redirects import clear_agent_redirect, get_agent_redirect, set_agent_redirect
 from arail.agent_workflows import get_agent_workflow, list_agent_workflows
@@ -46,6 +47,7 @@ from arail.portal import scheduler
 
 from arail.brand import load_brand
 from arail.identity import effective_identity
+from arail.airgap import AIRGAPPED_NOTICE
 from arail.experiments import branch_browser as _branch_browser
 from arail.router.backends import ModelResponse
 from arail.ui_theme import list_ui_themes, load_ui_theme, theme_css
@@ -189,10 +191,10 @@ _METRICS_LOCK = _threading.Lock()
 # Two tiers: minimalist (everyday) and maximus (full bench). Upgrade with
 # ./arailctl upgrade maximus.
 _TIER_SURFACES: dict[str, set[str]] = {
-    "minimalist": {"dashboard", "chat", "research", "dac", "agents", "docs"},
+    "minimalist": {"dashboard", "chat", "research", "dac", "agents", "docs", "study", "forge"},
     "maximus": {"dashboard", "chat", "research", "dac", "agents",
                 "admin", "docs", "notebooks", "terminal", "tuning", "plugins",
-                "build"},
+                "study", "forge"},
 }
 
 # v1.0.0 tier rename + the LAB_TIER lookup now live in arail.tier, the single
@@ -717,11 +719,14 @@ app.include_router(librarian_router)
 from arail.portal.models_api import models_router  # noqa: E402
 app.include_router(models_router)
 
-from arail.portal.build_api import build_router  # noqa: E402
-app.include_router(build_router)
+from arail.portal.forge_api import forge_router  # noqa: E402
+app.include_router(forge_router)
 
 from arail.portal.chat_sessions_api import chat_sessions_router  # noqa: E402
 app.include_router(chat_sessions_router)
+
+from arail.portal.study_routes import router as study_router  # noqa: E402
+app.include_router(study_router)
 
 PORTAL_DIR = Path(__file__).parent
 app.mount("/static", StaticFiles(directory=PORTAL_DIR / "static"), name="static")
@@ -1212,6 +1217,17 @@ async def _startup():
         except Exception as e:  # noqa: BLE001
             activity_log.emit("dream",
                 f"Dream daemon failed to start: {type(e).__name__}: {e}",
+                "warn")
+
+    # Job daemon — the admin Scheduler section's clock. Same on/off
+    # convention as dream_daemon: LAB_SCHEDULER=off disables it.
+    if os.getenv("LAB_SCHEDULER", "on").lower() not in ("off", "0", "false", "no"):
+        try:
+            from arail.agents.job_daemon import job_daemon
+            job_daemon.start()
+        except Exception as e:  # noqa: BLE001
+            activity_log.emit("scheduler",
+                f"Job daemon failed to start: {type(e).__name__}: {e}",
                 "warn")
 
     # Boot security scan — hybrid mode only (LAB_MODE=airgapped stays default;
@@ -1831,10 +1847,7 @@ async def providers_status():
         "available": known,
         "lab_mode": mode,
         "cloud_enabled": not _is_airgapped(),
-        "airgapped_notice": (
-            "Lab is in airgapped mode. Only My Machine is usable. "
-            "To enable cloud providers, set LAB_MODE=hybrid in .env and restart."
-        ) if _is_airgapped() else "",
+        "airgapped_notice": AIRGAPPED_NOTICE if _is_airgapped() else "",
         "providers": [
             {
                 "id": pid,
@@ -1914,7 +1927,7 @@ async def providers_active(request: Request):
                 "error": "Airgapped mode — only local sources are active. Set LAB_MODE=hybrid to use cloud providers."}
     if provider == "aerollm" and not _is_aerollm_installed():
         return {"ok": False,
-                "error": "The AeroLLM engine isn't built on this machine. Run './arailctl deep rebuild' to enable it."}
+                "error": "The QueueLLM engine isn't built on this machine. Run './arailctl deep rebuild' to enable it."}
     os.environ["COMPUTE_SOURCE"] = provider
     activity_log.emit("chat", f"Compute source switched to '{provider}'.", "info")
     # Sprint 2: regenerate_config() THEN restart() — under a single lock.
@@ -2574,6 +2587,22 @@ async def worlds_page(request: Request):
     user studies. Goals come second, set within the mounted World.
     """
     return templates.TemplateResponse(request, "worlds.html", {
+        **_identity_ctx(),
+    })
+
+
+@app.get("/study", response_class=HTMLResponse)
+async def study_page(request: Request):
+    """The study bench — the tutor team's quiz surface.
+
+    Every-tier (like /worlds and /dac): a lab shared with a student is one of
+    the reasons this project exists, so the bench is not a maximus perk.
+
+    The page is a shell. The roster, the cards, and the sourced explanations
+    all arrive from /api/study/* (see portal/study_routes.py) — which reads
+    hand-authored decks and sealed World bundles and calls no model.
+    """
+    return templates.TemplateResponse(request, "study.html", {
         **_identity_ctx(),
     })
 
@@ -4298,7 +4327,7 @@ async def post_research_deep(request: Request):
     activity_log.emit(
         "researcher",
         ("Deep research passes turned on — planning and interpretation may "
-         "use the aeroLLM deep model." if enabled else
+         "use the QueueLLM deep model." if enabled else
          "Deep research passes turned off — research runs on the fast "
          "model only."),
         "info")
@@ -4352,7 +4381,7 @@ def _research_models_block() -> dict | None:
             eligible = False
             code = "disabled"
             detail = ("deep passes are switched off — flip the toggle to use "
-                      "the aeroLLM deep model for planning and interpretation")
+                      "the QueueLLM deep model for planning and interpretation")
 
         return {
             "tier": get_current_tier(),
@@ -5034,19 +5063,25 @@ async def agents_status():
     workflow_rows = {row.get("agent_id"): row for row in list_agent_workflows()}
     researcher_redirect = get_agent_redirect("researcher")
 
-    # Walk the activity log once and bucket per-agent tokens + recent
-    # action snippets. Keeping it to a single pass means adding new
-    # agents later doesn't multiply the log scans.
+    # Walk the activity log once and bucket recent action snippets. Keeping
+    # it to a single pass means adding new agents later doesn't multiply
+    # the log scans. Token usage (V7, ARCHITECTURE.md contract #8) sources
+    # from the trace ring instead — real usage, not the requested ceiling
+    # activity_log's prompt_trace.max_tokens used to report — with a
+    # fallback to the legacy activity_log field for compatibility on a lab
+    # that has traces predating this sprint's chokepoint change.
+    from arail import agent_trace
     recent = activity_log.recent(200)
-    per_agent_tokens: dict[str, int] = {}
+    per_agent_tokens: dict[str, int] = dict(agent_trace.tokens_out_by_agent())
     per_agent_recent: dict[str, list[dict]] = {}
     for ev in recent:
         src = ev.get("source")
         if not src:
             continue
-        trace = ev.get("data", {}).get("prompt_trace")
-        if trace:
-            per_agent_tokens[src] = per_agent_tokens.get(src, 0) + int(trace.get("max_tokens", 0) or 0)
+        if src not in per_agent_tokens:
+            trace = ev.get("data", {}).get("prompt_trace")
+            if trace and trace.get("tokens_out"):
+                per_agent_tokens[src] = per_agent_tokens.get(src, 0) + int(trace.get("tokens_out") or 0)
         per_agent_recent.setdefault(src, []).append({
             "ts": ev.get("ts"),
             "level": ev.get("level", "info"),
@@ -5073,6 +5108,10 @@ async def agents_status():
         "workflow": researcher_workflow,
         "redirect": researcher_redirect,
         "has_goal": bool(goal and goal.get("goal_text")),
+        # V7: tokens_out is real usage; tokens is a deprecated alias now
+        # carrying the *corrected* value for one release (agents.html
+        # still reads "tokens" — filed to sprints/BACKLOG.md for removal).
+        "tokens_out": per_agent_tokens.get("researcher", 0),
         "tokens": per_agent_tokens.get("researcher", 0),
         "recent_actions": per_agent_recent.get("researcher", []),
     }
@@ -5086,14 +5125,17 @@ async def agents_status():
     c_status = {
         "pending": len(consent_store.list_pending()),
         "allowed": len(consent_store.list_allowed()),
+        "tokens_out": per_agent_tokens.get("curator", 0),
         "tokens": per_agent_tokens.get("curator", 0),
         "recent_actions": per_agent_recent.get("curator", []),
     }
 
     buddy_workflow = dict(workflow_rows.get("buddy") or {})
+    buddy_workflow["tokens_out"] = per_agent_tokens.get("buddy", 0)
     buddy_workflow["tokens"] = per_agent_tokens.get("buddy", 0)
     buddy_workflow["recent_actions"] = per_agent_recent.get("buddy", [])
     sre_workflow = dict(workflow_rows.get("sre") or {})
+    sre_workflow["tokens_out"] = per_agent_tokens.get("sre", 0)
     sre_workflow["tokens"] = per_agent_tokens.get("sre", 0)
     sre_workflow["recent_actions"] = per_agent_recent.get("sre", [])
 
@@ -5107,6 +5149,7 @@ async def agents_status():
     b_status = {
         "captures": captures,
         "last_task": last_task,
+        "tokens_out": per_agent_tokens.get("browser", 0),
         "tokens": per_agent_tokens.get("browser", 0),
         "recent_actions": per_agent_recent.get("browser", []),
     }
@@ -5122,16 +5165,56 @@ async def agents_status():
 
 @app.get("/api/agents/prompts")
 async def agents_prompts(agent: str = "", limit: int = 30):
-    """Return recent prompt-trace events for the Prompt Inspector."""
-    traces = []
-    for ev in reversed(activity_log.recent(200)):
-        if agent and ev.get("source") != agent:
+    """Recent model-call traces for the Prompt Inspector.
+
+    CHANGED SHAPE (sprint 2026-09-20-buddy-front-and-center, contract #7,
+    breaking): sourced from the agent_trace ring, not activity_log's
+    prompt_trace convention — bodies only appear when the flight recorder
+    is on, and even then only ``prompt``/``response`` keys are added, never
+    present-but-empty. This is a strict reduction in exposure: every tier,
+    unauthenticated, up to 5000 chars of unredacted body before this
+    sprint; metadata-only (admin-toggle-gated for bodies) after it.
+    """
+    from arail import agent_trace
+
+    recorder = agent_trace.recorder_state()
+    traces: list[dict] = []
+    for rec in reversed(agent_trace.ring(200)):
+        if rec.get("kind") not in ("agent", "system"):
             continue
-        if ev.get("data", {}).get("prompt_trace"):
-            traces.append(ev)
-            if len(traces) >= limit:
-                break
-    return list(reversed(traces))
+        source = rec.get("agent_id") or rec.get("label")
+        if agent and source != agent:
+            continue
+        entry = {
+            "ts": rec.get("iso"),
+            "source": source,
+            "trace_id": rec.get("trace_id"),
+            "model": rec.get("model"),
+            "backend": rec.get("backend"),
+            "tokens_out": rec.get("tokens_out"),
+            "latency_ms": rec.get("latency_ms"),
+            "ttft_ms": rec.get("ttft_ms"),
+            "ttft_status": rec.get("ttft_status"),
+        }
+        bodies = rec.get("bodies")
+        if recorder["enabled"] and isinstance(bodies, dict):
+            entry["prompt"] = bodies.get("prompt")
+            entry["response"] = bodies.get("response")
+        traces.append(entry)
+        if len(traces) >= limit:
+            break
+    return {
+        "recorder": {
+            "enabled": recorder["enabled"],
+            "reason": "off_by_default" if not recorder["enabled"] else "on",
+        },
+        "empty_state": (
+            "flight recorder off — flip to capture prompt bodies"
+            if not recorder["enabled"] else
+            "no prompt traces yet — run the researcher or a browser task"
+        ),
+        "traces": list(reversed(traces)),
+    }
 
 
 @app.post("/api/agents/instruct")
@@ -6128,6 +6211,150 @@ async def admin_security_run_scan():
     return {"ok": True, "status": result, "started_at": started_at}
 
 
+# -- Legacy bodies (F12, sprint 2026-09-20-buddy-front-and-center) ---------
+# Disclosed, never auto-purged. Explicitly _require_surface("admin")-gated —
+# unlike the pre-existing /api/admin/* endpoints above, which (verified
+# while wiring these) do not call _require_surface at all despite
+# ARCHITECTURE.md's citation that they do. Not fixed here (a pre-existing
+# gap, out of this sprint's scope); these three new endpoints are gated
+# correctly regardless.
+
+@app.get("/api/admin/legacy-bodies")
+async def admin_legacy_bodies_status():
+    """How many activity.jsonl lines still carry a pre-flight-recorder
+    body, and whether the operator already dismissed the notice."""
+    if (gate := _require_surface("admin")) is not None:
+        return gate
+    return activity.scan_for_legacy_bodies()
+
+
+@app.post("/api/admin/legacy-bodies/purge")
+async def admin_legacy_bodies_purge():
+    """Operator-initiated only — strips bodies, stamps body_purged=true,
+    preserves everything else. Never called automatically."""
+    if (gate := _require_surface("admin")) is not None:
+        return gate
+    return activity.purge_legacy_bodies()
+
+
+@app.post("/api/admin/legacy-bodies/dismiss")
+async def admin_legacy_bodies_dismiss():
+    """[Keep] — remembered so the notice does not return every boot."""
+    if (gate := _require_surface("admin")) is not None:
+        return gate
+    activity.dismiss_legacy_notice()
+    return {"dismissed": True}
+
+
+# -- Agent lanes (S6, sprint 2026-09-20-buddy-front-and-center) ------------
+# The four endpoints contract #6 names, each explicitly
+# _require_surface("admin")-gated. GET /api/admin/agent-lanes is in
+# FAST_PATH_PREFIXES (portal/scheduler.py) so it never queues behind an
+# inference; GET /api/admin/agent-trace-stream deliberately is NOT — see
+# that route's own docstring for why.
+
+@app.get("/api/admin/agent-lanes")
+async def admin_agent_lanes():
+    """Every agent as a living lane. Schema ``arail.agent_lanes/v1``."""
+    if (gate := _require_surface("admin")) is not None:
+        return gate
+    from arail import agent_trace
+    return agent_trace.lanes_snapshot()
+
+
+@app.get("/api/admin/agent-trace-stream")
+async def admin_agent_trace_stream():
+    """SSE, one frame per new trace record.
+
+    Deliberately a different route prefix from ``/api/admin/agent-lanes``:
+    ``FAST_PATH_PREFIXES`` matches with ``startswith``, so nesting this
+    under that prefix (e.g. ``/api/admin/agent-lanes/stream``) would make
+    the fast-path meter time this long-lived stream and inflate
+    ``fast_path_ms`` p95 — the exact bug ``_METRICS_EXCLUDED_PREFIXES``
+    already documents for a different endpoint. The awkward, unrelated-
+    looking name is the fix.
+    """
+    if (gate := _require_surface("admin")) is not None:
+        return gate
+    from arail import agent_trace
+
+    async def _generate():
+        async for rec in agent_trace.subscribe():
+            yield f"data: {json.dumps(rec, default=str)}\n\n"
+
+    return StreamingResponse(
+        _generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.get("/api/admin/agent-trace/{trace_id}")
+async def admin_agent_trace_detail(trace_id: str):
+    """One record, the "why?" drill-in. 404 on an unknown id. Bodies
+    present only if the flight recorder captured them."""
+    if (gate := _require_surface("admin")) is not None:
+        return gate
+    from arail import agent_trace
+    rec = agent_trace.find(trace_id)
+    if rec is None:
+        return JSONResponse(status_code=404, content={"error": "unknown_trace_id"})
+    return rec
+
+
+@app.post("/api/admin/agents/hold")
+async def admin_agents_hold(request: Request):
+    """{hold: bool} -> halt_all_jobs()/resume_all_jobs(). CSRF comes free
+    from local_trust_boundary (app.py's middleware, mutating methods only)
+    -- no new CSRF code."""
+    if (gate := _require_surface("admin")) is not None:
+        return gate
+    from arail import agent_context, scheduler as _job_scheduler
+    body = await request.json()
+    if bool(body.get("hold")):
+        _job_scheduler.halt_all_jobs()
+    else:
+        _job_scheduler.resume_all_jobs()
+    return agent_context.hold_state()
+
+
+@app.post("/api/admin/flight-recorder")
+async def admin_flight_recorder(request: Request):
+    """{enabled: bool, purge: bool} -> writes DATA_DIR/flight_recorder.json
+    and, when ``purge`` is true, also strips every captured body from disk
+    and the live ring (REVIEW.md S1 / operator decision (c): the same
+    purge mechanism as the legacy-bodies purge, not a second one).
+    Admin-only, so a minimalist lab can never turn bodies on."""
+    if (gate := _require_surface("admin")) is not None:
+        return gate
+    from arail import agent_trace
+    body = await request.json()
+    result = agent_trace.set_recorder_enabled(bool(body.get("enabled")))
+    if bool(body.get("purge")):
+        result["purge"] = agent_trace.purge_flight_recorder_bodies()
+    return result
+
+
+# -- Scheduler endpoints (admin Scheduler section) -------------------------
+
+@app.get("/api/admin/scheduler/status")
+async def admin_scheduler_status():
+    """Daemon on/off, plus every registered job's schedule and last run."""
+    from arail.agents.job_daemon import job_daemon, list_jobs_status
+    return {"daemon_status": job_daemon.status, "jobs": list_jobs_status()}
+
+
+@app.post("/api/admin/scheduler/jobs/{job_id}/run")
+async def admin_scheduler_run_job(job_id: str):
+    """Run one registered job immediately. Same shape as security's run-scan."""
+    from arail.agents.job_daemon import run_job_now
+    result = await run_job_now(job_id)
+    if not result.get("ok"):
+        from fastapi.responses import JSONResponse
+        return JSONResponse(result, status_code=404)
+    return result
+
+
 @app.get("/api/admin/security/run-scan/stream")
 async def admin_security_run_scan_stream():
     """Stream a pip-audit scan as SSE events matching the live-checks modal format."""
@@ -6717,7 +6944,7 @@ async def system_graph():
         "mlx": "MLX", "cuda": "CUDA", "cpu": "CPU",
         "openai_compat": "OpenAI-Compat", "huggingface": "HuggingFace",
         "openrouter": "OpenRouter", "claude": "Claude",
-        "airllm": "AirLLM", "aerollm": "AeroLLM",
+        "airllm": "AirLLM", "aerollm": "QueueLLM",
     }
     for name in BACKEND_MAP:
         is_active = name == active_backend
@@ -7067,25 +7294,74 @@ def _clean_chat_reply(text: str) -> str:
     return reply
 
 
+def _resolve_chat_cost(response: ModelResponse, cost_record: Any = None) -> dict[str, Any]:
+    """Return the honest cost fields for one chat turn.
+
+    ``cost_record`` is what ``cost_tracker.track()`` returned for *this* call.
+    Without it (the router branch tracks internally) we fall back to the
+    tracker's most recent record, but only when its backend and model match
+    this response; otherwise the cost is reported as ``unattributed`` rather
+    than borrowed from another call.
+    """
+    fields: dict[str, Any] = {
+        "cloud_cost_usd": None,
+        "cloud_cost_source": "unattributed",
+        "cloud_equivalent_usd": None,
+        "cloud_equivalent_source": None,
+        "energy_cost_usd": None,
+        "energy_source": None,
+    }
+    try:
+        from arail.costs import cost_source, cost_tracker, record_to_fields
+
+        rec = record_to_fields(cost_record) if cost_record is not None else {}
+        if not rec:
+            last = record_to_fields(cost_tracker.get_last_record())
+            if (
+                last
+                and last.get("backend") == response.backend
+                and last.get("model") == response.model
+            ):
+                rec = last
+        source = cost_source(response.backend)
+        if rec:
+            fields["cloud_cost_usd"] = rec.get("cloud_cost_usd")
+            fields["cloud_cost_source"] = rec.get("cloud_cost_source") or source
+            fields["cloud_equivalent_usd"] = rec.get("cloud_equivalent_usd")
+            fields["cloud_equivalent_source"] = (
+                "simulated" if rec.get("cloud_equivalent_usd") is not None else None
+            )
+            fields["energy_cost_usd"] = rec.get("energy_cost_usd")
+            fields["energy_source"] = (
+                rec.get("energy_source") or "estimated"
+                if rec.get("energy_cost_usd") is not None
+                else None
+            )
+        # Belt and braces, independent of attribution: a backend that is not
+        # a billed cloud estimate never reports a cloud charge.
+        if source != "billed_estimate":
+            fields["cloud_cost_usd"] = None
+            if source == "local" or fields["cloud_cost_source"] != "unattributed":
+                fields["cloud_cost_source"] = source
+        elif fields["cloud_cost_source"] not in ("billed_estimate", "unattributed"):
+            fields["cloud_cost_usd"] = None
+    except Exception:
+        pass
+    return fields
+
+
 def _build_chat_result(
     response: ModelResponse,
     *,
     wants_deep: bool,
     sources: list[dict[str, Any]] | None = None,
     provenance: Any = None,
+    cost_record: Any = None,
 ) -> dict[str, Any]:
     reply = _clean_chat_reply(response.text or "")
     latency_sec = max(response.latency_ms / 1000.0, 0.001)
     tokens_per_sec = round(response.tokens_used / latency_sec, 1)
-    cloud_cost_usd = None
-    energy_cost_usd = None
-    try:
-        from arail.costs import cost_tracker
-        last = cost_tracker.get_last_record() or {}
-        cloud_cost_usd = last.get("cloud_cost_usd")
-        energy_cost_usd = last.get("energy_cost_usd")
-    except Exception:
-        pass
+    cost_fields = _resolve_chat_cost(response, cost_record)
 
     activity_log.emit("chat",
                       f"Chat turn · {response.tokens_used} tokens · "
@@ -7099,8 +7375,7 @@ def _build_chat_result(
         "latency_ms": response.latency_ms,
         "tokens_used": response.tokens_used,
         "tokens_per_sec": tokens_per_sec,
-        "cloud_cost_usd": cloud_cost_usd,
-        "energy_cost_usd": energy_cost_usd,
+        **cost_fields,
         "deep": bool(wants_deep),
         "sources": list(sources or []),
         "error": None,
@@ -7525,7 +7800,7 @@ async def _run_chat_completion_stream(
                     messages=context.get("claude_messages"),
                 )
             from arail.costs import cost_tracker
-            cost_tracker.track(
+            cost_record = cost_tracker.track(
                 backend=response.backend,
                 model=response.model,
                 tokens_in=max(len(prompt) // 4, 1),
@@ -7546,7 +7821,7 @@ async def _run_chat_completion_stream(
             clean_reply = _clean_chat_reply(response.text)
             if clean_reply:
                 yield {"type": "delta", "delta": clean_reply}
-            yield {"type": "final", **_build_chat_result(response, wants_deep=wants_deep, sources=context.get("sources"), provenance=context.get("model_provenance"))}
+            yield {"type": "final", **_build_chat_result(response, wants_deep=wants_deep, sources=context.get("sources"), provenance=context.get("model_provenance"), cost_record=cost_record)}
             return
 
         final_response: ModelResponse | None = None
@@ -7575,7 +7850,7 @@ async def _run_chat_completion_stream(
                     **think_kwargs,
                 )
             from arail.costs import cost_tracker
-            cost_tracker.track(
+            cost_record = cost_tracker.track(
                 backend=response.backend, model=response.model,
                 tokens_in=max(len(prompt) // 4, 1),
                 tokens_out=response.tokens_used,
@@ -7586,7 +7861,7 @@ async def _run_chat_completion_stream(
             clean_reply = _clean_chat_reply(response.text)
             if clean_reply:
                 yield {"type": "delta", "delta": clean_reply}
-            yield {"type": "final", **_build_chat_result(response, wants_deep=wants_deep, sources=context.get("sources"), provenance=context.get("model_provenance"))}
+            yield {"type": "final", **_build_chat_result(response, wants_deep=wants_deep, sources=context.get("sources"), provenance=context.get("model_provenance"), cost_record=cost_record)}
             return
 
         if router is None:
@@ -7697,6 +7972,7 @@ async def _run_chat_completion(
     runtime_backend = context.get("runtime_backend")
     router = context.get("router")
     prompt = str(context["prompt"])
+    cost_record = None  # set by the branches that track the call themselves
 
     try:
         if deep_backend is not None:
@@ -7709,7 +7985,7 @@ async def _run_chat_completion(
                     messages=context.get("claude_messages"),
                 )
             from arail.costs import cost_tracker
-            cost_tracker.track(
+            cost_record = cost_tracker.track(
                 backend=response.backend,
                 model=response.model,
                 tokens_in=max(len(prompt) // 4, 1),
@@ -7741,7 +8017,7 @@ async def _run_chat_completion(
                     messages=context.get("claude_messages"),
                 )
             from arail.costs import cost_tracker
-            cost_tracker.track(
+            cost_record = cost_tracker.track(
                 backend=response.backend,
                 model=response.model,
                 tokens_in=max(len(prompt) // 4, 1),
@@ -7783,7 +8059,7 @@ async def _run_chat_completion(
     finally:
         _restore_chat_context(context)
 
-    return _build_chat_result(response, wants_deep=wants_deep, sources=context.get("sources"), provenance=context.get("model_provenance"))
+    return _build_chat_result(response, wants_deep=wants_deep, sources=context.get("sources"), provenance=context.get("model_provenance"), cost_record=cost_record)
 
 
 def _apply_chat_defaults(
@@ -8196,7 +8472,7 @@ async def api_chat_eject(request: Request):
         if names:
             freed.extend(f"{name} cache" for name in names)
             activity_log.emit("chat", "Ejected all optional chat backends.", "info")
-            notes.append("in-process deep backends (aeroLLM/AirLLM) still "
+            notes.append("in-process deep backends (QueueLLM/AirLLM) still "
                          "need a portal restart to actually free memory.")
         ok = bool(freed)
         requires_restart = bool(names)
@@ -8331,7 +8607,7 @@ _CHAT_MODEL_LOAD_STATE: dict[str, Any] = {
 
 _OPTIONAL_CHAT_BACKEND_CONFIG: dict[str, dict[str, str]] = {
     "aerollm": {
-        "label": "AeroLLM",
+        "label": "QueueLLM",
         "class_name": "AeroLLMBackend",
         # Built from the local sibling repo ($ARAIL_AEROLLM_REPO) — not pip.
         # `deep rebuild` re-runs the cargo build + dylib copy so active local
@@ -9640,7 +9916,7 @@ async def api_chat_models(provider: str = ""):
         })
     optional_backends.append({
         "id": "aerollm",
-        "label": "AeroLLM",
+        "label": "QueueLLM",
         "model": aero_model_name,
         "installed": _is_aerollm_installed(),
         # See deep_info's model_ready above — "installed" is package-level
@@ -10032,7 +10308,7 @@ def _display_provider_name(provider: str) -> str:
     mapping = {
         "my_machine": "Local",
         "local": "Local",
-        "aerollm": "AeroLLM",
+        "aerollm": "QueueLLM",
         "claude": "Claude",
         "nvidia": "NVIDIA",
         "huggingface": "HF",
@@ -11551,8 +11827,8 @@ def _toggle_audit_path() -> Path:
 
 
 def _toggle_bind_is_loopback() -> bool:
-    bind = os.getenv("BIND_ADDR", "127.0.0.1").strip().lower()
-    return bind in {"127.0.0.1", "::1", "localhost"}
+    from arail import config
+    return config.bind_is_loopback()
 
 
 def _check_local_mutation_request(request: Request):
@@ -11914,6 +12190,24 @@ async def api_system_reveal(request: Request):
     return {"opened": True, "path": abspath, "slot": slot}
 
 
+def _costs_record_fields(last: dict[str, Any]) -> dict[str, Any]:
+    """Honest-cost fields for a history record; a legacy record with a
+    cloud figure but no source is re-gated by its backend."""
+    from arail.costs import cost_source, record_to_fields
+
+    fields = record_to_fields(last)
+    if not fields.get("cloud_cost_source"):
+        src = cost_source(last.get("backend"))
+        fields["cloud_cost_source"] = src
+        if src != "billed_estimate":
+            fields["cloud_cost_usd"] = None
+    if fields.get("cloud_equivalent_usd") is not None:
+        fields["cloud_equivalent_source"] = "simulated"
+    if fields.get("energy_cost_usd") is not None:
+        fields["energy_source"] = fields.get("energy_source") or "estimated"
+    return fields
+
+
 @app.get("/api/system/costs")
 async def system_costs():
     """Return cost tracking summary — cloud-equivalent spend and energy costs."""
@@ -11928,8 +12222,11 @@ async def system_costs():
         "last_record": {
             "backend": last.get("backend"),
             "model_class": last.get("model_class"),
-            "cloud_cost_usd": last.get("cloud_cost_usd"),
-            "energy_cost_usd": last.get("energy_cost_usd"),
+            **{
+                k: v
+                for k, v in _costs_record_fields(last).items()
+                if k not in ("backend", "model")
+            },
             "tokens_in": last.get("tokens_in"),
             "tokens_out": last.get("tokens_out"),
         } if last else None,
@@ -11992,13 +12289,47 @@ async def knowledge_redirect(request: Request):
     return RedirectResponse(url="/dac" + q, status_code=307)
 
 
-@app.get("/build", response_class=HTMLResponse)
-async def build_page(request: Request):
-    """Nucleus MODEL BUILDING tab — thin shell; hydrates from /api/build/*."""
-    if (gate := _require_surface("build")) is not None:
+@app.get("/build")
+async def build_redirect(request: Request):
+    # /build is retired (2026-09-23, sprints/2026-09-23-nucleus-sprint-1) --
+    # replaced by Model Forge. 308 preserves the request method/body
+    # semantics (there are none here, but it's the correct permanent-
+    # redirect status for a route that no longer exists at all) (T-FORGE-4).
+    q = ("?" + str(request.query_params)) if request.query_params else ""
+    return RedirectResponse(url="/forge" + q, status_code=308)
+
+
+@app.get("/forge", response_class=HTMLResponse)
+async def forge_list_page(request: Request):
+    """Model Forge — read-only DNA-card viewer (ARCHITECTURE.md §4.13)."""
+    if (gate := _require_surface("forge")) is not None:
         return gate
-    return templates.TemplateResponse(request, "build.html", {
-        "active": "build",
+    from arail.portal import forge_api
+
+    return templates.TemplateResponse(request, "forge.html", {
+        "active": "forge", "mode": "list",
+        "cards": forge_api.list_cards(), "in_progress": forge_api.list_in_progress_runs(),
+        **_identity_ctx(),
+    })
+
+
+@app.get("/forge/{shard}/{version}", response_class=HTMLResponse)
+async def forge_detail_page(request: Request, shard: str, version: str):
+    if (gate := _require_surface("forge")) is not None:
+        return gate
+    from arail.portal import forge_api
+
+    card_dir = forge_api.safe_card_dir(shard, version)
+    if card_dir is None:
+        return HTMLResponse(status_code=404, content="not found")
+    card = forge_api.load_card_safely(card_dir / "dna-card.yaml")
+    if card is None:
+        return HTMLResponse(status_code=404, content="not found")
+
+    return templates.TemplateResponse(request, "forge.html", {
+        "active": "forge", "mode": "detail", "shard": shard, "version": version,
+        "card": card, "verify_badge": forge_api.verify_badge(card),
+        "report_html": forge_api.render_report_html(card_dir / "build-report.md"),
         **_identity_ctx(),
     })
 
@@ -12236,12 +12567,34 @@ async def api_pkb_review():
     """The review queue — raw candidates awaiting a human decision, plus the
     Compiled-KB state. This is the gate DaC's lifecycle calls for: agents
     propose (by creating raw content); the human approves what agents may
-    experiment/develop against."""
+    experiment/develop against.
+
+    **Scoped to the mounted World.** The PKB root is shared by every World
+    mounted into the same lab, so an unscoped queue showed one World's
+    glossary while another was mounted — a freshly-forged World looked like
+    it had inherited someone else's knowledge. With a World mounted the queue
+    is that World's candidates only; unmounted (the root lab) it is the
+    honest cross-World view, and every row carries the `world` it belongs to
+    so the UI can label it.
+    """
     from arail import compiled_kb as ckb
+    from arail.world_mount import current_mount
+
+    scope = None
+    try:
+        record = current_mount()
+        if record is not None and record.world:
+            scope = f"world-{record.world}"
+    except Exception as e:  # noqa: BLE001 — an unreadable mount must not 500 the queue
+        _log.warning("pkb review: mount lookup failed, showing all worlds: %s", e)
+
     return {
-        "pending": ckb.list_pending(),
+        "pending": ckb.list_pending(world=scope),
         "approved": ckb.list_approved(),
         "gate_enabled": ckb.gate_enabled(),
+        # Which World the queue is showing — None means the cross-World root
+        # lab view. The page renders this so the scope is never a guess.
+        "scope": scope,
     }
 
 
@@ -13559,7 +13912,7 @@ async def api_tuning_autoresearch_schedule_set(request: Request):
 # the tuning.html "AirLLM vs AeroLLM" cards consume.
 #
 # Result location: $AEROLLM_PERF_RESULTS_DIR if set, otherwise the
-# sibling aerollm checkout (../qukaizen-aerollm/scripts/perf/results/). Missing
+# sibling aerollm checkout (../qukaizen-queuellm/scripts/perf/results/). Missing
 # dir or no measurements → rows=[] with a `reason` so the page keeps
 # showing the projected numbers.
 #
@@ -13576,7 +13929,7 @@ def _perf_results_dir() -> Path:
     # arail/src/arail/portal/app.py → arail/ is parents[3]; aerollm
     # lives as a sibling checkout.
     arail_root = Path(__file__).resolve().parents[3]
-    return arail_root / "qukaizen-aerollm" / "scripts" / "perf" / "results"
+    return arail_root / "qukaizen-queuellm" / "scripts" / "perf" / "results"
 
 
 def _detect_perf_hw_id() -> str:

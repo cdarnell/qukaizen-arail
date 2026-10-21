@@ -303,7 +303,13 @@ def draft_proposal(slug: str, candidate: dict, spec: dict,
         f'"related": [up to 4 slugs from {known[:60]}]}}.'
     )
     try:
-        resp = router.complete(prompt, max_tokens=500, temperature=0.3, top_p=0.9)
+        # L3 (ARCHITECTURE.md): librarian_scout is a top-level module the
+        # loader never touches, called via to_thread from
+        # _builtin_librarian.py's scout_once() -- attributed to "librarian"
+        # (the FIXED_LANES id), not "librarian_scout" (not itself a lane).
+        from arail import agent_context
+        with agent_context.agent_call("librarian"):
+            resp = router.complete(prompt, max_tokens=500, temperature=0.3, top_p=0.9)
     except Exception as e:  # noqa: BLE001
         log.warning("librarian scout: draft call failed: %s", e)
         return None

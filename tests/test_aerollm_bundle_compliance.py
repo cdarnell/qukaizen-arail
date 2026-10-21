@@ -15,7 +15,7 @@ import re
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 TPL_DIR = REPO / "THIRD-PARTY-LICENSES" / "aerollm"
-AEROLLM_SIBLING = pathlib.Path.home() / "ProJects" / "qukaizen-aerollm"
+AEROLLM_SIBLING = pathlib.Path.home() / "ProJects" / "qukaizen-queuellm"
 
 
 def test_compliance_files_exist_and_nonempty():
@@ -58,7 +58,7 @@ def test_notice_byte_identical_to_sibling_when_available():
 
 
 def test_license_is_full_apache2_text_not_upstream_stub():
-    # Upstream's own LICENSE file (~/ProJects/qukaizen-aerollm/LICENSE) is
+    # Upstream's own LICENSE file (~/ProJects/qukaizen-queuellm/LICENSE) is
     # only the Apache-2.0 header boilerplate + copyright line (17 lines) —
     # NOT the full ~200-line license text. Apache-2.0 §4(a) requires giving
     # recipients "a copy of this License," and NOTICE says "See the LICENSE

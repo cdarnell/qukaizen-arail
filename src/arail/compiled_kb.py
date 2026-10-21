@@ -324,6 +324,32 @@ def _world_of(rel: str) -> str | None:
 _QUEUE_SUFFIXES = {".md", ".markdown", ".txt"}
 
 
+# Lab plumbing that lives in the PKB but is CONFIG, not knowledge. An
+# agent's AGENT.md describes how an agent behaves; a SKILL.md declares a
+# capability; a README.md documents a folder. None of them is a claim about
+# the world that an operator should be asked to "approve into the Compiled
+# KB", and putting them in the queue buries the real candidates — the day
+# two tutor coaches were added, their AGENT.md files appeared as knowledge
+# awaiting review.
+#
+# Matched by FILENAME, deliberately, not by directory: agent *outputs*
+# (agents/research/, agents/experiments/, agents/synthesis/,
+# agents/recommendations/, agents/<id>/dreams/) are genuine candidates and
+# live under the same agents/ tree as the config. Excluding the directory
+# would throw the findings out with the plumbing.
+_FURNITURE_FILENAMES = frozenset({
+    "agent.md",        # agent config (the loader's discovery contract)
+    "decisions.md",    # an agent's own config/decision log
+    "readme.md",       # folder documentation
+    "skill.md",        # a declared capability, not a fact
+})
+
+
+def _is_lab_furniture(rel: str) -> bool:
+    """True for config/plumbing files that must never enter the review queue."""
+    return Path(rel).name.lower() in _FURNITURE_FILENAMES
+
+
 def _is_candidate(rel: str) -> bool:
     if rel.startswith("compiled/"):          # auto-docs + our own manifest
         return False
@@ -333,14 +359,28 @@ def _is_candidate(rel: str) -> bool:
         return False
     if Path(rel).suffix.lower() not in _QUEUE_SUFFIXES:
         return False
+    if _is_lab_furniture(rel):               # config ≠ knowledge
+        return False
     # world bundle machinery (spec/terms/roster/... json) already excluded by suffix
     return True
 
 
-def list_pending(pkb_root: Path | None = None, *, limit: int = 500) -> list[dict[str, Any]]:
+def list_pending(pkb_root: Path | None = None, *, limit: int = 500,
+                 world: str | None = None) -> list[dict[str, Any]]:
     """Raw candidates awaiting a human decision: everything indexable that is
     neither already approved nor previously rejected. This is the review
-    queue — agents propose (by creating raw content); the human approves."""
+    queue — agents propose (by creating raw content); the human approves.
+
+    ``world`` scopes the queue to one World's knowledge (pass the mount's
+    ``world-<slug>`` key). Without it the queue is the cross-World view — the
+    root lab's honest "everything in this PKB" listing, where each row's
+    ``world`` field says which World it belongs to.
+
+    Scoping matters because the PKB root is shared by every World mounted
+    into the same lab. An unscoped queue makes a freshly-forged World look
+    like it inherited another World's glossary, which is the opposite of the
+    promise that a new World starts with its own Knowledge Base.
+    """
     root = pkb_root or _pkb_root()
     if not root.exists():
         return []
@@ -352,6 +392,8 @@ def list_pending(pkb_root: Path | None = None, *, limit: int = 500) -> list[dict
             continue
         rel = p.relative_to(root).as_posix()
         if rel in approved or rel in rejected or not _is_candidate(rel):
+            continue
+        if world is not None and _world_of(rel) != world:
             continue
         text = _read_text(p)
         kind = _kind_of(rel)
@@ -375,11 +417,14 @@ def list_pending(pkb_root: Path | None = None, *, limit: int = 500) -> list[dict
     return out
 
 
-def pending_paths(pkb_root: Path | None = None) -> list[str]:
+def pending_paths(pkb_root: Path | None = None, *, world: str | None = None) -> list[str]:
     """Candidate paths awaiting review — the cheap variant of list_pending
     (same walk and filters, but no file reads / titles / hashes). For
     counts and digests: the lab brief and the hero stats hit this per
-    request, so it must stay glob-only."""
+    request, so it must stay glob-only.
+
+    Takes the same ``world`` scope as ``list_pending`` so a count can never
+    disagree with the list it is counting."""
     root = pkb_root or _pkb_root()
     if not root.exists():
         return []
@@ -392,12 +437,14 @@ def pending_paths(pkb_root: Path | None = None) -> list[str]:
         rel = p.relative_to(root).as_posix()
         if rel in approved or rel in rejected or not _is_candidate(rel):
             continue
+        if world is not None and _world_of(rel) != world:
+            continue
         out.append(rel)
     return out
 
 
-def pending_count(pkb_root: Path | None = None) -> int:
-    return len(pending_paths(pkb_root))
+def pending_count(pkb_root: Path | None = None, *, world: str | None = None) -> int:
+    return len(pending_paths(pkb_root, world=world))
 
 
 # ── The gate: approve / reject / revoke ──────────────────────────────────
@@ -731,7 +778,7 @@ def bootstrap(pkb_root: Path | None = None, *, dry_run: bool = False) -> dict[st
         candidate_paths: list[str] = []
         if world_slug:
             try:
-                from arail.build.world_corpus import resolve_world_bundle
+                from arail.world_catalog import resolve_world_bundle
                 bundle = resolve_world_bundle(world_slug)
                 terms = bundle.get("terms", [])
             except FileNotFoundError:

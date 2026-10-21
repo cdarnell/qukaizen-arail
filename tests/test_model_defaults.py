@@ -409,7 +409,7 @@ def test_report_never_raises_and_mentions_both_slots_with_source(monkeypatch, tm
     monkeypatch.setenv("ARAIL_MODEL_DEFAULTS_FILE", str(f))
     model_defaults.write_cache(_res(), path=f)
     text = model_defaults.report()
-    assert "A (resident):" in text and "B (aeroLLM):" in text
+    assert "A (resident):" in text and "B (QueueLLM):" in text
     assert "source: auto" in text and "pinned off" in text
 
 
@@ -473,3 +473,18 @@ def test_write_cache_refuses_an_unreadable_file(tmp_path):
     f.write_text("pins: [oops\n")
     assert model_defaults.write_cache({"a": {"model": "x"}}, path=f) is False
     assert f.read_text() == "pins: [oops\n"
+
+
+def test_report_banner_columns_align_and_say_queuellm(monkeypatch, tmp_path):
+    """The display name is QueueLLM (not aeroLLM) and the A and B model
+    columns start at the same offset."""
+    f = tmp_path / "model_defaults.yaml"
+    monkeypatch.setenv("ARAIL_MODEL_DEFAULTS_FILE", str(f))
+    model_defaults.write_cache(_res(), path=f)
+    lines = model_defaults.report().splitlines()
+    a_line = next(x for x in lines if "A (resident):" in x)
+    b_line = next(x for x in lines if "B (QueueLLM):" in x)
+    assert "aeroLLM" not in "\n".join(lines)
+    a_model = a_line.split("A (resident):")[1]
+    b_model = b_line.split("B (QueueLLM):")[1]
+    assert (len(a_model) - len(a_model.lstrip())) == (len(b_model) - len(b_model.lstrip()))

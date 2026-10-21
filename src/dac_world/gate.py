@@ -1,4 +1,4 @@
-"""The gate — port of DaC's ``src/gate.ts``, three laws: sourced, declared
+"""The gate — port of DDaC's ``src/gate.ts``, three laws: sourced, declared
 category, closed related-graph.
 
 Moved verbatim from qukaizen-arail's ``src/arail/world_forge.py`` as part of

@@ -10,14 +10,14 @@
 # This script is NEVER run in CI (see ARCHITECTURE.md §10 — CI has no
 # access to the private aeroLLM source). It is a manual, documented
 # maintainer step, run from ~/ProJects/arail against a sibling checkout of
-# ~/ProJects/qukaizen-aerollm.
+# ~/ProJects/qukaizen-queuellm.
 #
 # Usage:
 #   bash scripts/package-aerollm-bundle.sh
 #   ALLOW_DIRTY=1 bash scripts/package-aerollm-bundle.sh   # dirty worktree override
 #
 # Env:
-#   ARAIL_AEROLLM_REPO   sibling aeroLLM checkout (default ~/ProJects/qukaizen-aerollm)
+#   ARAIL_AEROLLM_REPO   sibling aeroLLM checkout (default ~/ProJects/qukaizen-queuellm)
 #   OUT_DIR              output directory for the tarball + sidecar (default
 #                         $REPO_ROOT/dist/aerollm-bundle). Override in tests
 #                         so the regression suite NEVER touches the real
@@ -45,7 +45,7 @@ warn() { printf '%s\n' "${YLW}!${RST} $*" >&2; }
 err()  { printf '%s\n' "${RED}✗${RST} $*" >&2; }
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-AEROLLM_REPO="${ARAIL_AEROLLM_REPO:-$HOME/ProJects/qukaizen-aerollm}"
+AEROLLM_REPO="${ARAIL_AEROLLM_REPO:-$HOME/ProJects/qukaizen-queuellm}"
 CRATE_DIR="$AEROLLM_REPO/crates/aerollm-api"
 OUT_DIR="${OUT_DIR:-$REPO_ROOT/dist/aerollm-bundle}"
 PY="${PYTHON:-python3}"

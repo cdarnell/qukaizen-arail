@@ -1553,6 +1553,13 @@ body.wt-mode .kb-layout { display: none; }
 .ckb-title { display: flex; flex-direction: column; gap: 0.2rem; }
 .ckb-title-main { font-weight: 650; color: var(--text-strong); }
 .ckb-title-sub { font-size: 0.8rem; color: var(--text-muted); max-width: 46ch; }
+/* Scope line — which World's queue this is. Mono + accent so it reads as a
+   stated fact about the view, not more prose. */
+.ckb-title-scope {
+  display: block; margin-top: 0.35rem; max-width: 56ch;
+  font-family: var(--font-mono); font-size: 0.7rem; line-height: 1.5;
+  color: var(--info);
+}
 .ckb-gate {
   font-family: var(--font-mono); font-size: 0.68rem;
   text-transform: var(--label-transform); letter-spacing: var(--label-tracking);

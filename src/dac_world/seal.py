@@ -1,4 +1,4 @@
-"""The sealer -- port of DaC's ``scripts/export-bundle.mts``.
+"""The sealer -- port of DDaC's ``scripts/export-bundle.mts``.
 
 Moved from qukaizen-arail's ``src/arail/world_forge.py`` as part of the
 ``dac_world`` migration — see
@@ -61,7 +61,7 @@ _FRAMING_BY_TIER = {
     "model-asserted": "This World was DREAMED by a model — terms are model-asserted and UNVERIFIED.",
 }
 
-# Authored/display fields a caller may override (mirrors DaC's allow-list).
+# Authored/display fields a caller may override (mirrors DDaC's allow-list).
 _FACE_DISPLAY_KEYS = ("name", "tagline", "domain_framing", "vocabulary_register",
                       "palette_hint", "theme")
 
@@ -96,7 +96,7 @@ def _build_face(spec: dict, tier: str, counts: dict, overrides: Optional[dict],
         if overrides and overrides.get(key) is not None:
             if key == "theme":
                 # A theme block is validated HARD before sealing (same stance
-                # as DaC's exporter): a sealed bundle must never carry a theme
+                # as DDaC's exporter): a sealed bundle must never carry a theme
                 # ARAIL's own mount-time validator would reject. The validator
                 # itself is INJECTED (never imported) — see module docstring.
                 if theme_validator is None:
@@ -235,7 +235,7 @@ def write_bundle(
     _skill_terms, _skill_note = _skill_terms_capped(terms)
     (out_dir / "SKILL.md").write_text(
         render_world_skill(spec, face, _skill_terms, world_sha, extra_note=_skill_note),
-        encoding="utf-8")
+        encoding="utf-8", newline="\n")
     (out_dir / "capabilities.json").write_bytes(
         _pretty(_build_capabilities(spec, tier, terms, world_sha)))
     (out_dir / "arail-plugin.json").write_bytes(

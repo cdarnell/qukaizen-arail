@@ -228,24 +228,31 @@ def _llm_complete(router, prompt: str, max_tokens: int = 512,
         return None
     try:
         import time as _time
+        from arail import agent_context
         t0 = _time.monotonic()
-        resp = router.complete(prompt, max_tokens=max_tokens, temperature=0.7,
-                               system=system)
+        # L3 (ARCHITECTURE.md): researcher is a top-level module the loader
+        # never touches, so it gets its own explicit wrapper at this single
+        # model-acquisition helper -- both the deep and fast paths funnel
+        # through here.
+        with agent_context.agent_call("researcher"):
+            resp = router.complete(prompt, max_tokens=max_tokens, temperature=0.7,
+                                   system=system)
         elapsed = (_time.monotonic() - t0) * 1000
         text = resp.text.strip() if resp.text else None
 
-        traced_prompt = f"{system}\n\n{prompt}" if system else prompt
         # getattr-defensive: tests and bespoke routers pass duck-typed
         # responses that only guarantee `.text`.
         model = getattr(resp, "model", None)
         backend = getattr(resp, "backend", None)
         where = f", {model} @ {backend}" if model and backend else ""
+        # W4/V5 (ARCHITECTURE.md): activity.jsonl no longer carries prompt/
+        # response bodies at all -- metadata only. Bodies now live only in
+        # the flight recorder (agent_trace's bounded, admin-gated store,
+        # captured at the router chokepoint), off by default.
         activity_log.emit("researcher",
                           f"LLM call completed ({int(elapsed)}ms{where})",
                           "info", {
                               "prompt_trace": {
-                                  "prompt": traced_prompt[:3000],
-                                  "response": text[:2000] if text else None,
                                   "max_tokens": max_tokens,
                                   "latency_ms": round(elapsed, 1),
                                   "model": model,
@@ -366,6 +373,31 @@ _HYPOTHESIS_LABEL_RE = re.compile(
 )
 
 
+# Chat models wrap a list in conversational scaffolding: an opening
+# "Certainly! Here are five testable hypotheses:" and a closing "These
+# hypotheses are specific and measurable." Neither is a hypothesis, and
+# an un-filtered preamble consumes a real experiment slot — the run that
+# exposed this spent one of five slots "testing" the sentence
+# "Certainly! Here are five testable hypotheses...".
+_PREAMBLE_RE = re.compile(
+    r"^(certainly|sure|of course|absolutely|here (are|is)|below (are|is)|"
+    r"the following|these (are|hypotheses)|i (have|will|can)|"
+    r"as (an|a) )\b",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_scaffolding(s: str) -> bool:
+    """True for the model's framing sentences around the actual list."""
+    if _PREAMBLE_RE.match(s):
+        return True
+    # A line that only introduces what follows ends in a colon and makes
+    # no claim of its own.
+    if s.endswith(":") and len(s.split()) <= 14:
+        return True
+    return False
+
+
 def _normalize_hypothesis_line(raw: str) -> str | None:
     s = raw.strip().lstrip("0123456789.-) ").strip()
     if not s:
@@ -374,7 +406,270 @@ def _normalize_hypothesis_line(raw: str) -> str | None:
         return None
     s = _HYPOTHESIS_LABEL_RE.sub("", s)
     s = re.sub(r"\*+|_+", "", s).strip()
-    return s if len(s) > 10 else None
+    if len(s) <= 10:
+        return None
+    if _looks_like_scaffolding(s):
+        return None
+    return s
+
+
+# ── Report grounding ────────────────────────────────────────────────
+#
+# The metrics are code-measured, but the narrative around them is
+# model-written, and a model asked to "write a report" will furnish it:
+# a Hardware: line naming a machine that was never used, a Date:
+# YYYY-MM-DD placeholder, and — worst — a real measured number attached
+# to a hypothesis that was never tested. A reader cannot tell those from
+# the true parts, which makes the whole document untrustworthy even
+# though most of it is right.
+#
+# So: facts are emitted by code, and the narrative has to survive a
+# check against those facts before it is allowed into the document.
+
+_PLACEHOLDER_RE = re.compile(
+    r"YYYY-MM-DD|MM/DD/YYYY|<[A-Za-z][A-Za-z _-]{1,30}>|\[TBD\]|\bTBD\b|"
+    r"\bXX+\b|\bN/A\b",
+    re.IGNORECASE,
+)
+
+# Header fields a narrative must not assert: they are facts about the
+# run, and the run knows them.
+_ASSERTED_HEADER_RE = re.compile(
+    r"^\s*\**\s*(hardware|machine|device|gpu|date|seed|prompt count|"
+    r"temperature|model)\s*\**\s*:", re.IGNORECASE | re.MULTILINE,
+)
+
+_NUMBER_RE = re.compile(r"\d+(?:\.\d+)?")
+
+
+def _experiment_facts(exp: dict) -> dict:
+    """The verifiable truth about one experiment, straight off the record."""
+    r = exp.get("results") or {}
+    metrics = {k: v for k, v in (r.get("metrics") or {}).items()
+               if isinstance(v, (int, float))}
+    return {
+        "id": exp.get("id", "?"),
+        "hypothesis": exp.get("hypothesis", "") or "",
+        "archetype": r.get("archetype") or (exp.get("variables") or {}).get("archetype") or "unknown",
+        "provenance": str(r.get("provenance") or "unmeasured"),
+        "outcome": str(r.get("outcome") or "unknown"),
+        "model": r.get("model"),
+        "backend": r.get("backend"),
+        "platform": (r.get("environment") or {}).get("platform"),
+        "runs": r.get("runs"),
+        "metrics": metrics,
+        "cannot_run_reason": r.get("cannot_run_reason"),
+    }
+
+
+def _allowed_numbers(facts: list[dict]) -> set[float]:
+    """Every number a narrative may legitimately state.
+
+    Measured values, plus any number already present in the hypothesis
+    text (the model is entitled to restate its own hypothesis, including
+    the "by at least 20%" it wrote there).
+    """
+    allowed: set[float] = set()
+    for f in facts:
+        for v in f["metrics"].values():
+            allowed.add(float(v))
+        if f.get("runs") is not None:
+            try:
+                allowed.add(float(f["runs"]))
+            except (TypeError, ValueError):
+                pass
+        for text in (f["hypothesis"], str(f.get("archetype") or "")):
+            for tok in _NUMBER_RE.findall(text):
+                try:
+                    allowed.add(float(tok))
+                except ValueError:
+                    pass
+    allowed.update(float(i) for i in range(0, 13))  # list numbering, counts
+    return allowed
+
+
+def _number_is_supported(x: float, allowed: set[float]) -> bool:
+    """Rounding is legitimate reporting; invention is not."""
+    for v in allowed:
+        if x == v:
+            return True
+        tol = max(0.05, abs(v) * 0.02)
+        if abs(x - v) <= tol:
+            return True
+        if v and round(v) == x:
+            return True
+    return False
+
+
+def verify_report_narrative(text: str, experiments: list[dict]) -> list[str]:
+    """Problems that disqualify a model-written narrative. Empty == clean."""
+    problems: list[str] = []
+    if not text:
+        return ["narrative was empty"]
+
+    ph = _PLACEHOLDER_RE.findall(text)
+    if ph:
+        problems.append(
+            f"unfilled placeholders: {', '.join(sorted(set(ph))[:4])}")
+
+    hdr = _ASSERTED_HEADER_RE.findall(text)
+    if hdr:
+        problems.append(
+            "asserts run facts the narrative cannot know "
+            f"({', '.join(sorted({h.lower() for h in hdr})[:4])}) — "
+            "these are emitted from the record instead")
+
+    facts = [_experiment_facts(e) for e in experiments]
+    allowed = _allowed_numbers(facts)
+    unsupported: list[str] = []
+    for tok in _NUMBER_RE.findall(text):
+        try:
+            x = float(tok)
+        except ValueError:
+            continue
+        if not _number_is_supported(x, allowed):
+            unsupported.append(tok)
+    if unsupported:
+        problems.append(
+            "numbers not traceable to any measurement: "
+            + ", ".join(sorted(set(unsupported))[:6]))
+
+    # A narrative framed around hypotheses the run never tested will
+    # mis-attribute real numbers to changes that never happened — the
+    # failure that motivated this check. One observed report described
+    # "Prefetch Lookahead: increased from 2 to 3 layers" and cited two
+    # genuine throughput figures, when the lab had simply measured the
+    # same local model five times and varied nothing at all.
+    mismatched = [f for f in facts if _hypothesis_subject_mismatch(f)]
+    if mismatched:
+        problems.append(
+            f"{len(mismatched)} measured experiment(s) did not test their "
+            "stated hypothesis (the engine measured a local archetype "
+            "instead), so any hypothesis-framed narrative mis-attributes "
+            "the numbers")
+
+    # Every measured experiment here varied nothing between runs, so
+    # differences between them are noise. Prose that reads them as an
+    # A/B result is inventing a comparison.
+    measured = [f for f in facts if f["provenance"] == "measured"]
+    if len(measured) > 1:
+        signatures = {(f["archetype"], f.get("model")) for f in measured}
+        if len(signatures) == 1 and _READS_AS_COMPARISON_RE.search(text):
+            problems.append(
+                f"all {len(measured)} measured runs are the same "
+                f"{measured[0]['archetype']} measurement of "
+                f"`{measured[0].get('model')}` — the narrative compares them "
+                "as if something was varied")
+    return problems
+
+
+# Prose that asserts a differential result between runs.
+_READS_AS_COMPARISON_RE = re.compile(
+    r"\b(compared to|versus|vs\.?|outperform\w*|better than|worse than|"
+    r"improve\w*\s+(?:on|over)|increase[ds]?\s+from|decrease[ds]?\s+from|"
+    r"baseline)\b",
+    re.IGNORECASE,
+)
+
+
+def _hypothesis_subject_mismatch(f: dict) -> str | None:
+    """Flag when the thing measured is plainly not the thing claimed.
+
+    The engine maps every hypothesis onto one of a few archetypes and
+    measures THAT. So a hypothesis about speculative decoding on some
+    235B model becomes a throughput measurement of whatever local model
+    is loaded — and the record then says "supported". It is not: the run
+    never touched the subject of the claim.
+    """
+    model = (f.get("model") or "").strip()
+    if not model or f["provenance"] != "measured":
+        return None
+    hyp = f["hypothesis"]
+    # Model names in the hypothesis look like Qwen3-235B / Llama-3.2-1B.
+    named = re.findall(r"\b[A-Za-z][A-Za-z0-9.]*-?\d+\s*[BbMm]\b|"
+                       r"\b(?:Qwen|Llama|Mistral|Gemma|Phi|DeepSeek)[A-Za-z0-9.\-]*",
+                       hyp)
+    named = [n.strip() for n in named if n and n.strip()]
+    if not named:
+        return None
+    short = model.split(":")[0].lower()
+    if any(short in n.lower() or n.lower() in short for n in named):
+        return None
+    return (f"measured `{model}`; the hypothesis names "
+            f"{', '.join(sorted(set(named))[:2])} — this run does not test "
+            "that claim")
+
+
+def completion_status(experiments: list[dict]) -> tuple[str, str, dict]:
+    """(level, message, counts) for the end-of-run activity entry.
+
+    "Research complete. Report generated." went out at success level even
+    when every experiment came back cannot_run and the report held no
+    findings — so a lab with a dead Ollama looked exactly like a lab
+    doing science. Observed twice on a real machine: once behind the
+    keep_alive 400, once with the service simply stopped.
+    """
+    total = len(experiments)
+    measured = sum(
+        1 for e in experiments
+        if str(((e.get("results") or {}).get("provenance")) or "") == "measured"
+    )
+    counts = {"measured": measured, "experiments": total}
+    if measured:
+        return ("success",
+                f"Research complete — {measured}/{total} experiment(s) "
+                "measured. Report generated.", counts)
+    if total:
+        return ("warn",
+                f"Research finished with no measurements: 0/{total} "
+                "experiments produced data. The report records why.", counts)
+    return ("warn",
+            "Research finished without running any experiment. "
+            "The report records why.", counts)
+
+
+def measured_facts_block(experiments: list[dict]) -> str:
+    """Code-generated ground truth. Never model-written."""
+    facts = [_experiment_facts(e) for e in experiments]
+    if not facts:
+        return ""
+    lines = ["## What was actually measured", "",
+             "_Emitted from the experiment records, not written by a model._",
+             ""]
+    envs = {f["platform"] for f in facts if f.get("platform")}
+    models = {f["model"] for f in facts if f.get("model")}
+    if models:
+        lines.append(f"**Model(s) exercised:** {', '.join(sorted(models))}")
+    if envs:
+        lines.append(f"**Platform:** {', '.join(sorted(envs))}")
+    if models or envs:
+        lines.append("")
+
+    for f in facts:
+        lines.append(f"### `{f['id']}` — {f['archetype']} ({f['provenance']})")
+        if f["provenance"] == "measured" and f["metrics"]:
+            for k, v in f["metrics"].items():
+                lines.append(f"- `{k}` = {v}")
+        elif f["provenance"] == "cannot_run":
+            lines.append(f"- could not run: {f.get('cannot_run_reason') or 'no reason recorded'}")
+        else:
+            reason = f.get("cannot_run_reason")
+            lines.append(f"- **not tested** — {reason}" if reason
+                         else "- not measurable on this machine")
+            # A refusal on its own is honest but useless. Where the
+            # other loop has a real knob for this, name it; where no
+            # knob exists anywhere, say that too.
+            if reason:
+                try:
+                    from arail.experiments.levers import handoff_line
+                    lines.append(f"- ➡️ {handoff_line(f['hypothesis'])}")
+                except Exception:
+                    pass
+        mismatch = _hypothesis_subject_mismatch(f)
+        if mismatch:
+            lines.append(f"- ⚠️ **{mismatch}**")
+        lines.append("")
+    return "\n".join(lines).rstrip()
 
 
 class ResearcherAgent:
@@ -390,6 +685,9 @@ class ResearcherAgent:
         # freeze a possibly-broken binding until process restart.
         self._router_cache = None
         self._router_cfgv: Optional[int] = None
+        # Set when a model-written report narrative fails verification, so
+        # the fallback report can say why it was withheld.
+        self._last_report_problems: Optional[list[str]] = None
         # Lazy: the deep (aeroLLM) model is multi-GB. Don't load it at boot —
         # _active_deep_router() fetches the shared router on first background-
         # safe use, so an idle maximus lab never carries the 2nd inference.
@@ -1081,9 +1379,15 @@ class ResearcherAgent:
             except Exception:  # pragma: no cover
                 pass
 
-            activity_log.emit("researcher",
-                              "Research complete. Report generated.",
-                              "success", {"report_preview": report[:200], "progress": 1.0})
+            # Say what the run actually produced. "Research complete.
+            # Report generated." was emitted at success level even when
+            # every experiment came back cannot_run and the report held
+            # no findings at all — which is how a lab with a dead model
+            # looked identical to a lab doing science.
+            _level, _msg, _counts = completion_status(completed_experiments)
+            activity_log.emit("researcher", _msg, _level,
+                              {"report_preview": report[:200], "progress": 1.0,
+                               **_counts})
             self._status = "completed"
             self._set_swarm_lane_status("completed", current_task="Swarm synthesis complete", next_step=None)
             self._advance_workflow("Generated final report", "Research complete", None, progress=1.0)
@@ -1291,8 +1595,15 @@ class ResearcherAgent:
         measurement archetype the engine will actually run (or 'unmeasured')."""
         from arail.research import mini_experiments as mx
         redirect = _active_redirect()
-        archetype = mx.select_archetype(hypothesis) or "unmeasured"
+        archetype, unmeasurable_reason = mx.classify_hypothesis(hypothesis)
+        archetype = archetype or "unmeasured"
         methodology = mx.ARCHETYPE_METHODOLOGY.get(archetype, "")
+        if unmeasurable_reason:
+            # Refuse rather than substitute. Mapping "increase prefetch
+            # depth" onto a plain throughput run measured something real
+            # and then reported it as evidence for a change that never
+            # happened.
+            methodology = f"Not run: {unmeasurable_reason}"
         metrics = mx.ARCHETYPE_METRICS.get(archetype, [])
         return self.tracker.create(
             hypothesis=hypothesis,
@@ -1300,6 +1611,7 @@ class ResearcherAgent:
             variables={
                 "domain": domain,
                 "archetype": archetype,
+                "unmeasurable_reason": unmeasurable_reason or "",
                 "redirect_preset": str((redirect or {}).get("preset") or ""),
             },
             duration_days=None,
@@ -1444,14 +1756,39 @@ class ResearcherAgent:
             f"Experiments ({n}): {n_measured} measured, {n_cannot} could-not-run, "
             f"{n_unmeasured} unmeasured.\n{digest}\n\n"
             f"Include: Summary, Key Findings (cite the measured metrics), "
-            f"Recommendations. Under 300 words.\n\nReport:"
+            f"Recommendations. Under 300 words.\n\n"
+            f"Rules: do NOT write a header block — no Hardware:, Date:, "
+            f"Model:, Seed: or Prompt count: lines; those are emitted from "
+            f"the record. Do NOT leave placeholders like YYYY-MM-DD. Every "
+            f"number you write must be one of the measured values above.\n\n"
+            f"Report:"
         )
         llm_text = _deep_complete(self._active_deep_router(), self._router, prompt, max_tokens=600, system=sys_ctx)
+
+        facts_block = measured_facts_block(experiments)
+        footer = (f"\n\n---\n*Provenance: {n_measured} measured · "
+                  f"{n_unmeasured} unmeasured · {n_cannot} could-not-run. "
+                  "Narrative is model-written; the measured-facts section "
+                  "and every metric are code-emitted from the experiment "
+                  "records.*")
+
         if llm_text and len(llm_text) > 50:
-            return (llm_text.rstrip() +
-                    f"\n\n---\n*Provenance: {n_measured} measured · "
-                    f"{n_unmeasured} unmeasured · {n_cannot} could-not-run. "
-                    "Narrative is model-written; metrics are code-measured.*")
+            problems = verify_report_narrative(llm_text, experiments)
+            if not problems:
+                parts = [llm_text.rstrip()]
+                if facts_block:
+                    parts.append(facts_block)
+                return "\n\n".join(parts) + footer
+            # The narrative failed verification. Do not publish it — a
+            # confident report with one invented number is worse than a
+            # plain one, because the reader cannot tell which number.
+            activity_log.emit(
+                "researcher",
+                "Report narrative failed verification — publishing the "
+                f"measured results only ({problems[0]}).",
+                "warn", {"verification_problems": problems},
+            )
+            self._last_report_problems = problems
 
         # Heuristic fallback — prints the actual measured numbers, no fabrication.
         report_lines = [
@@ -1490,6 +1827,21 @@ class ResearcherAgent:
         if redirect_flags["prefer_autoresearch"]:
             report_lines.append("Convert the strongest measured path into a repeatable "
                                 "loop with explicit stop conditions.")
+        problems = getattr(self, "_last_report_problems", None)
+        if problems:
+            report_lines.extend([
+                "",
+                "> **The model-written narrative for this run was withheld.**",
+                "> It did not survive verification against the experiment "
+                "records, so only code-emitted results are shown above.",
+                ">",
+                *[f"> - {p}" for p in problems],
+            ])
+            self._last_report_problems = None
+
+        if facts_block:
+            report_lines.extend(["", facts_block])
+
         report_lines.extend(["", "---", "*Generated by Arail Researcher Agent — "
                              "metrics are code-measured on this machine.*"])
         return "\n".join(report_lines)

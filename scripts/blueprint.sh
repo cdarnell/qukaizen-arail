@@ -79,7 +79,7 @@ models = data.get("model", [])
 if not models:
     print("(catalog is empty)")
     sys.exit(0)
-print(f"{'ID':<28} {'LABEL':<32} {'TIER':<9} {'AeroLLM':<11} {'AirLLM':<11} {'MLX':<13}")
+print(f"{'ID':<28} {'LABEL':<32} {'TIER':<9} {'QueueLLM':<11} {'AirLLM':<11} {'MLX':<13}")
 print("-" * 110)
 for m in models:
     print(f"{m['id']:<28} {m['label']:<32} {m['lab_tier']:<9} "

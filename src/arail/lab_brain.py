@@ -73,8 +73,10 @@ user is engaged:
   lab stays responsive.
 - **Heavy window** (default 22:00–08:00) — deep-backend experiments
   (AirLLM today) and full-send GPU burns happen here.
-- **Halt jobs** button in the dashboard nav cancels all running
-  agent work without taking the portal down. Resume with one click.
+- **Hold all agents** button in the dashboard nav stops agents from
+  calling models or posting findings/suggestions/announcements, without
+  taking the portal down. Operational/error lines and SRE crash alerts
+  continue. Resume with one click.
 - **5-minute courtesy delay** on boot before the researcher's
   first tick so the UI loads clean.
 

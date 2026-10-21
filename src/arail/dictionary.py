@@ -392,7 +392,11 @@ def generate_terms(
         from arail.router import ModelRouter
         router = ModelRouter(billing_source="agent")
     prompt = build_prompt(theme, count=count, avoid_terms=avoid_terms or [])
-    resp = router.complete(prompt, max_tokens=1400, temperature=0.7, top_p=0.9)
+    # L3 (ARCHITECTURE.md): dictionary is not an agent -- system_call so it
+    # stops masquerading under the blanket "agent" bucket (V8).
+    from arail import agent_context
+    with agent_context.system_call("dictionary"):
+        resp = router.complete(prompt, max_tokens=1400, temperature=0.7, top_p=0.9)
     return parse_entries(getattr(resp, "text", "") or "")
 
 
@@ -418,10 +422,12 @@ def expand_term(
     if router is None:
         from arail.router import ModelRouter
         router = ModelRouter(billing_source="agent")
-    resp = router.complete(
-        build_expand_prompt(theme, term, short_def),
-        max_tokens=320, temperature=0.6, top_p=0.9,
-    )
+    from arail import agent_context
+    with agent_context.system_call("dictionary"):
+        resp = router.complete(
+            build_expand_prompt(theme, term, short_def),
+            max_tokens=320, temperature=0.6, top_p=0.9,
+        )
     return (getattr(resp, "text", "") or "").strip()
 
 

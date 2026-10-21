@@ -93,6 +93,23 @@ _EXT_MAP = {
 }
 
 
+def _mounted_world_prefix() -> str | None:
+    """``world-<slug>`` for the currently mounted World, else None.
+
+    Never raises: an unreadable or absent mount just means "no World to
+    attribute this to", which is the correct root-lab behavior.
+    """
+    try:
+        from arail.world_mount import current_mount
+        record = current_mount()
+    except Exception as e:  # noqa: BLE001 — ingest must never fail on a bad mount
+        _log.warning("pkb.ingest: mount lookup failed, ingesting unscoped: %s", e)
+        return None
+    if record is None or not getattr(record, "world", ""):
+        return None
+    return f"world-{record.world}"
+
+
 def ingest(pkb_root: Path | None = None) -> dict[str, Any]:
     """Process everything in inbox/ → sources/.
 
@@ -106,6 +123,16 @@ def ingest(pkb_root: Path | None = None) -> dict[str, Any]:
     if not inbox.exists():
         return {"moved": 0, "urls_fetched": 0, "errors": [], "destinations": {}}
 
+    # Knowledge ingested while a World is mounted BELONGS to that World, so it
+    # lands under sources/world-<slug>/ and the review queue can scope to it
+    # (compiled_kb._world_of reads exactly that prefix). Without this, every
+    # upload joined one undifferentiated pool and a freshly-forged World's
+    # queue filled up with the previous World's material.
+    #
+    # Unmounted (root lab) keeps the flat sources/<kind>/ layout — there is no
+    # World to attribute to, and inventing one would be a lie about provenance.
+    scope_prefix = _mounted_world_prefix()
+
     moved = 0
     urls_fetched = 0
     errors: list[str] = []
@@ -114,7 +141,9 @@ def ingest(pkb_root: Path | None = None) -> dict[str, Any]:
     # Process links.txt (URL bookmarks dropped in inbox)
     links_file = inbox / "links.txt"
     if links_file.exists():
-        bookmarks = root / "sources" / "bookmarks.md"
+        bookmarks = (root / "sources" / scope_prefix / "bookmarks.md"
+                     if scope_prefix else root / "sources" / "bookmarks.md")
+        bookmarks.parent.mkdir(parents=True, exist_ok=True)
         try:
             lines = links_file.read_text().strip().splitlines()
             with open(bookmarks, "a") as f:
@@ -162,7 +191,8 @@ def ingest(pkb_root: Path | None = None) -> dict[str, Any]:
         if item.is_file():
             ext = item.suffix.lower()
             subfolder = _EXT_MAP.get(ext, "articles")  # default to articles
-            dest_dir = root / "sources" / subfolder
+            dest_dir = (root / "sources" / scope_prefix / subfolder
+                        if scope_prefix else root / "sources" / subfolder)
             dest_dir.mkdir(parents=True, exist_ok=True)
             dest_name = f"{_date_prefix()}_{item.name}"
             dest = dest_dir / dest_name

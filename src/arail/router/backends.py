@@ -94,6 +94,12 @@ class ModelResponse:
     # tokens written to cache this request (~1.25x cost). See ClaudeBackend.
     cache_read_input_tokens: int = 0
     cache_creation_input_tokens: int = 0
+    # Server-reported prefill time (sprint 2026-09-20-buddy-front-and-
+    # center, S3). Distinct from TTFT — see router/core.py's honesty
+    # contract: a client MUST NOT render this as TTFT. None on every
+    # backend that doesn't report it (only OllamaNativeBackend does today,
+    # from prompt_eval_duration).
+    prefill_ms: Optional[float] = None
 
 
 StreamResult = str | ModelResponse
@@ -178,8 +184,17 @@ class MLXBackend(BaseBackend):
             self._load = load
             self._generate = generate
             self._stream_generate = getattr(_mlx_lm, "stream_generate", None)
-        except ImportError:
-            raise ImportError("MLX not installed. Run: pip install mlx mlx-lm")
+        except ImportError as exc:
+            # Keep the real reason. "MLX not installed" is only one of the
+            # ways this import fails — a broken/partial install, an
+            # incompatible mlx/mlx-lm pair, or a sandbox that blocks the
+            # native extension all land here too, and reporting them all
+            # as "not installed" sends people to `pip install` for a
+            # problem pip already solved.
+            raise ImportError(
+                f"MLX backend unavailable: {exc}. "
+                "If mlx-lm is genuinely missing: pip install mlx mlx-lm"
+            ) from exc
 
         # New-style sampler factory is preferred; fall back to the old
         # `temp=` kwarg if we're on a pre-0.19 mlx-lm.
@@ -1407,7 +1422,7 @@ def _resolve_kv_budget() -> dict[str, Any]:
         available: int = int(vm.available)
     except Exception as exc:  # noqa: BLE001
         reason = (
-            f"psutil unavailable ({exc}); aerollm will auto-detect KV budget"
+            f"psutil unavailable ({exc}); QueueLLM will auto-detect KV budget"
         )
         return {
             "budget_bytes": None,
@@ -1427,7 +1442,7 @@ def _resolve_kv_budget() -> dict[str, Any]:
     if total == 0:
         return {
             "budget_bytes": None,
-            "reason": "psutil returned total=0; aerollm will auto-detect KV budget",
+            "reason": "psutil returned total=0; QueueLLM will auto-detect KV budget",
             "fields": {
                 "pct_used": pct,
                 "total_gib": 0.0,
@@ -1555,7 +1570,7 @@ class AeroLLMBackend(BaseBackend):
                 "needed; this is the route for most people). Maintainer-only "
                 "alternatives: `./arailctl deep rebuild` (build from the local "
                 "sibling repo — set ARAIL_AEROLLM_REPO if it's not at "
-                "~/ProJects/qukaizen-aerollm) or `./arailctl deep update` (pip "
+                "~/ProJects/qukaizen-queuellm) or `./arailctl deep update` (pip "
                 "install the published wheel from the private index, needs "
                 "credentials). Do NOT use `maturin develop` — see scripts/setup.sh "
                 "for why."
@@ -1587,7 +1602,7 @@ class AeroLLMBackend(BaseBackend):
             # repo IDs are the canonical 4-bit MLX conversions.
             hf_repo = "mlx-community/" + self.model_name
             raise RuntimeError(
-                f"AeroLLM model dir not found: {model_path}. "
+                f"QueueLLM model dir not found: {model_path}. "
                 f"Set AEROLLM_MODEL and/or ARAIL_MODELS_DIR, or "
                 f"download the checkpoint with `huggingface-cli download "
                 f"{hf_repo} --local-dir {model_path}`."
@@ -1881,6 +1896,31 @@ class AeroLLMBackend(BaseBackend):
 # ---------------------------------------------------------------------------
 # OllamaNativeBackend  (Ollama native /api/chat — carries options.num_ctx)
 # ---------------------------------------------------------------------------
+def _normalize_keep_alive(value: "str | int") -> "str | int":
+    """Coerce a keep_alive setting into something Ollama actually accepts.
+
+    Ollama reads a JSON *string* as a Go duration and a JSON *number* as
+    seconds. "5m" and 300 are both fine; a bare "-1" is not — Go rejects
+    it with `time: missing unit in duration "-1"` and the request 400s.
+    Operators reasonably write ARAIL_OLLAMA_KEEP_ALIVE=-1 meaning
+    "forever", so turn any bare integer into the number form and leave
+    real durations ("2h", "30s") untouched.
+
+    Called at the REQUEST boundary (complete/stream_complete), not only
+    inside _keep_alive: this bug class has shipped twice — first when the
+    pin value itself was the string "-1" (see tests/router/
+    test_keep_alive.py's CORRECTED note: every /api/chat call 400'd and
+    the whole local lane was dead), then again on a branch whose fork of
+    _keep_alive drifted from the fixed version. Whatever resolves the
+    value — this method, an env override, a subclass, a __new__-built
+    instance — the body that reaches Ollama can never carry a bare
+    numeric string.
+    """
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return value
+
 
 
 def _raise_for_status_with_detail(resp) -> None:
@@ -1938,7 +1978,7 @@ class OllamaNativeBackend(OpenAICompatBackend):
         self.backend_name = "ollama:native"
         self._num_ctx = _resolve_ctx_override(self.model_name, default=None)
 
-    def _keep_alive(self) -> "int | str | None":
+    def _keep_alive(self) -> "str | int | None":
         """Ollama keep_alive for every request.
 
         Without it Ollama evicts the model ~5 min after the last call, so
@@ -1969,15 +2009,16 @@ class OllamaNativeBackend(OpenAICompatBackend):
             value = raw.strip()
             if not value:
                 return None
-            try:
-                # Ollama rejects the *string* "-1" ("missing unit in
-                # duration"); numeric values must be sent as JSON numbers.
-                return int(value)
-            except ValueError:
-                return value
+            return _normalize_keep_alive(value)
         pin_enabled = os.getenv("ARAIL_RESIDENT_PIN", "1").strip().lower() \
             not in ("0", "false", "no")
         if pin_enabled and self._is_registry_tier0_model():
+            # int, not "-1". Ollama parses a STRING keep_alive as a Go
+            # duration, and "-1" has no unit — it answers 400
+            # {"error":"time: missing unit in duration \"-1\""} and the
+            # whole call fails. A JSON *number* is seconds, and negative
+            # means "keep loaded indefinitely", which is what pinning
+            # means here.
             return -1
         return "2h"
 
@@ -2043,7 +2084,9 @@ class OllamaNativeBackend(OpenAICompatBackend):
             body["think"] = think
         keep_alive = self._keep_alive()
         if keep_alive is not None:
-            body["keep_alive"] = keep_alive
+            # Wire guard: whatever produced the value, a bare numeric
+            # string must leave here as a JSON number (Ollama 400s "-1").
+            body["keep_alive"] = _normalize_keep_alive(keep_alive)
 
         resp = self._session.post(
             f"{self._ollama_root()}/api/chat",   # F-OLLAMA-SHIM: native endpoint
@@ -2056,6 +2099,8 @@ class OllamaNativeBackend(OpenAICompatBackend):
         data = resp.json()
         # Ollama native response shape: {message: {role, content}, done: bool}
         text = (data.get("message") or {}).get("content") or ""
+        # prompt_eval_duration is nanoseconds; server-reported, never derived.
+        prefill_ns = data.get("prompt_eval_duration")
         return ModelResponse(
             text=text,
             model=data.get("model", self.model_name),
@@ -2063,6 +2108,7 @@ class OllamaNativeBackend(OpenAICompatBackend):
             backend="ollama_native",
             latency_ms=(time.time() - start) * 1000,
             cost_usd=0.0,
+            prefill_ms=(prefill_ns / 1_000_000.0) if prefill_ns is not None else None,
         )
 
     def stream_complete(self, prompt: str, max_tokens: int = 512,
@@ -2097,10 +2143,12 @@ class OllamaNativeBackend(OpenAICompatBackend):
             body["think"] = think
         keep_alive = self._keep_alive()
         if keep_alive is not None:
-            body["keep_alive"] = keep_alive
+            # Wire guard — same rule as complete(); see _normalize_keep_alive.
+            body["keep_alive"] = _normalize_keep_alive(keep_alive)
 
         full_text = ""
         eval_count = 0
+        prefill_ns = None
         with self._session.post(
             f"{self._ollama_root()}/api/chat",
             headers={"Authorization": f"Bearer {self.api_key}",
@@ -2123,6 +2171,8 @@ class OllamaNativeBackend(OpenAICompatBackend):
                     yield delta
                 if data.get("eval_count"):
                     eval_count = int(data["eval_count"])
+                if data.get("prompt_eval_duration") is not None:
+                    prefill_ns = data["prompt_eval_duration"]
                 if data.get("done"):
                     break
 
@@ -2133,6 +2183,7 @@ class OllamaNativeBackend(OpenAICompatBackend):
             backend="ollama_native",
             latency_ms=(time.time() - start) * 1000,
             cost_usd=0.0,
+            prefill_ms=(prefill_ns / 1_000_000.0) if prefill_ns is not None else None,
         )
 
 

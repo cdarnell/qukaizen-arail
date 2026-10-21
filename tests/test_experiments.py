@@ -753,3 +753,139 @@ def test_run_frontier_bench_never_raises_on_load_failure():
     assert run.error is not None
     assert "load_failed" in run.error
     assert "synthetic OOM" in run.error
+
+
+# ── Baseline never lands on the user's branch (hazard H1/H2) ────────
+#
+# Regression guard for the fix documented in
+# docs/plans/autoresearch-integration.md §4 decision (1): the baseline
+# capture used to be committed before any autoresearch/ branch existed,
+# so running the loop from `main` put a commit on `main` — which later
+# made `./arailctl update`'s `git pull --ff-only` refuse.
+
+def _stub_git(monkeypatch, ar, *, start_branch="main"):
+    """Patch every git seam and return a log of branch operations."""
+    ops: list = []
+
+    class _FakeGit:
+        sha = "d" * 40
+        short_sha = "ddddddd"
+        branch = start_branch
+        is_dirty = False
+        dirty_files: list = []
+
+    def fake_create(exp_id, base_branch=None):
+        branch = "autoresearch/" + exp_id
+        ops.append(("create", branch, base_branch))
+        return branch
+
+    def fake_commit(**kw):
+        ops.append(("commit", kw.get("subject", "")))
+        return "cafe" * 10
+
+    monkeypatch.setattr(ar, "assert_clean_tree", lambda: None)
+    monkeypatch.setattr(ar, "git_state", lambda: _FakeGit)
+    monkeypatch.setattr(ar, "save_tuning", lambda cfg, path=None: None)
+    monkeypatch.setattr(ar, "append_run", lambda r, path=None: None)
+    monkeypatch.setattr(ar, "create_experiment_branch", fake_create)
+    monkeypatch.setattr(ar, "commit_experiment", fake_commit)
+    monkeypatch.setattr(
+        ar, "abort_experiment",
+        lambda branch: ops.append(("checkout", branch)),
+    )
+    monkeypatch.setattr(
+        ar, "run_bench",
+        lambda **kw: _mk_run(1.0, variant=kw.get("variant_label") or "?"),
+    )
+    return ops
+
+
+def test_baseline_is_committed_on_its_own_autoresearch_branch(monkeypatch):
+    from arail.experiments import autoresearch as ar
+
+    ops = _stub_git(monkeypatch, ar, start_branch="main")
+    state = ar.run_autoresearch(
+        require_env_flag=False,
+        candidates=[("context-256 (smaller KV cache)",
+                     {"aerollm_max_length": 256})],
+    )
+
+    assert state.phase == "done"
+    # A baseline branch was created, off main, before anything committed.
+    creates = [o for o in ops if o[0] == "create"]
+    assert creates, "no branch was ever created"
+    first_branch, first_base = creates[0][1], creates[0][2]
+    assert first_branch.startswith("autoresearch/baseline-")
+    assert first_base == "main"
+    assert state.baseline_branch == first_branch
+    assert state.to_dict()["baseline_branch"] == first_branch
+
+    # The critical assertion: nothing is committed before we have left
+    # the user's branch. Any commit at index < the first create would
+    # be a commit landing on `main`.
+    first_create_at = next(i for i, o in enumerate(ops) if o[0] == "create")
+    first_commit_at = next(
+        (i for i, o in enumerate(ops) if o[0] == "commit"), None
+    )
+    assert first_commit_at is None or first_commit_at > first_create_at, (
+        "a commit was made while still on the user's branch"
+    )
+
+
+def test_variants_branch_from_the_baseline_branch(monkeypatch):
+    from arail.experiments import autoresearch as ar
+
+    ops = _stub_git(monkeypatch, ar, start_branch="main")
+    ar.run_autoresearch(
+        require_env_flag=False,
+        candidates=[("context-256 (smaller KV cache)",
+                     {"aerollm_max_length": 256})],
+    )
+
+    creates = [o for o in ops if o[0] == "create"]
+    baseline_branch = creates[0][1]
+    variant_creates = creates[1:]
+    assert variant_creates, "no variant branch was created"
+    for _, _branch, base in variant_creates:
+        # Never off the user's branch — always off the baseline.
+        assert base == baseline_branch
+
+
+def test_loop_returns_the_user_to_their_original_branch(monkeypatch):
+    from arail.experiments import autoresearch as ar
+
+    ops = _stub_git(monkeypatch, ar, start_branch="my-feature")
+    ar.run_autoresearch(
+        require_env_flag=False,
+        candidates=[("context-256 (smaller KV cache)",
+                     {"aerollm_max_length": 256})],
+    )
+
+    checkouts = [o[1] for o in ops if o[0] == "checkout"]
+    assert checkouts, "loop never checked anything back out"
+    assert checkouts[-1] == "my-feature", (
+        f"loop left the user on {checkouts[-1]!r}, not their own branch"
+    )
+
+
+def test_dirty_tree_abort_never_discards_user_work(monkeypatch):
+    """The restore path runs `git checkout -- .`. It must not fire when
+    we bailed because the USER's tree was dirty — that would delete
+    their uncommitted work."""
+    from arail.experiments import autoresearch as ar
+    from arail.experiments.git_ops import GitSafetyError
+
+    ops = _stub_git(monkeypatch, ar)
+
+    def boom():
+        raise GitSafetyError("Working tree is dirty; refusing to run")
+    monkeypatch.setattr(ar, "assert_clean_tree", boom)
+
+    state = ar.run_autoresearch(require_env_flag=False, candidates=[])
+
+    assert state.phase == "error"
+    assert "dirty" in (state.error or "").lower()
+    assert not [o for o in ops if o[0] == "checkout"], (
+        "restore ran after a dirty-tree abort — would discard user work"
+    )
+    assert not [o for o in ops if o[0] == "create"]

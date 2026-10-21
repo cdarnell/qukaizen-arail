@@ -1,5 +1,10 @@
 # AeroLLM — Research & Optimization Workbench
 
+> **Renamed.** AeroLLM became **QueueLLM** on 2026-08-21 — upstream is now
+> [github.com/cdarnell/qukaizen-queuellm](https://github.com/cdarnell/qukaizen-queuellm),
+> locally `~/ProJects/qukaizen-queuellm`. These five origin docs keep the name
+> they were written under; read "AeroLLM" here as QueueLLM.
+
 **Project name.** **AeroLLM** — the Rust runtime with MLX and CUDA
 backends that Arail uses for deep inference. Multi-threaded prefetched
 layer streaming optimized for concurrent research prompts.

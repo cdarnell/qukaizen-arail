@@ -1373,3 +1373,828 @@ BUILD_LOG.md round 2 and REVIEW.md round 2):
    without `model_resolve.LOCK`.** A concurrent pin re-resolve can replace
    `_LAST` and the note is lost from the strip (nothing is corrupted). Append
    under the lock or route the note through `resolve_and_apply` state.
+
+---
+
+## Autoresearch durability — the Tuning loop's git ledger over the long term
+
+**Filed by:** `docs/plans/autoresearch-integration.md` (2026-08-16 audit,
+branch `qukaizen/autoresearch-integration-plan-e1a5c3`), prompted by the
+operator question "is this really working for someone long term?"
+
+**The gap.** The Tuning loop (`src/arail/experiments/autoresearch.py` +
+`git_ops.py`) writes a branch-per-experiment ledger into the ARAIL
+checkout itself. Every safety rail on the *individual* operation is in
+place — 4-file whitelist, clean-tree gate, env flag, explicit staging,
+no push, no force, no reset. What is missing is any notion of the ledger
+as something that **accumulates**. Five hazards, all structural rather
+than observed (the loop has never been run end-to-end on the operator's
+machine — `git branch --list 'autoresearch/*'` returns 0 and no bench
+`.jsonl` exists):
+
+- ~~**H1 — baseline commit lands on the user's current branch.**~~
+  **FIXED 2026-08-16.** Baseline now commits on its own
+  `autoresearch/baseline-<ts>` branch; variants branch from that; the
+  loop restores the user's original branch in a `finally`. Guarded by a
+  `restore_to` sentinel so the restore (which runs `git checkout -- .`)
+  can never fire on the dirty-tree abort and eat the user's work. Four
+  regression tests in `tests/test_experiments.py`.
+- ~~**H2 — `./arailctl update` breaks after H1.**~~ **Resolved by the
+  H1 fix.** Remaining nicety: `./arailctl update` could detect and
+  explain pre-existing local commits instead of surfacing a raw
+  `git pull --ff-only` refusal.
+- ~~**H3 — `autoresearch/*` branches accumulate forever.**~~ **FIXED
+  2026-08-17** — `./arailctl autoresearch prune`, dry-run by default,
+  keep-gated (wins/current/unclassifiable/newest-N/young all survive),
+  re-validated at delete time, receipt-with-SHA written before each
+  deletion.
+- ~~**H4 — committed bench files grow without bound.**~~ **FIXED
+  2026-08-17** — `./arailctl autoresearch rotate`, dry-run by default,
+  archive-append + atomic replace, nothing discarded. Deliberately NOT
+  automatic inside the loop; see the plan doc for why, and for the cost.
+- **H5 — clean-tree gate vs. a blueprint people fork.**
+  `assert_clean_tree()` blocks the loop on any in-progress user edit.
+
+Plus a packaging note: `git_ops._repo_root()` walks four parents from
+`__file__`, which is correct for a checkout and for `pip install -e`, but
+lands outside any git repo under a non-editable install.
+
+**H0, found 2026-08-17 while building the H4 fix and more serious than
+any of the above: the loop could not complete a single pass.** Two of the
+four whitelisted paths live under `lab/data/`, which `.gitignore:42`
+excludes wholesale; `commit_experiment` ran a plain `git add` on them,
+which exits 1 and stages nothing, and `_run` uses `check=True`. That
+raised `CalledProcessError` from the baseline commit — the first commit
+of every pass, whose caller catches only `GitSafetyError`. Fixed by
+force-adding (safe because `-f` can only reach `ALLOWED_WRITABLE_FILES`;
+the membership check runs first). New `tests/test_git_ops_real_repo.py`
+drives real git and reproduces the original error if the `-f` is
+removed.
+
+**What's left.** H1/H2 were decided and fixed on 2026-08-16 (operator
+call: the loop writes only inside `autoresearch/`). H3, H4, H5 and the
+packaging note remain, and each is still gated on an operator decision
+that the audit could not make — §4 of the plan doc: branch/bench
+retention policy, whether the Researcher ever gets a git ledger (the
+never-created follow-up from
+`sprints/2026-05-11-experiment-branches/SPRINT.md:30`), whether
+`lab/data/experiments/` moves under the PKB root (clean-experience Gap 8,
+still unfiled elsewhere), and whether "no sharing story" is the intended
+end state for a local-first blueprint.
+
+**The highest-value remaining item is not on this list, and now has its
+own record: `docs/plans/test-suite-triage.md`.** H0 (the loop could not
+commit at all) survived because every git seam was stubbed and nobody was
+watching the red. Triage found 33 of 54 failures are cross-test
+pollution — they pass standalone — and that no CI job runs the full
+suite, which is the actual defect. The polluter is not yet identified;
+the triage records the reproduction and what is ruled out.
+
+**Also worth knowing.** The doc drift this audit found — README calling
+the Researcher a code-writing committer, `agent-loop.md` saying `git
+reset`, `tuning-loop.md` listing two whitelisted files — was fixed in the
+same branch. The remaining prose risk is that "autoresearch" still names
+two unrelated engines.
+
+---
+
+## Portal authentication
+
+**Filed by:** `sprints/2026-09-20-buddy-front-and-center/ARCHITECTURE.md`
+("The portal has no authentication — stated plainly").
+
+**The gap.** `onboarding_gate` middleware (`app.py:395`) is not auth: it
+blocks every surface only until a passphrase exists, then every request
+passes with no per-request credential check — no `Depends(`, no token
+compare, anywhere in `portal/app.py`. Default bind is `127.0.0.1`;
+`BIND_ADDR=0.0.0.0` is supported and explicitly accepted as an
+operator-opted-in exposure. `local_trust_boundary` gives DNS-rebinding and
+cross-site protection for *mutating* methods only. **Any process running
+as any user on the machine — and, on a widened bind, any host on the
+LAN — can read every portal GET.**
+
+**Why it wasn't done now.** The buddy-front-and-center sprint reduces the
+*amount of sensitive content* behind that surface (flight-recorder bodies
+off by default, redacted, capped, admin-gated) but does not add
+authentication — a materially larger, cross-cutting change (session
+tokens or equivalent, every route, every existing integration that assumes
+no auth) that deserves its own VISION/ARCHITECTURE pass, not a rider on an
+observability sprint.
+
+**What a future sprint needs to decide:** session-based auth vs. a
+bearer-token model; whether `LAB_MODE=hybrid` cloud-key flows need a
+different trust boundary than local-only; how a forked/renamed lab
+(`examples/peanut_farmer/`) inherits whatever the answer is without a
+hardcoded assumption about the product name.
+
+---
+
+## Seventeen `/api/admin/*` endpoints are not tier-gated at the API layer
+
+**Filed by:** `sprints/2026-09-20-buddy-front-and-center/BUILD_LOG.md`
+(S5's deviation #1), discovered while wiring the sprint's own new admin
+endpoints.
+
+**The gap.** `ARCHITECTURE.md`'s contract #6 cites `/api/admin/security`
+as existing precedent for "gated by `_require_surface('admin')`, which
+404s on minimalist." That citation does not match the code: grepping every
+`@app.get("/api/admin/...")` / `@app.post("/api/admin/...")` route in
+`portal/app.py` (17 of them, predating this sprint — components,
+check-updates, perf, cleanup, security, scheduler, models, ...) finds zero
+calls to `_require_surface("admin")`. Only the `/admin` **page** route
+itself is gated; its JSON API siblings are wide open regardless of tier.
+A minimalist user who knows or guesses a URL can call any of them.
+
+**Why it wasn't done now.** Out of this sprint's scope — this sprint's
+job was to instrument the chokepoint and gate its *own* four new
+endpoints correctly (done: `agent-lanes`, `agent-trace-stream`,
+`agent-trace/{id}`, `agents/hold`, `flight-recorder`, plus the three
+legacy-bodies endpoints), not to retrofit 17 unrelated, already-shipped
+endpoints. Fixing it now would have been exactly the scope expansion the
+sprint's own ledger warns against.
+
+**What a future sprint needs to decide:** whether all 17 get
+`_require_surface("admin")` in one pass (likely low-risk — they're
+already conceptually admin-only, just not enforced) or whether some are
+deliberately meant to be readable pre-tier-check for a reason not
+currently documented; a regression test parameterised over the full
+existing list (mirroring this sprint's own F13 pattern) would catch any
+future admin endpoint shipped without the gate too.
+
+---
+
+## The agent-inference gateway — gated on this sprint's own overlap measurement
+
+**Filed by:** `sprints/2026-09-20-buddy-front-and-center/VISION.md` (DE1),
+cut from P1's scope per the ledger.
+
+**The gap.** Agent calls never enter `inference_slot` — they run outside
+the queue that serialises chat/world-forge/etc. work. The brief originally
+asked for a single admission gateway that would also *order* agent calls
+behind interactive chat. VISION.md's V8 finding showed the real blast
+radius is ~11 sites (not ~5), 4 of them non-agent, 1 cross-process — the
+riskiest refactor in the whole three-phase programme — and cut it in favor
+of first building the read-only overlap counter this sprint actually
+shipped (`slot.overlap_pct`/`slot.samples` in
+`GET /api/admin/agent-lanes`, fed by `held_by_other` recorded at every
+agent call).
+
+**Why it wasn't done now.** Building the gateway before the
+instrumentation that tells you whether it's needed inverts D18 (the whole
+reason this sprint was ordered first). The overlap counter is that
+instrumentation; it now exists.
+
+**What a future sprint needs to decide, using DE1's pre-committed
+thresholds** (from a week of the operator's ordinary use, once
+`overlap_pct` has real samples): **< 5%** → defer the gateway indefinitely,
+the contention risk was theoretical; **5-25%** → build it after P2's brain
+bake-off, as originally planned; **> 25%** → promote it ahead of the
+Buddy panel (P3) and revisit the deferral itself as having been wrong.
+
+---
+
+## Pre-existing, flagged not fixed by the buddy-front-and-center sprint
+
+**Filed by:** `sprints/2026-09-20-buddy-front-and-center/ARCHITECTURE.md`
+("Where the spec is wrong or unbuildable as scoped", items 7 and 8) —
+found while reading the router/backend and cost-tracking code this sprint
+touched, explicitly not fixed because each is a behaviour change on a path
+this sprint does not otherwise touch.
+
+- **`MLXBackend.stream_complete` signature bug** (`router/backends.py:
+  330-332`): does not accept `system=`/`messages=`, but
+  `ModelRouter.stream_complete` (`router/core.py`) always passes both →
+  `TypeError` on any MLX streaming call through the router. Currently
+  unreachable in production (chat resolves through the registry to
+  Ollama/OpenAICompat), but this sprint's own S3 work
+  (`ARAIL_AGENT_STREAM_FAST`) makes agent-path streaming a live feature
+  for the first time — worth fixing before an MLX-backed agent path is
+  ever wired to stream.
+- **Concurrent `costs.json` write race**: the goal-parser child process
+  runs its own `cost_tracker` singleton against the *same* `costs.json`
+  as the parent, and `CostTracker._save()` is a non-atomic `write_text`.
+  Parent and child can race. Not introduced by this sprint and not
+  widened by it — `agent_trace.jsonl`'s append-only, one-writer-per-
+  process design (contract #9) is strictly safer than what `costs.json`
+  already does, which is why the trace store didn't repeat the mistake
+  rather than a reason to leave `costs.json` unfixed forever.
+
+**What a future sprint needs to decide:** whether the MLX signature bug
+gets a defensive fix now (cheap: accept and ignore the two kwargs, or
+route them through) or waits for an actual MLX-backed streaming caller to
+surface it; whether `costs.json`'s write path moves to the same
+temp-file-plus-`os.replace` pattern `agent_trace.py`/`activity.py`
+already use.
+
+---
+
+## `/api/agents/status`'s deprecated `tokens` alias — removal window
+
+**Filed by:** `sprints/2026-09-20-buddy-front-and-center/ARCHITECTURE.md`
+(contract #8, the V7 fix) and `BUILD_LOG.md` (S6).
+
+**The gap.** `GET /api/agents/status` now emits both `tokens_out` (new,
+correct — real usage from the trace ring) and `tokens` (deprecated alias,
+now carrying the *same corrected* value) because `agents.html` still reads
+`.tokens` in four places. The alias is meant to live for **one release**,
+not indefinitely.
+
+**What a future sprint needs to do:** once `agents.html` is confirmed to
+read `tokens_out` everywhere `tokens` was read (four `fmtTokens(...)`
+call sites plus the Researcher meta-line, already switched to prefer
+`tokens_out` this sprint but still falling back to `tokens`), drop the
+`tokens` key from the endpoint response and the fallback reads in the
+template.
+
+---
+
+## Buddy-front-and-center's BLOCK-review fix loop — filed as debt, not fixed
+
+**Filed by:** `sprints/2026-09-20-buddy-front-and-center/REVIEW.md`
+("Required actions before merge" → "File as debt (BACKLOG, not this
+sprint)"), during the fix loop that resolved B1–B6, D6, D8, F9, F13, and
+S1 (S1 was explicitly promoted to must-fix by the operator; the rest
+below were not).
+
+- **S2 — RESOLVED, see below.** ~~`src/arail/skills/goal_parser/__init__.py:250`:
+  `error_class=str(payload.get("error", "unknown"))[:80]` persists up to 80
+  chars of arbitrary child-process exception text to `agent_traces.jsonl`,
+  outside `redact.capture_body`'s reach, regardless of the flight recorder.~~
+  QA's TEST_REPORT.md demonstrated this live (an `Authorization: Bearer …`
+  fragment reaching disk with the recorder off, its finding **F2**) and it
+  was fixed, not filed again, in the QA fix loop that followed: an
+  allow-list on the parent (`_sanitize_error_class`,
+  `^[A-Za-z_][A-Za-z0-9_]*$`) plus a real `error_class` on the child for
+  every failure branch. See that sprint's BUILD_LOG.md Re-review index
+  for the commit and proving tests. Left here, struck through, so this
+  entry's own history is legible rather than silently deleted.
+- **S3** — Buddy's dream announcement (`_builtin_buddy.py`'s `dream()`)
+  puts up to 160 chars of raw model output into `activity.jsonl` via
+  `data={"preview": reflection[:160]}`, ungated by redaction and
+  independent of the flight recorder. **This is now LIVE, not merely
+  gated.** REVIEW.md R5 (re-review): the fix loop's own `dream()`
+  NameError fix (adding the missing `from arail.activity import
+  activity_log` import) was correct and in scope, but it activates a
+  path that had never once run to completion in production — on
+  pristine main, every call to `dream()` raised `NameError` before
+  reaching this emit, and `dream_daemon._dream_once` caught that
+  exception and logged a warn instead. After the fix loop, on an
+  unheld lab, `dream()` reaches this line and writes the preview every
+  night. The speech_gate added this same fix loop only silences it
+  while **held** — an unheld lab (the default) now has this line firing
+  for the first time ever. Not a `prompt_trace` body, so
+  `_has_legacy_body`/the legacy-bodies purge will never find it.
+  **QA must be told this directly, and must exercise the dream path
+  specifically**: (1) a "grep the whole DATA_DIR tree" pass can
+  legitimately hit a planted string here, and that is a real, now-live
+  finding, not a false positive; (2) everything in `dream()` after the
+  emit (`_recent_actions.append`, `_sync_workflow`, `return reflection`)
+  is also newly-reachable code that has never executed in production
+  and is therefore untested in practice, independent of this specific
+  leak.
+- **D1** — `ARAIL_AGENT_STREAM_FAST` removes the 120s total-generation
+  ceiling from Buddy's fast streamed calls (a `requests` per-read socket
+  timeout, not a total-duration timeout, once `stream=True`); undocumented.
+  Needs a bound plus a doc note on the behaviour change.
+- **D2** — no structural test asserts Ollama's streamed vs non-streamed
+  request bodies agree on everything except `stream`; add one so a future
+  edit to one path can't silently diverge from the other.
+- **D3** — `lanes_snapshot()` returns `user_defined`, `dropped_writes`,
+  `overlap_pct` that `admin.html` never renders; the trace drill-in
+  (`GET /api/admin/agent-trace/{id}`) has no UI entry point; `SYS_LANES`
+  is defined but neither emitted nor deleted.
+- **D5** — `_builtin_presence.py:127`'s thread should use whatever
+  `spawn_thread`/context-carrying helper the rest of the agents use (F3's
+  static guard would have caught this); document in `docs/agents.md` and
+  the Admin copy that a call which lost its attribution context is
+  visible in the trace but **not** covered by Hold.
+- **D7** — the admin SSE stream (`agent-trace-stream`) has no
+  backpressure/debounce behaviour defined for a fast-emitting lane; decide
+  how DE4's "kill line" number is measured against it.
+- **F2** — a disk-rotation failure in `_append_disk` is silently dropped;
+  should increment `dropped_writes` the same way a write failure does.
+- **W1's wall-clock SSE test** — promote the "within 2s" structural guard
+  (no `setInterval` near the lanes markup, pinned this fix loop) to an
+  actual timed `@pytest.mark.timing` test, plus a stronger `q.qsize()`
+  assertion on the subscriber queue than currently exists.
+- **conftest split** — the shared fixture doing both hermeticity
+  (DATA_DIR redirection) and ambient defaults (tier, etc.) should split
+  into two, so a test that only needs one doesn't have to reason about
+  the other.
+- **D8's remainder** — the `/api/agents/status` fallback loop bug, the
+  `calls_by_source` cardinality cap, streamed-response `model` provenance,
+  a missing trace on an abandoned stream, the purged-event UI string, and
+  registering `pytest.mark.perf` in `pyproject.toml` (currently an
+  unregistered marker warning).
+
+**What a future sprint needs to do:** S2 is resolved (see above); pick
+the rest up in order of the security/exposure gradient — S3 first (no
+code fix required, but it is a live leak, not a theoretical one — see
+above), then D1 (undocumented timeout-semantics change, already
+shipped), then the rest as capacity allows. QA must be briefed on S3
+before the next sprint's QA pass (both that the leak is real and now
+live, and that the dream path itself is newly-reachable and untested in
+practice), or a planted-string hit there will keep looking like a false
+positive.
+
+---
+
+## QA fix loop (TEST_REPORT.md, commit `9d0e083f`) — filed as debt, not fixed
+
+**Filed by:** `sprints/2026-09-20-buddy-front-and-center/TEST_REPORT.md`
+("Fix or file as debt (builder's call, not ship-blocking)"), during the
+fix loop that resolved F7, F8, F2 (TEST_REPORT.md's own numbering — a
+different finding from REVIEW.md's F2 above; disambiguated as "QA F2" in
+that fix loop's commits), F4, F5, F9 and, as a judgment call, F3. Three
+of TEST_REPORT.md's four "fix or file" items are filed here; F3 was
+fixed instead (see BUILD_LOG.md for why).
+
+- **QA F1** — `src/arail/redact.py:52-54`: a JSON-quoted
+  `{"api_key": "<16 chars>"}` value is not redacted. The assignment
+  pattern requires the key name to be followed by optional whitespace
+  then `:`/`=`; a quoted JSON key never is. A spec gap, not a build
+  defect — ARCHITECTURE.md #5's pattern list is implemented exactly as
+  specified. Fix: one `["']?` in the pattern.
+- **QA F6** — `src/arail/portal/app.py:6326`, `:6344`: malformed JSON on
+  `POST /api/admin/agents/hold` (and the recorder toggle) is a 500 —
+  `await request.json()` is unguarded. Curl-only, after the tier gate,
+  no information disclosed. Low severity. Fix: wrap the parse and
+  return 400 on `json.JSONDecodeError`.
+- **QA F10** — `config.PKB_ROOT` is not isolated by the conftest, so
+  tests write the developer's real `lab/pkb`, and
+  `dream_daemon._dream_once`'s "already dreamed today" check reads it —
+  meaning any test of `_dream_once` that does not patch
+  `_dream_file_for` silently no-ops on a machine that has dreamed today.
+  Same class of bug as `cost_tracker` (QA F9, fixed) and `activity_log`
+  — a process-global singleton/module constant bound before any fixture
+  runs. QA's own tests isolate it locally; the shared conftest fixture
+  should too.
+
+**What a future sprint needs to do:** QA F1 first (it is the only
+remaining redaction gap with a recorder-on, disk-write consequence — one
+regex character), then QA F10 (the next candidate in the same
+un-isolated-singleton family `_isolated_agent_observability_data_root`'s
+own docstring already names as recurring), then QA F6 (low severity,
+curl-only). QA's own TEST_REPORT.md notes worth carrying forward
+regardless of which item is picked up first: "un-isolated process-global
+singletons are this repo's recurring defect class" (three found in one
+sprint: `DATA_DIR`, `cost_tracker._data_path`, `PKB_ROOT`) and
+"'never raises' docstrings are a claim" (grep for the phrase, test each
+one with a non-`OSError` exception — this is exactly how QA F3 was
+found).
+
+---
+
+## Model Forge's logit path needs a non-bundled `unstable-api` runtime build
+
+**Filed by:** `sprints/2026-09-23-nucleus-sprint-1/ARCHITECTURE.md` §9
+"Added" #1 (F1).
+
+**The gap.** The pinned QueueLLM bundle ARAIL ships
+(`THIRD-PARTY-LICENSES/aerollm/BUNDLE.json`, `arail_release: v1.1.0`) is
+built with `--features extension-module` only — `Runtime.generate(logprobs=…)`
+and `Runtime.score()` are both `#[cfg(feature = "unstable-api")]` and raise
+`ValueError: logprobs is unstable per STABILITY.md` on the shipped binary.
+Logit-mode distillation (`nucleus build`'s Phase A) therefore cannot run
+against the default install at all; it needs a maintainer-local rebuild
+with `--features unstable-api` (ARCHITECTURE.md §10 commit 28, gated on
+operator decision Q1 = yes, out of this builder's scope per the task
+instructions).
+
+**What a future sprint needs to do:** either (a) re-pin ARAIL's bundle
+with `unstable-api` once QueueLLM promotes the R.2 logprobs path to
+stable — an outward-facing QueueLLM stability decision, not an ARAIL-side
+one — or (b) ship a second "forge" bundle alongside the default one,
+built with `unstable-api`, so `nucleus build` works out of the box
+without a maintainer-local cargo build. Until either lands, Gate B and
+item 10 (the real `qkz-linux-kernel` build) require commit 28's opt-in
+`ARAIL_AEROLLM_FEATURES=unstable-api ./arailctl deep rebuild` step.
+
+---
+
+## Nucleus's legacy-5 seal payload has no schema_version and is not JCS; the Python signer and Rust verifier already disagree
+
+**Filed by:** `sprints/2026-09-23-nucleus-sprint-1/ARCHITECTURE.md` §9
+"Added" #2 (F3) — also filed in `qukaizen-nucleus` per that doc's
+instruction.
+
+**The gap.** `arail.nucleus.cards.seal` signs exactly the 5-field legacy
+payload (`dna_id`, `pipeline_run_id`, `chain_hash`, `gate_results`,
+`timestamp`) because that's what the Nucleus Rust `qkz isotope verify`
+binary actually checks (confirmed live against the real binary at
+`qukaizen-nucleus/qkz/target/release/qkz`, T-SEAL-8). But Nucleus's OWN
+current Python signer (`NucleusDNAGenerator._build_signed_payload`,
+`nucleus/certifier/dna.py`) signs a **10-field** payload
+(`schema_version`, `lineage_id`, `model_version`, `base_model`,
+`regression_gate` added on top of the 5), so Nucleus's own current seals
+already fail its own Rust verifier — this is a pre-existing upstream
+defect, not something introduced by ARAIL's build against the contract.
+Neither payload format carries an RFC-8785 JCS guarantee; the Rust side's
+`PythonJsonFormatter` is a byte-for-byte reimplementation of CPython's
+`json.dumps(..., sort_keys=True)` default whitespace, which is fragile
+(any future change to either language's default JSON serialization
+breaks compatibility silently).
+
+**What a future sprint needs to do (in `qukaizen-nucleus`, per the
+architecture's own instruction):** move both the Python signer and the
+Rust verifier to a versioned payload (bump `SEAL_SCHEMA_VERSION`, have
+the verifier branch on it) using RFC-8785 JSON Canonicalization Scheme
+instead of a hand-matched formatter, then re-point ARAIL's `seal.py` at
+the new version once it's stable. Until then, ARAIL intentionally signs
+the narrower 5-field payload and does not attempt to also satisfy
+Nucleus's own 10-field Python verifier.
+
+---
+
+## Model Forge's worker duplicates a slice of the deep-runtime backend's init (thread pinning, KV budget)
+
+**Filed by:** `sprints/2026-09-23-nucleus-sprint-1/ARCHITECTURE.md` §9
+"Added" #3.
+
+**The gap.** `arail.nucleus.providers.queuellm.QueueLLMProvider`
+constructs `aerollm_api.Runtime(model_path, **kwargs)` directly, on a
+dedicated one-worker `ThreadPoolExecutor`, in a phase subprocess — the
+same "pin the unsendable Metal-backed handle to one worker thread"
+pattern the portal's own deep-mode backend
+(`src/arail/router/backends.py::AeroLLMBackend`) already implements, but
+duplicated rather than shared, because `AeroLLMBackend` is a process-wide
+singleton keyed by the `AEROLLM_MODEL` env var with no model parameter
+(F9) — it structurally cannot serve three different models (teacher,
+judge, student) in one Model Forge build.
+
+**What a future sprint should do:** extract a shared
+`queuellm_runtime_factory(model_path, **kw)` (thread-pinning + KV-budget
+construction logic only, no env-var-keyed singleton state) that both
+`AeroLLMBackend.__init__` and `QueueLLMProvider.__init__` call into, so
+the "unsendable handle, one pinned worker thread" invariant has one
+implementation instead of two that could drift.
+
+---
+
+## Model Forge real-runtime wiring (umbrella: MLX training cycle, teacher select, logprob probe, residency, judge, executable checks, hashes, provenance, Gate B preconditions)
+
+**Filed by:** builder session, sprints/2026-09-23-nucleus-sprint-1
+(BUILD_LOG.md deviation 8, the MLX training cycle, commit 18), expanded
+by REVIEW.md rounds 1–3. It is ARCHITECTURE.md §9 "Added" items 9 and 10.
+**Refreshed 2026-09-23 by QA** (REVIEW.md round 3, ASK A10 / R3-A10):
+stale lines were dropped, round-3 tickets were added, and each open item
+carries its QA test reference from TEST_REPORT.md where one exists.
+
+**Status as of the refresh.** Gate A (stub pipeline) is proven. Every
+item below is required before Gate B / item 10 unless marked otherwise.
+While B7 stands, `build.run()` refuses any non-stub build up front, so
+none of these gaps can produce a signed real card today. That is the
+only reason they are not merge-blocking.
+
+### Resolved since the original filing (removed from the list)
+
+- `tokenizer_parity` is now called from `certify.py` whenever both the
+  student and a concretely named teacher resolve. It defaults to `False`
+  with a reason for `teacher: auto`.
+- `pipeline_hash()` is now called from `certify.py`.
+- `training_hash` is a real content hash of the fuse output dir.
+- The LC judge is wired into PC for the stub path, with the judge ≠
+  teacher/student-base identity check before generation.
+
+### Still unwired for a real (non-stub) build
+
+- **Teacher auto-select.** `build.py` never calls
+  `models.select_teacher()`. `PA`/`PA2` resolve
+  `context.get("teacher_name", "")`, which is never written.
+- **Logprob capability probe.** `providers/queuellm.py`'s
+  `probe_logprobs_capability` is never called outside its own tests.
+- **MLX training cycle.** Detailed in the subsection below.
+- **Residency sampler.** The `residency.py` classifier is real, but no
+  sampler runs during a build, and `certify.py` hardcodes
+  `residency_status="unmeasured"`. See the decision item below: today
+  `unmeasured` does not block any decision.
+- **Real judge path.** `_score_open_lc` returns `not_run` when not stub.
+  Also: `fused_student_identity` is not passed to
+  `assert_judge_identity_distinct`.
+- **Executable checks.** No patch-generation task exists, so
+  `patch_applies`/`checkpatch_clean` are always `not_run`, and
+  `composite/v1-open` is auto-selected (capped at COMPATIBLE, §4.9).
+  Retire `v1-open` once patch generation exists. Also fix the `not_run`
+  reason text (round-2 **A7**): today it reads "not available in this
+  generic certify path"; it should say "no patch-generation task in
+  sprint 1; see BACKLOG".
+- **Open eval on cert items.** The LC judge runs on the 10 eyeball
+  prompts only. Move it onto cert items before a `patch_explanation`
+  entry is published (round-2 A10 list).
+- **Runtime provenance.** `runtime_names.runtime_provenance()` is never
+  called. It also hashes `aerollm_api/__init__.py` instead of the
+  extension `.so`, so `source` always reads `local-build` (round 1).
+- **`teacher_hash`.** It is still `best_effort_identity` (a cheap
+  identity or `unresolved:<name>`). Wire `models.content_hash()`.
+
+### Hash and yardstick precision (round-2 A4/A5)
+
+- **A4, `pipeline_hash`:** `training_hyperparams={"target":
+  fidelity_target}` is not a training hyperparameter. Record LoRA rank,
+  lr, cycles, and stop rule. `distill_params` lacks `renorm` and teacher
+  decoding.
+- **A4, `training_hash`:** it omits the adapter. `_dir_content_hash`
+  reads every file fully into memory; switch to the streaming, cached
+  `models.content_hash` before real fused weights exist.
+- **A5:** the `decoding` recorded in `eval_hash` is `Decoding()` at
+  certify time, not what the phases actually used. Record it in the
+  phase outputs and hash that. The existing decoding test perturbs only
+  the recorded side.
+- **Eyeball bytes read at certify time** (round-3 INFO). They are
+  hashed at certify, but PC judged them at PC time, so an edit in
+  between makes `eval_hash` describe prompts PC never judged. Hash them
+  into `metrics.json` at PC. QA pins the current behaviour:
+  `test_eval_hash_follows_eyeball_file_edited_between_pc_and_certify`
+  (xfail).
+- `decision_rule_id` stays `decision_rule/v1` even though `decide()`
+  gained the v1-open cap. That is acceptable because the cap keys on the
+  hashed `composite_formula_id`; say so in the §4.9 text.
+
+### Round-3 tickets
+
+- **R3-A3, LC estimator degenerate cases** (§9 item 10).
+  - `open_lc_judge.score` returns **0.5** whenever Δlen has zero
+    variance: all equal lengths, or a constant delta, including 10/10
+    wins. The 2×2 Hessian is singular on iteration 1.
+  - It returns **1.0** under quasi-separation at n = 10.
+  - Fix: fall back to the intercept-only fit (= raw win rate) when
+    `std(Δlen) == 0`, and add Firth/ridge regularisation or an explicit
+    `unreliable` flag under separation.
+  - QA pins all four probe cases as strict xfails in
+    `tests/nucleus/test_qa_round3.py` (`test_lc_*_degenerate_*`).
+- **R3-A4, preflight's protected-Buddy source mismatch** (§9 item 10).
+  - `runtime_names.buddy_deep_model_env_value()` prefers
+    `QUEUELLM_MODEL`, but `router/backends.py`'s `AeroLLMBackend` reads
+    only `AEROLLM_MODEL`.
+  - With `QUEUELLM_MODEL=<other>` and `AEROLLM_MODEL=<Buddy>`, preflight
+    advises dropping Buddy's actual model.
+  - With both unset, the backend default `Qwen2.5-7B-Instruct-4bit`
+    (also the `ai-engineer` judge target) is unprotected.
+  - Both are advisory text only (`nucleus plan` "WOULD REFUSE — Drop:
+    …"); nothing is evicted.
+  - Fix: protect both env values, plus the backend default when the
+    configured tier's deep backend is live.
+  - Also: `PreflightRefusal.__init__` still asserts the invariant on
+    display names against raw env strings. Check it by identity or
+    remove it.
+  - QA strict xfails: `test_preflight_protects_aerollm_model_when_queuellm_model_differs`,
+    `test_preflight_protects_backend_default_when_env_unset`,
+    `test_plan_output_never_advises_dropping_buddy_under_env_mismatch`.
+- **R3-A5, stub-laundering residuals.**
+  - Certify's stamp cross-check `continue`s past a missing
+    `phase_output/<phase>.json`. With `context.json` forged to
+    `stub: false` and every stamp deleted except a forged `fuse.json`,
+    the card is signed with the lab key and ledgered.
+  - Fix: refuse any missing `_WORKER_PHASES` stamp, and refuse
+    `stub: false` outright while B7 stands.
+  - Variant (b), all stamps forged, is the key-owner-can-sign-anything
+    case, not a key boundary, but the B7 refusal closes it too.
+  - QA strict xfails: `test_certify_refuses_when_phase_stamps_deleted`,
+    `test_certify_refuses_stub_false_while_b7_stands`.
+- **`run_certify` length.** 428 lines after three loops (§9 item 10).
+  Extract `_eval_hash_inputs`, `_assemble_card`, `_provenance_hashes`.
+
+### Decision and evaluation honesty
+
+- **`residency: unmeasured` permits CERTIFIED.** `decide()` caps only on
+  `violated`. Until the sampler runs, a non-v1-open card reaches
+  CERTIFIED with residency never measured. Decide whether `unmeasured`
+  caps at COMPATIBLE. QA pins current behaviour in
+  `test_decide_unmeasured_residency_does_not_cap`.
+- **Spike harness has no real provider** (round 1). `spike.py`'s real
+  path refuses, so the Gate B harness can't run on the M5 as-is. B3
+  "passes" via `classify([])` = `unmeasured`. B3 must never read "pass"
+  when residency was unmeasured on a real run.
+- **Contamination scope** (round 1):
+  - `certify.py` feeds only raw train corpus items; §4.9 requires
+    prompts + teacher outputs (`extract/*.npz` and teacher text).
+  - `contamination.py` holds every train doc's n-gram set in memory:
+    O(train), not O(cert), which misses the "1 M lines < 1 GB" target.
+  - Boundary: QA added `test_contamination_exactly_one_percent_blocks`
+    (8/800 blocks, as designed).
+  - Dates are compared as strings, so a timestamped date on the cutoff
+    day counts as a leak. Strict xfail:
+    `test_contamination_timestamp_on_cutoff_day_is_not_a_leak`.
+
+### Docs and UX (not Gate-B-blocking)
+
+- **A9:** non-fast `verify` can never exit 0 while `chain` is
+  `not_checked`, including for a trusted, untampered card. Document
+  this in `docs/nucleus.md` and print a one-line explanation under
+  `chain: not_checked`. Give the `tampered` badge a style in
+  `forge.html`. QA pins the exit code in
+  `test_cli_verify_non_fast_exits_3_even_when_everything_checkable_matches`.
+- **`--new-cert-version`** is undocumented in `docs/nucleus.md`, and
+  there is no preflight "cert set present" row, so a first build fails
+  at PA2, after Phase A.
+- **`/forge` on minimalist:** without `cryptography`, every badge reads
+  `invalid`. Render a neutral `unchecked` badge instead.
+- **`seal.py`:**
+  - The key file's owner is not checked (§6 #35 says "0600, owner").
+  - A malformed `public_key_hex` raises outside the `try`, so it
+    becomes exit 1 "internal error" instead of `signature: invalid`.
+    QA narrowed this: a malformed `signature_hex` is already handled.
+    Strict xfail: `test_malformed_public_key_hex_reports_invalid_exit_3`.
+- **Round-2 A6:** remove the false "score IDENTICALLY" comments in
+  `tests/nucleus/test_certify.py`. The fused and base stubs differ;
+  KNOWN_ISSUE there is fused 0.0625 < base 0.4167 mean F1.
+- **`baselines.base_student."closed.mean_f1"`** is written unrounded,
+  while every other card float has 6 dp. This is cosmetic (round-3 INFO).
+
+### Found by QA (2026-09-23, TEST_REPORT.md), all LOW
+
+- **F-QA-3, `$`-anchored validators accept a trailing newline.**
+  - Affected: `paths._BUILD_ID_RE`/`_SHARD_RE`/`_SEMVER_RE`,
+    `domain._SLUG_RE`, and `forge_api`'s copies. All use `re.match(r"^…$")`.
+  - No traversal is possible, but newline-bearing dir names can be minted.
+  - Fix: use `re.fullmatch` or `\Z`.
+  - Strict xfail: `test_validators_reject_trailing_newline`.
+- **F-QA-4, `build-report.md` is not covered by the seal.** `/forge`
+  renders it under the card's badge, so a hand-edited report still
+  shows `trusted`. Hash it into the card (or gate_results), or label it
+  "unsigned" in the viewer. Pinned by
+  `test_edited_build_report_is_not_covered_by_the_seal`.
+- **F-QA-5, `nucleus verify` never reads `seal.json`.** It checks only
+  the card's embedded `signed:` block, so a corrupted `seal.json` (the
+  file `qkz isotope verify` reads) goes unnoticed. Compare the two, or
+  verify both. Pinned by
+  `test_nucleus_verify_reads_the_card_seal_not_seal_json`.
+- **F-QA-6, `verify <shard>@<ver>` skips shard/semver validation**, so
+  `../../x@y` resolves outside FORGE_ROOT. It's read-only and
+  operator-supplied today, but must be fixed before the deferred MCP
+  tools pass model-chosen targets. Strict xfail:
+  `test_verify_shard_at_version_rejects_traversal`.
+- **F-QA-7, failure-mode grace.** Both cases fail closed with no card,
+  but neither names the fix the way a refusal would:
+  - `certify` on a well-formed but unknown build id prints
+    `internal error: [Errno 2] … context.json` with exit 1, where
+    `status` gives a plain "no such build" with exit 3.
+  - A missing `eval/metrics.json` likewise exits 1.
+
+  Pinned by `test_certify_unknown_but_well_formed_build_id_fails_without_traceback`
+  and `test_certify_missing_metrics_json_fails_closed_without_a_card`.
+
+### What a future sprint should do
+
+Wire the items above into `build.py`'s real-mode phase bodies and
+`certify.py`'s card assembly, in this order:
+
+1. Teacher auto-select, which unblocks a real Phase A.
+2. The logprob probe as a preflight row.
+3. The MLX training cycle (below).
+4. Residency sampling during PB/PC.
+5. The real judge and the LC estimator fix (R3-A3).
+6. Patch generation and executable checks, then retire v1-open.
+7. The A4/A5 hash precision fixes and runtime provenance.
+8. Close R3-A4 and R3-A5 before B7 is lifted.
+
+Verify each piece on the M5 alongside the `requires_mlx` markers. Flip
+the corresponding QA xfails to plain tests as each item lands, since
+they are strict and will fail loudly when fixed.
+
+---
+
+### The MLX training-cycle stub, specifically
+
+`train/mlx_kd.py` (commit 17) implements the per-step MLX loss/grad
+computation (`kd_train_step`) and model loading
+(`load_student_for_training`), matching `train/kd_loss.py`'s numpy
+reference.
+
+`build.py`'s `_phase_train` wires `arbitrage.run()` to a real trainer
+only for the stub path (`providers.stub.StubTrainer`). The real branch,
+`_mlx_train_cycle_fn`, always refuses with a clear message. That was a
+deliberate scope decision (Gate A needs only the stub path), not an
+oversight.
+
+**What a future sprint needs to do:** complete `_mlx_train_cycle_fn`:
+
+1. Read train shards from `run_dir/extract/*.npz` in batches.
+2. Call `train.mlx_kd.load_student_for_training` once per build, not
+   once per cycle.
+3. Run `kd_train_step` plus an `mlx.optimizers.Adam` (or similar) step
+   per batch.
+4. Checkpoint the adapter each cycle.
+5. Run a lightweight MLX-served, dev-only proxy eval (ARCHITECTURE.md
+   §3, `arbitrage.dev_eval_runtime: mlx`) to produce a real
+   `dev_proxy_composite`.
+
+Required before Gate B / item 10. Verify on the M5 alongside the
+`requires_mlx` markers.
+
+---
+
+## `tests/nucleus` combined with the full root test suite in one pytest process is order-dependent
+
+**Filed by:** builder session, `sprints/2026-09-23-nucleus-sprint-1/BUILD_LOG.md` "Review loop 4 (F3)",
+2026-09-24. Originally reported as TEST_REPORT.md finding F3 (round 1, `90fa766d`); this entry carries the
+follow-up root-cause evidence and the fallback taken (`ARCHITECTURE.md` §7.2).
+
+**The symptom.** Running `pytest tests -q` (the whole repo, ~350 root `tests/test_*.py` files plus
+`tests/dbspec tests/eval tests/nucleus tests/portal tests/registry tests/router tests/setup_ladder`, one
+process) fails 18 tests that pass in isolation and pass when run alone: `test_r1_r3_chat_models.py` ×4,
+`test_aerollm_model_ready.py` ×3, `test_deep_default_and_tier.py` ×2, `test_model_ux_phase0_warmth_probe.py`
+×2, `test_qa_model_ux_memory_and_eject_fidelity.py` ×2, `test_qa_provider_dropdown_paranoid.py` ×2,
+`test_b1_cloud_gallery_contract.py` ×1, `test_runtime_profile_api.py::test_post_emits_activity_event` ×1,
+plus `test_cli_qa_edge.py::test_q1_restart_…` in one of two paired runs. They pass when the same list runs
+without `tests/nucleus` present, and `tests/nucleus` + all 18 victim files together (582 items) also pass —
+the trigger needs `tests/nucleus` **and** the full ~350-file root prefix at the same time.
+
+**What this loop confirmed, precisely (evidence a future session can start from):**
+
+1. **The actual exception**, captured by wrapping `arail.portal.app._get_primary_router` with a scratch
+   pytest plugin and running the exact failing ordering once: `ModelRouter.__init__` picks the `mlx` backend
+   (Apple Silicon auto-detect) and `AeroLLMBackend.__init__`-equivalent MLX loader calls
+   `os.getenv("MODEL_NAME", "mlx-community/Qwen2.5-3B-Instruct-4bit")`, which returns the live string
+   `"ai-engineer:latest"` — an Ollama tag, not a HuggingFace repo id — so `mlx_lm.utils._download` raises
+   `HFValidationError: Repo id must use alphanumeric chars, '-', '_' or '.' ...`. `api_chat_models`'s
+   `except Exception` fallback then returns a 3-key payload, and every victim test's assertion on the missing
+   keys (`deep`, `gallery`, `optional_backends`, ...) is what actually fails.
+2. **`tests/nucleus` does not do this.** `grep -rn "arail.portal\|arail.registry\|arail.router" src/arail/nucleus
+   tests/nucleus` → zero hits (one unrelated docstring mention), and neither `arail.nucleus` nor
+   `tests/nucleus` sets `MODEL_NAME`/`MODEL_BACKEND`/`AEROLLM_MODEL` anywhere (grep confirmed). A
+   `pytest_runtest_setup` hookwrapper plugin that snapshots `MODEL_NAME`/`MODEL_BACKEND`/`AEROLLM_MODEL`/
+   `QUEUELLM_MODEL`/`ARAIL_MODELS_DIR`/`ARAIL_DATA_DIR` **before each test's own fixtures run** (i.e., only a
+   real leak from the *previous* test would show up) found **zero** leaks anywhere across a full
+   `tests/nucleus`-only run (443 passed, 4 skipped, 14 xfailed).
+3. **The two real, non-monkeypatch writers of `MODEL_NAME`/`AEROLLM_MODEL` are both outside `arail.nucleus`,
+   in `arail.model_defaults.apply()` (`src/arail/model_defaults.py:76,82,85`) and
+   `arail.portal.app._export_registry_env()` (`src/arail/portal/app.py:6899,6903`, called from the FastAPI
+   startup handler, i.e. on every `TestClient(app)` lifespan start) — both are **intentional, documented bare
+   `os.environ[...] =` writes that bypass `monkeypatch`** ("`apply()` writes MODEL_NAME/AEROLLM_MODEL straight
+   to os.environ — by design... monkeypatch's own teardown can't undo it", `tests/test_model_defaults.py`'s
+   own `_clean_env` docstring, which documents this exact failure signature happening once before, fixed by a
+   restore-by-hand fixture in that one file only). `_export_registry_env()` stamps `MODEL_NAME` from the
+   process-lifetime `arail.registry` singleton's tier0 entry — if that singleton is ever left holding
+   `model_id="ai-engineer:latest"`/`backend="ollama_native"` (the fixture default several `tests/registry/*`
+   tests set up) at the moment some *other* test's `TestClient(app)` triggers a fresh startup event, the next
+   `MODEL_NAME` env write is unconditional and untracked by that test's own `monkeypatch`.
+4. **Given (2) and (3), the likely mechanism is not a leak owned by `tests/nucleus`.** It is a pre-existing
+   test-isolation gap in `arail.portal.app`/`arail.model_defaults`/`arail.registry`'s bare-`os.environ`/
+   process-singleton pattern, which `tests/nucleus`'s ~40 real-subprocess-spawning tests only *expose* by
+   shifting wall-clock/thread/GC scheduling enough for the race to land badly — matching TEST_REPORT.md F3's
+   own characterization ("a resource-class interaction... not a state leak I can attribute to a specific line
+   in `tests/nucleus`").
+
+**Why not fixed this session.** The actual fix belongs in `arail.portal.app`/`arail.registry`/
+`arail.model_defaults` (restore-by-hand cleanup around every bare `os.environ` write and/or a reliable
+per-test registry-singleton reset, mirroring `tests/test_model_defaults.py`'s own `_clean_env` fixture) — files
+outside this sprint's scope (`sprints/2026-09-23-nucleus-sprint-1/BUILD_LOG.md`'s plan). Landing that fix here
+would be scope drift into a pre-existing, cross-cutting test-hygiene defect that predates and is independent of
+Model Forge.
+
+**Fallback landed instead:** `ARCHITECTURE.md` §7.2 documents that `tests/nucleus` must always run as its own
+pytest invocation (which `.github/workflows/nucleus-tests.yml` already does — there is no CI job anywhere that
+runs the combined full suite as one process) and that `pytest tests -q` is a local diagnostic only, not a merge
+gate.
+
+**What a future sprint should do:** reproduce step 1's failing ordering with the scratch diagnostic plugin
+above (`_get_primary_router` wrapped to print the real exception) and step 3's leads; add a `monkeypatch`-safe
+or restore-by-hand-cleaned wrapper around `arail.model_defaults.apply()` and
+`arail.portal.app._export_registry_env()`'s env writes, and/or a `reset_registry()` autouse fixture at the
+root `tests/conftest.py` level (not just `tests/registry/`), so the registry singleton can never survive
+between tests regardless of which file touches it.
+
+**QA round 2 correction (2026-09-24, TEST_REPORT.md "Round 2"). Point 4 above is wrong: there *is* a
+nucleus-owned trigger. It is a module, not an env var.** Step 2's snapshot covered env vars only. A
+`sys.modules` snapshot finds it:
+
+- **Nucleus imports `mlx_lm` in-process.** In the failing ordering, `mlx_lm` enters `sys.modules` during
+  `tests/nucleus/test_build_phases.py::test_build_run_end_to_end`. `build.run()` →
+  `preflight.run_preflight()`'s default capability probes → `preflight._probe_mlx_lm_version()` does a real
+  `import mlx_lm`, and it stays imported for the rest of the process. In the non-nucleus ordering, `mlx_lm`
+  is **not** in `sys.modules` when the first victim starts.
+- **The `MODEL_NAME` leak is not the differentiator.** The stray `MODEL_NAME="ai-engineer:latest"` write
+  happens **identically in both orderings**, after
+  `tests/test_aerollm_compute_source.py::test_select_aerollm_allowed_airgapped_when_built`.
+  `tests/test_models_boot_endpoint.py` resets it to `llama-ai-eng` before `test_r1_r3_chat_models.py` runs, so
+  at the r1_r3 victims `MODEL_NAME` is `llama-ai-eng` in both orderings.
+- **Decisive experiment.** Take the non-nucleus prefix (which passes) plus the victim file:
+  - put a no-op test first → **0/4** r1_r3 victims fail;
+  - put a single test that only calls `arail.nucleus.preflight._probe_mlx_lm_version()` first → **4/4** fail.
+
+So the nucleus-side condition is the preloaded `mlx_lm`, not scheduling or GC.
+
+**Mechanism:**
+
+1. With `mlx_lm` already in `sys.modules`, `router.core._is_importable("mlx_lm")` is a no-op success.
+2. `ModelRouter._auto_detect()` then returns `mlx`.
+3. The MLX backend is constructed from whatever `MODEL_NAME` holds (an Ollama tag either way) and raises.
+4. `api_chat_models` falls back to its 3-key payload.
+
+**Still undetermined:** why a *fresh* `import mlx_lm` at that point in the non-nucleus ordering does not lead
+to the same outcome. Most likely something in the root prefix makes the fresh import fail, or caches an
+earlier router. Either way it is outside nucleus.
+
+**Pinned by** `tests/nucleus/test_qa_round3.py::test_mlx_lm_version_probe_does_not_import_mlx_lm_into_the_process`
+(strict xfail; skipped where `mlx_lm` is absent, e.g. CI's ubuntu runner).
+
+**Two fixes, either sufficient for the nucleus half:**
+
+- **(a) production:** probe the version without importing: `importlib.util.find_spec("mlx_lm")` plus
+  `importlib.metadata.version("mlx_lm")`. This is also cheaper for `nucleus plan` on minimalist, since a real
+  `import mlx_lm` costs ~1.5 s and initialises Metal.
+- **(b) tests:** have `build.run` tests pass `capability_probes` or monkeypatch the probe.
+
+The fallback in §7.2 remains valid for CI: CI runs `tests/nucleus` alone, on ubuntu, where `_auto_detect`
+never picks `mlx`.

@@ -45,8 +45,8 @@ results table at the bottom.
 | minimalist  | MLX          | Default path on Apple Silicon — most users will see this        |
 | minimalist  | CPU          | Intel Mac / Linux without GPU / locked-down corporate laptop    |
 | minimalist  | CUDA         | Linux desktop with NVIDIA — verify Ollama-on-Linux path         |
-| maximus     | MLX          | AeroLLM install on Apple Silicon — the deep-mode happy path     |
-| maximus     | CUDA         | AeroLLM CUDA absent → AirLLM fallback notice fires              |
+| maximus     | MLX          | QueueLLM install on Apple Silicon — the deep-mode happy path     |
+| maximus     | CUDA         | QueueLLM CUDA absent → AirLLM fallback notice fires              |
 
 ### Compat shim
 
@@ -169,10 +169,10 @@ Permission denied: setup.log                         # cloned to a path the user
 
 - pip installs `jupyterlab`, `anthropic`, `langchain`, `langgraph`,
   `pip-audit`.
-- On Apple Silicon: AeroLLM probe runs; either finds `aerollm_api`
+- On Apple Silicon: QueueLLM probe runs; either finds `aerollm_api`
   importable or prints the sibling-repo build hint. Setup completes
   either way.
-- On CUDA: AeroLLM CUDA absent → fallback notice fires, AirLLM stays
+- On CUDA: QueueLLM CUDA absent → fallback notice fires, AirLLM stays
   uninstalled unless `ARAIL_INSTALL_AIRLLM=1`.
 - Portal restart shows the additional nav items (Admin, Workbench).
 
@@ -225,7 +225,7 @@ These are expected at v1.0.0; they're tracked but not blockers:
   the GitHub Release mirror, setup falls back to `qwen2.5:1.5b` and
   logs why. Run `scripts/check_ai_eng_artifact.sh` to test artifact
   availability.
-- AeroLLM CUDA absent on Linux Maximus — until aerollm ships the CUDA
+- QueueLLM CUDA absent on Linux Maximus — until QueueLLM ships the CUDA
   backend; AirLLM (opt-in) is the documented fallback.
 - A handful of pre-existing test failures in `pytest tests/`
   (opencode lifecycle kwarg, dashboard layout v2, swarm goal

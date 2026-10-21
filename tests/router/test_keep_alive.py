@@ -2,8 +2,17 @@
 
 Sprint: 2026-08-11-two-slot-chat-models Part 3 rewrote _keep_alive from a
 plain env-only staticmethod into a per-model instance method — the
-resident (registry tier0) model now pins ("-1") by default; any other
-Ollama model keeps the old 2h. Every test here isolates the registry
+resident (registry tier0) model now pins by default; any other
+Ollama model keeps the old 2h.
+
+CORRECTED 2026-08-17: these tests originally asserted the wire value was
+the STRING "-1". That is exactly the value Ollama rejects — it parses a
+string keep_alive as a Go duration, and "-1" carries no unit, so every
+/api/chat call answered 400 {"error":"time: missing unit in duration
+\"-1\""} and the entire local model lane was dead. The pinned value is
+now the JSON number -1 (seconds; negative means keep loaded forever).
+The tests had encoded the implementation rather than what the server
+accepts, so they passed while the feature was completely broken. Every test here isolates the registry
 (tmp file + fresh singleton) so `_is_registry_tier0_model()` never reads
 or seeds a developer's real lab/data/model_registry.json.
 """
@@ -67,6 +76,8 @@ def test_empty_env_omits_keep_alive(backend, monkeypatch):
 
 
 def test_pin_forever_passthrough(backend, monkeypatch):
+    """An operator writing -1 means "forever"; it must reach the wire as
+    a number, never as the bare string Ollama refuses."""
     monkeypatch.setenv("ARAIL_OLLAMA_KEEP_ALIVE", "-1")
     backend.complete("hi", max_tokens=8)
     # Ollama >=0.32 rejects the *string* "-1" (400 "missing unit in
@@ -206,10 +217,80 @@ def test_chat_gallery_new_path_gets_keep_alive_too(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# The wire guard: complete()/stream_complete() normalize keep_alive at the
+# request boundary, so NO producer — env, pin, a subclass, a drifted fork of
+# _keep_alive on another branch — can put the bare string "-1" on the wire.
+# (Ollama parses a string keep_alive as a Go duration; "-1" has no unit and
+# 400s the call — the failure that painted the dashboard's "unhealthy"
+# banner over a perfectly healthy lab.)
+# ---------------------------------------------------------------------------
+
+class _StreamingCapturingSession(_CapturingSession):
+    """Adds the context-manager + iter_lines surface stream_complete needs."""
+
+    def post(self, url, headers=None, json=None, timeout=None, stream=False):
+        self.bodies.append(json)
+
+        class _R:
+            status_code = 200
+
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"message": {"content": "ok"}, "eval_count": 1,
+                        "model": "m"}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def iter_lines(self, decode_unicode=False):
+                return iter(['{"message":{"content":"ok"},"done":true,'
+                             '"eval_count":1,"model":"m"}'])
+        return _R()
+
+
+def test_wire_guard_normalizes_a_drifted_keep_alive_override(backend, monkeypatch):
+    """Simulates the fork drift that re-shipped this bug: _keep_alive
+    resolving to the bare string "-1". The body must still carry the
+    JSON number."""
+    monkeypatch.delenv("ARAIL_OLLAMA_KEEP_ALIVE", raising=False)
+    monkeypatch.setattr(backend, "_keep_alive", lambda: "-1")
+    backend.complete("hi", max_tokens=8)
+    sent = backend._session.bodies[0]["keep_alive"]
+    assert sent == -1
+    assert not isinstance(sent, str)
+
+
+def test_wire_guard_leaves_real_durations_alone(backend, monkeypatch):
+    monkeypatch.delenv("ARAIL_OLLAMA_KEEP_ALIVE", raising=False)
+    monkeypatch.setattr(backend, "_keep_alive", lambda: "30s")
+    backend.complete("hi", max_tokens=8)
+    assert backend._session.bodies[0]["keep_alive"] == "30s"
+
+
+def test_stream_body_keep_alive_is_normalized_too(monkeypatch):
+    monkeypatch.setenv("MODEL_NAME", "ai-engineer:latest")
+    monkeypatch.delenv("MODEL_API_BASE", raising=False)
+    monkeypatch.setenv("ARAIL_OLLAMA_KEEP_ALIVE", "-1")
+    be = OllamaNativeBackend()
+    be._session = _StreamingCapturingSession()
+    list(be.stream_complete("hi", max_tokens=8))
+    sent = be._session.bodies[0]["keep_alive"]
+    assert sent == -1
+    assert not isinstance(sent, str)
+
+
+# ---------------------------------------------------------------------------
 # FM7: Ollama's own error text must reach the caller, not a bare "400"
 # ---------------------------------------------------------------------------
 
 class _ErrSession:
+    """Always answers with an HTTP error whose JSON body carries ``payload``."""
+
     def __init__(self, status=400, payload=None):
         self.status, self.payload = status, payload
 
@@ -230,8 +311,9 @@ class _ErrSession:
             def __enter__(self):
                 return self
 
-            def __exit__(self, *a):
+            def __exit__(self, *exc):
                 return False
+
         return _R()
 
 

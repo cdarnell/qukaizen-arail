@@ -63,7 +63,7 @@ def test_resident_picker_header_is_honest():
 
 def test_deep_picker_header_is_honest():
     text = _chat_html_text()
-    assert "sec.innerHTML = `<div class=\"head\"><span>Deep model · aeroLLM</span>" in text
+    assert "sec.innerHTML = `<div class=\"head\"><span>Deep model · QueueLLM</span>" in text
 
 
 def test_deep_rail_subtitle_does_not_claim_streamed_from_disk():
@@ -72,3 +72,4 @@ def test_deep_rail_subtitle_does_not_claim_streamed_from_disk():
     header claim fixed alongside the header itself."""
     text = _chat_html_text()
     assert "streamed from disk via AeroLLM" not in text
+    assert "streamed from disk via QueueLLM" not in text

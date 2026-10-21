@@ -29,6 +29,7 @@ import json
 import logging
 import os
 import shutil
+import subprocess
 import threading
 import time
 from pathlib import Path
@@ -38,6 +39,7 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
+from arail import agent_context
 from arail import world_forge as wf
 from arail import world_mount as wm
 from arail.activity import activity_log
@@ -168,19 +170,25 @@ async def _run_forge(params: wf.ForgeParams, brain: str = "local") -> None:
     global _forge_state, _forge_result
     try:
         router_ = _curation_router(brain)
-        if brain in _CLOUD_BRAINS:
-            # Frontier API forge — no local model residency, so no
-            # inference_slot: the cloud calls run beside chat's GPU work.
-            result = await asyncio.to_thread(
-                wf.forge_world, params, router=router_,
-                progress_cb=_forge_progress, cancel=_forge_cancel,
-            )
-        else:
-            async with scheduler.inference_slot("world-forge"):
+        # L3 (ARCHITECTURE.md): world_routes is not an agent -- system_call
+        # under the same label already used for the inference_slot, so
+        # attribution and slot metrics agree on what this work is called.
+        # dac_world (wf) itself stays ARAIL-free (no import arail), so the
+        # wrap has to live here, around the to_thread hop that reaches it.
+        with agent_context.system_call("world-forge"):
+            if brain in _CLOUD_BRAINS:
+                # Frontier API forge — no local model residency, so no
+                # inference_slot: the cloud calls run beside chat's GPU work.
                 result = await asyncio.to_thread(
                     wf.forge_world, params, router=router_,
                     progress_cb=_forge_progress, cancel=_forge_cancel,
                 )
+            else:
+                async with scheduler.inference_slot("world-forge"):
+                    result = await asyncio.to_thread(
+                        wf.forge_world, params, router=router_,
+                        progress_cb=_forge_progress, cancel=_forge_cancel,
+                    )
         _forge_result = result
         _forge_state = {**_forge_state, "state": "done",
                         "terms_found": len(result.terms),
@@ -499,6 +507,137 @@ async def api_world_delete(slug: str, request: Request):
     return {"ok": True}
 
 
+# ═══════════════════════════ PUSH TO TEAM ══════════════════════════════════
+# The mounted world's catalog directory (WORLDS_DIR/<slug>/) already IS a
+# valid dac.world-bundle/v1 bundle — manifest.json + the six sealed siblings
+# are written at forge-confirm time and re-sealed on every terms edit. No new
+# packaging step exists here on purpose: this route re-verifies the seal
+# (defense in depth before anything leaves ARAIL) and hands the same
+# directory straight to team-adopt, exactly the way a human would from a
+# terminal. If verify_seal ever fails here, that's a real bug elsewhere in
+# the mount/reseal path, not something this route should paper over.
+
+TEAM_REPO_ENV = "TEAM_REPO_PATH"
+_DEFAULT_TEAM_REPO = os.path.expanduser("~/ProJects/qukaizen-team")
+
+
+def _team_repo_dir() -> Path:
+    return Path(os.getenv(TEAM_REPO_ENV, _DEFAULT_TEAM_REPO)).expanduser()
+
+
+@router.get("/api/admin/team/push-status")
+async def api_team_push_status():
+    """What the 'Push to TEAM' panel needs: the currently mounted world (if
+    any), whether team-adopt is reachable, and which TEAM worlds exist to
+    push into."""
+    record = wm.current_mount()
+    mounted = record.world if record else None
+
+    team_repo = _team_repo_dir()
+    team_adopt = team_repo / "bin" / "team-adopt"
+    worlds_dir = team_repo / "worlds"
+    team_worlds: list[str] = []
+    if worlds_dir.is_dir():
+        team_worlds = sorted(
+            p.name for p in worlds_dir.iterdir()
+            if p.is_dir() and (p / "world.json").exists()
+        )
+
+    return {
+        "mounted_world": mounted,
+        "team_repo": str(team_repo),
+        "team_adopt_found": team_adopt.exists(),
+        "team_worlds": team_worlds,
+    }
+
+
+@router.post("/api/admin/team/push")
+async def api_team_push(request: Request):
+    """Push the currently mounted ARAIL world into a TEAM world as a
+    reference shelf. Same shape as run-scan / the scheduler's run-now:
+    subprocess, captured output, a receipt-style JSON back to the caller.
+
+    Body: {"team_world": "<slug under qukaizen-team/worlds/>"} — optional;
+    omitted means a dry run (team-adopt prints its report, writes nothing).
+    """
+    if (rej := _csrf_reject(request)) is not None:
+        return rej
+
+    record = wm.current_mount()
+    if record is None:
+        return _err(400, {"error": "no_world_mounted",
+                           "message": "Mount a world before pushing it to TEAM."})
+
+    catalog = _mounted_catalog_dir()
+    if catalog is None:
+        return _err(404, {"error": "catalog_missing",
+                           "message": f"Mount record points at '{record.world}' but its "
+                                      "catalog directory has no manifest.json."})
+
+    # Re-verify the seal right before this bundle leaves ARAIL. Reads the
+    # same six files team-adopt is about to read.
+    try:
+        bundle = wm.load_bundle(catalog)
+    except wm.BundleError as e:
+        return _err(422, {"error": "bundle_unreadable", "message": e.user_message})
+
+    seal = wm.verify_seal(bundle)
+    if not seal.ok:
+        activity_log.emit("team-push",
+            f"Refused to push '{record.world}' — seal check failed: {seal.user_message}",
+            "error")
+        return _err(422, {"error": "seal_mismatch", "message": seal.user_message})
+
+    body: dict = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+    team_world = str(body.get("team_world") or "").strip()
+
+    team_repo = _team_repo_dir()
+    team_adopt = team_repo / "bin" / "team-adopt"
+    if not team_adopt.exists():
+        return _err(404, {"error": "team_adopt_not_found",
+                           "message": f"No team-adopt at {team_adopt}. Set {TEAM_REPO_ENV} "
+                                      "if qukaizen-team lives somewhere else on this machine."})
+
+    cmd = ["python3", str(team_adopt), str(catalog)]
+    into_dir = None
+    if team_world:
+        if not wm._SLUG_RE.match(team_world):
+            return _err(400, {"error": "bad_team_world"})
+        into_dir = team_repo / "worlds" / team_world
+        if not (into_dir / "world.json").exists():
+            return _err(404, {"error": "team_world_not_found",
+                               "message": f"No world.json at {into_dir}."})
+        cmd += ["--into", str(into_dir)]
+
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    except subprocess.TimeoutExpired:
+        return _err(504, {"error": "timeout", "message": "team-adopt did not finish in 30s."})
+    except OSError as e:
+        return _err(500, {"error": "launch_failed", "message": str(e)})
+
+    ok = proc.returncode == 0
+    activity_log.emit(
+        "team-push",
+        (f"Pushed '{record.world}' to TEAM"
+         + (f" world '{team_world}'" if team_world else " (dry run)")
+         + (" — ok" if ok else f" — exit {proc.returncode}")),
+        "info" if ok else "error",
+    )
+    return {
+        "ok": ok,
+        "exit_code": proc.returncode,
+        "dry_run": not bool(team_world),
+        "world": record.world,
+        "team_world": team_world or None,
+        "output": (proc.stdout + proc.stderr)[-6000:],
+    }
+
+
 # ═══════════════════════════ TERMS EDITOR ═════════════════════════════════
 
 _reseal_lock = asyncio.Lock()
@@ -743,8 +882,9 @@ async def api_term_draft(request: Request):
         out["source"] = wf._source_tag_from_model(model_name)
         return out
 
-    async with scheduler.inference_slot("term-draft"):
-        proposal = await asyncio.to_thread(_draft)
+    with agent_context.system_call("term-draft"):
+        async with scheduler.inference_slot("term-draft"):
+            proposal = await asyncio.to_thread(_draft)
     return {"proposal": proposal}
 
 
@@ -765,10 +905,11 @@ async def _run_review(bundle_dir: Path, spec: dict, terms: list[dict]) -> None:
     display = str(spec.get("display_name", world))
     try:
         router_ = _review_router()
-        async with scheduler.inference_slot("world-review"):
-            flags = await asyncio.to_thread(
-                wf.reconcile_terms, spec, terms,
-                router=router_, limit=REVIEW_BATCH, cancel=_review_cancel)
+        with agent_context.system_call("world-review"):
+            async with scheduler.inference_slot("world-review"):
+                flags = await asyncio.to_thread(
+                    wf.reconcile_terms, spec, terms,
+                    router=router_, limit=REVIEW_BATCH, cancel=_review_cancel)
         doc = {
             "schema": REVIEW_SCHEMA,
             "world": world,
@@ -886,16 +1027,17 @@ async def _run_grow(bundle_dir: Path, spec: dict, terms: list[dict], brain: str)
             global _grow_state
             _grow_state = {**_grow_state, "stage": stage, "message": note}
 
-        async with scheduler.inference_slot("world-grow"):
-            _grow_state = {**_grow_state, "stage": "reviewing"}
-            flags = await asyncio.to_thread(
-                wf.reconcile_terms, spec, terms, router=router_,
-                limit=GROW_REVIEW_BATCH, cancel=_grow_cancel)
-            _corrected, changes = wf.apply_corrections(terms, flags, declared)
-            _grow_state = {**_grow_state, "stage": "growing"}
-            new_terms = await asyncio.to_thread(
-                wf.propose_new_terms, spec, terms, router=router_,
-                limit=GROW_NEW_BATCH, cancel=_grow_cancel)
+        with agent_context.system_call("world-grow"):
+            async with scheduler.inference_slot("world-grow"):
+                _grow_state = {**_grow_state, "stage": "reviewing"}
+                flags = await asyncio.to_thread(
+                    wf.reconcile_terms, spec, terms, router=router_,
+                    limit=GROW_REVIEW_BATCH, cancel=_grow_cancel)
+                _corrected, changes = wf.apply_corrections(terms, flags, declared)
+                _grow_state = {**_grow_state, "stage": "growing"}
+                new_terms = await asyncio.to_thread(
+                    wf.propose_new_terms, spec, terms, router=router_,
+                    limit=GROW_NEW_BATCH, cancel=_grow_cancel)
 
         merged = terms + new_terms
         # Re-gate + reseal + swap (auto-applied; fully reversible via the log).

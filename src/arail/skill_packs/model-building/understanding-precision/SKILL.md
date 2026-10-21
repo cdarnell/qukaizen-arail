@@ -16,7 +16,7 @@ when_not_to_use:
 # Understanding precision
 
 Procedural knowledge for reasoning about numerical precision in
-model weights. Critical skill for anyone optimizing AeroLLM or
+model weights. Critical skill for anyone optimizing QueueLLM or
 picking a quantization strategy.
 
 ## Two representations
@@ -56,9 +56,9 @@ so the weight range fits inside the integer range.
 3. **Granularity** — per-tensor / per-channel / per-block scale
    factors. Finer = better quality at low bits, more metadata.
 
-## Why this matters for AeroLLM
+## Why this matters for QueueLLM
 
-AeroLLM reads every layer from disk on every token. Layer size
+QueueLLM reads every layer from disk on every token. Layer size
 scales with precision. Halving bits halves read time.
 
 - 400B FP16 = 800 GB → 800 GB/token of disk read
@@ -89,7 +89,7 @@ is near-INT4 size + near-FP16 quality.
 3. Swap to your candidate quantization (e.g., INT4 per-block, 64-
    weight groups). Re-run the same evals.
 4. Report as a delta: "INT4 per-block-64: +0.3% loss vs FP16,
-   -4× disk, -3.5× AeroLLM tokens-per-minute."
+   -4× disk, -3.5× QueueLLM tokens-per-minute."
 5. A quality delta under 0.5% on relevant benchmarks is usually
    indistinguishable from run-to-run noise. Anything over 2% is
    user-visible.
@@ -98,9 +98,9 @@ is near-INT4 size + near-FP16 quality.
 
 - **MLX fast path (laptop)** — INT4 per-block. Great chat
   throughput, acceptable quality.
-- **AeroLLM deep path (frontier)** — INT4 per-block is the ceiling
+- **QueueLLM deep path (frontier)** — INT4 per-block is the ceiling
   you can run on a MacBook's disk. Mixed precision is the next
-  lever in the AeroLLM optimization ladder.
+  lever in the QueueLLM optimization ladder.
 - **Training** — FP32 or BF16 exclusively. Don't train at INT.
 
 ## Source links

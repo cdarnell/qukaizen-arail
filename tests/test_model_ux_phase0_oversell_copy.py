@@ -55,7 +55,7 @@ def _catalog_text() -> str:
 # attributes streaming to AirLLM, not aeroLLM) and must NOT trip this —
 # hence an exact-phrase blacklist rather than a same-line co-occurrence
 # heuristic (which would false-positive on the honest contrastive copy).
-_BANNED_PHRASES = (
+_BANNED_PHRASES_OLD_NAME = (
     "aerollm layer-stream",
     "aerollm's native selective",
     "aerollm's rust runtime ships native selective",
@@ -70,6 +70,21 @@ _BANNED_PHRASES = (
     "ssd (streamed)",
     "streamed from disk via aerollm",
 )
+
+# The display name is now QueueLLM, so every banned phrase that names the
+# old engine also needs a QueueLLM twin; otherwise these negative checks
+# pass vacuously while oversell copy slips in under the new name.
+_BANNED_PHRASES = _BANNED_PHRASES_OLD_NAME + tuple(
+    p.replace("aerollm", "queuellm")
+    for p in _BANNED_PHRASES_OLD_NAME
+    if "aerollm" in p
+)
+
+
+def test_every_banned_aerollm_phrase_has_a_queuellm_twin():
+    for phrase in _BANNED_PHRASES_OLD_NAME:
+        if "aerollm" in phrase:
+            assert phrase.replace("aerollm", "queuellm") in _BANNED_PHRASES, phrase
 
 
 def _lines_with_banned_phrases(text: str) -> list[str]:

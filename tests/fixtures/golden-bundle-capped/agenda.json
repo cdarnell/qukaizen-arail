@@ -1,0 +1,13 @@
+{
+  "schema": "dac.world-agenda/v1",
+  "world": "golden-capped",
+  "watches": [
+    {
+      "node": "golden-capped",
+      "feeds": [
+        "model:test"
+      ],
+      "cadence": "occasional"
+    }
+  ]
+}

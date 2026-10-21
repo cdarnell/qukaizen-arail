@@ -506,6 +506,64 @@ with a unique module name (`arail.agents._folder_<id>`) so the
 bundled `_builtin_<id>.py` never clashes with the PKB copy in
 `sys.modules`.
 
+### Attribution and hold contract
+
+Since sprint 2026-09-20-buddy-front-and-center, every model call your agent
+makes is traced and can be held — and for anything reachable through the
+loader's own entry points, this happens **without you writing a line of
+attribution or halt-checking code.**
+
+**Attribution, for free, if you go through `.start()`.** The loader wraps
+`instance.start()` in `arail.agent_context.agent_call(agent_id)` before
+calling it. Because `asyncio.create_task` copies the calling
+`contextvars.Context`, an agent that spawns its own async loop *inside*
+`start()` — every shipped agent does this — has that whole loop, and every
+model call made from it (directly, or via `asyncio.to_thread`), attributed
+to your agent id for its entire life. You do not call `agent_call()`
+yourself for this path. This is deliberate: a new agent author cannot
+forget something they never had to write.
+
+**If your model call happens somewhere the loader doesn't reach** — a
+helper module invoked from outside `start()`/`dream()`, a background thread
+you spawn yourself, or anything similar — it will not be attributed
+automatically, and it will not be silently mislabeled either: it lands in
+the Admin lane view's **Unattributed** lane, named by its exact
+`module:lineno` call site. That is a visible, ugly signal that something
+needs a wrapper — never a wrong agent id. Two ways to fix it:
+
+- Wrap the call site yourself: `with arail.agent_context.agent_call
+  (your_agent_id): resp = router.complete(...)`.
+- If you spawn a bare `threading.Thread` (rather than relying on
+  `create_task`/`to_thread`, both of which already copy context), use
+  `arail.agent_context.spawn_thread(target, *args, **kwargs)` instead of
+  `threading.Thread(...)` directly — a bare `Thread` does **not** copy the
+  context, and the shim exists specifically for this case.
+
+**Hold ("Hold all agents" in Admin) refuses your inference, not your
+process.** `ModelRouter.complete()`/`.stream_complete()` raise
+`arail.agent_context.AgentHeldError` (a `RuntimeError`) when the lab is
+held and the active context is agent-scoped. This means:
+
+- **Your agent must already tolerate a `RuntimeError` from a model call**
+  the same way it tolerates a network failure or a cold model. If your
+  code already wraps `router.complete()`/`.stream_complete()` in a broad
+  `except Exception`, you get graceful degradation for free — the same
+  path an unreachable model already takes. If it doesn't, add one; an
+  agent that lets `AgentHeldError` propagate into its own loop will crash
+  that loop the first time the operator holds the lab.
+- Hold is admission control, not cancellation — a call already inside a
+  backend when the switch flips runs to completion. Only *new* calls are
+  refused at the door.
+- If your agent speaks proactively (writes to the activity feed off its
+  own initiative, not in response to a request), gate that announcement
+  too: `if arail.agent_context.speech_gate(your_agent_id): emit(...)`.
+  Inference and speech are held separately on purpose — silencing your
+  agent's voice must not require silencing whatever non-model bookkeeping
+  it still safely does while held.
+
+See `sprints/2026-09-20-buddy-front-and-center/ARCHITECTURE.md` and
+`docs/agent-observability.md` for the full design and the trace schema.
+
 ### Cache
 
 `load_one(agent_id)` and `load_all()` are idempotent — the first

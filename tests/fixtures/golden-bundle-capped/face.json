@@ -1,0 +1,15 @@
+{
+  "schema": "dac.world-face/v1",
+  "world": "golden-capped",
+  "name": "Golden Capped Fixture",
+  "tagline": "A Golden Capped Fixture World (dreamed).",
+  "palette_hint": "slate-violet",
+  "domain_framing": "This lab studies Golden Capped Fixture. This World was DREAMED by a model — terms are model-asserted and UNVERIFIED. Hypotheses and answers stay within the declared categories (alpha, beta).",
+  "vocabulary_register": "Use the World's own terms; cite a source for every factual claim.",
+  "provenance_tier": "model-asserted",
+  "provenance_counts": {
+    "model": 300,
+    "sourced": 0,
+    "total": 300
+  }
+}

@@ -196,7 +196,7 @@ def probe_entry(entry: ModelEntry) -> HealthState:
 
 def _tier_line(entry: ModelEntry) -> str:
     h = entry.health
-    where = entry.endpoint or ("aerollm (in-process)"
+    where = entry.endpoint or ("QueueLLM (in-process)"
                                if entry.provider_type == "aerollm" else "local")
     lat = f", {h.latency_ms:.0f}ms" if h.latency_ms is not None else ""
     detail = f" — {h.detail}" if h.detail and h.status not in ("healthy",) else ""

@@ -2,10 +2,13 @@
 
 Contract (two backends, identical shape):
 
-    1. Snapshot the current git HEAD as the baseline.
+    1. Snapshot the current git HEAD as the baseline, and remember
+       which branch the user was on so we can put them back.
     2. Run the benchmark `runs_per_config` times to get baseline
        metrics (tokens/sec, TTFT). Persist to the backend's tuning
-       config (tuning.yml or tuning-mlx.yml).
+       config (tuning.yml or tuning-mlx.yml) and commit that on an
+       autoresearch/baseline-<ts> branch of our own — never on the
+       user's branch.
     3. Enumerate candidate variants from the catalog below. A
        variant is a {knob: value} dict that passes the tuning-
        schema validator.
@@ -36,7 +39,11 @@ Safety rails (non-negotiable, same for both backends):
     - ARAIL_AUTORESEARCH_ENABLED env var must be set.
     - Only the backend's two whitelisted files are ever written
       (enforced in git_ops.commit_experiment).
-    - Never touches main. Variants live on autoresearch/<id> branches.
+    - Never touches main, or any other branch outside the
+      autoresearch/ namespace. Both the baseline capture and every
+      variant live on autoresearch/<id> branches, and the loop checks
+      the user's original branch back out when it finishes — including
+      after a win or a crash.
     - Never pushes. No network ops from this module.
 
 The "autonomous agent" language is deliberate: the loop does not
@@ -188,6 +195,11 @@ class LoopState:
     current_variant: Optional[str] = None
     baseline_tok_per_sec: Optional[float] = None
     baseline_sha: Optional[str] = None
+    # The autoresearch/baseline-<ts> branch this pass captured its
+    # baseline on. The loop commits nothing outside the autoresearch/
+    # namespace, so this is where the baseline record lives — never on
+    # whatever branch the user happened to be sitting on.
+    baseline_branch: Optional[str] = None
     variants: List[VariantResult] = field(default_factory=list)
     error: Optional[str] = None
     # Continuous ("don't stop, won't stop") mode. When True, the outer
@@ -217,6 +229,7 @@ class LoopState:
             "current_variant": self.current_variant,
             "baseline_tok_per_sec": self.baseline_tok_per_sec,
             "baseline_sha": self.baseline_sha,
+            "baseline_branch": self.baseline_branch,
             "variants": [
                 {
                     "label": v.label,
@@ -446,6 +459,27 @@ def _commit_files(backend: str) -> List[str]:
     return ["config/tuning.yml", "lab/data/aerollm-bench.jsonl"]
 
 
+class _SkipVariant(Exception):
+    """A schema-valid variant the backend cannot actually run."""
+
+
+def _unsupported_combination(cfg, delta: Dict[str, Any],
+                             backend: str) -> Optional[str]:
+    """Backend-specific runnability check on the POST-delta knob set."""
+    if backend != "mlx":
+        return None
+    try:
+        from arail.experiments.mlx_backend import unsupported_combination
+    except Exception:
+        return None
+    knobs = {name: k.current for name, k in cfg.knobs.items()}
+    knobs.update(delta)
+    try:
+        return unsupported_combination(knobs)
+    except Exception:
+        return None
+
+
 def _default_candidates(backend: str) -> List[Candidate]:
     return MLX_CANDIDATES if backend == "mlx" else CANDIDATES
 
@@ -629,6 +663,13 @@ def run_autoresearch(
         else:
             effective_candidates = _default_candidates(backend)
 
+    # Set once we've switched off the user's branch; None means "we
+    # never moved, so there is nothing to restore and nothing of ours
+    # in the working tree". Load-bearing: the restore path discards
+    # working-tree changes, so it must never run when the reason we
+    # bailed was the user's own dirty tree.
+    restore_to: Optional[str] = None
+
     try:
         if require_env_flag and not os.getenv("ARAIL_AUTORESEARCH_ENABLED"):
             raise GitSafetyError(
@@ -641,6 +682,10 @@ def run_autoresearch(
         assert_clean_tree()
         origin_state = git_state()
         state.baseline_sha = origin_state.short_sha
+        # Captured BEFORE any branch switch. This is the branch the user
+        # was sitting on when they started the loop, and the one we put
+        # them back on when we're done. Nothing is ever committed here.
+        origin_branch = origin_state.branch
 
         cfg = load_tuning(config_path)
 
@@ -658,7 +703,30 @@ def run_autoresearch(
             )
         state.baseline_tok_per_sec = baseline_tps
 
-        # Persist baseline into the config and commit on origin branch.
+        # Persist baseline into the config and commit it on a branch of
+        # our own. The baseline capture used to be committed on whatever
+        # branch the user started from — which meant running the loop
+        # from `main` put a commit on `main`, and `./arailctl update`'s
+        # `git pull --ff-only` would later refuse with an error the user
+        # couldn't trace back to "I ran an experiment". The loop now
+        # writes only inside the `autoresearch/` namespace.
+        baseline_branch = create_experiment_branch(
+            f"baseline-{time.strftime('%Y%m%d-%H%M%S')}",
+            base_branch=origin_branch,
+        )
+        restore_to = origin_branch
+        state.baseline_branch = baseline_branch
+        try:
+            activity_log.emit(
+                "autoresearch",
+                f"Baseline branch created: {baseline_branch}",
+                "info",
+                {"event": "branch-update", "branch": baseline_branch,
+                 "outcome": "baseline", "backend": backend},
+            )
+        except Exception:
+            pass
+
         cfg.baseline_commit = origin_state.sha
         cfg.baseline_metrics = {
             "median_tok_per_sec": baseline_tps,
@@ -694,7 +762,12 @@ def run_autoresearch(
         threshold = float(
             cfg.knobs["improvement_threshold_pct"].current
         )
-        origin_branch = git_state().branch
+        # Variants branch from the baseline branch, not from the user's
+        # branch, so each variant carries the baseline record it is
+        # being compared against — and so a losing variant returns to
+        # the baseline (where tuning.yml still holds baseline_metrics)
+        # rather than to a user branch that never saw them.
+        variant_base = baseline_branch
 
         for label, delta in effective_candidates:
             state.phase = "variant"
@@ -725,7 +798,26 @@ def run_autoresearch(
                             f"({reason})"
                         )
 
-                create_experiment_branch(exp_id, base_branch=origin_branch)
+                # Schema-valid is not the same as runnable. Ask the
+                # backend whether this combination is supported before
+                # spending a branch and N model loads on it.
+                unsupported = _unsupported_combination(cfg, delta, backend)
+                if unsupported:
+                    result.outcome = "skipped"
+                    result.error = unsupported
+                    try:
+                        activity_log.emit(
+                            "autoresearch",
+                            f"Skipped {label}: {unsupported}",
+                            "warn",
+                            {"event": "variant-skipped", "label": label,
+                             "backend": backend},
+                        )
+                    except Exception:
+                        pass
+                    raise _SkipVariant(unsupported)
+
+                create_experiment_branch(exp_id, base_branch=variant_base)
                 try:
                     activity_log.emit(
                         "autoresearch",
@@ -748,7 +840,7 @@ def run_autoresearch(
                 if v_tps is None:
                     result.outcome = "error"
                     result.error = "no measurable tok/s"
-                    abort_experiment(origin_branch)
+                    abort_experiment(variant_base)
                 else:
                     delta_pct = ((v_tps - baseline_tps) / baseline_tps) * 100
                     result.median_tok_per_sec = v_tps
@@ -798,13 +890,17 @@ def run_autoresearch(
                             )
                         except Exception:
                             pass
-                        abort_experiment(origin_branch)
+                        abort_experiment(variant_base)
 
+            except _SkipVariant:
+                # Recorded as "skipped" above; no branch was created and
+                # nothing was written, so there is nothing to abort.
+                pass
             except Exception as exc:
                 result.error = f"{type(exc).__name__}: {exc}"
                 result.outcome = "error"
                 try:
-                    abort_experiment(origin_branch)
+                    abort_experiment(variant_base)
                 except Exception:
                     pass
             finally:
@@ -827,6 +923,35 @@ def run_autoresearch(
         state.error = f"{type(exc).__name__}: {exc}"
         state.finished_at = _now()
         return state
+
+    finally:
+        # Put the user back where they started. A win leaves us checked
+        # out on the winning variant branch; a mid-pass crash can leave
+        # us anywhere. Either way the loop should not silently move
+        # someone's working checkout to a branch they didn't ask for.
+        #
+        # `restore_to` is None whenever we bailed before creating the
+        # baseline branch — including the dirty-tree abort — so this
+        # never discards work that isn't ours.
+        if restore_to is not None:
+            try:
+                abort_experiment(restore_to)
+            except Exception as exc:  # pragma: no cover - defensive
+                # Don't mask a real loop result with a cleanup failure;
+                # say so loudly instead, since the user is now sitting
+                # on a branch they didn't choose.
+                try:
+                    activity_log.emit(
+                        "autoresearch",
+                        f"Could not return to {restore_to}: "
+                        f"{type(exc).__name__}: {exc}. "
+                        f"Run `git checkout {restore_to}` yourself.",
+                        "warn",
+                        {"event": "branch-restore-failed",
+                         "branch": restore_to, "backend": backend},
+                    )
+                except Exception:
+                    pass
 
 
 def _slug(label: str) -> str:

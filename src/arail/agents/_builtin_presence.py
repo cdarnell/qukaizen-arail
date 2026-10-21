@@ -77,6 +77,16 @@ class PresenceAgent:
             snap = {"profile": new_profile, "source": new_source}
 
         message = self._format_message(old_profile, old_source, new_profile, new_source)
+        # F9 (ARCHITECTURE.md): presence's one proactive announcement,
+        # gated the same as every other proactive speaker even though this
+        # one carries no model output at all — "hold" silences the lab's
+        # narration, not just its inference.
+        try:
+            from arail import agent_context
+            if not agent_context.speech_gate("presence"):
+                return
+        except Exception:  # noqa: BLE001
+            pass
         try:
             activity_log.emit("profile", message, "info", data=snap)
         except Exception as e:  # noqa: BLE001

@@ -63,6 +63,16 @@ retained behind `?legacy=1` for one release after M5.
 - **Domain expert distillation** — second flagship; needs the fine-tune factory from maximus.plan §6.
 - **Mission Status ↔ chat surfacing** — clicking a step caption deep-links to the relevant chat thread.
 
+### Autoresearch durability → [`docs/plans/autoresearch-integration.md`](docs/plans/autoresearch-integration.md)
+
+The Tuning loop's git ledger is mechanically sound but not yet durable
+over months of use. The audit documents five hazards (baseline commit
+landing on the user's current branch; `arailctl update`'s `--ff-only`
+refusing once it has; unbounded `autoresearch/*` branch accumulation;
+unbounded committed bench `.jsonl` growth; the clean-tree gate vs. a
+blueprint people fork and edit) plus six operator decisions that gate the
+fixes. **Blocked on those decisions, not on implementation.**
+
 ### Production-readiness follow-ups (from sprint 2026-05-01-prod-readiness-wrappers)
 
 - **Phase 2 — inference worker isolation.** Phase 1 (in-process `inference_slot` semaphore + fast-path bypass) shipped 2026-05-01. Phase 2 should try multi-worker uvicorn first (`--workers 2`, semaphore becomes per-process); if a single worker still saturates under sustained load, extract `arail.router` into an out-of-process inference daemon over a Unix socket so FastAPI workers stay purely I/O-bound. See `sprints/2026-05-01-prod-readiness-wrappers/ARCHITECTURE.md` § "Phase-2 callout".

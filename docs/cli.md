@@ -193,7 +193,7 @@ message.
 
 **Model selection is automatic; `start` only reports it.** The readiness
 banner always prints a `Models:` block with the two slots (A: the fast,
-resident Ollama chat model; B: the deep model AeroLLM streams in) and
+resident Ollama chat model; B: the deep model QueueLLM streams in) and
 where each came from (`source:` `pin`, `env`, `auto` or `cache`, plus a
 reason when something fell through). `start` never picks a model and
 never prompts: the portal resolves both slots itself every time it
@@ -392,7 +392,7 @@ active).
 
 ### `deep <op>`
 
-AeroLLM 2nd-inference control: `install` (bundled prebuilt binary) |
+QueueLLM 2nd-inference control: `install` (bundled prebuilt binary) |
 `rebuild` (from source) | `update` (published wheel) | `status`.
 
 Three install channels, dispatched by `scripts/build-aerollm.sh auto`
@@ -402,7 +402,7 @@ channel both use):
 | Channel | Op | Requires | Who it's for |
 |---|---|---|---|
 | BUNDLED | `deep install` | network to `github.com` (or a local tarball via `AEROLLM_BUNDLE_FILE`) | outside users — no source repo, no credentials |
-| DEV | `deep rebuild` | the aeroLLM sibling repo checked out at `$ARAIL_AEROLLM_REPO` | maintainers with local aeroLLM changes |
+| DEV | `deep rebuild` | the QueueLLM sibling repo checked out at `$ARAIL_AEROLLM_REPO` | maintainers with local QueueLLM changes |
 | RELEASE | `deep update` | `pypi.qukaizen.com` index credentials | maintainers on the private index |
 
 `auto` picks DEV if the sibling repo is present, RELEASE if
@@ -422,7 +422,7 @@ regardless of what's on disk.
 | `AEROLLM_BUNDLE_SHA256` | read from `pyproject.toml [tool.arail.package-sources] aerollm_bundle_sha256` — a genuine out-of-band pin, independent of the download — on both routes: `./arailctl setup` forwards it, and standalone `./arailctl deep install` reads pyproject itself when the env var is unset. An explicit env value always wins. Only if pyproject can't be read at all does it fall back to the same-origin `.sha256` sidecar | pin/override the expected **tarball** digest |
 
 `./arailctl deep status` reports a `channel:` line (`dev` \| `release` \|
-`bundled` \| `none`) and, when bundled, an `aerollm <version> (<short-sha>,
+`bundled` \| `none`) and, when bundled, a `QueueLLM <version> (<short-sha>,
 built <date>)` provenance line read from `aerollm_api.bundle.json`.
 
 **What the sha256 check does and doesn't guarantee (v1):** when
@@ -774,10 +774,69 @@ another `pkb reembed` already running against this root) · `2` the given
 DaC WorldBundle ops — passthrough to `python -m arail.world_mount`.
 Unchanged.
 
+### `nucleus <verb>`
+
+Model Forge (local domain distillation) — passthrough to
+`python -m arail.nucleus`, which owns its own tier gate and exit-code
+contract (`0` ok · `1` internal error · `2` usage · `3` refused by
+policy). See `docs/nucleus.md` for the full tour.
+
+| Verb | What it does |
+|----|--------------|
+| `plan "<intent>" --name <slug>` | Writes `configs/domains/<slug>.yaml` and confirms it resolves |
+| `stage <slug> --source KIND:NAME=<path>` | Stages a local corpus; makes zero network calls |
+| `build <slug> --profile local` | Preflight, then extract / extract-on-cert / train / fuse / eval |
+| `spike <slug>` | Gate B half-day M5 harness |
+| `certify <build_id>` | Contamination gate, DNA card, seal, build report, local ledger |
+| `verify <shard>@<version>|<dir>` | Re-checks a card's signature, key trust, and content hashes |
+| `status <build_id>` | Prints a build's `run.json` |
+| `list` | Shows certified shards |
+
 ### `benchmark_models` (aliases: `benchmark`, `aerollm`)
 
 Measure local model TPS for autoresearch routing. Defaults to `--all`
 when no args are given. Unchanged.
+
+### `autoresearch <op>`
+
+Retention for what the tuning loop leaves behind. The loop creates a
+baseline branch plus one branch per variant on every pass and appends to
+a bench log, and it prunes nothing — run it nightly for a month and you
+have hundreds of refs and an unbounded JSONL. These two ops bound that.
+
+**Both ops are dry-run by default.** With no `--apply` they print the
+plan and change nothing.
+
+| Op | What it does |
+|----|--------------|
+| `prune` | Delete old losing/superseded `autoresearch/*` branches |
+| `rotate` | Move the oldest bench records into a sibling archive file |
+
+| Flag | Effect |
+|---|---|
+| `--apply` | Actually make the change (mutually exclusive with `--dry-run`) |
+| `--dry-run` | Explicit form of the default |
+| `--json` | Emit the plan (and result) as JSON |
+| `--keep-recent N` | `prune`: never touch the N newest branches (default 20) |
+| `--older-than-days N` | `prune`: never touch anything younger (default 14) |
+| `--verbose` | `prune`: also list what was kept, and why |
+| `--max-lines N` | `rotate`: how many newest records stay in place (default 5000) |
+
+`prune` never deletes a **win**, the branch you are currently on, a
+branch it cannot classify (`unknown`/`running`), the newest N, anything
+younger than the age gate, or any ref outside `autoresearch/`. Every gate
+is a *keep* gate, so a new failure mode defaults to keeping. Before each
+deletion it appends a receipt to `lab/data/autoresearch-pruned.jsonl`
+carrying the branch's full SHA and a ready-to-paste `git branch <name>
+<sha>` restore line — only the ref is removed, never the objects.
+
+`rotate` discards nothing: the archive is appended to, and the live file
+is replaced atomically so a crash cannot truncate it.
+
+Exit: `0` planned, applied, or nothing to do · `2` usage error (bad flag,
+invalid policy, `--apply` with `--dry-run`) · `3` applied but one or more
+branches failed to delete — the pile is still there, so this is degraded,
+not success.
 
 ### `kb <op>`
 

@@ -20,7 +20,7 @@ development continues.
 - Keep the repo root focused on shipped source, docs, and entrypoints.
 - Keep first-run friend-and-family onboarding deterministic.
 - Stop writable lab state from making the checkout feel "already used".
-- Let AeroLLM evolve as a separate open-source initiative without making the
+- Let QueueLLM evolve as a separate open-source initiative without making the
   main ARAIL release path look unstable.
 
 ## Current friction
@@ -29,7 +29,7 @@ development continues.
   models, notebooks, and experimental backend work.
 - The default lab still writes into repo-root-adjacent locations like `.env`,
   `lab.conf`, `lab/data/`, `models/`, and `setup.log`.
-- Root-level `pytest` can pick up non-product test trees when AeroLLM work is
+- Root-level `pytest` can pick up non-product test trees when QueueLLM work is
   present in the same checkout.
 - The blueprint system already knows how to materialize isolated instances,
   but the default lab still behaves like a special case.
@@ -48,7 +48,7 @@ Separate the repo into four concerns:
    Writable runtime state: `.env`, `lab.conf`, logs, models, notebooks, PKB,
    secrets, caches, uploads, and experiment output.
 4. Optional backends
-   AeroLLM and other deep backends consumed as optional packages, wheels, or
+   QueueLLM and other deep backends consumed as optional packages, wheels, or
    sibling checkouts instead of as part of the default validation surface.
 
 ## Recommended migration path
@@ -57,7 +57,7 @@ Separate the repo into four concerns:
 
 - Keep the public contract on two tiers only: `minimalist` and `maximus`.
 - Scope default pytest discovery to `tests/`.
-- Treat AeroLLM as optional development work, not part of the default ARAIL
+- Treat QueueLLM as optional development work, not part of the default ARAIL
   release smoke test.
 
 ### Phase 1 — introduce `ARAIL_HOME`
@@ -85,13 +85,13 @@ Separate the repo into four concerns:
 - Keep `lab/` only if it is intentionally shipped as read-only example content;
   otherwise replace it with package seeds plus generated runtime content.
 
-### Phase 4 — split AeroLLM cleanly
+### Phase 4 — split QueueLLM cleanly
 
 - Keep the integration contract in ARAIL limited to the backend adapter and
   install/health documentation.
-- Consume AeroLLM from its own repo via wheel, editable install, or explicit
+- Consume QueueLLM from its own repo via wheel, editable install, or explicit
   sibling-path override.
-- Keep AeroLLM benchmarks and runtime tests outside ARAIL's default pytest path.
+- Keep QueueLLM benchmarks and runtime tests outside ARAIL's default pytest path.
 
 ## Backward-compatibility guardrails
 
@@ -109,7 +109,7 @@ Separate the repo into four concerns:
 - `./arailctl doctor` passes.
 - Root `pytest` matches `pytest tests`.
 - The repo root looks like a product source tree, not a half-used lab.
-- AeroLLM remains easy to co-develop, but its failures do not make ARAIL look
+- QueueLLM remains easy to co-develop, but its failures do not make ARAIL look
   broken to blueprint users.
 
 ## Vendored World bundles

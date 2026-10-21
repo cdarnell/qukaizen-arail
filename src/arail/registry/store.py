@@ -238,6 +238,18 @@ TIER1_ID = _TIER1_ID = "tier1-aerollm"
 QKZ_2B_ID = "qkz-project-aware-2b"
 
 
+_TIER1_NOTE = (
+    "Tier 1 deep reasoning via QueueLLM (in-process, MoE-preferred). "
+    "Kept resident by deep_policy once first warmed."
+)
+# The built-in note as written before the QueueLLM display rename. Matched
+# exactly so a user-edited note is never overwritten.
+_LEGACY_TIER1_NOTE = (
+    "Tier 1 deep reasoning via aeroLLM (in-process, MoE-preferred). "
+    "Kept resident by deep_policy once first warmed."
+)
+
+
 def _specs_for(model_id: str) -> tuple[Optional[int], Optional[float]]:
     ctx: Optional[int] = None
     params: Optional[float] = None
@@ -355,16 +367,23 @@ def _seed_from_env(reg: ModelRegistry) -> bool:
             tags=["reasoning", "build", "long_context"],
             enabled=aero_enabled,
             source="seed_env",
-            note="Tier 1 deep reasoning via aeroLLM (in-process, MoE-preferred). "
-                 "Kept resident by deep_policy once first warmed.",
+            note=_TIER1_NOTE,
         )
         changed = True
-    elif existing.enabled != (aero_capable and bool(existing.model_id)):
-        # Capability changed (tier flip, wheel installed/removed) — always
-        # safe to apply in place; doesn't touch a user's model_id pick.
-        # An entry with no model can never be enabled.
-        existing.enabled = aero_capable and bool(existing.model_id)
-        changed = True
+    else:
+        want = aero_capable and bool(existing.model_id)
+        if existing.enabled != want:
+            # Capability changed (tier flip, wheel installed/removed) — always
+            # safe to apply in place; doesn't touch a user's model_id pick.
+            # An entry with no model can never be enabled.
+            existing.enabled = want
+            changed = True
+        if existing.note == _LEGACY_TIER1_NOTE:
+            # Display-only: a registry persisted before the QueueLLM rename
+            # still carries the old engine name. Only the exact built-in
+            # text is replaced, so a hand-edited note survives.
+            existing.note = _TIER1_NOTE
+            changed = True
     if reg.seed_state.get("tier1") != tier1_fp:
         reg.seed_state["tier1"] = tier1_fp
         changed = True

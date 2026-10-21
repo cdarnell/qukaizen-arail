@@ -1,0 +1,27 @@
+{
+  "schema": "dac.world-bundle/v1",
+  "bundle_version": 1,
+  "world": "golden-capped",
+  "display_name": "Golden Capped Fixture",
+  "created_at": "1970-01-01T00:00:00.000Z",
+  "world_sha256": "f456246d4fad23187782e1dbf91eea74dba9fe5fb5cd330936c780b9bd1b498e",
+  "files": {
+    "terms.json": "f456246d4fad23187782e1dbf91eea74dba9fe5fb5cd330936c780b9bd1b498e",
+    "spec.json": "23ab64b9db58099e6f24845c89a1f47d3f242fa03f869be34761a31e1312d989",
+    "roster.json": "a1bbc01e2a62b4dd4388676fed46b0510f7e9060a2d7b1d5bb440b6debb6464d",
+    "face.json": "708d34c833bc051d57a0692ae41a24973ecc613453731c04583ef2fb6622af84",
+    "agenda.json": "818a5c519c3799a6d042b6b7af7a1a13427051187c4b143c5e30b254624387bb",
+    "drift-report.json": "17c70ac647af9dbca642e15285bade12711cd6bc7f0d52a8590fc04572df3b69"
+  },
+  "provenance_tier": "model-asserted",
+  "provenance_counts": {
+    "model": 300,
+    "sourced": 0,
+    "total": 300
+  },
+  "refresh_cadence": "see agenda.json",
+  "compat": {
+    "bundle_schema": 1,
+    "terms_schema": 1
+  }
+}

@@ -221,6 +221,7 @@ def _reset_window_override_for_tests() -> None:
 _halt_lock = threading.Lock()
 _halted = False
 _halt_loaded = False
+_halt_changed_at: str | None = None
 
 
 def _halt_path():
@@ -229,7 +230,7 @@ def _halt_path():
 
 
 def _load_halt_locked() -> None:
-    global _halted, _halt_loaded
+    global _halted, _halt_loaded, _halt_changed_at
     if _halt_loaded:
         return
     _halt_loaded = True
@@ -242,18 +243,22 @@ def _load_halt_locked() -> None:
         return
     if isinstance(data, dict):
         _halted = bool(data.get("halted", False))
+        _halt_changed_at = data.get("changed_at")
 
 
 def _persist_halt_locked() -> None:
+    global _halt_changed_at
     path = _halt_path()
     try:
         if not _halted:
+            _halt_changed_at = None
             path.unlink(missing_ok=True)
         else:
+            _halt_changed_at = datetime.now().isoformat(timespec="seconds")
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(json.dumps({
                 "halted": True,
-                "changed_at": datetime.now().isoformat(timespec="seconds"),
+                "changed_at": _halt_changed_at,
             }, indent=2))
     except OSError:
         pass  # best-effort persistence; in-memory state still applies
@@ -263,6 +268,15 @@ def jobs_halted() -> bool:
     with _halt_lock:
         _load_halt_locked()
         return _halted
+
+
+def halt_changed_at() -> str | None:
+    """ISO timestamp of the last halt/resume transition, or None if the
+    lab has never been held this DATA_DIR's lifetime. Used by
+    ``agent_context.hold_state()`` for the Admin control's copy (F17)."""
+    with _halt_lock:
+        _load_halt_locked()
+        return _halt_changed_at
 
 
 def halt_all_jobs() -> None:
@@ -283,10 +297,11 @@ def resume_all_jobs() -> None:
 
 
 def _reset_halt_for_tests() -> None:
-    global _halted, _halt_loaded
+    global _halted, _halt_loaded, _halt_changed_at
     with _halt_lock:
         _halted = False
         _halt_loaded = True
+        _halt_changed_at = None
         _halt_path().unlink(missing_ok=True)
 
 

@@ -447,10 +447,10 @@ def report() -> str:
         lines.append(f"                   {a['install_command']}")
     if b["model"]:
         lines.append(
-            f"    B (aeroLLM):   {b['model']:<28} {_fmt_gb(b['size_gb']):>10}   "
+            f"    B (QueueLLM):  {b['model']:<28} {_fmt_gb(b['size_gb']):>10}   "
             f"source: {b['source'] or 'env/default'}")
     else:
-        lines.append("    B (aeroLLM):   (none)")
+        lines.append("    B (QueueLLM):  (none)")
     if b["reason"]:
         lines.append(f"                   {b['reason']}")
     return "\n".join(lines)

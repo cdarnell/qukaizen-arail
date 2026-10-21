@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dna-card/v2",
+  "title": "Model Forge DNA card v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["shard", "version", "built", "pipeline_hash", "eval_hash", "runtime",
+              "lab_mode", "distillation", "splits", "contamination", "corpus",
+              "closed_ended", "open_ended", "executable", "composite", "fidelity"],
+  "properties": {
+    "shard": {"type": "string", "pattern": "^[a-z0-9-]{1,64}$"},
+    "version": {"type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$"},
+    "built": {"type": "string"},
+    "pipeline_hash": {"type": "string"},
+    "eval_hash": {"type": "string"},
+    "runtime": {"type": "string"},
+    "lab_mode": {"type": "string", "enum": ["airgapped", "hybrid"]},
+    "signed": {"type": "object"},
+
+    "distillation": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["mode", "teacher", "student", "tokenizer_parity"],
+      "properties": {
+        "mode": {"type": "string", "enum": ["logit", "sequence"]},
+        "teacher": {"type": "object"},
+        "student": {"type": "object"},
+        "tokenizer_parity": {"type": "boolean"},
+        "tokenizer_parity_detail": {"type": "string"},
+        "logit_source": {"type": "string"},
+        "top_n": {"type": "integer"},
+        "renorm": {"type": "string"},
+        "captured_mass": {"type": "number"},
+        "dropped_mass": {"type": "number"}
+      }
+    },
+
+    "splits": {"type": "object", "additionalProperties": true},
+    "contamination": {"type": "object", "additionalProperties": true},
+    "corpus": {"type": "object", "additionalProperties": true},
+    "residency": {"type": "object", "additionalProperties": true},
+    "arbitrage": {"type": "object", "additionalProperties": true},
+
+    "inner_loop": {"type": "object", "additionalProperties": true},
+
+    "closed_ended": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "precision": {"type": "number"}, "recall": {"type": "number"},
+          "f1": {"type": "number"}, "n": {"type": "integer"}, "support": {"type": "integer"},
+          "macro_f1": {"type": "number"}, "per_class": {"type": "object"},
+          "warn": {"type": "string"},
+          "status": {"type": "string", "const": "not_run"}, "reason": {"type": "string"}
+        }
+      }
+    },
+    "open_ended": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "lc_win_rate_vs_base": {"type": "number"}, "judge": {"type": "string"},
+          "n": {"type": "integer"}, "ci95": {"type": "array", "items": {"type": "number"}},
+          "status": {"type": "string", "const": "not_run"}, "reason": {"type": "string"}
+        }
+      }
+    },
+    "executable": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "rate": {"type": "number"}, "n": {"type": "integer"},
+          "status": {"type": "string", "const": "not_run"}, "reason": {"type": "string"}
+        }
+      }
+    },
+
+    "hallucination_rate": {},
+    "irreducible_floor": {},
+    "baselines": {"type": "object", "additionalProperties": true},
+
+    "composite": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["formula_id", "formula", "value"],
+      "properties": {
+        "formula_id": {"type": "string"}, "formula": {"type": "string"}, "value": {"type": "number"}
+      }
+    },
+    "fidelity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target", "achieved", "decision"],
+      "properties": {
+        "target": {"type": "number"}, "achieved": {"type": "number"},
+        "decision": {"type": "string", "enum": ["CERTIFIED", "COMPATIBLE", "BETA", "KNOWN_ISSUE"]},
+        "arbitrage_stop_reason": {"type": "string"}, "decision_rule": {"type": "string"}
+      }
+    },
+
+    "efficiency": {"type": "object", "additionalProperties": true},
+    "weights": {"type": "object", "additionalProperties": true}
+  }
+}

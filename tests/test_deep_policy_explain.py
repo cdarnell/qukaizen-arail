@@ -88,7 +88,7 @@ def test_foreground_skips_background_gate(gates):
     ("halted", "halted"),
     ("active_window", "active work window"),
     ("interactive", "operator present"),
-    ("profile_param", "disables background aeroLLM"),
+    ("profile_param", "disables background QueueLLM"),
     ("pressure", "memory pressure"),
 ])
 def test_each_background_gate_names_itself(gates, close_gate, expect_in_detail):

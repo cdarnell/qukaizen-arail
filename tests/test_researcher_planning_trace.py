@@ -152,3 +152,48 @@ def test_plan_research_overwrites_previous_trace(agent):
            first_trace["chosen"] != second_trace["chosen"]
     # The second plan's chosen reflects the new goal text.
     assert "second goal" in " ".join(second_trace["chosen"])
+
+
+# ── Chat scaffolding is not a hypothesis ────────────────────────────
+#
+# A real run spent one of five experiment slots "testing" the sentence
+# "Certainly! Here are five testable hypotheses that directly address
+# the goal:" — the model's preamble survived normalization and became a
+# tracked experiment.
+
+import pytest as _pytest
+
+from arail.agents.researcher import _normalize_hypothesis_line as _norm
+
+
+@_pytest.mark.parametrize("line", [
+    "Certainly! Here are five testable hypotheses that address the goal:",
+    "Sure! Below are the hypotheses you asked for:",
+    "Here are 5 hypotheses, ordered by directness:",
+    "These hypotheses are specific, measurable, and grounded in the domain.",
+    "The following hypotheses can be tested locally:",
+    "I have generated the following list:",
+])
+def test_conversational_scaffolding_is_not_a_hypothesis(line):
+    assert _norm(line) is None, f"scaffolding survived: {line!r}"
+
+
+@_pytest.mark.parametrize("line", [
+    "1. Increasing prefetch lookahead depth from 2 to 4 will raise tok/s by 10%",
+    "- Implementing a persistent KV cache will improve throughput by 15-20%",
+    "**Speculative decoding** with a fast SLM will boost tok/s by at least 20%",
+    "Switching to mixed-precision per-layer will improve tok/s by 30%",
+])
+def test_real_hypotheses_still_survive(line):
+    out = _norm(line)
+    assert out and len(out) > 10
+    assert not out.startswith(("1.", "-", "*"))
+
+
+def test_a_long_claim_ending_in_a_colon_is_kept():
+    """The colon rule targets short introducers, not a real claim that
+    happens to end in one."""
+    line = ("Increasing the prefetch lookahead depth from two to four layers "
+            "on a 7B model will improve decode throughput measurably on this "
+            "machine under the following conditions:")
+    assert _norm(line) is not None

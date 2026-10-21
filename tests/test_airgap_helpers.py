@@ -215,3 +215,21 @@ class TestShouldAllowEgress:
         ok, reason = airgap.should_allow_egress("http://10.0.0.5/x")
         assert ok is True
         assert reason == "local"
+
+
+# ── AIRGAPPED_NOTICE (moved from portal/app.py providers_status; T-REG-2) ──
+
+class TestAirgappedNotice:
+    def test_notice_is_the_pre_move_chat_string(self):
+        # Byte-identical to the string that used to be inlined in
+        # portal/app.py::providers_status before it moved here
+        # (sprints/2026-09-23-nucleus-sprint-1, ARCHITECTURE.md §3 N8/§4.11).
+        assert airgap.AIRGAPPED_NOTICE == (
+            "Lab is in airgapped mode. Only My Machine is usable. "
+            "To enable cloud providers, set LAB_MODE=hybrid in .env and restart."
+        )
+
+    def test_providers_status_endpoint_uses_the_shared_constant(self):
+        from arail.portal import app as portal_app
+
+        assert portal_app.AIRGAPPED_NOTICE is airgap.AIRGAPPED_NOTICE

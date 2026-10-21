@@ -1,0 +1,4505 @@
+{
+  "version": 1,
+  "terms": [
+    {
+      "slug": "capped-term-0000",
+      "term": "Capped Term 0000",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0000 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0000, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0000.",
+      "related": [
+        {
+          "slug": "capped-term-0001",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0002"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0001",
+      "term": "Capped Term 0001",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0001 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0001, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0001.",
+      "related": [
+        "capped-term-0002",
+        {
+          "slug": "capped-term-0003",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0002",
+      "term": "Capped Term 0002",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0002 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0002, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0002.",
+      "related": [
+        "capped-term-0003",
+        "capped-term-0004"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0003",
+      "term": "Capped Term 0003",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0003 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0003, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0003.",
+      "related": [
+        {
+          "slug": "capped-term-0004",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0005"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0004",
+      "term": "Capped Term 0004",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0004 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0004, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0004.",
+      "related": [
+        "capped-term-0005",
+        {
+          "slug": "capped-term-0006",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0005",
+      "term": "Capped Term 0005",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0005 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0005, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0005.",
+      "related": [
+        "capped-term-0006",
+        "capped-term-0007"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0006",
+      "term": "Capped Term 0006",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0006 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0006, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0006.",
+      "related": [
+        {
+          "slug": "capped-term-0007",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0008"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0007",
+      "term": "Capped Term 0007",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0007 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0007, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0007.",
+      "related": [
+        "capped-term-0008",
+        {
+          "slug": "capped-term-0009",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0008",
+      "term": "Capped Term 0008",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0008 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0008, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0008.",
+      "related": [
+        "capped-term-0009",
+        "capped-term-0010"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0009",
+      "term": "Capped Term 0009",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0009 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0009, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0009.",
+      "related": [
+        {
+          "slug": "capped-term-0010",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0011"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0010",
+      "term": "Capped Term 0010",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0010 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0010, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0010.",
+      "related": [
+        "capped-term-0011",
+        {
+          "slug": "capped-term-0012",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0011",
+      "term": "Capped Term 0011",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0011 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0011, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0011.",
+      "related": [
+        "capped-term-0012",
+        "capped-term-0013"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0012",
+      "term": "Capped Term 0012",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0012 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0012, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0012.",
+      "related": [
+        {
+          "slug": "capped-term-0013",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0014"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0013",
+      "term": "Capped Term 0013",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0013 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0013, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0013.",
+      "related": [
+        "capped-term-0014",
+        {
+          "slug": "capped-term-0015",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0014",
+      "term": "Capped Term 0014",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0014 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0014, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0014.",
+      "related": [
+        "capped-term-0015",
+        "capped-term-0016"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0015",
+      "term": "Capped Term 0015",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0015 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0015, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0015.",
+      "related": [
+        {
+          "slug": "capped-term-0016",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0017"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0016",
+      "term": "Capped Term 0016",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0016 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0016, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0016.",
+      "related": [
+        "capped-term-0017",
+        {
+          "slug": "capped-term-0018",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0017",
+      "term": "Capped Term 0017",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0017 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0017, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0017.",
+      "related": [
+        "capped-term-0018",
+        "capped-term-0019"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0018",
+      "term": "Capped Term 0018",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0018 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0018, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0018.",
+      "related": [
+        {
+          "slug": "capped-term-0019",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0020"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0019",
+      "term": "Capped Term 0019",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0019 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0019, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0019.",
+      "related": [
+        "capped-term-0020",
+        {
+          "slug": "capped-term-0021",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0020",
+      "term": "Capped Term 0020",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0020 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0020, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0020.",
+      "related": [
+        "capped-term-0021",
+        "capped-term-0022"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0021",
+      "term": "Capped Term 0021",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0021 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0021, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0021.",
+      "related": [
+        {
+          "slug": "capped-term-0022",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0023"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0022",
+      "term": "Capped Term 0022",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0022 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0022, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0022.",
+      "related": [
+        "capped-term-0023",
+        {
+          "slug": "capped-term-0024",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0023",
+      "term": "Capped Term 0023",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0023 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0023, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0023.",
+      "related": [
+        "capped-term-0024",
+        "capped-term-0025"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0024",
+      "term": "Capped Term 0024",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0024 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0024, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0024.",
+      "related": [
+        {
+          "slug": "capped-term-0025",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0026"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0025",
+      "term": "Capped Term 0025",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0025 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0025, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0025.",
+      "related": [
+        "capped-term-0026",
+        {
+          "slug": "capped-term-0027",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0026",
+      "term": "Capped Term 0026",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0026 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0026, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0026.",
+      "related": [
+        "capped-term-0027",
+        "capped-term-0028"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0027",
+      "term": "Capped Term 0027",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0027 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0027, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0027.",
+      "related": [
+        {
+          "slug": "capped-term-0028",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0029"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0028",
+      "term": "Capped Term 0028",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0028 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0028, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0028.",
+      "related": [
+        "capped-term-0029",
+        {
+          "slug": "capped-term-0030",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0029",
+      "term": "Capped Term 0029",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0029 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0029, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0029.",
+      "related": [
+        "capped-term-0030",
+        "capped-term-0031"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0030",
+      "term": "Capped Term 0030",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0030 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0030, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0030.",
+      "related": [
+        {
+          "slug": "capped-term-0031",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0032"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0031",
+      "term": "Capped Term 0031",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0031 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0031, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0031.",
+      "related": [
+        "capped-term-0032",
+        {
+          "slug": "capped-term-0033",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0032",
+      "term": "Capped Term 0032",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0032 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0032, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0032.",
+      "related": [
+        "capped-term-0033",
+        "capped-term-0034"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0033",
+      "term": "Capped Term 0033",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0033 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0033, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0033.",
+      "related": [
+        {
+          "slug": "capped-term-0034",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0035"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0034",
+      "term": "Capped Term 0034",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0034 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0034, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0034.",
+      "related": [
+        "capped-term-0035",
+        {
+          "slug": "capped-term-0036",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0035",
+      "term": "Capped Term 0035",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0035 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0035, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0035.",
+      "related": [
+        "capped-term-0036",
+        "capped-term-0037"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0036",
+      "term": "Capped Term 0036",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0036 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0036, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0036.",
+      "related": [
+        {
+          "slug": "capped-term-0037",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0038"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0037",
+      "term": "Capped Term 0037",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0037 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0037, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0037.",
+      "related": [
+        "capped-term-0038",
+        {
+          "slug": "capped-term-0039",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0038",
+      "term": "Capped Term 0038",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0038 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0038, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0038.",
+      "related": [
+        "capped-term-0039",
+        "capped-term-0040"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0039",
+      "term": "Capped Term 0039",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0039 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0039, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0039.",
+      "related": [
+        {
+          "slug": "capped-term-0040",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0041"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0040",
+      "term": "Capped Term 0040",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0040 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0040, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0040.",
+      "related": [
+        "capped-term-0041",
+        {
+          "slug": "capped-term-0042",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0041",
+      "term": "Capped Term 0041",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0041 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0041, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0041.",
+      "related": [
+        "capped-term-0042",
+        "capped-term-0043"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0042",
+      "term": "Capped Term 0042",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0042 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0042, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0042.",
+      "related": [
+        {
+          "slug": "capped-term-0043",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0044"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0043",
+      "term": "Capped Term 0043",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0043 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0043, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0043.",
+      "related": [
+        "capped-term-0044",
+        {
+          "slug": "capped-term-0045",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0044",
+      "term": "Capped Term 0044",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0044 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0044, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0044.",
+      "related": [
+        "capped-term-0045",
+        "capped-term-0046"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0045",
+      "term": "Capped Term 0045",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0045 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0045, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0045.",
+      "related": [
+        {
+          "slug": "capped-term-0046",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0047"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0046",
+      "term": "Capped Term 0046",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0046 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0046, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0046.",
+      "related": [
+        "capped-term-0047",
+        {
+          "slug": "capped-term-0048",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0047",
+      "term": "Capped Term 0047",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0047 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0047, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0047.",
+      "related": [
+        "capped-term-0048",
+        "capped-term-0049"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0048",
+      "term": "Capped Term 0048",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0048 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0048, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0048.",
+      "related": [
+        {
+          "slug": "capped-term-0049",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0050"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0049",
+      "term": "Capped Term 0049",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0049 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0049, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0049.",
+      "related": [
+        "capped-term-0050",
+        {
+          "slug": "capped-term-0051",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0050",
+      "term": "Capped Term 0050",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0050 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0050, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0050.",
+      "related": [
+        "capped-term-0051",
+        "capped-term-0052"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0051",
+      "term": "Capped Term 0051",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0051 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0051, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0051.",
+      "related": [
+        {
+          "slug": "capped-term-0052",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0053"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0052",
+      "term": "Capped Term 0052",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0052 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0052, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0052.",
+      "related": [
+        "capped-term-0053",
+        {
+          "slug": "capped-term-0054",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0053",
+      "term": "Capped Term 0053",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0053 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0053, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0053.",
+      "related": [
+        "capped-term-0054",
+        "capped-term-0055"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0054",
+      "term": "Capped Term 0054",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0054 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0054, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0054.",
+      "related": [
+        {
+          "slug": "capped-term-0055",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0056"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0055",
+      "term": "Capped Term 0055",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0055 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0055, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0055.",
+      "related": [
+        "capped-term-0056",
+        {
+          "slug": "capped-term-0057",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0056",
+      "term": "Capped Term 0056",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0056 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0056, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0056.",
+      "related": [
+        "capped-term-0057",
+        "capped-term-0058"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0057",
+      "term": "Capped Term 0057",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0057 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0057, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0057.",
+      "related": [
+        {
+          "slug": "capped-term-0058",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0059"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0058",
+      "term": "Capped Term 0058",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0058 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0058, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0058.",
+      "related": [
+        "capped-term-0059",
+        {
+          "slug": "capped-term-0060",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0059",
+      "term": "Capped Term 0059",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0059 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0059, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0059.",
+      "related": [
+        "capped-term-0060",
+        "capped-term-0061"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0060",
+      "term": "Capped Term 0060",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0060 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0060, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0060.",
+      "related": [
+        {
+          "slug": "capped-term-0061",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0062"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0061",
+      "term": "Capped Term 0061",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0061 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0061, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0061.",
+      "related": [
+        "capped-term-0062",
+        {
+          "slug": "capped-term-0063",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0062",
+      "term": "Capped Term 0062",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0062 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0062, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0062.",
+      "related": [
+        "capped-term-0063",
+        "capped-term-0064"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0063",
+      "term": "Capped Term 0063",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0063 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0063, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0063.",
+      "related": [
+        {
+          "slug": "capped-term-0064",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0065"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0064",
+      "term": "Capped Term 0064",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0064 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0064, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0064.",
+      "related": [
+        "capped-term-0065",
+        {
+          "slug": "capped-term-0066",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0065",
+      "term": "Capped Term 0065",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0065 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0065, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0065.",
+      "related": [
+        "capped-term-0066",
+        "capped-term-0067"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0066",
+      "term": "Capped Term 0066",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0066 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0066, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0066.",
+      "related": [
+        {
+          "slug": "capped-term-0067",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0068"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0067",
+      "term": "Capped Term 0067",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0067 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0067, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0067.",
+      "related": [
+        "capped-term-0068",
+        {
+          "slug": "capped-term-0069",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0068",
+      "term": "Capped Term 0068",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0068 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0068, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0068.",
+      "related": [
+        "capped-term-0069",
+        "capped-term-0070"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0069",
+      "term": "Capped Term 0069",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0069 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0069, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0069.",
+      "related": [
+        {
+          "slug": "capped-term-0070",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0071"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0070",
+      "term": "Capped Term 0070",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0070 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0070, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0070.",
+      "related": [
+        "capped-term-0071",
+        {
+          "slug": "capped-term-0072",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0071",
+      "term": "Capped Term 0071",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0071 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0071, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0071.",
+      "related": [
+        "capped-term-0072",
+        "capped-term-0073"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0072",
+      "term": "Capped Term 0072",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0072 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0072, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0072.",
+      "related": [
+        {
+          "slug": "capped-term-0073",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0074"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0073",
+      "term": "Capped Term 0073",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0073 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0073, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0073.",
+      "related": [
+        "capped-term-0074",
+        {
+          "slug": "capped-term-0075",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0074",
+      "term": "Capped Term 0074",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0074 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0074, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0074.",
+      "related": [
+        "capped-term-0075",
+        "capped-term-0076"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0075",
+      "term": "Capped Term 0075",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0075 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0075, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0075.",
+      "related": [
+        {
+          "slug": "capped-term-0076",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0077"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0076",
+      "term": "Capped Term 0076",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0076 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0076, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0076.",
+      "related": [
+        "capped-term-0077",
+        {
+          "slug": "capped-term-0078",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0077",
+      "term": "Capped Term 0077",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0077 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0077, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0077.",
+      "related": [
+        "capped-term-0078",
+        "capped-term-0079"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0078",
+      "term": "Capped Term 0078",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0078 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0078, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0078.",
+      "related": [
+        {
+          "slug": "capped-term-0079",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0080"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0079",
+      "term": "Capped Term 0079",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0079 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0079, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0079.",
+      "related": [
+        "capped-term-0080",
+        {
+          "slug": "capped-term-0081",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0080",
+      "term": "Capped Term 0080",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0080 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0080, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0080.",
+      "related": [
+        "capped-term-0081",
+        "capped-term-0082"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0081",
+      "term": "Capped Term 0081",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0081 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0081, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0081.",
+      "related": [
+        {
+          "slug": "capped-term-0082",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0083"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0082",
+      "term": "Capped Term 0082",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0082 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0082, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0082.",
+      "related": [
+        "capped-term-0083",
+        {
+          "slug": "capped-term-0084",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0083",
+      "term": "Capped Term 0083",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0083 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0083, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0083.",
+      "related": [
+        "capped-term-0084",
+        "capped-term-0085"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0084",
+      "term": "Capped Term 0084",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0084 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0084, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0084.",
+      "related": [
+        {
+          "slug": "capped-term-0085",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0086"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0085",
+      "term": "Capped Term 0085",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0085 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0085, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0085.",
+      "related": [
+        "capped-term-0086",
+        {
+          "slug": "capped-term-0087",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0086",
+      "term": "Capped Term 0086",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0086 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0086, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0086.",
+      "related": [
+        "capped-term-0087",
+        "capped-term-0088"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0087",
+      "term": "Capped Term 0087",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0087 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0087, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0087.",
+      "related": [
+        {
+          "slug": "capped-term-0088",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0089"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0088",
+      "term": "Capped Term 0088",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0088 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0088, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0088.",
+      "related": [
+        "capped-term-0089",
+        {
+          "slug": "capped-term-0090",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0089",
+      "term": "Capped Term 0089",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0089 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0089, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0089.",
+      "related": [
+        "capped-term-0090",
+        "capped-term-0091"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0090",
+      "term": "Capped Term 0090",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0090 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0090, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0090.",
+      "related": [
+        {
+          "slug": "capped-term-0091",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0092"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0091",
+      "term": "Capped Term 0091",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0091 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0091, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0091.",
+      "related": [
+        "capped-term-0092",
+        {
+          "slug": "capped-term-0093",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0092",
+      "term": "Capped Term 0092",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0092 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0092, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0092.",
+      "related": [
+        "capped-term-0093",
+        "capped-term-0094"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0093",
+      "term": "Capped Term 0093",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0093 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0093, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0093.",
+      "related": [
+        {
+          "slug": "capped-term-0094",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0095"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0094",
+      "term": "Capped Term 0094",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0094 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0094, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0094.",
+      "related": [
+        "capped-term-0095",
+        {
+          "slug": "capped-term-0096",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0095",
+      "term": "Capped Term 0095",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0095 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0095, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0095.",
+      "related": [
+        "capped-term-0096",
+        "capped-term-0097"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0096",
+      "term": "Capped Term 0096",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0096 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0096, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0096.",
+      "related": [
+        {
+          "slug": "capped-term-0097",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0098"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0097",
+      "term": "Capped Term 0097",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0097 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0097, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0097.",
+      "related": [
+        "capped-term-0098",
+        {
+          "slug": "capped-term-0099",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0098",
+      "term": "Capped Term 0098",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0098 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0098, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0098.",
+      "related": [
+        "capped-term-0099",
+        "capped-term-0100"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0099",
+      "term": "Capped Term 0099",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0099 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0099, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0099.",
+      "related": [
+        {
+          "slug": "capped-term-0100",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0101"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0100",
+      "term": "Capped Term 0100",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0100 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0100, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0100.",
+      "related": [
+        "capped-term-0101",
+        {
+          "slug": "capped-term-0102",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0101",
+      "term": "Capped Term 0101",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0101 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0101, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0101.",
+      "related": [
+        "capped-term-0102",
+        "capped-term-0103"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0102",
+      "term": "Capped Term 0102",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0102 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0102, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0102.",
+      "related": [
+        {
+          "slug": "capped-term-0103",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0104"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0103",
+      "term": "Capped Term 0103",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0103 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0103, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0103.",
+      "related": [
+        "capped-term-0104",
+        {
+          "slug": "capped-term-0105",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0104",
+      "term": "Capped Term 0104",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0104 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0104, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0104.",
+      "related": [
+        "capped-term-0105",
+        "capped-term-0106"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0105",
+      "term": "Capped Term 0105",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0105 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0105, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0105.",
+      "related": [
+        {
+          "slug": "capped-term-0106",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0107"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0106",
+      "term": "Capped Term 0106",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0106 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0106, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0106.",
+      "related": [
+        "capped-term-0107",
+        {
+          "slug": "capped-term-0108",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0107",
+      "term": "Capped Term 0107",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0107 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0107, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0107.",
+      "related": [
+        "capped-term-0108",
+        "capped-term-0109"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0108",
+      "term": "Capped Term 0108",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0108 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0108, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0108.",
+      "related": [
+        {
+          "slug": "capped-term-0109",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0110"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0109",
+      "term": "Capped Term 0109",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0109 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0109, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0109.",
+      "related": [
+        "capped-term-0110",
+        {
+          "slug": "capped-term-0111",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0110",
+      "term": "Capped Term 0110",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0110 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0110, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0110.",
+      "related": [
+        "capped-term-0111",
+        "capped-term-0112"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0111",
+      "term": "Capped Term 0111",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0111 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0111, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0111.",
+      "related": [
+        {
+          "slug": "capped-term-0112",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0113"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0112",
+      "term": "Capped Term 0112",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0112 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0112, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0112.",
+      "related": [
+        "capped-term-0113",
+        {
+          "slug": "capped-term-0114",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0113",
+      "term": "Capped Term 0113",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0113 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0113, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0113.",
+      "related": [
+        "capped-term-0114",
+        "capped-term-0115"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0114",
+      "term": "Capped Term 0114",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0114 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0114, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0114.",
+      "related": [
+        {
+          "slug": "capped-term-0115",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0116"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0115",
+      "term": "Capped Term 0115",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0115 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0115, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0115.",
+      "related": [
+        "capped-term-0116",
+        {
+          "slug": "capped-term-0117",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0116",
+      "term": "Capped Term 0116",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0116 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0116, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0116.",
+      "related": [
+        "capped-term-0117",
+        "capped-term-0118"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0117",
+      "term": "Capped Term 0117",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0117 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0117, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0117.",
+      "related": [
+        {
+          "slug": "capped-term-0118",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0119"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0118",
+      "term": "Capped Term 0118",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0118 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0118, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0118.",
+      "related": [
+        "capped-term-0119",
+        {
+          "slug": "capped-term-0120",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0119",
+      "term": "Capped Term 0119",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0119 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0119, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0119.",
+      "related": [
+        "capped-term-0120",
+        "capped-term-0121"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0120",
+      "term": "Capped Term 0120",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0120 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0120, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0120.",
+      "related": [
+        {
+          "slug": "capped-term-0121",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0122"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0121",
+      "term": "Capped Term 0121",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0121 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0121, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0121.",
+      "related": [
+        "capped-term-0122",
+        {
+          "slug": "capped-term-0123",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0122",
+      "term": "Capped Term 0122",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0122 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0122, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0122.",
+      "related": [
+        "capped-term-0123",
+        "capped-term-0124"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0123",
+      "term": "Capped Term 0123",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0123 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0123, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0123.",
+      "related": [
+        {
+          "slug": "capped-term-0124",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0125"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0124",
+      "term": "Capped Term 0124",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0124 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0124, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0124.",
+      "related": [
+        "capped-term-0125",
+        {
+          "slug": "capped-term-0126",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0125",
+      "term": "Capped Term 0125",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0125 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0125, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0125.",
+      "related": [
+        "capped-term-0126",
+        "capped-term-0127"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0126",
+      "term": "Capped Term 0126",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0126 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0126, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0126.",
+      "related": [
+        {
+          "slug": "capped-term-0127",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0128"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0127",
+      "term": "Capped Term 0127",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0127 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0127, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0127.",
+      "related": [
+        "capped-term-0128",
+        {
+          "slug": "capped-term-0129",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0128",
+      "term": "Capped Term 0128",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0128 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0128, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0128.",
+      "related": [
+        "capped-term-0129",
+        "capped-term-0130"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0129",
+      "term": "Capped Term 0129",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0129 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0129, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0129.",
+      "related": [
+        {
+          "slug": "capped-term-0130",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0131"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0130",
+      "term": "Capped Term 0130",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0130 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0130, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0130.",
+      "related": [
+        "capped-term-0131",
+        {
+          "slug": "capped-term-0132",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0131",
+      "term": "Capped Term 0131",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0131 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0131, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0131.",
+      "related": [
+        "capped-term-0132",
+        "capped-term-0133"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0132",
+      "term": "Capped Term 0132",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0132 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0132, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0132.",
+      "related": [
+        {
+          "slug": "capped-term-0133",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0134"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0133",
+      "term": "Capped Term 0133",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0133 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0133, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0133.",
+      "related": [
+        "capped-term-0134",
+        {
+          "slug": "capped-term-0135",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0134",
+      "term": "Capped Term 0134",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0134 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0134, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0134.",
+      "related": [
+        "capped-term-0135",
+        "capped-term-0136"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0135",
+      "term": "Capped Term 0135",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0135 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0135, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0135.",
+      "related": [
+        {
+          "slug": "capped-term-0136",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0137"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0136",
+      "term": "Capped Term 0136",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0136 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0136, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0136.",
+      "related": [
+        "capped-term-0137",
+        {
+          "slug": "capped-term-0138",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0137",
+      "term": "Capped Term 0137",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0137 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0137, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0137.",
+      "related": [
+        "capped-term-0138",
+        "capped-term-0139"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0138",
+      "term": "Capped Term 0138",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0138 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0138, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0138.",
+      "related": [
+        {
+          "slug": "capped-term-0139",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0140"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0139",
+      "term": "Capped Term 0139",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0139 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0139, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0139.",
+      "related": [
+        "capped-term-0140",
+        {
+          "slug": "capped-term-0141",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0140",
+      "term": "Capped Term 0140",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0140 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0140, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0140.",
+      "related": [
+        "capped-term-0141",
+        "capped-term-0142"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0141",
+      "term": "Capped Term 0141",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0141 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0141, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0141.",
+      "related": [
+        {
+          "slug": "capped-term-0142",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0143"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0142",
+      "term": "Capped Term 0142",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0142 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0142, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0142.",
+      "related": [
+        "capped-term-0143",
+        {
+          "slug": "capped-term-0144",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0143",
+      "term": "Capped Term 0143",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0143 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0143, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0143.",
+      "related": [
+        "capped-term-0144",
+        "capped-term-0145"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0144",
+      "term": "Capped Term 0144",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0144 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0144, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0144.",
+      "related": [
+        {
+          "slug": "capped-term-0145",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0146"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0145",
+      "term": "Capped Term 0145",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0145 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0145, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0145.",
+      "related": [
+        "capped-term-0146",
+        {
+          "slug": "capped-term-0147",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0146",
+      "term": "Capped Term 0146",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0146 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0146, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0146.",
+      "related": [
+        "capped-term-0147",
+        "capped-term-0148"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0147",
+      "term": "Capped Term 0147",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0147 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0147, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0147.",
+      "related": [
+        {
+          "slug": "capped-term-0148",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0149"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0148",
+      "term": "Capped Term 0148",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0148 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0148, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0148.",
+      "related": [
+        "capped-term-0149",
+        {
+          "slug": "capped-term-0150",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0149",
+      "term": "Capped Term 0149",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0149 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0149, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0149.",
+      "related": [
+        "capped-term-0150",
+        "capped-term-0151"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0150",
+      "term": "Capped Term 0150",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0150 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0150, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0150.",
+      "related": [
+        {
+          "slug": "capped-term-0151",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0152"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0151",
+      "term": "Capped Term 0151",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0151 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0151, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0151.",
+      "related": [
+        "capped-term-0152",
+        {
+          "slug": "capped-term-0153",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0152",
+      "term": "Capped Term 0152",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0152 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0152, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0152.",
+      "related": [
+        "capped-term-0153",
+        "capped-term-0154"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0153",
+      "term": "Capped Term 0153",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0153 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0153, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0153.",
+      "related": [
+        {
+          "slug": "capped-term-0154",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0155"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0154",
+      "term": "Capped Term 0154",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0154 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0154, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0154.",
+      "related": [
+        "capped-term-0155",
+        {
+          "slug": "capped-term-0156",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0155",
+      "term": "Capped Term 0155",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0155 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0155, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0155.",
+      "related": [
+        "capped-term-0156",
+        "capped-term-0157"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0156",
+      "term": "Capped Term 0156",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0156 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0156, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0156.",
+      "related": [
+        {
+          "slug": "capped-term-0157",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0158"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0157",
+      "term": "Capped Term 0157",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0157 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0157, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0157.",
+      "related": [
+        "capped-term-0158",
+        {
+          "slug": "capped-term-0159",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0158",
+      "term": "Capped Term 0158",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0158 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0158, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0158.",
+      "related": [
+        "capped-term-0159",
+        "capped-term-0160"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0159",
+      "term": "Capped Term 0159",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0159 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0159, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0159.",
+      "related": [
+        {
+          "slug": "capped-term-0160",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0161"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0160",
+      "term": "Capped Term 0160",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0160 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0160, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0160.",
+      "related": [
+        "capped-term-0161",
+        {
+          "slug": "capped-term-0162",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0161",
+      "term": "Capped Term 0161",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0161 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0161, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0161.",
+      "related": [
+        "capped-term-0162",
+        "capped-term-0163"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0162",
+      "term": "Capped Term 0162",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0162 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0162, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0162.",
+      "related": [
+        {
+          "slug": "capped-term-0163",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0164"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0163",
+      "term": "Capped Term 0163",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0163 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0163, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0163.",
+      "related": [
+        "capped-term-0164",
+        {
+          "slug": "capped-term-0165",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0164",
+      "term": "Capped Term 0164",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0164 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0164, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0164.",
+      "related": [
+        "capped-term-0165",
+        "capped-term-0166"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0165",
+      "term": "Capped Term 0165",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0165 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0165, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0165.",
+      "related": [
+        {
+          "slug": "capped-term-0166",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0167"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0166",
+      "term": "Capped Term 0166",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0166 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0166, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0166.",
+      "related": [
+        "capped-term-0167",
+        {
+          "slug": "capped-term-0168",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0167",
+      "term": "Capped Term 0167",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0167 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0167, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0167.",
+      "related": [
+        "capped-term-0168",
+        "capped-term-0169"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0168",
+      "term": "Capped Term 0168",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0168 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0168, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0168.",
+      "related": [
+        {
+          "slug": "capped-term-0169",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0170"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0169",
+      "term": "Capped Term 0169",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0169 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0169, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0169.",
+      "related": [
+        "capped-term-0170",
+        {
+          "slug": "capped-term-0171",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0170",
+      "term": "Capped Term 0170",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0170 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0170, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0170.",
+      "related": [
+        "capped-term-0171",
+        "capped-term-0172"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0171",
+      "term": "Capped Term 0171",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0171 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0171, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0171.",
+      "related": [
+        {
+          "slug": "capped-term-0172",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0173"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0172",
+      "term": "Capped Term 0172",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0172 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0172, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0172.",
+      "related": [
+        "capped-term-0173",
+        {
+          "slug": "capped-term-0174",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0173",
+      "term": "Capped Term 0173",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0173 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0173, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0173.",
+      "related": [
+        "capped-term-0174",
+        "capped-term-0175"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0174",
+      "term": "Capped Term 0174",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0174 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0174, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0174.",
+      "related": [
+        {
+          "slug": "capped-term-0175",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0176"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0175",
+      "term": "Capped Term 0175",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0175 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0175, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0175.",
+      "related": [
+        "capped-term-0176",
+        {
+          "slug": "capped-term-0177",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0176",
+      "term": "Capped Term 0176",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0176 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0176, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0176.",
+      "related": [
+        "capped-term-0177",
+        "capped-term-0178"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0177",
+      "term": "Capped Term 0177",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0177 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0177, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0177.",
+      "related": [
+        {
+          "slug": "capped-term-0178",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0179"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0178",
+      "term": "Capped Term 0178",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0178 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0178, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0178.",
+      "related": [
+        "capped-term-0179",
+        {
+          "slug": "capped-term-0180",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0179",
+      "term": "Capped Term 0179",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0179 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0179, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0179.",
+      "related": [
+        "capped-term-0180",
+        "capped-term-0181"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0180",
+      "term": "Capped Term 0180",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0180 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0180, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0180.",
+      "related": [
+        {
+          "slug": "capped-term-0181",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0182"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0181",
+      "term": "Capped Term 0181",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0181 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0181, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0181.",
+      "related": [
+        "capped-term-0182",
+        {
+          "slug": "capped-term-0183",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0182",
+      "term": "Capped Term 0182",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0182 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0182, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0182.",
+      "related": [
+        "capped-term-0183",
+        "capped-term-0184"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0183",
+      "term": "Capped Term 0183",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0183 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0183, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0183.",
+      "related": [
+        {
+          "slug": "capped-term-0184",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0185"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0184",
+      "term": "Capped Term 0184",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0184 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0184, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0184.",
+      "related": [
+        "capped-term-0185",
+        {
+          "slug": "capped-term-0186",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0185",
+      "term": "Capped Term 0185",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0185 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0185, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0185.",
+      "related": [
+        "capped-term-0186",
+        "capped-term-0187"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0186",
+      "term": "Capped Term 0186",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0186 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0186, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0186.",
+      "related": [
+        {
+          "slug": "capped-term-0187",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0188"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0187",
+      "term": "Capped Term 0187",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0187 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0187, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0187.",
+      "related": [
+        "capped-term-0188",
+        {
+          "slug": "capped-term-0189",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0188",
+      "term": "Capped Term 0188",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0188 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0188, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0188.",
+      "related": [
+        "capped-term-0189",
+        "capped-term-0190"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0189",
+      "term": "Capped Term 0189",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0189 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0189, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0189.",
+      "related": [
+        {
+          "slug": "capped-term-0190",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0191"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0190",
+      "term": "Capped Term 0190",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0190 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0190, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0190.",
+      "related": [
+        "capped-term-0191",
+        {
+          "slug": "capped-term-0192",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0191",
+      "term": "Capped Term 0191",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0191 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0191, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0191.",
+      "related": [
+        "capped-term-0192",
+        "capped-term-0193"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0192",
+      "term": "Capped Term 0192",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0192 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0192, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0192.",
+      "related": [
+        {
+          "slug": "capped-term-0193",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0194"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0193",
+      "term": "Capped Term 0193",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0193 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0193, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0193.",
+      "related": [
+        "capped-term-0194",
+        {
+          "slug": "capped-term-0195",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0194",
+      "term": "Capped Term 0194",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0194 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0194, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0194.",
+      "related": [
+        "capped-term-0195",
+        "capped-term-0196"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0195",
+      "term": "Capped Term 0195",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0195 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0195, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0195.",
+      "related": [
+        {
+          "slug": "capped-term-0196",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0197"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0196",
+      "term": "Capped Term 0196",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0196 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0196, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0196.",
+      "related": [
+        "capped-term-0197",
+        {
+          "slug": "capped-term-0198",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0197",
+      "term": "Capped Term 0197",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0197 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0197, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0197.",
+      "related": [
+        "capped-term-0198",
+        "capped-term-0199"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0198",
+      "term": "Capped Term 0198",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0198 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0198, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0198.",
+      "related": [
+        {
+          "slug": "capped-term-0199",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0200"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0199",
+      "term": "Capped Term 0199",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0199 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0199, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0199.",
+      "related": [
+        "capped-term-0200",
+        {
+          "slug": "capped-term-0201",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0200",
+      "term": "Capped Term 0200",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0200 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0200, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0200.",
+      "related": [
+        "capped-term-0201",
+        "capped-term-0202"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0201",
+      "term": "Capped Term 0201",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0201 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0201, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0201.",
+      "related": [
+        {
+          "slug": "capped-term-0202",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0203"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0202",
+      "term": "Capped Term 0202",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0202 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0202, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0202.",
+      "related": [
+        "capped-term-0203",
+        {
+          "slug": "capped-term-0204",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0203",
+      "term": "Capped Term 0203",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0203 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0203, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0203.",
+      "related": [
+        "capped-term-0204",
+        "capped-term-0205"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0204",
+      "term": "Capped Term 0204",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0204 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0204, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0204.",
+      "related": [
+        {
+          "slug": "capped-term-0205",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0206"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0205",
+      "term": "Capped Term 0205",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0205 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0205, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0205.",
+      "related": [
+        "capped-term-0206",
+        {
+          "slug": "capped-term-0207",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0206",
+      "term": "Capped Term 0206",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0206 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0206, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0206.",
+      "related": [
+        "capped-term-0207",
+        "capped-term-0208"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0207",
+      "term": "Capped Term 0207",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0207 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0207, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0207.",
+      "related": [
+        {
+          "slug": "capped-term-0208",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0209"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0208",
+      "term": "Capped Term 0208",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0208 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0208, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0208.",
+      "related": [
+        "capped-term-0209",
+        {
+          "slug": "capped-term-0210",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0209",
+      "term": "Capped Term 0209",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0209 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0209, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0209.",
+      "related": [
+        "capped-term-0210",
+        "capped-term-0211"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0210",
+      "term": "Capped Term 0210",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0210 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0210, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0210.",
+      "related": [
+        {
+          "slug": "capped-term-0211",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0212"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0211",
+      "term": "Capped Term 0211",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0211 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0211, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0211.",
+      "related": [
+        "capped-term-0212",
+        {
+          "slug": "capped-term-0213",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0212",
+      "term": "Capped Term 0212",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0212 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0212, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0212.",
+      "related": [
+        "capped-term-0213",
+        "capped-term-0214"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0213",
+      "term": "Capped Term 0213",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0213 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0213, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0213.",
+      "related": [
+        {
+          "slug": "capped-term-0214",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0215"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0214",
+      "term": "Capped Term 0214",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0214 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0214, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0214.",
+      "related": [
+        "capped-term-0215",
+        {
+          "slug": "capped-term-0216",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0215",
+      "term": "Capped Term 0215",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0215 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0215, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0215.",
+      "related": [
+        "capped-term-0216",
+        "capped-term-0217"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0216",
+      "term": "Capped Term 0216",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0216 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0216, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0216.",
+      "related": [
+        {
+          "slug": "capped-term-0217",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0218"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0217",
+      "term": "Capped Term 0217",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0217 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0217, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0217.",
+      "related": [
+        "capped-term-0218",
+        {
+          "slug": "capped-term-0219",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0218",
+      "term": "Capped Term 0218",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0218 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0218, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0218.",
+      "related": [
+        "capped-term-0219",
+        "capped-term-0220"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0219",
+      "term": "Capped Term 0219",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0219 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0219, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0219.",
+      "related": [
+        {
+          "slug": "capped-term-0220",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0221"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0220",
+      "term": "Capped Term 0220",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0220 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0220, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0220.",
+      "related": [
+        "capped-term-0221",
+        {
+          "slug": "capped-term-0222",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0221",
+      "term": "Capped Term 0221",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0221 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0221, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0221.",
+      "related": [
+        "capped-term-0222",
+        "capped-term-0223"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0222",
+      "term": "Capped Term 0222",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0222 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0222, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0222.",
+      "related": [
+        {
+          "slug": "capped-term-0223",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0224"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0223",
+      "term": "Capped Term 0223",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0223 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0223, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0223.",
+      "related": [
+        "capped-term-0224",
+        {
+          "slug": "capped-term-0225",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0224",
+      "term": "Capped Term 0224",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0224 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0224, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0224.",
+      "related": [
+        "capped-term-0225",
+        "capped-term-0226"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0225",
+      "term": "Capped Term 0225",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0225 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0225, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0225.",
+      "related": [
+        {
+          "slug": "capped-term-0226",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0227"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0226",
+      "term": "Capped Term 0226",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0226 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0226, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0226.",
+      "related": [
+        "capped-term-0227",
+        {
+          "slug": "capped-term-0228",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0227",
+      "term": "Capped Term 0227",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0227 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0227, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0227.",
+      "related": [
+        "capped-term-0228",
+        "capped-term-0229"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0228",
+      "term": "Capped Term 0228",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0228 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0228, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0228.",
+      "related": [
+        {
+          "slug": "capped-term-0229",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0230"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0229",
+      "term": "Capped Term 0229",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0229 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0229, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0229.",
+      "related": [
+        "capped-term-0230",
+        {
+          "slug": "capped-term-0231",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0230",
+      "term": "Capped Term 0230",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0230 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0230, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0230.",
+      "related": [
+        "capped-term-0231",
+        "capped-term-0232"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0231",
+      "term": "Capped Term 0231",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0231 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0231, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0231.",
+      "related": [
+        {
+          "slug": "capped-term-0232",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0233"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0232",
+      "term": "Capped Term 0232",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0232 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0232, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0232.",
+      "related": [
+        "capped-term-0233",
+        {
+          "slug": "capped-term-0234",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0233",
+      "term": "Capped Term 0233",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0233 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0233, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0233.",
+      "related": [
+        "capped-term-0234",
+        "capped-term-0235"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0234",
+      "term": "Capped Term 0234",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0234 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0234, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0234.",
+      "related": [
+        {
+          "slug": "capped-term-0235",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0236"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0235",
+      "term": "Capped Term 0235",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0235 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0235, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0235.",
+      "related": [
+        "capped-term-0236",
+        {
+          "slug": "capped-term-0237",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0236",
+      "term": "Capped Term 0236",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0236 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0236, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0236.",
+      "related": [
+        "capped-term-0237",
+        "capped-term-0238"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0237",
+      "term": "Capped Term 0237",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0237 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0237, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0237.",
+      "related": [
+        {
+          "slug": "capped-term-0238",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0239"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0238",
+      "term": "Capped Term 0238",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0238 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0238, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0238.",
+      "related": [
+        "capped-term-0239",
+        {
+          "slug": "capped-term-0240",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0239",
+      "term": "Capped Term 0239",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0239 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0239, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0239.",
+      "related": [
+        "capped-term-0240",
+        "capped-term-0241"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0240",
+      "term": "Capped Term 0240",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0240 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0240, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0240.",
+      "related": [
+        {
+          "slug": "capped-term-0241",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0242"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0241",
+      "term": "Capped Term 0241",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0241 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0241, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0241.",
+      "related": [
+        "capped-term-0242",
+        {
+          "slug": "capped-term-0243",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0242",
+      "term": "Capped Term 0242",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0242 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0242, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0242.",
+      "related": [
+        "capped-term-0243",
+        "capped-term-0244"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0243",
+      "term": "Capped Term 0243",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0243 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0243, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0243.",
+      "related": [
+        {
+          "slug": "capped-term-0244",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0245"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0244",
+      "term": "Capped Term 0244",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0244 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0244, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0244.",
+      "related": [
+        "capped-term-0245",
+        {
+          "slug": "capped-term-0246",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0245",
+      "term": "Capped Term 0245",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0245 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0245, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0245.",
+      "related": [
+        "capped-term-0246",
+        "capped-term-0247"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0246",
+      "term": "Capped Term 0246",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0246 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0246, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0246.",
+      "related": [
+        {
+          "slug": "capped-term-0247",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0248"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0247",
+      "term": "Capped Term 0247",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0247 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0247, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0247.",
+      "related": [
+        "capped-term-0248",
+        {
+          "slug": "capped-term-0249",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0248",
+      "term": "Capped Term 0248",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0248 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0248, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0248.",
+      "related": [
+        "capped-term-0249",
+        "capped-term-0250"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0249",
+      "term": "Capped Term 0249",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0249 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0249, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0249.",
+      "related": [
+        {
+          "slug": "capped-term-0250",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0251"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0250",
+      "term": "Capped Term 0250",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0250 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0250, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0250.",
+      "related": [
+        "capped-term-0251",
+        {
+          "slug": "capped-term-0252",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0251",
+      "term": "Capped Term 0251",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0251 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0251, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0251.",
+      "related": [
+        "capped-term-0252",
+        "capped-term-0253"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0252",
+      "term": "Capped Term 0252",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0252 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0252, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0252.",
+      "related": [
+        {
+          "slug": "capped-term-0253",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0254"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0253",
+      "term": "Capped Term 0253",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0253 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0253, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0253.",
+      "related": [
+        "capped-term-0254",
+        {
+          "slug": "capped-term-0255",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0254",
+      "term": "Capped Term 0254",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0254 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0254, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0254.",
+      "related": [
+        "capped-term-0255",
+        "capped-term-0256"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0255",
+      "term": "Capped Term 0255",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0255 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0255, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0255.",
+      "related": [
+        {
+          "slug": "capped-term-0256",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0257"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0256",
+      "term": "Capped Term 0256",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0256 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0256, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0256.",
+      "related": [
+        "capped-term-0257",
+        {
+          "slug": "capped-term-0258",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0257",
+      "term": "Capped Term 0257",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0257 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0257, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0257.",
+      "related": [
+        "capped-term-0258",
+        "capped-term-0259"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0258",
+      "term": "Capped Term 0258",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0258 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0258, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0258.",
+      "related": [
+        {
+          "slug": "capped-term-0259",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0260"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0259",
+      "term": "Capped Term 0259",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0259 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0259, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0259.",
+      "related": [
+        "capped-term-0260",
+        {
+          "slug": "capped-term-0261",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0260",
+      "term": "Capped Term 0260",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0260 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0260, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0260.",
+      "related": [
+        "capped-term-0261",
+        "capped-term-0262"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0261",
+      "term": "Capped Term 0261",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0261 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0261, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0261.",
+      "related": [
+        {
+          "slug": "capped-term-0262",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0263"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0262",
+      "term": "Capped Term 0262",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0262 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0262, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0262.",
+      "related": [
+        "capped-term-0263",
+        {
+          "slug": "capped-term-0264",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0263",
+      "term": "Capped Term 0263",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0263 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0263, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0263.",
+      "related": [
+        "capped-term-0264",
+        "capped-term-0265"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0264",
+      "term": "Capped Term 0264",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0264 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0264, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0264.",
+      "related": [
+        {
+          "slug": "capped-term-0265",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0266"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0265",
+      "term": "Capped Term 0265",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0265 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0265, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0265.",
+      "related": [
+        "capped-term-0266",
+        {
+          "slug": "capped-term-0267",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0266",
+      "term": "Capped Term 0266",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0266 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0266, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0266.",
+      "related": [
+        "capped-term-0267",
+        "capped-term-0268"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0267",
+      "term": "Capped Term 0267",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0267 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0267, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0267.",
+      "related": [
+        {
+          "slug": "capped-term-0268",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0269"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0268",
+      "term": "Capped Term 0268",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0268 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0268, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0268.",
+      "related": [
+        "capped-term-0269",
+        {
+          "slug": "capped-term-0270",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0269",
+      "term": "Capped Term 0269",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0269 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0269, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0269.",
+      "related": [
+        "capped-term-0270",
+        "capped-term-0271"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0270",
+      "term": "Capped Term 0270",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0270 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0270, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0270.",
+      "related": [
+        {
+          "slug": "capped-term-0271",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0272"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0271",
+      "term": "Capped Term 0271",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0271 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0271, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0271.",
+      "related": [
+        "capped-term-0272",
+        {
+          "slug": "capped-term-0273",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0272",
+      "term": "Capped Term 0272",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0272 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0272, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0272.",
+      "related": [
+        "capped-term-0273",
+        "capped-term-0274"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0273",
+      "term": "Capped Term 0273",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0273 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0273, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0273.",
+      "related": [
+        {
+          "slug": "capped-term-0274",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0275"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0274",
+      "term": "Capped Term 0274",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0274 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0274, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0274.",
+      "related": [
+        "capped-term-0275",
+        {
+          "slug": "capped-term-0276",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0275",
+      "term": "Capped Term 0275",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0275 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0275, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0275.",
+      "related": [
+        "capped-term-0276",
+        "capped-term-0277"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0276",
+      "term": "Capped Term 0276",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0276 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0276, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0276.",
+      "related": [
+        {
+          "slug": "capped-term-0277",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0278"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0277",
+      "term": "Capped Term 0277",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0277 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0277, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0277.",
+      "related": [
+        "capped-term-0278",
+        {
+          "slug": "capped-term-0279",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0278",
+      "term": "Capped Term 0278",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0278 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0278, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0278.",
+      "related": [
+        "capped-term-0279",
+        "capped-term-0280"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0279",
+      "term": "Capped Term 0279",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0279 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0279, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0279.",
+      "related": [
+        {
+          "slug": "capped-term-0280",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0281"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0280",
+      "term": "Capped Term 0280",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0280 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0280, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0280.",
+      "related": [
+        "capped-term-0281",
+        {
+          "slug": "capped-term-0282",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0281",
+      "term": "Capped Term 0281",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0281 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0281, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0281.",
+      "related": [
+        "capped-term-0282",
+        "capped-term-0283"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0282",
+      "term": "Capped Term 0282",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0282 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0282, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0282.",
+      "related": [
+        {
+          "slug": "capped-term-0283",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0284"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0283",
+      "term": "Capped Term 0283",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0283 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0283, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0283.",
+      "related": [
+        "capped-term-0284",
+        {
+          "slug": "capped-term-0285",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0284",
+      "term": "Capped Term 0284",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0284 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0284, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0284.",
+      "related": [
+        "capped-term-0285",
+        "capped-term-0286"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0285",
+      "term": "Capped Term 0285",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0285 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0285, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0285.",
+      "related": [
+        {
+          "slug": "capped-term-0286",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0287"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0286",
+      "term": "Capped Term 0286",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0286 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0286, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0286.",
+      "related": [
+        "capped-term-0287",
+        {
+          "slug": "capped-term-0288",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0287",
+      "term": "Capped Term 0287",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0287 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0287, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0287.",
+      "related": [
+        "capped-term-0288",
+        "capped-term-0289"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0288",
+      "term": "Capped Term 0288",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0288 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0288, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0288.",
+      "related": [
+        {
+          "slug": "capped-term-0289",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0290"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0289",
+      "term": "Capped Term 0289",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0289 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0289, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0289.",
+      "related": [
+        "capped-term-0290",
+        {
+          "slug": "capped-term-0291",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0290",
+      "term": "Capped Term 0290",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0290 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0290, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0290.",
+      "related": [
+        "capped-term-0291",
+        "capped-term-0292"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0291",
+      "term": "Capped Term 0291",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0291 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0291, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0291.",
+      "related": [
+        {
+          "slug": "capped-term-0292",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0293"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0292",
+      "term": "Capped Term 0292",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0292 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0292, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0292.",
+      "related": [
+        "capped-term-0293",
+        {
+          "slug": "capped-term-0294",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0293",
+      "term": "Capped Term 0293",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0293 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0293, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0293.",
+      "related": [
+        "capped-term-0294",
+        "capped-term-0295"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0294",
+      "term": "Capped Term 0294",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0294 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0294, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0294.",
+      "related": [
+        {
+          "slug": "capped-term-0295",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0296"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0295",
+      "term": "Capped Term 0295",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0295 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0295, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0295.",
+      "related": [
+        "capped-term-0296",
+        {
+          "slug": "capped-term-0297",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0296",
+      "term": "Capped Term 0296",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0296 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0296, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0296.",
+      "related": [
+        "capped-term-0297",
+        "capped-term-0298"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0297",
+      "term": "Capped Term 0297",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0297 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0297, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0297.",
+      "related": [
+        {
+          "slug": "capped-term-0298",
+          "rel": "prerequisite-of"
+        },
+        "capped-term-0299"
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0298",
+      "term": "Capped Term 0298",
+      "category": "alpha",
+      "short": "A deterministic fixture term number 0298 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0298, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0298.",
+      "related": [
+        "capped-term-0299",
+        {
+          "slug": "capped-term-0000",
+          "rel": "part-of"
+        }
+      ],
+      "source": "model:test"
+    },
+    {
+      "slug": "capped-term-0299",
+      "term": "Capped Term 0299",
+      "category": "beta",
+      "short": "A deterministic fixture term number 0299 used to exercise the measured-size capped-selection path.",
+      "definition": "Long-form definition text for capped term 0299, unused by SKILL.md rendering but present for gate/provenance completeness in this synthetic corpus.",
+      "example": "Example usage sentence referencing capped term 0299.",
+      "related": [
+        "capped-term-0000",
+        "capped-term-0001"
+      ],
+      "source": "model:test"
+    }
+  ]
+}

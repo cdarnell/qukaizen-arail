@@ -101,8 +101,9 @@ this work?").
 
 ### 3. Notice, edit, run, keep-or-revert — the Tuning loop
 
-`arail.experiments` (the **/tuning** page,
-[tuning.py](../src/arail/experiments/tuning.py)) is heavier still, and
+`arail.experiments` (the **/tuning** page — the loop is
+[autoresearch.py](../src/arail/experiments/autoresearch.py), the git is
+[git_ops.py](../src/arail/experiments/git_ops.py)) is heavier still, and
 closest to what "an autonomous coding agent" usually means. Its shape,
 stripped to the loop:
 
@@ -110,16 +111,26 @@ stripped to the loop:
 LOOP:
   Observe → what branch/commit are we on, what did the last run measure?
   Think   → what's one experimental change worth trying?
-  Act     → edit the code, git commit, run it, read the real result
-          → if it's better: keep the branch
-          → if it's equal or worse: git reset back to where you started
+  Act     → branch, edit the config, run it, read the real result
+          → if it beats baseline by the threshold: commit on the branch
+          → if it's equal or worse: discard the working-tree changes and
+            check the original branch back out
 ```
+
+The revert is `git checkout -- .` followed by `git checkout <original
+branch>` — **not** `git reset`. The losing branch ref is left in place
+on purpose so you can go look at what was tried
+([git_ops.py:134-142](../src/arail/experiments/git_ops.py)). The loop
+can only ever write four whitelisted files, it never pushes, every
+commit it makes lands inside the `autoresearch/` namespace (the
+baseline included), and it puts you back on your original branch when
+it's done.
 
 This is the one loop in the lab where Act includes **editing a file and
 running arbitrary code** — the same category of action a coding agent
 takes. The keep-or-revert step is a second, smaller Observe→Think
 cycle nested inside Act: observe the measured result, decide whether it
-earned the change, act again (keep or reset). Every accepted change
+earned the change, act again (keep or discard). Every accepted change
 becomes a real git commit — nothing here is invented or
 simulated after the fact.
 
@@ -144,7 +155,7 @@ Each tier's Act is scoped to match what a mistake there would cost:
 |---|---|---|
 | Buddy / SRE | emit a message | an annoying sentence |
 | Researcher | run a measurement, write to the PKB | a wrong-but-labeled note in the Knowledge Base |
-| Tuning loop | edit code, run it, commit or reset | a discarded branch (never your working tree) |
+| Tuning loop | edit one of four whitelisted files, run it, commit or discard | an abandoned branch (never your working tree) |
 | opencode | anything a coding agent can do | whatever a coding agent could do — hence maximus-tier gating |
 
 Notice the loader contract itself enforces the first boundary: personality
@@ -162,7 +173,7 @@ sized to the agent."
 This isn't an ARAIL invention. It's the general shape behind any system
 that gets called an "agent" — Claude Code itself runs Observe → Think →
 Act (read the repo and the conversation, decide what to do, call a
-tool). aeroLLM's inference loop and DDaC's declare→gate→version pipeline
+tool). QueueLLM's inference loop and DDaC's declare→gate→version pipeline
 aren't agent loops in this sense — they're not making act-or-don't-act
 judgment calls on a cadence — but paperagents' declarative agent configs
 and any future qukaizen.com agent surface would be expected to fit the
@@ -178,5 +189,7 @@ specifics.)
 - [Agents — Architecture Reference](agents.md) — full contracts: folder shape, memory tiers, the dynamic loader.
 - [`src/arail/agents/_builtin_buddy.py`](../src/arail/agents/_builtin_buddy.py) — lightest-weight Act, read this first.
 - [`src/arail/research/mini_experiments.py`](../src/arail/research/mini_experiments.py) — the Plan→Design→Run→Report loop.
-- [`src/arail/experiments/tuning.py`](../src/arail/experiments/tuning.py) — the git-branch-per-experiment loop.
+- [`src/arail/experiments/autoresearch.py`](../src/arail/experiments/autoresearch.py) — the git-branch-per-experiment loop itself.
+- [`src/arail/experiments/git_ops.py`](../src/arail/experiments/git_ops.py) — every git call that loop makes, and the safety rails around them.
+- [Autoresearch integration audit](plans/autoresearch-integration.md) — how the two loops differ, and the long-term hazards of the git one.
 - [`src/arail/portal/services/opencode.py`](../src/arail/portal/services/opencode.py) — the fully general version, running as a real subprocess.

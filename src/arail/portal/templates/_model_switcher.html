@@ -113,7 +113,7 @@
     var t1 = (state.entries||[]).find(function(e){return e.tier===1&&e.enabled;});
     var html = [];
     if(t0) html.push(dot(t0.health.status)+esc(t0.display_name)+' <span class="msw-muted">(resident)</span>');
-    if(t1) html.push(dot(t1.health.status)+esc(t1.display_name)+' <span class="msw-muted">@ aeroLLM</span>');
+    if(t1) html.push(dot(t1.health.status)+esc(t1.display_name)+' <span class="msw-muted">@ QueueLLM</span>');
     el.innerHTML = html.join(' <span class="msw-muted">·</span> ') || '—';
   }
 

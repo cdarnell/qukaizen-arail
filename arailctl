@@ -22,6 +22,7 @@
 #    wiki     ARAIL documentation-as-code: build | info | new <title>
 #    kb       QuKaiZen Karpathy LLM Wiki ops: status | compile | lint | query |
 #             search | ingest | index | where  (discoverable, no hardcoded paths)
+#    autoresearch  tuning-loop retention: prune branches | rotate bench logs
 #    help     show this message
 #
 #  `install`/`tier` are the canonical names for the refresh and feature-set
@@ -251,7 +252,7 @@ EOF
     uninstall-daemon  remove launchd supervision (back to dev/foreground mode)
     tier [<tier>]   switch (or print) the feature-set tier — minimalist | maximus
                     ('upgrade' is a permanent alias — see docs/cli.md)
-    deep <op>       AeroLLM 2nd inference: install (bundled binary) | rebuild (source) |
+    deep <op>       QueueLLM 2nd inference: install (bundled binary) | rebuild (source) |
                     update (wheel) | status
     version         show installed component versions
     status [--json[=full|instances]] [--probe|--no-probe] [--quiet]  show what's
@@ -260,12 +261,15 @@ EOF
     logs [comp]     tail activity log — filter by component
     reset [mode]    wipe state — models|data|pkb|plugins|env|full|destroy
     world <op>      DaC WorldBundle: list | mount <dir> [--apply-face] | verify <dir> | verify-shipped [--examples] | swap <dir> | unmount
+    nucleus <verb>  Model Forge (local domain distillation): plan | stage | build | spike |
+                    eval | certify | verify | status | list — see docs/nucleus.md
     pkb <op>        ARAIL lab content: ingest | compile | browse | prune | bootstrap
     wiki <op>       ARAIL docs-as-code: build | info | new <title>
     kb <op>         QuKaiZen Karpathy Wiki: status | compile | lint | query
                     | search | ingest | index | where    (auto-discovers KB root)
     blueprint <op>  list | catalog | show | create | apply | destroy — Configuration as Code
     benchmark_models [opts]  measure model TPS for autoresearch routing (alias: benchmark, aerollm)
+    autoresearch <op>  tuning-loop retention: prune (branches) | rotate (bench logs)
     help            this message
 
 EOF
@@ -998,6 +1002,38 @@ LOGSEOF
         fi
         say "doctor: OK"
         ;;
+    autoresearch)
+        # Retention for what the tuning loop leaves behind. Both ops are
+        # dry-run by default; --apply opts into the write.
+        op="${1:-}"; shift || true
+        case "$op" in
+            prune|rotate) ;;
+            ""|help|-h|--help)
+                cat <<'EOF'
+Usage: ./arailctl autoresearch <command> [options]
+
+  prune    Delete old losing/superseded autoresearch/* branches.
+           Never touches wins, the branch you're on, the newest N, or
+           anything it cannot classify. Writes a recovery receipt with
+           each branch's SHA before deleting it.
+  rotate   Move the oldest records out of the bench logs into a sibling
+           archive, keeping the newest in place. Nothing is discarded.
+
+Both are dry-run by default — pass --apply to make the change.
+
+Common options: --apply  --dry-run  --json
+  prune:  --keep-recent N  --older-than-days N  --verbose
+  rotate: --max-lines N
+EOF
+                exit 0
+                ;;
+            *) die "autoresearch command must be one of: prune | rotate" ;;
+        esac
+        [[ -d .venv ]] || die "missing .venv — run ./arailctl setup"
+        # shellcheck disable=SC1091
+        source .venv/bin/activate
+        exec python -m arail.experiments.retention "$op" "$@"
+        ;;
     db)
         # Declarative persistence: the spec tree in spec/ is the source of
         # truth; SQLite, LanceDB, and the generated resolver/registry are all
@@ -1244,6 +1280,16 @@ TEMPLATE
                 ;;
             *) die "wiki op must be one of: build | info | new <title> | serve" ;;
         esac
+        ;;
+    nucleus)
+        # Model Forge — see docs/nucleus.md. `python -m arail.nucleus` owns
+        # its own tier gate and exit-code contract (0 ok / 1 internal error /
+        # 2 usage / 3 refused by policy); this case is a thin exec, same
+        # pattern as `world` and `pkb` above.
+        [[ -d .venv ]] || die "missing .venv — run ./arailctl setup"
+        # shellcheck disable=SC1091
+        source .venv/bin/activate
+        exec python -m arail.nucleus "$@"
         ;;
     world)
         [[ -d .venv ]] || die "missing .venv — run ./arailctl setup"

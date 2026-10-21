@@ -50,7 +50,7 @@ def test_branches_panel_is_tier_gated_and_attributed():
     section = RESEARCH.index('class="rx-branches"')
     assert guard < section, "tier guard must wrap the branches section"
     assert "{% endif %}" in RESEARCH[section:]
-    assert "aerollm-tuning</a> loop" in RESEARCH
+    assert "QueueLLM tuning</a> loop" in RESEARCH
     assert "Tuning loop — experiment branches" in RESEARCH
 
 

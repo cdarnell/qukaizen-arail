@@ -1,5 +1,5 @@
 """Boot-time model auto-resolution — slot A (fast/resident, Ollama) and
-slot B (deep/streaming, aeroLLM) picked from what is installed and what
+slot B (deep/streaming, QueueLLM) picked from what is installed and what
 this machine can hold.
 
 Sprint 2026-10-20-boot-model-autoresolve. Precedence per slot::
@@ -34,7 +34,7 @@ from typing import Any, Dict, List, Optional
 
 _log = logging.getLogger(__name__)
 
-# Same ceiling as the aeroLLM preload loop: resident A + B together may
+# Same ceiling as the QueueLLM preload loop: resident A + B together may
 # claim at most this fraction of total RAM.
 RAM_BUDGET_FRACTION = 0.60
 # /api/show is one request per model; cap it so a big install can't stall boot.

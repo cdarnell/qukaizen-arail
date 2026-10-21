@@ -1,4 +1,4 @@
-"""dac_world — DaC's shared, model-free World forge/seal/gate/skill core.
+"""dac_world — DDaC's shared, model-free World forge/seal/gate/skill core.
 
 This package is the single generator for ``dac.world-bundle/v1`` bundles.
 qukaizen-arail imports it at runtime (an intentional, human-approved
