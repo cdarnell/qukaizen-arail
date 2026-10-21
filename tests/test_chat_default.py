@@ -231,6 +231,11 @@ def test_chat_default_deep_slot_refuses_when_not_on_disk(monkeypatch, isolated_s
 def test_chat_default_deep_slot_success_updates_env_and_registry(monkeypatch, isolated_secrets, tmp_path):
     _isolate_registry(monkeypatch, tmp_path)
     _deep_slot_resolvable(monkeypatch, tmp_path, "Qwen2.5-3B-Instruct-4bit")
+    # requires_restart is now computed from the resident runtime (it used to
+    # be a constant False); pin "nothing resident" so another test's leftover
+    # AeroLLMBackend singleton can't change the answer.
+    from arail.router.backends import AeroLLMBackend
+    monkeypatch.setattr(AeroLLMBackend, "_shared", {}, raising=False)
     from arail.portal import app as portal_app
     with patch.object(portal_app, "_aerollm_model_ready", return_value=True):
         client = _make_client(monkeypatch, lab_mode="airgapped")
