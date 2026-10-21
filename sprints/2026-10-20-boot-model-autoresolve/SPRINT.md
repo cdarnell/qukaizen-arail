@@ -23,8 +23,8 @@ Base: PR #186 (qukaizen/model-selection-boot-f0316f) is MERGED to main; this bra
 | think | visionary | VISION.md | skipped | — | — | — |
 | plan | architect (design) | ARCHITECTURE.md | done | 2026-10-20 | 2026-10-20 | n/a |
 | build | builder | BUILD_LOG.md | done | 2026-10-20 | 2026-10-20 | n/a |
-| review | architect (review) | REVIEW.md | BLOCK, looping to build | 2026-10-20 | 2026-10-20 | BLOCK |
-| test | qa | TEST_REPORT.md | pending | — | — | — |
+| review | architect (review) | REVIEW.md | done (round 2) | 2026-10-20 | 2026-10-21 | WEAK_PASS (R1 BLOCK fixed) |
+| test | qa | TEST_REPORT.md | in progress | 2026-10-21 | — | — |
 | ship | — | PR | pending | — | — | — |
 
 ## Decisions log
