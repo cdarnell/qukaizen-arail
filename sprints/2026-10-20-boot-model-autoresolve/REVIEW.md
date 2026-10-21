@@ -68,3 +68,41 @@ As predicted: yaml mixes pins and cache, there is one release of shims (BACKLOG 
 4. **A2:** preserve `warm` for slots not re-warmed across `resolve_and_apply`.
 5. QA: real `./arailctl start` time-to-ready vs main, and the `tests/cli/*.sh` drivers with a worktree `.venv`.
 6. Add the two unanticipated debt items above to ARCHITECTURE.md's tech-debt section (or BACKLOG) on re-review.
+
+---
+
+# Round 2 re-review
+
+**Date:** 2026-10-21
+**Build:** BUILD_LOG.md "Round 2" at 579d6038 (fix commits 5027caf6, bd7c2f28, d10d6e94, 4eafcc61)
+
+## Verdict: WEAK_PASS
+
+All four round-1 findings are fixed and verified by code reading plus scratch repros. No new BLOCK. Three new ASKs are follow-ups, not merge blockers.
+
+## Re-verification of round-1 findings
+
+- **B1 (corrupt yaml overwritten): fixed.** Repro: wrote an unparseable `model_defaults.yaml`, called `write_cache`. It returned `False` and the bytes were unchanged. `write_pin` on the corrupt file wrote `.model_defaults.corrupt.bak` before replacing the file. The degraded note now tells "unreadable" apart from "not writable".
+- **B2 (sentinel PID reuse wedge): fixed.** Repro with `_sentinel_is_live` and pid=1 (always alive):
+  - fresh, same boot: live (correct)
+  - 1 h old: stale
+  - other boot id: stale
+  - missing `started_at`: stale (this also covers sentinels written before this fix)
+  
+  A deferred warm now appears in the degraded strip (`warm_deferred`).
+- **A1 (fallback ignored crash list): fixed.** `_fallback` takes `skip_b` on both the exception path and the timeout path and drops a cached B that matches it. The tests for both paths pass. A guard test confirms a non-crashed cached B is kept.
+- **A2 (re-resolve wiped warm): fixed.** Warm status carries forward only from this process's `_LAST` and only when the slot's model is unchanged. The keep and drop tests pass.
+
+Targeted suites: 102 passed (defaults, boot models, deep warm, resolve). Filtered round-2 tests: 6 passed.
+
+## Regression hunt
+
+- [INFO] **`.bak` accumulation is bounded.** One backup per distinct corrupt content, made only on an explicit pin, which then rewrites a valid file. Repeating with identical corrupt bytes produced one timestamped extra and no growth. Edge case: if two different corrupt contents are backed up in the same second, `_backup_unreadable` skips the write because the timestamped name already exists, and it returns a path to a backup holding different bytes. This is only a cosmetic risk.
+- [INFO] **Crash list does expire.** The sentinel is cleared by a successful warm, by a failed-warm exception, and by any explicit B pin (`models_api.py:348`). Clearing B's pin counts as a B pin, so the message "clear the pin to retry" is accurate. A crashed model is not skipped forever.
+- [ASK] **The 600 s sentinel age can mislabel a slow live load as a crash.** I checked whether this causes a double load: it does not. A second instance that boots while a load older than 600 s is still running gets `crashed_model() == model`. It therefore skips B and shows a false "crashed last boot" note instead of loading twice. The loading instance clears the sentinel when it finishes, so the next boot is clean. Because the operator runs Worlds serially (see memory), the risk is low. Follow-up: measure a cold 7B aerollm load on the slowest supported disk and set `SENTINEL_MAX_AGE_S` to at least 2x that, or refresh `started_at` as a heartbeat during the load.
+- [ASK] **macOS boot id includes a localtime-rendered date string.** `sysctl -n kern.boottime` returns `{ sec = N, usec = M } <ctime>`. It was stable across repeated reads. However, the ctime part is rendered in the current timezone, so a TZ or DST change between `write_sentinel` and the check makes the ids differ. A live load would then read as stale, which is the same mislabel as above. This only matters inside the 10-minute window. Follow-up: compare only `sec`/`usec`. If the lookup fails (returns None), the check falls back to age plus pid, which is safe.
+- [ASK] **`_warm_slot_b` appends `warm_deferred` to `last_resolution()["degraded"]` without holding `model_resolve.LOCK`.** A concurrent pin re-resolve can replace `_LAST`, and the note is then lost; nothing gets corrupted. If the note is lost, it never shows in the degraded strip. Follow-up: append under the lock, or route the note through `resolve_and_apply` state.
+- [INFO] The two unforeseen debts the builder recorded (two seed-state writers, two locks with conventional ordering) were not predicted in ARCHITECTURE.md. Add both to the `sprints/BACKLOG.md` shim-removal entry. The builder already proposed this.
+
+## Required actions before merge
+None blocking. File the three ASKs above and the two recorded debts as follow-ups in `sprints/BACKLOG.md`. QA still owns the real `./arailctl start` timing and `tests/cli/*.sh` from round 1.
