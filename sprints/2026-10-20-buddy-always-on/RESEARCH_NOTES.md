@@ -41,6 +41,8 @@ the brief's nine questions.
 12. (2026-10-21) "Each team has their own network. That should be a default recommendation out of paperagents."
 13. (2026-10-21) "paperagents is the swarm tech integration crew."
 
+14. (2026-10-21) The goal for the swarm crew: teams "that can build or codify any workflow": "have a computer process to automate, or move a batch job to a real-time job and manage that logic."
+
 ## 2. The field (verified against each repo via the GitHub API today)
 
 | | nanobot (HKUDS) | Hermes Agent (Nous) | OpenClaw | OpenBot (nightly-labs) |
