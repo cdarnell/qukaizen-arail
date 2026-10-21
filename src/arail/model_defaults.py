@@ -24,6 +24,7 @@ from __future__ import annotations
 import logging
 import os
 import tempfile
+import threading
 import warnings
 from pathlib import Path
 from typing import Any
@@ -34,6 +35,11 @@ _log = logging.getLogger(__name__)
 # every ARAIL entry point (start.sh, the launchd plist's WorkingDirectory,
 # pytest's rootdir) already runs with CWD at the repo root.
 _DEFAULT_PATH = Path("model_defaults.yaml")
+
+# Serialises read-modify-write cycles within this process so a pin write can
+# never be lost to a concurrent cache write (FM13). Cross-process writers are
+# last-writer-wins on `resolved`; pins are only ever written by write_pin.
+_WRITE_LOCK = threading.RLock()
 
 VERSION = 2
 NONE_PIN = "none"
@@ -211,7 +217,7 @@ def _atomic_write(p: Path, content: str) -> None:
         raise
 
 
-def write_cache(resolution: dict[str, Any], path: "Path | None" = None) -> bool:
+def _write_cache_unlocked(resolution: dict[str, Any], path: "Path | None" = None) -> bool:
     """Replace the ``resolved`` block (atomic); pins are re-emitted as read.
     *resolution* is ``BootResolution.to_dict()`` (plus optional ``warm``).
     Returns False (after one warning) when the file can't be written —
@@ -229,7 +235,7 @@ def write_cache(resolution: dict[str, Any], path: "Path | None" = None) -> bool:
         return False
 
 
-def update_warm(slot: str, status: str, path: "Path | None" = None) -> bool:
+def _update_warm_unlocked(slot: str, status: str, path: "Path | None" = None) -> bool:
     """Record a slot's warm outcome inside ``resolved.warm``."""
     p = _path(path)
     cur = read(p)
@@ -247,7 +253,7 @@ def update_warm(slot: str, status: str, path: "Path | None" = None) -> bool:
         return False
 
 
-def write_pin(slot: str, value: "str | None", path: "Path | None" = None) -> Path:
+def _write_pin_unlocked(slot: str, value: "str | None", path: "Path | None" = None) -> Path:
     """Set one pin. *value*: a model id, ``"none"`` (slot b only), or
     ``None`` / ``"auto"`` to clear. Preserves the other pin and the cache.
     A legacy v1 file is upgraded in the same write. Raises ValueError for
@@ -266,7 +272,7 @@ def write_pin(slot: str, value: "str | None", path: "Path | None" = None) -> Pat
     return p
 
 
-def migrate_v1(path: "Path | None" = None) -> bool:
+def _migrate_v1_unlocked(path: "Path | None" = None) -> bool:
     """Rewrite a legacy v1 file as v2 (portal resolver only). Keeps a
     one-time ``.model_defaults.v1.bak`` beside it. True iff migrated."""
     p = _path(path)
@@ -285,6 +291,37 @@ def migrate_v1(path: "Path | None" = None) -> bool:
         _log.warning("model_defaults: couldn't migrate %s: %s", p, e)
         return False
     return True
+
+
+def write_cache(resolution: dict[str, Any], path: "Path | None" = None) -> bool:
+    """Replace the ``resolved`` block (atomic); pins are re-emitted as read.
+    *resolution* is ``BootResolution.to_dict()`` (plus optional ``warm``).
+    Returns False (after one warning) when the file can't be written --
+    a read-only checkout must never block boot (FM10)."""
+    with _WRITE_LOCK:
+        return _write_cache_unlocked(resolution, path)
+
+
+def update_warm(slot: str, status: str, path: "Path | None" = None) -> bool:
+    """Record a slot's warm outcome inside ``resolved.warm``."""
+    with _WRITE_LOCK:
+        return _update_warm_unlocked(slot, status, path)
+
+
+def write_pin(slot: str, value: "str | None", path: "Path | None" = None) -> Path:
+    """Set one pin. *value*: a model id, ``"none"`` (slot b only), or
+    ``None`` / ``"auto"`` to clear. Preserves the other pin and the cache.
+    A legacy v1 file is upgraded in the same write. Raises ValueError for
+    a bad slot / ``none`` on slot a, OSError if unwritable."""
+    with _WRITE_LOCK:
+        return _write_pin_unlocked(slot, value, path)
+
+
+def migrate_v1(path: "Path | None" = None) -> bool:
+    """Rewrite a legacy v1 file as v2 (portal resolver only). Keeps a
+    one-time ``.model_defaults.v1.bak`` beside it. True iff migrated."""
+    with _WRITE_LOCK:
+        return _migrate_v1_unlocked(path)
 
 
 def write_defaults(

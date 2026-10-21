@@ -92,6 +92,12 @@ def test_ollama_down_uses_cache(world, monkeypatch):  # FM1
     assert any(d["kind"] == "ollama_down" for d in res.degraded)
 
 
+def test_ollama_down_pin_beats_cache(world, monkeypatch):
+    monkeypatch.setattr(mr, "_fetch_ollama_tags", lambda: None)
+    res = mr.resolve_boot(pins={"a": "qwen3:4b"}, cache={"a": {"model": "old:1b"}})
+    assert (res.a.model, res.a.source) == ("qwen3:4b", "pin")
+
+
 def test_ollama_down_no_cache(world, monkeypatch):
     monkeypatch.setattr(mr, "_fetch_ollama_tags", lambda: None)
     res = mr.resolve_boot()

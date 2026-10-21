@@ -189,12 +189,12 @@ def reconcile_from_resolution(reg: ModelRegistry, resolution: Dict[str, Any]) ->
         a_model = a.get("model")
         if (a_model and t0 is not None
                 and t0.backend in ("ollama_native", "openai_compat")):
-            if t0.model_id != a_model:
+            a_source = "user" if a.get("source") == "pin" else "seed_env"
+            if t0.model_id != a_model or t0.source != a_source:
                 ctx, params = _specs_for(a_model)
                 reg.entries[_TIER0_ID] = replace(
                     t0, model_id=a_model, display_name=_short_name(a_model),
-                    context_window=ctx, params_b=params,
-                    source="user" if a.get("source") == "pin" else "seed_env")
+                    context_window=ctx, params_b=params, source=a_source)
                 changed = True
             t0 = reg.entries[_TIER0_ID]
             fp = f"{t0.model_id}::{t0.backend}::{t0.endpoint or ''}"
@@ -207,14 +207,15 @@ def reconcile_from_resolution(reg: ModelRegistry, resolution: Dict[str, Any]) ->
             b_model = b.get("model") or ""
             enabled = _aero_capable() and bool(b_model)
             if b_model:
-                if t1.model_id != b_model or t1.enabled != enabled:
+                b_source = "user" if b.get("source") == "pin" else "seed_env"
+                if (t1.model_id != b_model or t1.enabled != enabled
+                        or t1.source != b_source):
                     ctx1, params1 = _specs_for(b_model)
                     reg.entries[_TIER1_ID] = replace(
                         t1, model_id=b_model, display_name=_short_name(b_model),
                         context_window=ctx1, params_b=params1,
                         architecture="moe" if "moe" in b_model.lower() else "dense",
-                        enabled=enabled,
-                        source="user" if b.get("source") == "pin" else "seed_env")
+                        enabled=enabled, source=b_source)
                     changed = True
             elif t1.model_id or t1.enabled:
                 reg.entries[_TIER1_ID] = replace(

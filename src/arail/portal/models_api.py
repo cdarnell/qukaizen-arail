@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
 
 log = logging.getLogger(__name__)
@@ -146,39 +146,37 @@ async def models_register_artifact(req: RegisterArtifactRequest) -> Dict[str, An
             "state": reg.to_state()}
 
 
-# ── Boot model selection — "settle it once and for all" ────────────────
+# ── Boot model resolution -- auto-resolved, pins optional ──────────────
 #
-# Two slots, settled once into model_defaults.yaml, then left alone:
-#   A — the primary, resident chat model (an installed Ollama tag)
-#   B — the model AeroLLM (the deep / 2nd inference) loads (a directory
-#       under ARAIL_MODELS_DIR)
+# ARAIL resolves two slots itself at portal start (arail.model_resolve):
+#   A -- the fast, resident chat model (an installed Ollama tag)
+#   B -- the deep model AeroLLM streams in (a directory under ARAIL_MODELS_DIR)
+# model_defaults.yaml holds operator pins + a cache of the last result; it is
+# never a gate. (Replaces the PR #186 picker/"settle" flow;
+# sprints/2026-10-20-boot-model-autoresolve.)
 #
-# GET  /api/models/boot    — what to show: hidden | picker | problem
-# POST /api/models/settle  — write the two slots, refusing dishonest choices
+# GET  /api/models/boot    -- hidden | degraded + the resolution
+# POST /api/models/pin     -- pin (or clear) one slot, re-resolve, warm async
+# POST /api/models/settle  -- DEPRECATED alias for two pin writes
 #
-# Deliberately separate from GET /api/models/state (polled every 10s by
-# every open tab — see _model_switcher.html) and from GET /api/chat/models
-# (the chat-tab gallery monolith): this endpoint is fetched ONCE per page
-# load by the boot banner, never on an interval, so it can afford the same
-# per-load cost /api/chat/models already pays (an Ollama /api/tags probe +
-# a models-dir scan) without violating the quiet-boot contract those other
-# two surfaces are held to. See docs/adr equivalent discussion in
-# CLAUDE.md "Model checkpoint paths stay relative / env-driven".
+# Fetched ONCE per page load (never on an interval); the optional ?full=1
+# adds the override UI's candidate lists, which cost an Ollama /api/tags
+# probe plus a models-dir scan -- the same per-load cost /api/chat/models
+# already pays.
 
 _BOOT_CANDIDATES_CACHE: Dict[str, Any] = {"ts": 0.0, "payload": None}
 _BOOT_CANDIDATES_TTL = 30.0
 
-
-from arail.model_resolve import fit_primary as _fit_primary  # noqa: E402
-from arail.model_resolve import fit_secondary as _fit_secondary  # noqa: E402
+from arail.model_resolve import fit_primary as _fit_primary  # noqa: E402,F401
+from arail.model_resolve import fit_secondary as _fit_secondary  # noqa: E402,F401
 
 
 def _tier1_resident_model_differs(new_default_b: Optional[str]) -> bool:
     """True iff AeroLLM already has a DIFFERENT model resident than
-    *new_default_b* — the signal the settle endpoint uses to say
+    *new_default_b* -- the signal the pin endpoint uses to say
     "applies on next start" instead of silently unloading multi-GB
     weights. Never constructs anything (mirrors registry/health.py's R5
-    contract) — inspects the shared-instance dict only."""
+    contract) -- inspects the shared-instance dict only."""
     try:
         from arail.router.backends import AeroLLMBackend
         shared = getattr(AeroLLMBackend, "_shared", None) or {}
@@ -191,82 +189,6 @@ def _tier1_resident_model_differs(new_default_b: Optional[str]) -> bool:
         return False
     except Exception:  # noqa: BLE001
         return False
-
-
-def _boot_settlement() -> Dict[str, Any]:
-    """Cheap-ish determination of mode + why. Called once per page load
-    (never on an interval), so an Ollama presence probe here is the same
-    cost /api/chat/models already pays on every chat page load."""
-    from arail import model_defaults as _md
-    slots = _md.resolve_slots()
-    # Interim bridge (removed in the GET /api/models/boot v2 step): "settled"
-    # used to be reported by resolve_slots(); derive it from the v2 reader.
-    _data = _md.read(Path(slots["path"]))
-    slots["settled"] = bool(_data["pins"]["a"] or _data["resolved"].get("a")
-                            or _data["legacy"])
-
-    if not slots["settled"]:
-        return {"mode": "picker", "settled": False, "problems": [],
-                "default_a": slots["default_a"], "default_b": slots["default_b"]}
-
-    problems: List[Dict[str, Any]] = []
-
-    # Drift: env no longer matches what was settled (hand-edited .env).
-    file_data = {}
-    if _data["legacy"]:
-        file_data = {"default_a": _data["pins"]["a"],
-                     "default_b": (None if _data["pins"]["b"] == "none"
-                                   else _data["pins"]["b"])}
-    elif _data["resolved"]:
-        file_data = {"default_a": (_data["resolved"].get("a") or {}).get("model"),
-                     "default_b": (_data["resolved"].get("b") or {}).get("model")}
-    file_a = file_data.get("default_a") if isinstance(file_data, dict) else None
-    if file_a and slots["default_a"] != file_a:
-        problems.append({"slot": "a", "kind": "drift", "model": slots["default_a"],
-                         "detail": f"env no longer matches the settled value "
-                                   f"({file_a!r})"})
-    if isinstance(file_data, dict) and "default_b" in file_data:
-        file_b = file_data.get("default_b")
-        if slots["default_b"] != file_b:
-            problems.append({"slot": "b", "kind": "drift", "model": slots["default_b"],
-                             "detail": f"env no longer matches the settled "
-                                       f"value ({file_b!r})"})
-
-    # Slot A — is it actually still installed in Ollama?
-    a = slots["default_a"]
-    try:
-        from arail.chat import _ollama_installed_models
-        installed_ids = {m["id"] for m in _ollama_installed_models()}
-        short_installed = {i.split(":", 1)[0] for i in installed_ids}
-        a_present = a in installed_ids or a.split(":", 1)[0] in short_installed
-    except Exception:  # noqa: BLE001
-        a_present = True  # probe failure must never manufacture a false alarm
-    if not a_present:
-        problems.append({"slot": "a", "kind": "missing", "model": a,
-                         "detail": f"'{a}' is no longer installed in Ollama"})
-    else:
-        fit = _fit_primary(a)
-        if fit["verdict"] == "too_big":
-            problems.append({"slot": "a", "kind": "unfit", "model": a,
-                             "detail": fit["detail"]})
-
-    # Slot B — is the directory still there, and does it still fit?
-    b = slots["default_b"]
-    if b:
-        models_dir = os.getenv("ARAIL_MODELS_DIR", "lab/models")
-        b_path = b if os.path.isabs(b) else os.path.join(models_dir, b)
-        if not os.path.isdir(b_path):
-            problems.append({"slot": "b", "kind": "missing", "model": b,
-                             "detail": f"not found at {b_path}"})
-        else:
-            fit = _fit_secondary(b, b_path)
-            if fit["verdict"] == "too_big":
-                problems.append({"slot": "b", "kind": "unfit", "model": b,
-                                 "detail": fit["detail"]})
-
-    mode = "problem" if problems else "hidden"
-    return {"mode": mode, "settled": True, "problems": problems,
-            "default_a": a, "default_b": b}
 
 
 def _slot_a_candidates(airgapped: bool) -> List[Dict[str, Any]]:
@@ -291,34 +213,41 @@ def _boot_candidates(airgapped: bool, *, refresh: bool = False) -> Dict[str, Any
     return payload
 
 
+def _current_resolution() -> Dict[str, Any]:
+    """This process's resolution, else the cached one on disk (a request
+    can arrive before the boot task finishes)."""
+    from arail import model_defaults as _md
+    from arail import model_resolve as _mr
+    last = _mr.last_resolution()
+    if last:
+        return dict(last)
+    cached = _md.read()["resolved"]
+    return dict(cached) if cached else {}
+
+
 @models_router.get("/boot")
 async def models_boot(full: bool = False, refresh: bool = False) -> Dict[str, Any]:
-    """What the boot model-selection banner should show, and with what
-    data. ``mode`` is one of:
-      hidden   — settled, both slots healthy; render nothing.
-      picker   — never settled; show the full two-slot picker.
-      problem  — settled but something broke (missing / unfit / drift);
-                 show a compact strip with a "Fix…" that expands to the
-                 picker (``full=1``).
-    Candidate lists (the expensive part — per-model fit checks against
-    the catalog) are assembled only when ``full=1`` or mode != hidden.
-    """
+    """What the boot strip should show. ``mode`` is ``hidden`` (nothing to
+    say) or ``degraded`` (something the operator can act on). Never a
+    picker, never a "drift" problem."""
     from arail.airgap import is_airgapped
     airgapped = is_airgapped()
-    settlement = _boot_settlement()
+    res = _current_resolution()
 
+    def _slot(key: str) -> Dict[str, Any]:
+        s = res.get(key) if isinstance(res.get(key), dict) else {}
+        return {"model": s.get("model"), "source": s.get("source") or "none",
+                "reason": s.get("reason"), "size_gb": s.get("size_gb")}
+
+    degraded = [d for d in (res.get("degraded") or []) if isinstance(d, dict)]
     payload: Dict[str, Any] = {
-        "mode": settlement["mode"],
-        "settlement": {"settled": settlement["settled"],
-                       "problems": settlement["problems"]},
+        "mode": "degraded" if degraded else "hidden",
+        "resolution": {"a": _slot("a"), "b": _slot("b")},
+        "warm": {"a": (res.get("warm") or {}).get("a"),
+                 "b": (res.get("warm") or {}).get("b")},
+        "degraded": degraded,
         "airgapped": airgapped,
         "hardware": {},
-        "slots": {
-            "a": {"label": "Load in GPU/Memory now",
-                  "configured": settlement["default_a"], "allow_none": False},
-            "b": {"label": "aeroLLM deep reference",
-                  "configured": settlement["default_b"], "allow_none": True},
-        },
     }
     try:
         from arail import hardware as _hw
@@ -329,17 +258,144 @@ async def models_boot(full: bool = False, refresh: bool = False) -> Dict[str, An
         }
     except Exception:  # noqa: BLE001
         pass
-
-    stamp_bits = [settlement["mode"], str(settlement["settled"]),
-                  str(len(settlement["problems"]))]
-    payload["stamp"] = "|".join(stamp_bits)
-
-    if full or settlement["mode"] != "hidden":
+    if full:
         candidates = _boot_candidates(airgapped, refresh=refresh)
-        payload["slots"]["a"]["candidates"] = candidates["a"]
-        payload["slots"]["b"]["candidates"] = candidates["b"]
-
+        payload["candidates"] = candidates
     return payload
+
+
+def _validate_pin(slot: str, model: Optional[str]) -> Optional[str]:
+    """Validate one pin; returns the normalised value to store (a model id,
+    ``"none"`` or None to clear) or raises HTTPException(400). Same bar as
+    the old settle endpoint, plus a path-containment check for slot B."""
+    from arail.registry.ceiling import ModelCeilingViolation, resolve_answering_model
+
+    value = (model or "").strip()
+    if not value or value.lower() == "auto":
+        return None
+    if value.lower() == "none":
+        if slot == "a":
+            raise HTTPException(status_code=400,
+                                detail="the fast slot can't be pinned to 'none'")
+        return "none"
+
+    if slot == "a":
+        from arail.chat import detect_installed_models
+        installed = detect_installed_models()
+        installed_ollama = {m["id"] for m in installed if m["runtime"] == "ollama"}
+        short_installed = {i.split(":", 1)[0] for i in installed_ollama}
+        if value not in installed_ollama and value.split(":", 1)[0] not in short_installed:
+            raise HTTPException(status_code=400, detail=(
+                f"'{value}' is not installed in Ollama yet. "
+                f"Run: ollama pull {value}"))
+        try:
+            resolve_answering_model(value, role="primary", backend="ollama_native")
+        except ModelCeilingViolation as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        return value
+
+    models_dir = os.getenv("ARAIL_MODELS_DIR", "lab/models")
+    model_path = value if os.path.isabs(value) else os.path.join(models_dir, value)
+    real = os.path.realpath(model_path)
+    root = os.path.realpath(models_dir)
+    inside = os.path.commonpath([real, root]) == root
+    env_b = os.environ.get("AEROLLM_MODEL", "")
+    env_points_here = (os.path.isabs(env_b) and os.path.realpath(env_b) == real
+                       and os.path.isabs(value))
+    if not (inside or env_points_here):
+        raise HTTPException(status_code=400, detail=(
+            f"'{value}' is outside the models directory ({models_dir}) -- "
+            "put the model there, or set ARAIL_MODELS_DIR."))
+    if not os.path.isdir(model_path):
+        raise HTTPException(status_code=400, detail=(
+            f"'{value}' was not found at {model_path}. Try: "
+            f"hf download mlx-community/{value} --local-dir {model_path}"))
+    try:
+        resolve_answering_model(value, role="secondary",
+                                backend="aerollm", model_path=model_path)
+    except ModelCeilingViolation as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return value
+
+
+async def apply_pin(slot: str, value: Optional[str], *, schedule_warm: bool = True
+                    ) -> Dict[str, Any]:
+    """Write one (already validated) pin, re-resolve + stamp env/registry,
+    and schedule that slot's warm without waiting on it. Shared by the pin
+    endpoint, the settle alias and POST /api/chat/default so a chip pick
+    survives a reboot. Returns ``{"resolution", "restart_required"}``."""
+    return await apply_pins({slot: value}, schedule_warm=schedule_warm)
+
+
+async def apply_pins(pins: Dict[str, Optional[str]], *, schedule_warm: bool = True
+                     ) -> Dict[str, Any]:
+    import asyncio
+    from arail import model_defaults as _md
+    from arail import model_resolve as _mr
+    from arail.portal import model_warmth as _mw
+
+    restart_required = False
+    if "b" in pins:
+        new_b = pins["b"]
+        restart_required = _tier1_resident_model_differs(
+            None if new_b in (None, "none") else new_b)
+
+    def _do() -> Dict[str, Any]:
+        with _mr.LOCK:
+            for slot, value in pins.items():
+                _md.write_pin(slot, value)
+            if "b" in pins:
+                _mw.clear_sentinel()    # an explicit pick is the retry
+            return _mr.resolve_and_apply(skip_b=_mw.crashed_model())
+
+    try:
+        res = await asyncio.to_thread(_do)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=(
+            f"couldn't write model_defaults.yaml: {exc}"))
+    _BOOT_CANDIDATES_CACHE["payload"] = None
+
+    if schedule_warm:
+        try:
+            from arail.portal import app as _app
+            if _app._boot_warm_enabled():
+                if "a" in pins and (res.get("a") or {}).get("model"):
+                    asyncio.create_task(_app._warm_slot_a())
+                if "b" in pins and not restart_required:
+                    asyncio.create_task(_app._warm_slot_b((res.get("b") or {}).get("model")))
+        except Exception:  # noqa: BLE001
+            pass
+    return {"resolution": res, "restart_required": restart_required}
+
+
+def _event(kind: str, text: str, **extra: Any) -> None:
+    from arail.activity import activity_log
+    activity_log.emit("registry", text, "success",
+                      {"model_event": {"kind": kind, **extra}})
+
+
+class PinRequest(BaseModel):
+    slot: str                       # "a" | "b"
+    model: Optional[str] = None     # id | "none" (b only) | None / "auto" clears
+
+
+@models_router.post("/pin")
+async def models_pin(req: PinRequest) -> Dict[str, Any]:
+    """Pin (or clear) one slot. Validated like the old settle; the pin is
+    written, the slot re-resolved, and the warm scheduled -- the response
+    never waits on the warm."""
+    slot = (req.slot or "").strip().lower()
+    if slot not in ("a", "b"):
+        raise HTTPException(status_code=400, detail="slot must be 'a' or 'b'")
+    value = _validate_pin(slot, req.model)
+    out = await apply_pin(slot, value)
+    res = out["resolution"]
+    _event("pinned", f"Model pin set: {slot.upper()}={value or 'auto'}",
+           slot=slot, model=value, restart_required=out["restart_required"])
+    return {"ok": True, "slot": slot, "pin": value,
+            "resolution": {"a": res.get("a"), "b": res.get("b")},
+            "restart_required": out["restart_required"],
+            "state": _registry().to_state()}
 
 
 class SettleRequest(BaseModel):
@@ -348,71 +404,20 @@ class SettleRequest(BaseModel):
 
 
 @models_router.post("/settle")
-async def models_settle(req: SettleRequest) -> Dict[str, Any]:
-    """Write the two boot slots to model_defaults.yaml — refusing any
-    choice that isn't actually installed/on-disk, or that violates the
-    answering-model ceiling (arail.registry.ceiling). ``default_b: null``
-    (or omitted) is always a valid "no deep model" choice."""
-    from arail import model_defaults as _md
-    from arail.chat import detect_installed_models
-    from arail.registry import store as _store
-    from arail.registry.ceiling import ModelCeilingViolation, resolve_answering_model
-
+async def models_settle(req: SettleRequest, response: Response) -> Dict[str, Any]:
+    """DEPRECATED alias (remove next release): two pin writes. An omitted
+    ``default_b`` is the ``none`` pin, as the old explicit null was."""
     default_a = (req.default_a or "").strip()
     if not default_a:
         raise HTTPException(status_code=400, detail="default_a is required")
-
-    installed = detect_installed_models()
-    installed_ollama = {m["id"] for m in installed if m["runtime"] == "ollama"}
-    short_installed = {i.split(":", 1)[0] for i in installed_ollama}
-    a_short = default_a.split(":", 1)[0]
-    if default_a not in installed_ollama and a_short not in short_installed:
-        raise HTTPException(status_code=400, detail=(
-            f"'{default_a}' is not installed in Ollama yet. "
-            f"Run: ollama pull {default_a}"))
-    try:
-        resolve_answering_model(default_a, role="primary", backend="ollama_native")
-    except ModelCeilingViolation as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
-    default_b = (req.default_b or "").strip() or None
-    if default_b:
-        models_dir = os.getenv("ARAIL_MODELS_DIR", "lab/models")
-        model_path = (default_b if os.path.isabs(default_b)
-                      else os.path.join(models_dir, default_b))
-        if not os.path.isdir(model_path):
-            raise HTTPException(status_code=400, detail=(
-                f"'{default_b}' was not found at {model_path}. Try: "
-                f"hf download mlx-community/{default_b} "
-                f"--local-dir {model_path}"))
-        try:
-            resolve_answering_model(default_b, role="secondary",
-                                    backend="aerollm", model_path=model_path)
-        except ModelCeilingViolation as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-
-    restart_required = _tier1_resident_model_differs(default_b)
-
-    _md.write_defaults(default_a, default_b)
-    _md.apply()
-
-    reg = _registry()
-    _store.reconcile_from_env(reg)
-
-    # Force the next boot-banner read to see this settlement immediately —
-    # a request-scoped TTL cache would otherwise show stale candidates for
-    # up to _BOOT_CANDIDATES_TTL seconds right after settling.
-    _BOOT_CANDIDATES_CACHE["payload"] = None
-
-    from arail.activity import activity_log
-    activity_log.emit(
-        "registry",
-        f"Model defaults settled: A={default_a}"
-        + (f", B={default_b}" if default_b else ", B=(none)"),
-        "success",
-        {"model_event": {"kind": "settled", "default_a": default_a,
-                         "default_b": default_b,
-                         "restart_required": restart_required}})
-
-    return {"ok": True, "restart_required": restart_required,
-            "state": reg.to_state()}
+    a = _validate_pin("a", default_a)
+    b = _validate_pin("b", (req.default_b or "").strip() or "none")
+    out = await apply_pins({"a": a, "b": b})
+    response.headers["Deprecation"] = "true"
+    response.headers["Link"] = '</api/models/pin>; rel="successor-version"'
+    _event("settled", f"Model defaults pinned (via deprecated /settle): A={a}, "
+           f"B={b}", default_a=a, default_b=b,
+           restart_required=out["restart_required"])
+    return {"ok": True, "deprecated": True,
+            "restart_required": out["restart_required"],
+            "state": _registry().to_state()}

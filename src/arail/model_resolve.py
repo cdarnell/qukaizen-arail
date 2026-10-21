@@ -45,7 +45,7 @@ _HTTP_TIMEOUT_S = 1.5
 
 # Held around resolve + cache write so a pin write racing a boot resolve
 # cannot interleave with the cache rewrite (FM13).
-LOCK = threading.Lock()
+LOCK = threading.RLock()
 
 _TIER_ORDER = {"recommended": 0, "flagship": 1, "optional": 2}
 SHIPPED_DEFAULT = "llama-ai-eng"
@@ -331,13 +331,17 @@ def _resolve_a(pin, env_pref, tags, cache_a, total_ram, notes) -> SlotResolution
     if tags is None:
         notes.append({"slot": "a", "kind": "ollama_down",
                       "detail": "Ollama isn't running — start it with `ollama serve`"})
+        # Can't verify anything: an explicit pin is still the operator's intent,
+        # then the last verified result, then the .env preference.
+        if pin:
+            return SlotResolution(model=pin, source="pin",
+                                  reason="Ollama unreachable; unverified")
         if cache_a:
             return SlotResolution(model=cache_a, source="cache",
                                   reason="Ollama unreachable; using last resolved model")
-        for src, val in (("pin", pin), ("env", env_pref)):
-            if val:
-                return SlotResolution(model=val, source=src,
-                                      reason="Ollama unreachable; unverified")
+        if env_pref:
+            return SlotResolution(model=env_pref, source="env",
+                                  reason="Ollama unreachable; unverified")
         return SlotResolution(reason="Ollama unreachable and no previous model")
 
     show_budget = [SHOW_CAP]
@@ -596,6 +600,11 @@ def resolve_and_apply(*, skip_b: Optional[str] = None,
             {k: v for k, v in out.items() if k not in ("saved", "migrated")})
         out["migrated"] = migrated
         out["file_ok"] = bool(data["ok"])
+        if not out["saved"] or not out["file_ok"]:
+            out["degraded"].append({
+                "slot": "a", "kind": "cache_unsaved",
+                "detail": "couldn't read or save the model cache "
+                          "(model_defaults.yaml) -- resolved in memory only"})
         md.stamp_env(out)
         try:
             from arail.registry import get_registry

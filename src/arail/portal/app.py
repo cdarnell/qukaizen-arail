@@ -6836,7 +6836,7 @@ def _record_warm(slot: str, status: str) -> None:
 
 
 async def _boot_models() -> None:
-    """Resolve both model slots, then warm A (and B — see _warm_deep_slot).
+    """Resolve both model slots, then warm A and B (_warm_slot_a / _warm_slot_b).
 
     Replaces the old registry->env export + autochecks-gated warm: the
     resolver (arail.model_resolve) is now the single source of truth and
@@ -6885,20 +6885,31 @@ async def _boot_models() -> None:
         _record_warm("a", "skipped")
         _MODEL_WARM = True
     else:
-        await _warm_primary_router()
-        if _MODEL_WARM_MS is not None:
-            _record_warm("a", "ok")
-        elif _MODEL_WARM_SKIP_REASON == _MODEL_WARM_SKIP_REASON_ON_EXCEPTION:
-            _record_warm("a", "failed")
-        elif _MODEL_WARM_SKIP_REASON == "ARAIL_TIER0_BOOT_WARM=0":
-            _record_warm("a", "disabled")
-        else:
-            _record_warm("a", "skipped")
+        await _warm_slot_a()
     # Slot B after A, so a chat turn arriving at boot queues behind at most
     # one warm. A crash in this load is caught by the sentinel next boot.
+    await _warm_slot_b(b.get("model"))
+
+
+async def _warm_slot_a() -> None:
+    """Warm slot A through the single warm path (_warm_primary_router) and
+    record its outcome in the closed vocabulary. Never raises."""
+    await _warm_primary_router()
+    if _MODEL_WARM_MS is not None:
+        _record_warm("a", "ok")
+    elif _MODEL_WARM_SKIP_REASON == _MODEL_WARM_SKIP_REASON_ON_EXCEPTION:
+        _record_warm("a", "failed")
+    elif _MODEL_WARM_SKIP_REASON == "ARAIL_TIER0_BOOT_WARM=0":
+        _record_warm("a", "disabled")
+    else:
+        _record_warm("a", "skipped")
+
+
+async def _warm_slot_b(model: "str | None") -> None:
+    """One-shot deep-model warm + outcome record. Never raises."""
     try:
         from arail.portal import model_warmth as _mw
-        _record_warm("b", await _mw.boot_warm_deep(b.get("model")))
+        _record_warm("b", await _mw.boot_warm_deep(model))
     except Exception:  # noqa: BLE001
         _record_warm("b", "failed")
 
@@ -7839,44 +7850,6 @@ def _apply_chat_defaults(
         return backend, model, runtime
 
 
-def _registry_write_through_resident(model_id: str) -> bool:
-    """Promote *model_id* to the registry's tier0-local entry (sprints/
-    2026-08-11-two-slot-chat-models Part 4) — so the nav's model switcher
-    and every other registry reader agree with what chat just set as its
-    default, by construction, instead of two systems that can disagree.
-
-    Only called for ollama-runtime picks that already passed the primary
-    ceiling. Never raises; returns False (no-op) on any failure — the
-    chat default itself is already set by the caller regardless.
-    """
-    try:
-        from arail.registry import get_registry
-        from arail.registry.store import TIER0_ID
-        from arail.model_specs import resolve_params_b as _resolve_params_b
-        from dataclasses import replace as _replace
-
-        reg = get_registry()
-        reg._ensure_loaded()
-        existing = reg.entries.get(TIER0_ID)
-        if existing is None:
-            return False
-        params_b, _source = _resolve_params_b(model_id)
-        endpoint = f"http://127.0.0.1:{os.getenv('OLLAMA_PORT', '11434')}/v1"
-        reg.add_entry(_replace(
-            existing,
-            model_id=model_id,
-            backend="ollama_native",
-            endpoint=endpoint,
-            display_name=_compact_model_label(model_id) or model_id,
-            params_b=params_b,
-            source="user",
-        ))
-        return True
-    except Exception as e:  # noqa: BLE001
-        activity_log.emit("registry", f"Resident write-through skipped: {e}", "warn")
-        return False
-
-
 @app.post("/api/chat/default")
 async def chat_default(request: Request):
     """Set or clear the chat-wide default provider+model (L4), or set one
@@ -7939,29 +7912,17 @@ async def chat_default(request: Request):
                 ),
             }
 
-        os.environ["AEROLLM_MODEL"] = model_id
+        # A chip pick must survive a reboot: it is a pin (model_defaults.yaml),
+        # and the resolver stamps env + registry from it (one direction).
         registry_updated = False
         try:
-            from arail.registry import get_registry
-            from arail.registry.store import TIER1_ID
-            from arail.model_specs import resolve_params_b as _resolve_params_b
-            from dataclasses import replace as _replace
-
-            reg = get_registry()
-            reg._ensure_loaded()
-            existing = reg.entries.get(TIER1_ID)
-            if existing is not None:
-                params_b, _source = _resolve_params_b(model_id)
-                reg.add_entry(_replace(
-                    existing,
-                    model_id=model_id,
-                    display_name=_compact_model_label(model_id) or model_id,
-                    params_b=params_b,
-                    source="user",
-                ))
-                registry_updated = True
+            from arail.portal import models_api as _models_api
+            out = await _models_api.apply_pin("b", model_id)
+            registry_updated = True
+            requires_restart = bool(out.get("restart_required"))
         except Exception as e:  # noqa: BLE001
-            activity_log.emit("registry", f"Deep write-through skipped: {e}", "warn")
+            requires_restart = False
+            activity_log.emit("registry", f"Deep pin skipped: {e}", "warn")
 
         activity_log.emit("chat", f"Deep slot default set: model={model_id}", "info")
         return {
@@ -7969,7 +7930,7 @@ async def chat_default(request: Request):
             "slot": "deep",
             "model": model_id,
             "registry_updated": registry_updated,
-            "requires_restart": False,
+            "requires_restart": requires_restart,
         }
 
     # ── RESIDENT SLOT (default) — original behavior, plus write-through ─
@@ -8008,9 +7969,13 @@ async def chat_default(request: Request):
         from arail.registry.ceiling import ModelCeilingViolation, resolve_answering_model
         try:
             resolve_answering_model(model_id, role="primary", backend="ollama_native")
-            registry_updated = _registry_write_through_resident(model_id)
+            from arail.portal import models_api as _models_api
+            await _models_api.apply_pin("a", model_id)
+            registry_updated = True
         except ModelCeilingViolation:
             pass  # chat default still set; just not promoted to tier0
+        except Exception as e:  # noqa: BLE001 -- the chat default itself is already set
+            activity_log.emit("registry", f"Resident pin skipped: {e}", "warn")
 
     activity_log.emit("chat", f"Chat default set: provider={provider} model={model_id}", "info")
     return {
