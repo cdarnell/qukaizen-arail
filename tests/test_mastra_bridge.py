@@ -393,11 +393,11 @@ def _spawn_sleeper(tmp_path, name):
     return subprocess.Popen(["/bin/bash", str(script)], start_new_session=True)
 
 
-def _spawn_studio_like():
+def _spawn_studio_like(cwd=None):
     """A group leader whose argv/cwd look exactly like the one start_studio launches."""
     import subprocess
     return subprocess.Popen(["/bin/bash", "-c", 'exec -a "npm exec mastra dev" sleep 120'],
-                            cwd=str(mb.MASTRA_DIR), start_new_session=True)
+                            cwd=str(cwd or mb.MASTRA_DIR), start_new_session=True)
 
 
 def test_stop_never_signals_unrelated_reused_pid(tmp_path, monkeypatch):
@@ -541,7 +541,9 @@ def test_reset_stops_running_studio_but_not_unrelated_pid(tmp_path):            
     fake = _reset_sandbox(tmp_path)
     mdir = fake / "lab" / "data" / "mastra"
     mdir.mkdir(parents=True)
-    studio = _spawn_studio_like()
+    sdir = fake / "integrations" / "mastra-studio"
+    sdir.mkdir(parents=True)
+    studio = _spawn_studio_like(sdir)      # reset.sh anchors the cwd to ITS OWN repo's Studio dir
     other = _spawn_sleeper(tmp_path, "unrelated.sh")
     try:
         (mdir / "studio.pid").write_text(f"{studio.pid} {os.getpgid(studio.pid)}")
@@ -645,3 +647,70 @@ def test_health_does_not_report_foreign_listener_as_studio(monkeypatch):
     from arail.portal import app as appmod
     src = inspect.getsource(appmod)
     assert '_mastra_bridge.listener_state)) != "foreign"' in src
+
+
+# ── Re-test fix round: identity without lsof, and not-by-cwd-alone ────
+
+def test_foreign_listener_without_lsof_is_never_signalled(monkeypatch, tmp_path):
+    import socket
+    monkeypatch.setattr(mb, "mastra_db_path", lambda: tmp_path / "mastra" / "mastra.db")
+    (tmp_path / "mastra").mkdir()
+    monkeypatch.setattr(mb, "listener_pids", lambda port: None)
+    monkeypatch.setattr(mb, "_process_cwd", lambda pid: None)
+    s = socket.socket()
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        s.bind(("127.0.0.1", 4111))
+    except OSError:
+        pytest.skip("4111 busy")
+    s.listen(5)
+    try:
+        assert mb.listener_state() == "unknown"
+        res = mb.stop_studio()
+        assert res["ok"] is False and res["error"] == "cannot_verify_identity" and "lsof" in res["message"]
+        assert mb.resolve_page_state(lambda: (25, 0, 0), lambda: True, mb.listener_state)["state"] == "status_unknown"
+        assert s.fileno() != -1
+    finally:
+        s.close()
+
+
+def test_stop_without_lsof_stops_genuine_leader_by_argv_shape(monkeypatch, tmp_path):
+    monkeypatch.setattr(mb, "mastra_db_path", lambda: tmp_path / "mastra" / "mastra.db")
+    (tmp_path / "mastra").mkdir()
+    monkeypatch.setattr(mb, "listener_pids", lambda port: None)
+    p = _spawn_studio_like()
+    import os
+    mb._pid_file().write_text(f"{p.pid} {os.getpgid(p.pid)}")
+    res = mb.stop_studio(lambda pid: "npm exec mastra dev", lambda pid: None)   # cwd unknown (no lsof)
+    assert res["was_running"] is True
+    p.wait(timeout=10)
+
+
+def test_undeterminable_identity_keeps_pid_file_and_signals_nothing(monkeypatch, tmp_path):
+    monkeypatch.setattr(mb, "mastra_db_path", lambda: tmp_path / "mastra" / "mastra.db")
+    (tmp_path / "mastra").mkdir()
+    p = _spawn_studio_like()
+    try:
+        import os
+        mb._pid_file().write_text(f"{p.pid} {os.getpgid(p.pid)}")
+        res = mb.stop_studio(lambda pid: "", lambda pid: None)     # ps gave nothing
+        assert res["ok"] is False and res["error"] == "cannot_verify_identity"
+        assert mb._pid_file().exists() and p.poll() is None
+    finally:
+        p.kill(); p.wait()
+
+
+def test_cwd_alone_does_not_make_a_listener_ours(monkeypatch):
+    # cwd under the Studio dir but not the Mastra node entry and not in the recorded group
+    monkeypatch.setattr(mb, "listener_pids", lambda port: [os.getpid()])
+    monkeypatch.setattr(mb, "_process_cwd", lambda pid: str(mb.MASTRA_DIR))
+    monkeypatch.setattr(mb, "port_open", lambda *a, **k: True)
+    assert mb.listener_state(command_of=lambda pid: "python -m http.server 4111") == "foreign"
+    entry = f"/opt/homebrew/bin/node {mb.MASTRA_DIR}/.mastra/output/index.mjs"
+    assert mb.listener_state(command_of=lambda pid: entry) == "ours"
+
+
+def test_reset_sh_cwd_match_is_anchored():
+    sh = (mb.REPO_ROOT / "scripts" / "reset.sh").read_text()
+    assert '*/integrations/mastra-studio*' not in sh
+    assert '"$studio_cwd" == "$studio_root"/*' in sh

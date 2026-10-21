@@ -2626,8 +2626,12 @@ async def mastra_start(request: Request):
 async def mastra_stop(request: Request):
     if (gate := _mastra_gate(request)) is not None:
         return gate
+    from fastapi.responses import JSONResponse
     from arail import mastra_bridge
-    return await asyncio.to_thread(mastra_bridge.stop_studio)
+    res = await asyncio.to_thread(mastra_bridge.stop_studio)
+    if not res.get("ok"):
+        return JSONResponse(status_code=res.get("status", 409), content={"error": res["error"], "message": res.get("message", "")})
+    return res
 
 
 @app.post("/api/mastra/run-once")

@@ -26,6 +26,8 @@
     <h3>Not installed</h3><p>{{ detail }}</p><pre>./arailctl mastra install</pre>
   {% elif state == 'port_in_use' %}
     <h3>Port in use</h3><p>{{ detail }}</p>
+  {% elif state == 'status_unknown' %}
+    <h3>Status unknown</h3><p>{{ detail }}</p>
   {% elif state == 'not_running' %}
     <h3>Not running</h3><p>{{ detail }}</p>
     <button id="mst-start" type="button">Start Studio</button>

@@ -127,3 +127,20 @@ Test correction (evidence): `tests/test_mastra_qa.py::test_concurrent_real_probe
 Also: `test_health` parity test (tests/test_system_health_stream_tier_filter_qa.py) caught my first health change (identity check bypassed the patched `_port_open`); health is now "port open and not identified as foreign".
 
 Results: tests/test_mastra_qa.py + test_mastra_bridge.py + test_researcher_tool.py + health/tier/CSRF/experiments/reset suites + tests/portal: all pass except the 10 known base failures (test_build_tab x4, test_models_api, opencode x2, token_compliance, test_cli_verbs doctor-healthy, test_cli_status T34 timing). `node --test integrations/mastra-studio/test/qa-run-once.test.mjs`: 6 pass, 0 fail. D1 browser leg remains INCONCLUSIVE (owner pcap).
+
+---
+## Re-test fix round 2026-10-21 (TEST_REPORT re-test at 15913d3e: R-1, R-2)
+
+Identity now has four outcomes instead of a guess: **ours / foreign / unknown / none**, and process checks return `None` (unknown) rather than `""` when lsof is missing or denied.
+
+- **R-1 (MEDIUM).**
+  - A live leader is "ours" when pid == pgid, its argv has Studio's shape (`npm|npx|node ... mastra dev`) and its cwd is under `integrations/mastra-studio`, OR its cwd cannot be determined (no lsof): shape plus the recorded `pid pgid` pair then proves it. An orphaned group (leader dead, members alive) is still stopped (a pgid cannot be reused while a member lives).
+  - Positively something else (other argv, cwd elsewhere) -> `stale`, nothing signalled. `ps` giving nothing, or a listener that cannot be identified -> `{"ok": false, "error": "cannot_verify_identity", "message": "cannot verify Studio identity: lsof is required ..."}`, the pid file is kept, nothing is signalled (HTTP 409 from the portal).
+  - Without lsof, `status` of ARAIL's own Studio is `running` (recorded group proves it); an unidentifiable listener is the new page state `status_unknown` (not `port_in_use`); `start` refuses it. Seven page states now.
+- **R-2 (LOW).** A listener is "ours" only if its cwd is under the Studio dir AND (it is `node .../integrations/mastra-studio/.mastra/output/index.mjs` OR it is in the group recorded in `studio.pid`). A process group is never killed on cwd alone. `reset.sh` now anchors the cwd to its own repo's Studio dir (`cd -P` + `pwd -P` prefix match, not an unanchored glob) and treats an unknown cwd the same way as the Python side.
+- Side fix: `listener_state` asks lsof first and only falls back to a TCP connect when lsof sees nothing (a probe connect had exhausted a backlog-1 test socket).
+- My reset test now builds the fake Studio under the sandbox repo's own `integrations/mastra-studio` to match the anchored rule.
+
+Live checks (real Studio, `lsof` hidden from PATH): `start` with lsof, then `status` -> running, `start` -> already_running, `stop` -> was_running true, 0 listeners, pid file removed. A foreign `http.server` on 4111 without lsof: `status_unknown`, `stop` -> `cannot_verify_identity`, the server survived. `http.server` started from inside `integrations/mastra-studio`: `port_in_use`, `stop` -> was_running false, survived.
+
+Tests: test_mastra_qa.py + test_mastra_bridge.py (91) + test_researcher_tool.py: 239 passed; node qa-run-once: 6/6; wider portal/tier/CSRF/health/experiments/reset suites: only the known base failures (test_build_tab x4, test_models_api, opencode x2, token_compliance, test_cli_verbs doctor-healthy, test_cli_status T34). D1 browser leg remains INCONCLUSIVE (owner pcap).

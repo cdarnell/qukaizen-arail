@@ -467,14 +467,18 @@ reset_data() {
         read -r studio_pid studio_pgid < "$studio_pidfile" || true
         if [[ "$studio_pid" =~ ^[0-9]+$ && "$studio_pid" == "$studio_pgid" && "$studio_pgid" -gt 1 ]] \
             && kill -0 -- "-$studio_pgid" 2>/dev/null; then
-            local studio_ok="false" studio_cmd studio_cwd
+            local studio_ok="false" studio_cmd studio_cwd studio_root
             if ! kill -0 "$studio_pid" 2>/dev/null; then
                 studio_ok="true"
             else
                 studio_cmd="$(ps -p "$studio_pid" -o command= 2>/dev/null || true)"
                 studio_cwd="$(lsof -a -p "$studio_pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1)"
-                if [[ "$studio_cmd" =~ ^([^[:space:]]*/)?(npm|npx|node)[[:space:]]([^[:space:]]+[[:space:]])*mastra[[:space:]]dev([[:space:]]|$) \
-                    && "$studio_cwd" == */integrations/mastra-studio* ]]; then
+                studio_root="$(cd -P "$REPO_ROOT/integrations/mastra-studio" 2>/dev/null && pwd -P || true)"
+                # argv shape must match; the cwd must be under THIS repo's Studio dir (anchored prefix),
+                # or be unknown (no lsof) in which case shape + recorded pid==pgid is the proof.
+                if [[ "$studio_cmd" =~ ^([^[:space:]]*/)?(npm|npx|node)[[:space:]]([^[:space:]]+[[:space:]])*mastra[[:space:]]dev([[:space:]]|$) ]] \
+                    && { [[ -z "$studio_cwd" ]] || { [[ -n "$studio_root" ]] \
+                         && [[ "$studio_cwd" == "$studio_root" || "$studio_cwd" == "$studio_root"/* ]]; }; }; then
                     studio_ok="true"
                 fi
             fi

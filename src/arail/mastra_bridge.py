@@ -135,28 +135,75 @@ def listener_pids(port: int) -> Optional[list]:
     return sorted({int(ln[1:]) for ln in out.splitlines() if ln.startswith("p") and ln[1:].isdigit()})
 
 
-def _process_cwd(pid: int) -> str:
+def _process_cwd(pid: int) -> Optional[str]:
+    """Working directory of ``pid``, or None when it cannot be determined (no lsof, denied, error).
+    None is "unknown", never "somewhere else": callers must not treat it as a mismatch."""
     lsof = shutil.which("lsof")
     if not lsof:
-        return ""
+        return None
     try:
         out = subprocess.run([lsof, "-a", "-p", str(pid), "-d", "cwd", "-Fn"],
                              capture_output=True, text=True, timeout=10).stdout
     except (OSError, subprocess.SubprocessError):
-        return ""
-    return next((ln[1:] for ln in out.splitlines() if ln.startswith("n")), "")
+        return None
+    return next((ln[1:] for ln in out.splitlines() if ln.startswith("n")), None)
 
 
-def listener_state(port: Optional[int] = None) -> str:
-    """'none' | 'ours' | 'foreign' for the Studio port. A listener is ours only if every
-    listening process has its working directory under integrations/mastra-studio."""
+# The Studio's listening process: node running the built entry under integrations/mastra-studio.
+def _listener_shape(command: str) -> bool:
+    entry = str(MASTRA_DIR / ".mastra" / "output" / "index.mjs")
+    return bool(re.match(r"^(\S*/)?node\s", command)) and entry in command
+
+
+def _recorded_group() -> Optional[int]:
+    try:
+        pid_s, pgid_s = _pid_file().read_text().split()
+        pid, pgid = int(pid_s), int(pgid_s)
+    except (OSError, ValueError):
+        return None
+    return pgid if pgid > 1 and pid == pgid and _group_alive(pgid) else None
+
+
+def listener_state(port: Optional[int] = None,
+                   command_of: Optional[Callable[[int], str]] = None,
+                   cwd_of: Optional[Callable[[int], Optional[str]]] = None) -> str:
+    """'none' | 'ours' | 'foreign' | 'unknown' for the Studio port.
+
+    A listener is ours only if its cwd is under integrations/mastra-studio AND (it is the Mastra
+    node entry OR it belongs to the process group recorded in studio.pid). When identity cannot
+    be determined (no lsof, denied) the answer is 'unknown', never a guess."""
     port = port or studio_port()
+    command_of = command_of or _process_command
+    cwd_of = cwd_of or _process_cwd
     pids = listener_pids(port)
-    if pids is None:                       # cannot identify anyone: fall back to a plain connect
-        return "foreign" if port_open(port) else "none"
-    if not pids:
-        return "foreign" if port_open(port) else "none"   # listening but not visible to lsof
-    return "ours" if all(_under_mastra_dir(_process_cwd(p)) for p in pids) else "foreign"
+    if not pids and not port_open(port):     # lsof is authoritative when it sees a listener
+        return "none"
+    recorded = _recorded_group()
+    if pids is None or not pids:
+        # Without lsof the recorded group (liveness + leader proof) is the only evidence of "ours".
+        if recorded is not None and _leader_or_orphan_is_ours(command_of, cwd_of):
+            return "ours"
+        return "unknown"
+    verdicts = []
+    for p in pids:
+        try:
+            in_group = recorded is not None and os.getpgid(p) == recorded
+        except ProcessLookupError:
+            continue
+        cwd = cwd_of(p)
+        if cwd is None:
+            verdicts.append("ours" if in_group else "unknown")
+        elif not _under_mastra_dir(cwd):
+            verdicts.append("foreign")
+        elif in_group or _listener_shape(command_of(p)):
+            verdicts.append("ours")
+        else:
+            verdicts.append("foreign")
+    if "foreign" in verdicts:
+        return "foreign"
+    if "unknown" in verdicts or not verdicts:
+        return "unknown"
+    return "ours"
 
 
 def resolve_page_state(
@@ -164,7 +211,7 @@ def resolve_page_state(
     installed: Callable[[], bool] = is_installed,
     running: Callable[[], Any] = listener_state,
 ) -> Dict[str, str]:
-    """Exactly one of node_missing | node_too_old | not_installed | port_in_use | not_running | running.
+    """Exactly one of node_missing | node_too_old | not_installed | port_in_use | status_unknown | not_running | running.
 
     ``running()`` returns 'none' | 'ours' | 'foreign' (a bool is accepted: True means ours)."""
     v = get_node()
@@ -177,6 +224,10 @@ def resolve_page_state(
         return {"state": "not_installed", "detail": "Run ./arailctl mastra install to fetch the pinned packages."}
     ls = running()
     ls = ("ours" if ls else "none") if isinstance(ls, bool) else ls
+    if ls == "unknown":
+        return {"state": "status_unknown",
+                "detail": "Status unknown: something is listening on port %d and ARAIL cannot identify it "
+                          "(lsof is missing or not permitted). Install lsof to let ARAIL tell." % studio_port()}
     if ls == "foreign":
         return {"state": "port_in_use",
                 "detail": f"Port {studio_port()} is in use by another program. ARAIL will not start, stop or open anything there."}
@@ -249,7 +300,7 @@ def is_loopback_listener(addrs: list, port: int) -> bool:
 
 def start_studio() -> Dict[str, Any]:
     st = resolve_page_state()
-    if st["state"] in ("node_missing", "node_too_old", "not_installed", "port_in_use"):
+    if st["state"] in ("node_missing", "node_too_old", "not_installed", "port_in_use", "status_unknown"):
         return {"ok": False, "error": st["state"], "status": 409}
     if st["state"] == "running":
         return {"ok": True, "already_running": True}
@@ -296,8 +347,13 @@ _LEADER_SHAPE = re.compile(r"^(\S*/)?(npm|npx|node)\s+(\S+\s+)*mastra\s+dev(\s|$
 
 
 def pid_is_our_studio(pid: int, pgid: int, command_of: Callable[[int], str] = _process_command,
-                      cwd_of: Callable[[int], str] = _process_cwd) -> bool:
-    """True only for a live group leader (pid == pgid) with Studio's argv shape and cwd."""
+                      cwd_of: Callable[[int], Optional[str]] = _process_cwd) -> Optional[bool]:
+    """Is the live leader ``pid`` the Studio we started?
+
+    True: pid == pgid, argv has Studio's shape and (cwd is under integrations/mastra-studio, or
+    the cwd cannot be determined, e.g. no lsof: shape + recorded pair already prove it).
+    False: positively something else (different group, other argv, cwd elsewhere).
+    None: cannot be determined (ps gave nothing)."""
     if pid != pgid:
         return False
     try:
@@ -305,7 +361,28 @@ def pid_is_our_studio(pid: int, pgid: int, command_of: Callable[[int], str] = _p
             return False
     except (ProcessLookupError, PermissionError):
         return False
-    return bool(_LEADER_SHAPE.match(command_of(pid))) and _under_mastra_dir(cwd_of(pid))
+    cmd = command_of(pid)
+    if not cmd:
+        return None
+    if not _LEADER_SHAPE.match(cmd):
+        return False
+    cwd = cwd_of(pid)
+    return True if cwd is None else _under_mastra_dir(cwd)
+
+
+def _leader_or_orphan_is_ours(command_of, cwd_of) -> bool:
+    try:
+        pid_s, pgid_s = _pid_file().read_text().split()
+        pid, pgid = int(pid_s), int(pgid_s)
+    except (OSError, ValueError):
+        return False
+    try:
+        leader_alive = os.getpgid(pid) == pgid
+    except ProcessLookupError:
+        return True            # group alive, leader dead: orphaned members of our own group
+    except PermissionError:
+        return False
+    return leader_alive and pid_is_our_studio(pid, pgid, command_of, cwd_of) is True
 
 
 def _group_alive(pgid: int) -> bool:
@@ -331,15 +408,20 @@ def _kill_group(pgid: int) -> None:
         pass
 
 
+CANNOT_VERIFY = ("cannot verify Studio identity: lsof is required to tell Studio from another program "
+                 "(macOS ships it; on Linux install the lsof package). Nothing was signalled.")
+
+
 def stop_studio(command_of: Callable[[int], str] = _process_command,
-                cwd_of: Callable[[int], str] = _process_cwd) -> Dict[str, Any]:
+                cwd_of: Callable[[int], Optional[str]] = _process_cwd) -> Dict[str, Any]:
     """Stop the Studio process group ARAIL started.
 
-    A process group id cannot be reused while any member is alive, so if the recorded group
-    is alive and its leader is dead, the survivors are Studio's own (orphaned) members. If
-    the leader pid is alive it must look like Studio (argv shape + cwd), otherwise the pid
-    was recycled and nothing is signalled. A listener on the Studio port that is ours but has
-    no usable pid file is stopped via its own group; a foreign listener is never touched."""
+    A process group id cannot be reused while any member is alive, so if the recorded group is
+    alive and its leader is dead, the survivors are Studio's own orphaned members. A live leader
+    must prove itself (argv shape, cwd when known). If identity cannot be determined nothing is
+    signalled and the pid file is kept. A listener on the Studio port with no usable pid file is
+    stopped only when it is positively Studio (cwd under the Studio dir AND the Mastra node
+    entry); a group is never killed on cwd alone; a foreign listener is never touched."""
     pf = _pid_file()
     stopped = False
     stale = False
@@ -356,7 +438,10 @@ def stop_studio(command_of: Callable[[int], str] = _process_command,
                 leader_alive = False
             except PermissionError:
                 leader_alive = True
-            if not leader_alive or pid_is_our_studio(pid, pgid, command_of, cwd_of):
+            verdict = True if not leader_alive else pid_is_our_studio(pid, pgid, command_of, cwd_of)
+            if verdict is None:
+                return {"ok": False, "error": "cannot_verify_identity", "message": CANNOT_VERIFY, "status": 409}
+            if verdict:
                 _kill_group(pgid)
                 stopped = True
             else:
@@ -364,7 +449,8 @@ def stop_studio(command_of: Callable[[int], str] = _process_command,
         else:
             stale = True
         pf.unlink(missing_ok=True)
-    if listener_state() == "ours":
+    state = listener_state(command_of=command_of, cwd_of=cwd_of)
+    if state == "ours":
         for lp in listener_pids(studio_port()) or []:
             try:
                 g = os.getpgid(lp)
@@ -373,6 +459,8 @@ def stop_studio(command_of: Callable[[int], str] = _process_command,
             if g > 1 and g != os.getpgid(0):
                 _kill_group(g)
                 stopped = True
+    elif state == "unknown" and not stopped:
+        return {"ok": False, "error": "cannot_verify_identity", "message": CANNOT_VERIFY, "status": 409}
     out: Dict[str, Any] = {"ok": True, "was_running": stopped}
     if stale and not stopped:
         out["stale"] = True
