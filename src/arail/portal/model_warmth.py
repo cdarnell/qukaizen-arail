@@ -323,8 +323,8 @@ def _pid_alive(pid: int) -> bool:
         return False
     except PermissionError:
         return True
-    except OSError:
-        return False
+    except (OSError, OverflowError, ValueError):
+        return False        # out-of-range pid (> INT_MAX) is stale, not an error
     return True
 
 
