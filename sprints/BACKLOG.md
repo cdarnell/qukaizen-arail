@@ -1332,3 +1332,13 @@ platform assumption `T3/daemon-a` had — a scenario is legitimate to gate
 on a platform only when the PRODUCT is gated at the same boundary and
 says so (this sprint's own standing rule, ARCHITECTURE.md §10); anything
 gated merely to make CI green needs fixing, not skipping.
+
+## Delete the boot-model deprecation shims (filed 2026-10-20, boot-model-autoresolve)
+
+`POST /api/models/settle` (alias for two pin writes, `Deprecation: true`
+header) and `model_defaults.write_defaults()` (shim to `write_pin`, emits
+`DeprecationWarning`) ship for one release only. Delete both in the
+release after the one that carries sprint 2026-10-20-boot-model-autoresolve,
+along with `tests/test_models_settle_endpoint.py`. Also: the chat gallery's
+`arail.chat._ollama_installed_models` still hardcodes port 11434 (the boot
+resolver honours `OLLAMA_PORT`); route it through the same helper.

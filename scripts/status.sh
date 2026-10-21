@@ -599,6 +599,27 @@ print(json.dumps(out))
 fi
 export DB_JSON DB_COLLECTOR_FAILED DB_COLLECTOR_ERROR
 
+# ── Models (sprints/2026-10-20-boot-model-autoresolve) — the last-resolved
+# slot A/B cache, read from model_defaults.yaml. A local file read: no
+# network, no model load, permitted under --no-probe. Additive: a missing
+# or unreadable file just means no `models` key.
+MODELS_JSON="$(ARAIL_MODEL_DEFAULTS_FILE="${ARAIL_MODEL_DEFAULTS_FILE:-$REPO_ROOT/model_defaults.yaml}" python3 -c '
+import json
+try:
+    from arail import model_defaults as md
+    d = md.read()
+    r = d.get("resolved") or {}
+    w = r.get("warm") or {}
+    out = {}
+    for k in ("a", "b"):
+        s = r.get(k) if isinstance(r.get(k), dict) else {}
+        out[k] = {"model": s.get("model"), "source": s.get("source"), "warm": w.get(k)}
+    print(json.dumps(out if r else {}))
+except Exception:
+    print("{}")
+' 2>/dev/null || echo '{}')"
+export MODELS_JSON
+
 GENERATED_AT="$(python3 -c 'import datetime; print(datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))')"
 PROVISIONED="false"
 [[ -d .venv ]] && PROVISIONED="true"
@@ -673,6 +694,10 @@ root_services = json.loads(os.environ["ROOT_SERVICES_JSON"])
 agents = json.loads(os.environ["AGENTS_JSON"])
 warnings = json.loads(os.environ["WARNINGS_JSON"])
 db_by_slug = json.loads(os.environ.get("DB_JSON") or "{}")
+try:
+    models_info = json.loads(os.environ.get("MODELS_JSON") or "{}")
+except ValueError:
+    models_info = {}
 db_collector_failed = os.environ.get("DB_COLLECTOR_FAILED") == "1"
 db_collector_error = os.environ.get("DB_COLLECTOR_ERROR") or ""
 
@@ -884,6 +909,8 @@ doc = {
     },
     "verdict": verdict,
 }
+if models_info:
+    doc["models"] = models_info     # additive; schema stays arail.status/v2
 
 if mode == "json":
     print(json.dumps(doc, indent=2))
@@ -975,6 +1002,17 @@ elif doc["supervision"]["plists_installed"]:
     print("")
 else:
     print(f"  {BOLD}Supervision{RESET}: foreground (start.sh) — see ./arailctl install-daemon")
+    print("")
+
+if models_info:
+    _ma, _mb = models_info.get("a") or {}, models_info.get("b") or {}
+
+    def _mfmt(slot, m):
+        name = m.get("model") or "(none)"
+        extra = ", ".join(x for x in (m.get("source"),
+                                      f"warm {m['warm']}" if m.get("warm") else None) if x)
+        return f"{slot} {name}" + (f" ({extra})" if extra else "")
+    print(f"  models: {_mfmt('fast', _ma)} · {_mfmt('deep', _mb)}")
     print("")
 
 # ── Root lab (ARCHITECTURE.md §7.1 — "root lab: not started" replaces the

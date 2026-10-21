@@ -171,15 +171,17 @@ def test_session_isolation_points_at_a_file_that_does_not_exist():
     assert not Path(override).exists()
 
 
-def test_example_file_is_valid_yaml_and_documents_both_keys():
-    """The committed .example file must actually parse and name both
-    slots — it's the thing a new operator reads first."""
+def test_example_file_is_valid_v2_yaml_with_both_pins_unset():
+    """The committed .example file must parse as v2, pin nothing (so copying
+    it changes nothing), and read back through model_defaults.read()."""
     import yaml
     example = Path(__file__).resolve().parent.parent / "model_defaults.yaml.example"
     assert example.exists()
     data = yaml.safe_load(example.read_text(encoding="utf-8"))
-    assert "default_a" in data
-    assert "default_b" in data
+    assert data["version"] == 2
+    assert data["pins"] == {"a": None, "b": None}
+    got = model_defaults.read(example)
+    assert got["version"] == 2 and got["pins"] == {"a": None, "b": None}
 
 
 # ---------------------------------------------------------------------------

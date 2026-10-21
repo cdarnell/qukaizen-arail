@@ -103,7 +103,7 @@ reason unless `--force`.
 | `[1/5] source` | `git pull --ff-only`; prints `old…new` short SHAs + commit count; **re-execs itself if HEAD moved** so a self-update never runs on stale bytes | not a git repo · dirty worktree · detached HEAD · no upstream · diverged (not a fast-forward) · airgapped without `--force` |
 | `[2/5] deps` | `pip install -e ".[$LAB_TIER]"` (idempotent); with `--rebuild-venv`, recreates `.venv` first (**failure here is a hard failure, exit 1** — not degraded) | airgapped without `--force` |
 | `[3/5] components` | `scripts/update.sh --apply --non-interactive` — `components.json` drives it; a single component's failure warns and continues | airgapped without `--force` (`update.sh`'s own check) |
-| `[4/5] models` | Compares the expected primary chat model (`model_defaults.yaml`'s `default_a` if present, else `llama-ai-eng`) against `ollama list`; reports drift + the exact commands; applies only with `--models` | ollama absent / daemon unreachable → skipped (never hangs); the apply step also honors the airgap refusal |
+| `[4/5] models` | Compares the expected primary chat model (the last-resolved slot A in `model_defaults.yaml`, else its pin or a v1 `default_a`, else `llama-ai-eng`) against `ollama list`; reports drift + the exact commands; applies only with `--models` | ollama absent / daemon unreachable → skipped (never hangs); the apply step also honors the airgap refusal |
 | `[5/5] verify` | `./arailctl doctor` — its exit code folds straight through (`3`→degraded, `1`→hard failure); before that, ensures every resolved root's `arail.db` is created and forward-migrated (see "The relational store" below) | — |
 
 **The relational store (`arail.db`).** Before `[5/5] verify`, `install`
@@ -191,24 +191,46 @@ directly, even when a daemon is active — daemon-mode refusal is
 `start.sh`'s own job so it can name the World slug (or `--root`) in the
 message.
 
-**Model selection, settled once and read-only here.** The readiness
-banner always prints a `Models:` block — the two boot slots (A: the
-resident chat model; B: the model AeroLLM references for deep answers),
-each with size, on-filesystem presence, and RAM fit, plus the exact
-`ollama pull` / `hf download` command when a configured model is
-missing. `start` never picks a model itself and never prompts — the
-interactive two-slot picker lives in the portal (a banner under the
-statusbar on every page until you confirm once, then only reappearing if
-something breaks — missing, doesn't fit, or `.env` drifted away from
-what was settled). Both surfaces read the same source of truth:
+**Model selection is automatic; `start` only reports it.** The readiness
+banner always prints a `Models:` block with the two slots (A: the fast,
+resident Ollama chat model; B: the deep model AeroLLM streams in) and
+where each came from (`source:` `pin`, `env`, `auto` or `cache`, plus a
+reason when something fell through). `start` never picks a model and
+never prompts: the portal resolves both slots itself every time it
+starts, from what is installed and what this machine can hold, then
+loads them (below). Precedence per slot is **pin** (`model_defaults.yaml`
+`pins`) > **`.env`** (`MODEL_NAME` / `AEROLLM_MODEL`) > **auto**
+(installed x fits x ranked) > none. A pin or `.env` value that is not
+installed, too big, or over the RAM budget never blocks anything: it
+falls through to the next level and the portal's degraded strip says so,
+with the exact `ollama pull` / `hf download` command as text.
+
 `model_defaults.yaml` (repo root, gitignored — see
-`model_defaults.yaml.example`), written by the portal's
-`POST /api/models/settle` and read back with
-`python -m arail.model_defaults --banner` (what `start` shells out to)
-or `--get default_a`/`--get default_b` (one resolved value, empty line
-if unset — used to fix the Ollama-presence check below instead of
-hardcoding `llama-ai-eng`). Deleting `model_defaults.yaml` re-arms the
-portal picker on the next page load.
+`model_defaults.yaml.example`) holds your `pins` (preserved across boots;
+`null` = auto, slot B may be `none` to keep the deep slot off) and a
+`resolved` cache of the last result, rewritten every boot and never
+compared for "drift". The banner reads that cache with
+`python -m arail.model_defaults --banner` (what `start` shells out to) or
+`--get default_a`/`--get default_b` (empty line if unset — used to fix
+the Ollama-presence check below instead of hardcoding `llama-ai-eng`);
+`--json` prints `{version, path, pins, resolved, ...}`. Pin from the
+portal (the Resident chip, or `POST /api/models/pin`). Deleting the file
+just means "re-resolve, no pins". A v1 file (`default_a` / `default_b`)
+is upgraded on first portal boot, keeping `.model_defaults.v1.bak`;
+`default_b: null` becomes the `none` pin so a deep model you disabled
+stays disabled. `POST /api/models/settle` still works for one release as
+a deprecated alias for two pins.
+
+**Boot warm is on by default** and no longer waits for
+`ARAIL_AUTOCHECKS` (loading a local model is local work; the interval
+health loop and Claude-cache prewarm stay autochecks-gated). Slot A warms
+with a 1-token completion; slot B (maximus + the `aerollm_api` wheel) loads
+once, memory-pressure permitting. A crash while loading B leaves a
+sentinel, and that model is skipped on later boots until you pin a
+different one or re-pin it. Opt out with `ARAIL_BOOT_WARM=0` (both slots),
+`ARAIL_TIER0_BOOT_WARM=0` (slot A) or `ARAIL_AEROLLM_PRELOAD=0` (slot B).
+`GET /api/instance` reports `warm_a` / `warm_b` (`ok|skipped|failed|
+deferred|disabled`).
 
 **The relational store (`arail.db`), a dependent service** (sprints/
 2026-08-10-arail2-persistence-instantiated §4.5). Before the portal
@@ -478,6 +500,14 @@ portal port, external Ollama reachability, then (human mode only) the
 scheduler window and `lab/` disk usage. Stale registry records are pruned
 **after** rendering, in every mode — a status command that silently
 deletes what it just reported would be surprising.
+
+**Models (`models`).** `--json`/`--json=full` also carries an optional
+`models` object, `{"a": {"model", "source", "warm"}, "b": {...}}`, read
+from the last-resolved cache in `model_defaults.yaml` (a local file read:
+no network, nothing loaded, allowed under `--no-probe`). It is additive,
+so the document stays `arail.status/v2`; it is absent when no cache
+exists yet, and human mode prints one matching `models:` line.
+`--json=instances` is untouched.
 
 **The relational store (`arail.db`) as a dependent service**
 (sprints/2026-08-10-arail2-persistence-instantiated §4.4). Every
