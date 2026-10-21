@@ -24,6 +24,8 @@
     <h3>Node.js is too old</h3><p>{{ detail }}</p>
   {% elif state == 'not_installed' %}
     <h3>Not installed</h3><p>{{ detail }}</p><pre>./arailctl mastra install</pre>
+  {% elif state == 'port_in_use' %}
+    <h3>Port in use</h3><p>{{ detail }}</p>
   {% elif state == 'not_running' %}
     <h3>Not running</h3><p>{{ detail }}</p>
     <button id="mst-start" type="button">Start Studio</button>
@@ -59,6 +61,12 @@
 (function () {
   const post = (u, b) => fetch(u, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(b || {})}).then(r => r.json());
   const $ = id => document.getElementById(id);
+  const REASONS = {
+    researcher_busy: 'researcher_busy - another probe or Researcher run is active; try again when it finishes.',
+    goal_in_progress: 'goal_in_progress - your current goal is unfinished and a probe would archive it.',
+    wrong_tier: 'wrong_tier - this needs the maximus tier.',
+    bad_score: 'bad_score - the local model gave an unusable score, so nothing was recorded.',
+    experiment_mismatch: 'experiment_mismatch - the id you gave is not the experiment this run created.'};
   if ($('mst-start')) $('mst-start').onclick = async () => { $('mst-start').disabled = true; await post('/api/mastra/start'); location.reload(); };
   if ($('mst-stop')) $('mst-stop').onclick = async () => { await post('/api/mastra/stop'); location.reload(); };
   if ($('mst-copy')) $('mst-copy').onclick = async () => {
@@ -68,7 +76,7 @@
     $('mst-go').disabled = true; $('mst-result').hidden = false; $('mst-result').textContent = 'Running (can take several minutes)...';
     const exp = $('mst-exp').value.trim();
     const r = await post('/api/mastra/run-once', {goal: $('mst-goal').value, experiment_id: exp || undefined});
-    $('mst-result').textContent = r.error ? ('Could not run: ' + r.error) : ('Experiment ' + r.experiment_id + ': probe score ' + r.score + ' (not a 3DEval measurement)');
+    $('mst-result').textContent = r.error ? ('Could not run: ' + (REASONS[r.error] || r.error)) : ('Experiment ' + r.experiment_id + ': probe score ' + r.score + ' (not a 3DEval measurement)');
     $('mst-go').disabled = false;
   };
 })();

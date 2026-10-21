@@ -9,6 +9,16 @@ from arail import mastra_bridge as mb
 
 
 def main(argv: list) -> int:
+    try:
+        return _main(argv)
+    except OSError as exc:
+        print(f"Could not complete: {exc.strerror or 'file system error'}"
+              f"{' (' + exc.filename + ')' if exc.filename else ''}. Check that lab/data is writable.",
+              file=sys.stderr)
+        return 1
+
+
+def _main(argv: list) -> int:
     op = argv[0] if argv else "status"
     if op == "install":
         return mb.install()

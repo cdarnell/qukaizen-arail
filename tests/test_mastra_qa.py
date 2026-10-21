@@ -558,7 +558,10 @@ def test_concurrent_real_probes_exactly_one_runs(tmp_path):
     outs = [json.loads(p.communicate(timeout=900)[0]) for p in procs]
     ok = [o for o in outs if "error" not in o]
     # exactly one run gets the lock; llama3.2:1b sometimes gives an unusable score -> bad_score
-    ran = [o for o in outs if not str(o.get("error", "")).startswith("run_failed")]
+    # losers are refused with researcher_busy (F-7: verbatim; this filter predated the fix and
+    # looked for run_failed:*, the lossy form the busy code used to take)
+    ran = [o for o in outs if o.get("error") not in ("researcher_busy",)
+           and not str(o.get("error", "")).startswith("run_failed")]
     assert len(ran) == 1 and len(ok) <= 1, outs
     exps = list((tmp_path / "lab" / "data" / "experiments").glob("*.json"))
     probes = sum(1 for f in exps for o in json.loads(f.read_text()).get("observations", [])

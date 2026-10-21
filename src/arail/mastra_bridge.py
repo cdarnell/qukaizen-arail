@@ -51,8 +51,9 @@ _DENY = re.compile(r"(_API_KEY|_TOKEN|LICENSE_KEY|SECRET|PASSWORD)$|^MASTRA_(PLA
 
 
 def mastra_db_path() -> Path:
+    """Absolute: the Node child runs from integrations/mastra-studio, not the lab cwd."""
     from arail.config import DATA_DIR
-    return Path(DATA_DIR) / "mastra" / "mastra.db"
+    return Path(DATA_DIR).resolve() / "mastra" / "mastra.db"
 
 
 def mastra_env(parent: Optional[Dict[str, str]] = None) -> Dict[str, str]:
@@ -66,11 +67,13 @@ def mastra_env(parent: Optional[Dict[str, str]] = None) -> Dict[str, str]:
     # ARAIL resolves lab paths relative to its cwd; the Mastra project dir is not the lab,
     # so pass absolute paths and the cwd the MCP server must use.
     from arail.config import LAB_ROOT, PKB_ROOT
-    env.setdefault("ARAIL_ROOT", os.getcwd())
-    env.setdefault("LAB_ROOT", str(Path(LAB_ROOT).resolve()))
-    env.setdefault("LAB_PKB", str(Path(PKB_ROOT).resolve()))
-    env.setdefault("ARAIL_DATA_DIR", str(Path(DATA_DIR).resolve()))
-    env.setdefault("ARAIL_MASTRA_DB", str(mastra_db_path()))
+    # Always absolute and derived from ARAIL's own config (never a relative value inherited
+    # from the parent env): run-once.mjs requires the DB under the data dir by absolute path.
+    env["ARAIL_ROOT"] = os.getcwd()
+    env["LAB_ROOT"] = str(Path(LAB_ROOT).resolve())
+    env["LAB_PKB"] = str(Path(PKB_ROOT).resolve())
+    env["ARAIL_DATA_DIR"] = str(Path(DATA_DIR).resolve())
+    env["ARAIL_MASTRA_DB"] = str(mastra_db_path())
     env.setdefault("ARAIL_PYTHON", sys.executable)
     env.setdefault("PYTHONPATH", str(REPO_ROOT / "src"))
     env.setdefault("LAB_TIER", "maximus")
@@ -111,12 +114,59 @@ def port_open(port: int, host: str = STUDIO_HOST, timeout: float = 0.3) -> bool:
         return False
 
 
+def _under_mastra_dir(path: str) -> bool:
+    try:
+        Path(path).resolve().relative_to(MASTRA_DIR.resolve())
+        return True
+    except (ValueError, OSError):
+        return False
+
+
+def listener_pids(port: int) -> Optional[list]:
+    """Pids listening on 127.0.0.1/::1:port (None when lsof is unavailable)."""
+    lsof = shutil.which("lsof")
+    if not lsof:
+        return None
+    try:
+        out = subprocess.run([lsof, "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-Fp"],
+                             capture_output=True, text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return sorted({int(ln[1:]) for ln in out.splitlines() if ln.startswith("p") and ln[1:].isdigit()})
+
+
+def _process_cwd(pid: int) -> str:
+    lsof = shutil.which("lsof")
+    if not lsof:
+        return ""
+    try:
+        out = subprocess.run([lsof, "-a", "-p", str(pid), "-d", "cwd", "-Fn"],
+                             capture_output=True, text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return next((ln[1:] for ln in out.splitlines() if ln.startswith("n")), "")
+
+
+def listener_state(port: Optional[int] = None) -> str:
+    """'none' | 'ours' | 'foreign' for the Studio port. A listener is ours only if every
+    listening process has its working directory under integrations/mastra-studio."""
+    port = port or studio_port()
+    pids = listener_pids(port)
+    if pids is None:                       # cannot identify anyone: fall back to a plain connect
+        return "foreign" if port_open(port) else "none"
+    if not pids:
+        return "foreign" if port_open(port) else "none"   # listening but not visible to lsof
+    return "ours" if all(_under_mastra_dir(_process_cwd(p)) for p in pids) else "foreign"
+
+
 def resolve_page_state(
     get_node: Callable[[], Optional[tuple]] = node_version,
     installed: Callable[[], bool] = is_installed,
-    running: Callable[[], bool] = lambda: port_open(studio_port()),
+    running: Callable[[], Any] = listener_state,
 ) -> Dict[str, str]:
-    """Exactly one of node_missing | node_too_old | not_installed | not_running | running."""
+    """Exactly one of node_missing | node_too_old | not_installed | port_in_use | not_running | running.
+
+    ``running()`` returns 'none' | 'ours' | 'foreign' (a bool is accepted: True means ours)."""
     v = get_node()
     if v is None:
         return {"state": "node_missing", "detail": "Node.js was not found. Mastra Studio needs Node 22.13 or newer."}
@@ -125,7 +175,12 @@ def resolve_page_state(
         return {"state": "node_too_old", "detail": f"Found Node v{found}; Mastra Studio needs 22.13.0 or newer."}
     if not installed():
         return {"state": "not_installed", "detail": "Run ./arailctl mastra install to fetch the pinned packages."}
-    if not running():
+    ls = running()
+    ls = ("ours" if ls else "none") if isinstance(ls, bool) else ls
+    if ls == "foreign":
+        return {"state": "port_in_use",
+                "detail": f"Port {studio_port()} is in use by another program. ARAIL will not start, stop or open anything there."}
+    if ls == "none":
         return {"state": "not_running", "detail": "Studio is installed but not running."}
     return {"state": "running", "detail": f"Studio is running on {STUDIO_HOST}:{studio_port()}."}
 
@@ -194,19 +249,22 @@ def is_loopback_listener(addrs: list, port: int) -> bool:
 
 def start_studio() -> Dict[str, Any]:
     st = resolve_page_state()
-    if st["state"] in ("node_missing", "node_too_old", "not_installed"):
+    if st["state"] in ("node_missing", "node_too_old", "not_installed", "port_in_use"):
         return {"ok": False, "error": st["state"], "status": 409}
     if st["state"] == "running":
         return {"ok": True, "already_running": True}
-    mastra_db_path().parent.mkdir(parents=True, exist_ok=True)
-    env = mastra_env()
-    with open(mastra_db_path().parent / "studio.log", "ab") as log:
-        proc = subprocess.Popen(
-            ["npx", "--no-install", "mastra", "dev"], cwd=str(MASTRA_DIR), env=env,
-            stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
-            start_new_session=True, shell=False)
-    # start_new_session makes the child its own group leader: pid == pgid.
-    _pid_file().write_text(f"{proc.pid} {os.getpgid(proc.pid)}")
+    try:
+        mastra_db_path().parent.mkdir(parents=True, exist_ok=True)
+        env = mastra_env()
+        with open(mastra_db_path().parent / "studio.log", "ab") as log:
+            proc = subprocess.Popen(
+                ["npx", "--no-install", "mastra", "dev"], cwd=str(MASTRA_DIR), env=env,
+                stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+                start_new_session=True, shell=False)
+        # start_new_session makes the child its own group leader: pid == pgid.
+        _pid_file().write_text(f"{proc.pid} {os.getpgid(proc.pid)}")
+    except OSError:
+        return {"ok": False, "error": "data_dir_not_writable", "status": 500}
     import time
     for _ in range(120):
         if port_open(studio_port()):
@@ -232,8 +290,14 @@ def _process_command(pid: int) -> str:
         return ""
 
 
-def pid_is_our_studio(pid: int, pgid: int, command_of: Callable[[int], str] = _process_command) -> bool:
-    """True only if ``pid`` is the live group leader we started and its command line is mastra's."""
+# What the group leader Popen'd by start_studio looks like: `npm exec mastra dev` (or node/npx
+# variants), run from integrations/mastra-studio. A bare "mastra" substring is not enough.
+_LEADER_SHAPE = re.compile(r"^(\S*/)?(npm|npx|node)\s+(\S+\s+)*mastra\s+dev(\s|$)")
+
+
+def pid_is_our_studio(pid: int, pgid: int, command_of: Callable[[int], str] = _process_command,
+                      cwd_of: Callable[[int], str] = _process_cwd) -> bool:
+    """True only for a live group leader (pid == pgid) with Studio's argv shape and cwd."""
     if pid != pgid:
         return False
     try:
@@ -241,38 +305,78 @@ def pid_is_our_studio(pid: int, pgid: int, command_of: Callable[[int], str] = _p
             return False
     except (ProcessLookupError, PermissionError):
         return False
-    return "mastra" in command_of(pid)
+    return bool(_LEADER_SHAPE.match(command_of(pid))) and _under_mastra_dir(cwd_of(pid))
 
 
-def stop_studio(command_of: Callable[[int], str] = _process_command) -> Dict[str, Any]:
-    pf = _pid_file()
-    if not pf.exists():
-        return {"ok": True, "was_running": False}
+def _group_alive(pgid: int) -> bool:
     try:
-        pid_s, pgid_s = pf.read_text().split()
-        pid, pgid = int(pid_s), int(pgid_s)
-    except ValueError:
-        pf.unlink(missing_ok=True)
-        return {"ok": True, "was_running": False, "stale": True}
-    if not pid_is_our_studio(pid, pgid, command_of):
-        # Dead, or the pid now belongs to something else: never signal it.
-        pf.unlink(missing_ok=True)
-        return {"ok": True, "was_running": False, "stale": True}
+        os.killpg(pgid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def _kill_group(pgid: int) -> None:
     import time
     try:
         os.killpg(pgid, signal.SIGTERM)
         for _ in range(20):
             time.sleep(0.25)
-            try:
-                os.killpg(pgid, 0)
-            except ProcessLookupError:
-                break
-        else:
-            os.killpg(pgid, signal.SIGKILL)
+            if not _group_alive(pgid):
+                return
+        os.killpg(pgid, signal.SIGKILL)
     except (ProcessLookupError, PermissionError):
         pass
-    pf.unlink(missing_ok=True)
-    return {"ok": True, "was_running": True}
+
+
+def stop_studio(command_of: Callable[[int], str] = _process_command,
+                cwd_of: Callable[[int], str] = _process_cwd) -> Dict[str, Any]:
+    """Stop the Studio process group ARAIL started.
+
+    A process group id cannot be reused while any member is alive, so if the recorded group
+    is alive and its leader is dead, the survivors are Studio's own (orphaned) members. If
+    the leader pid is alive it must look like Studio (argv shape + cwd), otherwise the pid
+    was recycled and nothing is signalled. A listener on the Studio port that is ours but has
+    no usable pid file is stopped via its own group; a foreign listener is never touched."""
+    pf = _pid_file()
+    stopped = False
+    stale = False
+    if pf.exists():
+        try:
+            pid_s, pgid_s = pf.read_text().split()
+            pid, pgid = int(pid_s), int(pgid_s)
+        except ValueError:
+            pid = pgid = 0
+        if pgid > 1 and pid == pgid and _group_alive(pgid):
+            try:
+                leader_alive = os.getpgid(pid) == pgid
+            except ProcessLookupError:
+                leader_alive = False
+            except PermissionError:
+                leader_alive = True
+            if not leader_alive or pid_is_our_studio(pid, pgid, command_of, cwd_of):
+                _kill_group(pgid)
+                stopped = True
+            else:
+                stale = True
+        else:
+            stale = True
+        pf.unlink(missing_ok=True)
+    if listener_state() == "ours":
+        for lp in listener_pids(studio_port()) or []:
+            try:
+                g = os.getpgid(lp)
+            except ProcessLookupError:
+                continue
+            if g > 1 and g != os.getpgid(0):
+                _kill_group(g)
+                stopped = True
+    out: Dict[str, Any] = {"ok": True, "was_running": stopped}
+    if stale and not stopped:
+        out["stale"] = True
+    return out
 
 
 # ── run-once: spawn, parse, validate, write back ──────────────────────
@@ -375,6 +479,8 @@ def run_probe(goal: Any, experiment_id: Optional[str] = None, *,
         stdout = spawn(payload, mastra_env(), timeout)
     except TimeoutError:
         return {"error": "timeout"}
+    except OSError:
+        return {"error": "data_dir_not_writable"}
     try:
         parsed = parse_child_output(stdout)
     except ChildOutputError as exc:

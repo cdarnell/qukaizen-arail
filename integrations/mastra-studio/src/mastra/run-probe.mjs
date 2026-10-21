@@ -53,7 +53,9 @@ export async function runProbe({ mastra, mcp, goal, SpanType, scorerId }) {
   } catch (e) {
     tool.error({ error: e, endSpan: true });
     root.error({ error: e, endSpan: true });
-    throw e;
+    // The ARAIL tool signals refusals by code; hand that code up verbatim instead of "run failed".
+    const m = /(researcher_busy|goal_in_progress|wrong_tier|invalid_goal|run_failed:[A-Za-z0-9_]{1,40})\s*$/.exec(String(e?.message ?? ''));
+    throw m ? new Error(m[1]) : e;
   }
   const payload = unwrap(res);
   if (!payload || !Array.isArray(payload.steps)) {

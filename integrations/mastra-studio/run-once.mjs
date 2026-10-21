@@ -30,7 +30,7 @@ let req;
 try {
   const raw = process.argv[2] ?? readFileSync(0, 'utf8');
   req = JSON.parse(raw);
-  if (typeof req.goal !== 'string' || !req.goal.trim() || req.goal.length > 2000) throw new Error('goal');
+  if (typeof req.goal !== 'string' || !req.goal.trim() || [...req.goal].length > 2000) throw new Error('goal');
 } catch { fail('bad_request'); }
 
 const pyBin = process.env.ARAIL_PYTHON;
@@ -74,6 +74,6 @@ try {
   process.exit(0);
 } catch (e) {
   console.error(e);
-  if (e && ['bad_score', 'model_unavailable'].includes(e.message)) fail(e.message);
+  if (e && /^(bad_score|model_unavailable|researcher_busy|goal_in_progress|wrong_tier|invalid_goal|run_failed:[A-Za-z0-9_]{1,40})$/.test(e.message)) fail(e.message);
   fail(`run_failed:${(e && e.name) || 'Error'}`);
 }

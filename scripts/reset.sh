@@ -458,15 +458,30 @@ reset_data() {
     if [[ -n "$ollama_pid" ]]; then
         kill "$ollama_pid" 2>/dev/null || true
     fi
-    # Mastra Studio (opt-in) keeps its LibSQL file under $DATA_DIR/mastra; stop it first, but
-    # only a process whose pid is its own group leader AND whose command line mentions mastra.
+    # Mastra Studio (opt-in) keeps its LibSQL file under $DATA_DIR/mastra; stop it first. A process
+    # group id cannot be reused while any member lives, so: group alive + leader dead = orphaned
+    # Studio members (stop them); leader alive = it must look like `npm|node ... mastra dev` run
+    # from integrations/mastra-studio (a recycled pid, e.g. an editor, is never signalled).
     local studio_pidfile="$DATA_DIR/mastra/studio.pid" studio_pid="" studio_pgid=""
     if [[ -f "$studio_pidfile" ]]; then
         read -r studio_pid studio_pgid < "$studio_pidfile" || true
-        if [[ "$studio_pid" =~ ^[0-9]+$ && "$studio_pid" == "$studio_pgid" ]] \
-            && ps -p "$studio_pid" -o command= 2>/dev/null | grep -q mastra; then
-            kill -TERM -- "-$studio_pgid" 2>/dev/null || true
-            sleep 1
+        if [[ "$studio_pid" =~ ^[0-9]+$ && "$studio_pid" == "$studio_pgid" && "$studio_pgid" -gt 1 ]] \
+            && kill -0 -- "-$studio_pgid" 2>/dev/null; then
+            local studio_ok="false" studio_cmd studio_cwd
+            if ! kill -0 "$studio_pid" 2>/dev/null; then
+                studio_ok="true"
+            else
+                studio_cmd="$(ps -p "$studio_pid" -o command= 2>/dev/null || true)"
+                studio_cwd="$(lsof -a -p "$studio_pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1)"
+                if [[ "$studio_cmd" =~ ^([^[:space:]]*/)?(npm|npx|node)[[:space:]]([^[:space:]]+[[:space:]])*mastra[[:space:]]dev([[:space:]]|$) \
+                    && "$studio_cwd" == */integrations/mastra-studio* ]]; then
+                    studio_ok="true"
+                fi
+            fi
+            if [[ "$studio_ok" == "true" ]]; then
+                kill -TERM -- "-$studio_pgid" 2>/dev/null || true
+                sleep 1
+            fi
         fi
     fi
     if [[ -d "$DATA_DIR" ]]; then

@@ -106,3 +106,24 @@ No portal/Python code changed. No researcher.py change. Python tests not run (no
 Residual window (documented, not widened): the portal's own `POST /api/goal` does not honour the run lock (it only checks its in-process `researcher.status`), so a goal set from the UI during a probe can still archive the probe's goal. Making it honour the lock would touch unrelated portal code; the /mastra page now says so. Mitigation: do not set a goal while a probe runs.
 
 Tests: tests/test_mastra_bridge.py + tests/test_researcher_tool.py 95 passed. Wider run (tier, system-health, trust boundary, route guards, experiments, qa_security_surface, reset_paths, tests/portal): 616 passed, 8 failed, identical to the 8 base failures (test_build_tab x4, test_models_api, opencode x2, token_compliance, verified on 20f334b4). D1 browser leg remains INCONCLUSIVE pending the owner pcap.
+
+---
+## QA fix round 2026-10-21 (TEST_REPORT.md FAIL at b51286d0)
+
+| Finding | Fix |
+|---|---|
+| F-1 HIGH | `mastra_db_path()` and `mastra_env()` now always emit ABSOLUTE `ARAIL_MASTRA_DB`, `ARAIL_DATA_DIR`, `LAB_ROOT`, `LAB_PKB`, `ARAIL_ROOT`, overriding any relative value in the parent env. Verified end to end with an empty environment: `env -i PATH HOME ./arailctl mastra run-once "..."` returned an experiment id, trace id and a real score (was `bad_db_path`). |
+| F-2 MED | `stop_studio` reasons on the process group: a pgid cannot be reused while a member lives, so group alive + leader dead = orphaned Studio members, which are stopped; a live leader must match the Studio argv shape and cwd. Also falls back to stopping a listener on :4111 that is verifiably ours. `reset.sh` uses the same rule. Verified live: `kill -9` of the npm leader, then `stop` -> `was_running: true`, no listener, no mastra process. |
+| F-3 MED | `listener_state()` = none / ours / foreign (lsof: every listening pid's cwd must be under `integrations/mastra-studio`). New page state `port_in_use` (so six states now; amendment to the five in ARCHITECTURE C3), `start` returns `port_in_use` 409, `stop` never touches a foreign listener, health excludes a foreign listener. Verified live with `python -m http.server 4111`: status `port_in_use`, start refused, stop left it running. |
+| F-4 LOW | `start_studio`/`run_probe` return `data_dir_not_writable`; the CLI prints a plain message and exits 1 on any OSError. |
+| F-5 LOW | Leader identity = argv shape `^(npm|npx|node) ... mastra dev` AND cwd under `integrations/mastra-studio` AND pid == pgid (Python and reset.sh). |
+| F-6 LOW | Node counts code points (`[...goal].length`), matching Python; a 2000-emoji goal is accepted. |
+| F-7 MED | The MCP tool's refusal (`researcher_busy`, `goal_in_progress`, `wrong_tier`, `invalid_goal`, `run_failed:*`) is extracted from the MCP error and returned verbatim by run-once.mjs, the CLI and the portal (HTTP 409 for refusals); the page maps codes to plain sentences. |
+| F-8 LOW | `uv.lock` NOT regenerated (unrelated churn: drops the dac-world git dep, rewrites nvidia markers). Known follow-up: re-lock in a dedicated change so the `mastra = ["mcp>=1.0,<2"]` extra is locked; until then do not run plain `uv run`/`uv sync` in this branch (use `--frozen`/`--no-sync`). Nothing in the tests or `arailctl mastra` calls uv; `git diff -- uv.lock` is empty after the full run. |
+| docs | `docs/cli.md`: `experiment_id` is a must-match check, not "attach to"; `port_in_use` state listed. |
+
+Test correction (evidence): `tests/test_mastra_qa.py::test_concurrent_real_probes_exactly_one_runs` identified losers as `run_failed:*`, the lossy form F-7 removed. After the fix the live output is `[{'error':'researcher_busy'}, {'error':'researcher_busy'}, {experiment_id, mastra_trace_id, score}]` (exactly one ran). I changed only the filter to also treat `researcher_busy` as a loser; the assertions on count, ledger and leftovers are untouched. None of the 7 `test_defect_*` tests were edited.
+
+Also: `test_health` parity test (tests/test_system_health_stream_tier_filter_qa.py) caught my first health change (identity check bypassed the patched `_port_open`); health is now "port open and not identified as foreign".
+
+Results: tests/test_mastra_qa.py + test_mastra_bridge.py + test_researcher_tool.py + health/tier/CSRF/experiments/reset suites + tests/portal: all pass except the 10 known base failures (test_build_tab x4, test_models_api, opencode x2, token_compliance, test_cli_verbs doctor-healthy, test_cli_status T34 timing). `node --test integrations/mastra-studio/test/qa-run-once.test.mjs`: 6 pass, 0 fail. D1 browser leg remains INCONCLUSIVE (owner pcap).

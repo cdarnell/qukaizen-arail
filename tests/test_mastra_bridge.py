@@ -393,6 +393,13 @@ def _spawn_sleeper(tmp_path, name):
     return subprocess.Popen(["/bin/bash", str(script)], start_new_session=True)
 
 
+def _spawn_studio_like():
+    """A group leader whose argv/cwd look exactly like the one start_studio launches."""
+    import subprocess
+    return subprocess.Popen(["/bin/bash", "-c", 'exec -a "npm exec mastra dev" sleep 120'],
+                            cwd=str(mb.MASTRA_DIR), start_new_session=True)
+
+
 def test_stop_never_signals_unrelated_reused_pid(tmp_path, monkeypatch):
     monkeypatch.setattr(mb, "mastra_db_path", lambda: tmp_path / "mastra" / "mastra.db")
     (tmp_path / "mastra").mkdir()
@@ -416,7 +423,7 @@ def test_stop_never_signals_unrelated_reused_pid(tmp_path, monkeypatch):
 def test_stop_kills_a_genuine_studio_group_and_leaves_no_process(tmp_path, monkeypatch):
     monkeypatch.setattr(mb, "mastra_db_path", lambda: tmp_path / "mastra" / "mastra.db")
     (tmp_path / "mastra").mkdir()
-    p = _spawn_sleeper(tmp_path, "mastra-fake.sh")   # T-I-5 analogue: command line mentions mastra
+    p = _spawn_studio_like()   # T-I-5 analogue
     import os, time
     mb._pid_file().write_text(f"{p.pid} {os.getpgid(p.pid)}")
     assert mb.stop_studio()["was_running"] is True
@@ -534,7 +541,7 @@ def test_reset_stops_running_studio_but_not_unrelated_pid(tmp_path):            
     fake = _reset_sandbox(tmp_path)
     mdir = fake / "lab" / "data" / "mastra"
     mdir.mkdir(parents=True)
-    studio = _spawn_sleeper(tmp_path, "mastra-fake.sh")
+    studio = _spawn_studio_like()
     other = _spawn_sleeper(tmp_path, "unrelated.sh")
     try:
         (mdir / "studio.pid").write_text(f"{studio.pid} {os.getpgid(studio.pid)}")
@@ -547,3 +554,94 @@ def test_reset_stops_running_studio_but_not_unrelated_pid(tmp_path):            
     finally:
         for p in (studio, other):
             p.kill(); p.wait()
+
+
+# ── QA fix round ──────────────────────────────────────────────────────
+
+def test_page_state_port_in_use_and_start_refuses(monkeypatch):
+    nodev, T = (lambda: (25, 0, 0)), (lambda: True)
+    st = mb.resolve_page_state(nodev, T, lambda: "foreign")
+    assert st["state"] == "port_in_use" and "another program" in st["detail"]
+    monkeypatch.setattr(mb, "resolve_page_state", lambda: st)
+    assert mb.start_studio() == {"ok": False, "error": "port_in_use", "status": 409}
+
+
+def test_foreign_listener_is_never_stopped(monkeypatch, tmp_path):
+    import socket
+    monkeypatch.setattr(mb, "mastra_db_path", lambda: tmp_path / "mastra" / "mastra.db")
+    (tmp_path / "mastra").mkdir()
+    s = socket.socket()
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        s.bind(("127.0.0.1", 4111))
+    except OSError:
+        pytest.skip("4111 busy")
+    s.listen(1)
+    try:
+        assert mb.listener_state() == "foreign"
+        res = mb.stop_studio()
+        assert res["was_running"] is False
+        assert s.fileno() != -1                       # we are still alive and listening
+        assert mb.listener_state() == "foreign"
+    finally:
+        s.close()
+
+
+def test_default_config_paths_are_absolute(tmp_path):
+    import subprocess, sys
+    code = ("import json, arail.mastra_bridge as mb; e = mb.mastra_env(); "
+            "print(json.dumps({k: e[k] for k in ('ARAIL_MASTRA_DB','ARAIL_DATA_DIR','LAB_ROOT','LAB_PKB','ARAIL_ROOT')}))")
+    out = json.loads(subprocess.run([sys.executable, "-c", code], cwd=str(mb.REPO_ROOT), capture_output=True,
+                                    text=True, env={"PATH": os.environ["PATH"], "HOME": str(tmp_path),
+                                                    "PYTHONPATH": str(mb.REPO_ROOT / "src")}).stdout)
+    assert all(os.path.isabs(v) for v in out.values()), out
+    assert out["ARAIL_MASTRA_DB"].startswith(out["ARAIL_DATA_DIR"] + os.sep)
+
+
+def test_relative_parent_values_cannot_leak_into_child_env():
+    env = mb.mastra_env({"PATH": "/bin", "ARAIL_MASTRA_DB": "rel/x.db", "ARAIL_DATA_DIR": "rel", "LAB_ROOT": "lab"})
+    assert os.path.isabs(env["ARAIL_MASTRA_DB"]) and os.path.isabs(env["ARAIL_DATA_DIR"]) and os.path.isabs(env["LAB_ROOT"])
+
+
+def test_cli_prints_plain_message_on_oserror(monkeypatch, capsys):
+    from arail import mastra_cli
+
+    def boom():
+        raise PermissionError(13, "Permission denied", "/x/lab/data/mastra")
+
+    monkeypatch.setattr(mb, "start_studio", boom)
+    assert mastra_cli.main(["start"]) == 1
+    err = capsys.readouterr().err
+    assert "Traceback" not in err and "Permission denied" in err
+
+
+def test_reused_pid_with_mastra_path_in_argv_is_not_signalled(tmp_path, monkeypatch):
+    import subprocess
+    monkeypatch.setattr(mb, "mastra_db_path", lambda: tmp_path / "mastra" / "mastra.db")
+    (tmp_path / "mastra").mkdir()
+    victim = subprocess.Popen(["/bin/sleep", "120"], start_new_session=True)
+    try:
+        mb._pid_file().write_text(f"{victim.pid} {victim.pid}")
+        res = mb.stop_studio(lambda pid: "npm exec mastra dev", lambda pid: "/somewhere/else")
+        assert res.get("stale") is True and victim.poll() is None
+    finally:
+        victim.kill(); victim.wait()
+
+
+def test_goal_length_rule_is_code_points_in_node_too():
+    js = (mb.MASTRA_DIR / "run-once.mjs").read_text()
+    assert "[...req.goal].length > 2000" in js
+
+
+def test_refusal_codes_are_passed_through_by_node_driver():
+    js = (mb.MASTRA_DIR / "run-once.mjs").read_text()
+    probe = (mb.MASTRA_DIR / "src/mastra/run-probe.mjs").read_text()
+    for code in ("researcher_busy", "goal_in_progress", "wrong_tier"):
+        assert code in js and code in probe
+
+
+def test_health_does_not_report_foreign_listener_as_studio(monkeypatch):
+    import inspect
+    from arail.portal import app as appmod
+    src = inspect.getsource(appmod)
+    assert '_mastra_bridge.listener_state)) != "foreign"' in src

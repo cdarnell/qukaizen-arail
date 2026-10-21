@@ -2645,8 +2645,11 @@ async def mastra_run_once(request: Request):
     res = await asyncio.to_thread(
         mastra_bridge.run_probe, body.get("goal"), body.get("experiment_id"))
     if "error" in res:
-        return JSONResponse(status_code=400 if res["error"] in ("invalid_goal", "experiment_missing") else 502,
-                            content=res)
+        code = res["error"]
+        status = (400 if code in ("invalid_goal", "experiment_missing") else
+                  409 if code in ("researcher_busy", "goal_in_progress", "wrong_tier", "experiment_mismatch",
+                                  "not_installed") else 502)
+        return JSONResponse(status_code=status, content=res)
     return res
 
 
@@ -11314,7 +11317,11 @@ async def system_health():
     marimo_running = marimo_up and _container_running("arail-marimo")
     open_notebook_running = open_notebook_up and _container_running("arail-open-notebook")
     from arail import mastra_bridge as _mastra_bridge
+    # Open port AND not identified as someone else's listener (F-3): a foreign program on
+    # 4111 must not be reported as Studio.
     mastra_studio_up = await _port_open("127.0.0.1", _mastra_bridge.studio_port())
+    if mastra_studio_up:
+        mastra_studio_up = (await asyncio.to_thread(_mastra_bridge.listener_state)) != "foreign"
 
     services = _build_services_dict(
         portal_up=portal_up,
