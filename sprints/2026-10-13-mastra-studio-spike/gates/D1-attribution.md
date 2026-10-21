@@ -16,5 +16,5 @@ Remediation (committed): the child environment now sets `MASTRA_OFFLINE=1` and `
 Re-run (lsof poll, 45 s, env -i + the three flags): zero non-loopback sockets. Listener `*:4111`.
 Second finding (F11) fixed: `server: { host: '127.0.0.1' }` in `src/mastra/index.ts` → listener `127.0.0.1:4111`.
 
-## Status: D1 is NOT yet PASS
+## Status (2026-10-21): D1 PASS with caveats - see D1-egress.json update_2026-10-21 and D1-pcap-summary.txt
 The lsof poll is clean, but the gate requires the packet capture (a DNS lookup counts as egress). One owner-run capture with the new flags is needed to close it.
