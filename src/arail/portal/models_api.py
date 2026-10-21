@@ -294,6 +294,8 @@ def _validate_pin(slot: str, model: Optional[str]) -> Optional[str]:
             raise HTTPException(status_code=400, detail=str(exc))
         return value
 
+    if "\x00" in value:
+        raise HTTPException(status_code=400, detail="model name contains a NUL byte")
     models_dir = os.getenv("ARAIL_MODELS_DIR", "lab/models")
     model_path = value if os.path.isabs(value) else os.path.join(models_dir, value)
     real = os.path.realpath(model_path)
