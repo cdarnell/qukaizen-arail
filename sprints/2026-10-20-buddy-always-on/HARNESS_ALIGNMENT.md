@@ -62,3 +62,40 @@ rule, once."
 The site page should gain the consented-channel exception (rule 2) once G13
 holds, in `qukaizen-site`. Not done here: a public page is outward-facing and
 belongs to its own change.
+
+## Fit with paperagents, Paperclip AI and nanobot (operator question, 2026-10-21)
+
+Standing decision (paperagents SPRINT.md, 2026-09-28): **"Paperclip AI: borrow
+ideas (run records, budgets warn→hold, kill switch), no dependency."** paperagents
+keeps only the manifest `apiVersion` string `paperclip.io/v1alpha1` and a
+`PAPERCLIP_HOME` fallback; its `package.json` has no Paperclip dependency.
+Nothing in this sprint changes that.
+
+| Harness part | Who provides it today | Paperclip analog (not taken) |
+|---|---|---|
+| Registry | paperagents TOML declare + `policy.json` v1 (deny/ask, no allow); Buddy's frozen action table | skills/policy API, agent permissions |
+| Model | ARAIL `brain.chat` + `deep_policy` (residency as a file) | none (adapter-agnostic) |
+| Context | DDaC Worlds + Buddy's context provider; nanobot Dream OFF for Buddy | none (no long-term memory; issue #460) |
+| Guardrails | Buddy structured output + chips + approval cards; paperagents PreToolUse hook for Claude Code agents | board approvals, decisions ("agents propose, people decide") |
+| Loop | nanobot cron/triggers/heartbeat; Buddy `trace.record` + approvals ledger; paperagents receipts v1 | heartbeat runs, issue checkout, run records |
+
+**UI orchestration.** nanobot's WebUI (topic workspace, activity and context
+usage, automations, apps, skills, settings) is a single-agent operator console
+and covers Buddy. paperagents' `/observe` (SSE) covers the Claude Code fleet.
+ARAIL's Admin lanes cover the lab's agents. Paperclip's org chart, issue board,
+budgets with hard stops and board approvals across heterogeneous agents are
+the one thing none of ours has; the harness page answers it with the Loop and
+Registry modules, not with an import.
+
+**Known duplication to retire in S2:** three ledgers (paperagents SQLite,
+Buddy's approvals ledger, ARAIL `agent_trace` v2) and two policy declarations
+(paperagents TOML; Buddy's `buddy.toml` + `people.toml`). The unifier already
+exists as formats: `policy.json` v1, `hold` v1, event line v1, run receipt v1,
+`buddy.host/v1`. paperagents observes Buddy as its reserved `arail-agent`
+runtime (haltPath → Buddy's hold file).
+
+**Recommendation for `qukaizen-harness`:** make it protocol-first (the JSON
+schemas above plus conformance suites, "five modules, zero product imports"),
+with each product implementing in its own language (nanobot/Buddy in Python,
+paperagents in TypeScript). A shared library would force a language choice the
+products do not share; a protocol does not.
