@@ -1881,6 +1881,30 @@ class AeroLLMBackend(BaseBackend):
 # ---------------------------------------------------------------------------
 # OllamaNativeBackend  (Ollama native /api/chat — carries options.num_ctx)
 # ---------------------------------------------------------------------------
+
+
+def _raise_for_status_with_detail(resp) -> None:
+    """``raise_for_status`` that keeps Ollama's own ``error`` text.
+
+    A bare "400 Bad Request" hid the real cause of the keep_alive bug;
+    the JSON body names it. Truncated to 160 chars; only the response
+    body is read, never request headers.
+    """
+    try:
+        resp.raise_for_status()
+    except Exception as exc:  # noqa: BLE001
+        detail = ""
+        try:
+            payload = resp.json()
+            if isinstance(payload, dict):
+                detail = str(payload.get("error") or "")
+        except Exception:  # noqa: BLE001
+            detail = ""
+        if detail:
+            raise type(exc)(f"{exc}: {detail[:160]}") from exc
+        raise
+
+
 class OllamaNativeBackend(OpenAICompatBackend):
     """Talks to Ollama's NATIVE /api/chat endpoint (not the OpenAI /v1 shim).
 
@@ -1914,7 +1938,7 @@ class OllamaNativeBackend(OpenAICompatBackend):
         self.backend_name = "ollama:native"
         self._num_ctx = _resolve_ctx_override(self.model_name, default=None)
 
-    def _keep_alive(self) -> "str | None":
+    def _keep_alive(self) -> "int | str | None":
         """Ollama keep_alive for every request.
 
         Without it Ollama evicts the model ~5 min after the last call, so
@@ -1924,7 +1948,7 @@ class OllamaNativeBackend(OpenAICompatBackend):
           1. ARAIL_OLLAMA_KEEP_ALIVE, if set at all (including "" — omit
              keep_alive entirely, falling back to Ollama's own default).
              An explicit operator override always wins.
-          2. "-1" (pin forever) when ARAIL_RESIDENT_PIN is truthy
+          2. -1 (int; pin forever) when ARAIL_RESIDENT_PIN is truthy
              (default on) AND this instance's model is the registry's
              tier0/resident entry — the "in the GPU at all times" story
              the two-slot redesign (sprints/2026-08-11-two-slot-chat-
@@ -1946,11 +1970,18 @@ class OllamaNativeBackend(OpenAICompatBackend):
         raw = os.getenv("ARAIL_OLLAMA_KEEP_ALIVE")
         if raw is not None:
             value = raw.strip()
-            return value or None
+            if not value:
+                return None
+            try:
+                # Ollama rejects the *string* "-1" ("missing unit in
+                # duration"); numeric values must be sent as JSON numbers.
+                return int(value)
+            except ValueError:
+                return value
         pin_enabled = os.getenv("ARAIL_RESIDENT_PIN", "1").strip().lower() \
             not in ("0", "false", "no")
         if pin_enabled and self._is_registry_tier0_model():
-            return "-1"
+            return -1
         return "2h"
 
     def _is_registry_tier0_model(self) -> bool:
@@ -2024,7 +2055,7 @@ class OllamaNativeBackend(OpenAICompatBackend):
             json=body,
             timeout=120,
         )
-        resp.raise_for_status()
+        _raise_for_status_with_detail(resp)
         data = resp.json()
         # Ollama native response shape: {message: {role, content}, done: bool}
         text = (data.get("message") or {}).get("content") or ""
@@ -2081,7 +2112,7 @@ class OllamaNativeBackend(OpenAICompatBackend):
             timeout=120,
             stream=True,
         ) as resp:
-            resp.raise_for_status()
+            _raise_for_status_with_detail(resp)
             for line in resp.iter_lines(decode_unicode=True):
                 if not line:
                     continue
