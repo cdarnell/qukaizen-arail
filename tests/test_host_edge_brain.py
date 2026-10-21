@@ -209,7 +209,7 @@ class _Gate(BaseBackend):
         raise NotImplementedError
 
     def stream_complete(self, prompt, max_tokens=512, temperature=0.7, top_p=None, *, system=None, messages=None,
-                        response_schema=None):
+                        response_schema=None, system_as_message=False):
         self.entered.set()
         assert self.release.wait(10)
         yield REPLY
@@ -256,7 +256,7 @@ class _Boom(BaseBackend):
         raise NotImplementedError
 
     def stream_complete(self, prompt, max_tokens=512, temperature=0.7, top_p=None, *, system=None, messages=None,
-                        response_schema=None):
+                        response_schema=None, system_as_message=False):
         if self.after_first:
             yield "{"
         raise RuntimeError("backend exploded: PRIVATE-PROMPT-TEXT")
@@ -308,7 +308,7 @@ def test_a_hold_that_lands_between_the_edge_check_and_the_chokepoint_is_refused(
 
 def test_no_tools_ever_reach_the_router(lab):
     assert post(lab, chat(tools=[])).status_code == 200
-    assert lab.backend.calls[-1].keys() == {"system", "prompt", "max_tokens", "response_schema"}
+    assert lab.backend.calls[-1].keys() == {"system", "prompt", "max_tokens", "response_schema", "system_as_message"}
 
 
 def test_a_response_schema_reaches_the_backend_as_the_format(lab):
@@ -399,7 +399,7 @@ class _UsesAllTokens(BaseBackend):
         raise NotImplementedError
 
     def stream_complete(self, prompt, max_tokens=512, temperature=0.7, top_p=None, *, system=None, messages=None,
-                        response_schema=None):
+                        response_schema=None, system_as_message=False):
         yield REPLY
         yield ModelResponse(text=REPLY, model="llama-ai-eng", tokens_used=max_tokens, backend="ollama_native",
                             latency_ms=1.0)
@@ -510,3 +510,87 @@ def test_lab_mode_is_read_again_after_the_wait_for_the_slot(tmp_path, monkeypatc
     assert second.status_code == 403 and second.json()["error"]["code"] == "mode_airgapped"
     assert budget.default_budget().snapshot()["turns_used"] == 1          # the refused call counted nothing
     assert len([r for r in agent_trace.ring(100) if r.get("outcome") == "refused_mode_airgapped"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# R1-4c: the persona the model reads is Buddy's, not the Modelfile's
+# ---------------------------------------------------------------------------
+# REVIEW finding 4(c): the edge flattened Buddy's persona into `system`, and OllamaNativeBackend prepended it to the prompt and sent ONE user
+# message. With no system message in the request, Ollama uses the Modelfile's SYSTEM; for llama-ai-eng that is "You are an AI engineering
+# assistant ... You reason step by step ...". So every answer was Buddy's rules arriving as user text underneath a different persona.
+
+PERSONA = "You are Buddy, the QA expert of the qa-practice World.\nAnswer from the cards or say you cannot."
+
+
+class _OllamaSession:
+    """A recording stand-in for the HTTP session of the real OllamaNativeBackend (streams one short answer)."""
+
+    def __init__(self):
+        self.bodies = []
+
+    def post(self, url, **kw):
+        self.bodies.append(kw["json"])
+        session = self
+
+        class _Resp:
+            status_code = 200
+
+            def raise_for_status(self):
+                pass
+
+            def iter_lines(self, decode_unicode=True):
+                yield json.dumps({"message": {"content": REPLY}})
+                yield json.dumps({"message": {"content": ""}, "done": True, "eval_count": 4, "prompt_eval_duration": 1000})
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        return _Resp()
+
+
+def _real_backend_router(session):
+    from arail.router.backends import OllamaNativeBackend
+    b = OllamaNativeBackend.__new__(OllamaNativeBackend)
+    b.base_url, b.api_key, b.model_name, b._num_ctx, b._session = "http://127.0.0.1:11434/v1", "k", "llama-ai-eng", None, session
+    return ModelRouter.from_backend(b, "ollama_native")
+
+
+def test_the_edge_asks_the_backend_for_a_real_system_message(lab):
+    body = chat()
+    body["messages"][0]["content"] = header() + "\n" + PERSONA
+    assert post(lab, body).status_code == 200
+    call = lab.backend.calls[-1]
+    assert call["system_as_message"] is True and call["system"] == PERSONA
+
+
+def test_the_request_ollama_receives_has_buddys_persona_as_its_system_message_and_nothing_else_does(tmp_path, monkeypatch):
+    w = World({}, "brain.chat", tmp_path, monkeypatch)
+    session = _OllamaSession()
+    monkeypatch.setattr(brain, "build_router", lambda: _real_backend_router(session))
+    body = chat(question="Explain the pre-existing failure rule.")
+    body["messages"][0]["content"] = header() + "\n" + PERSONA
+    body["messages"][1:1] = [{"role": "user", "content": "earlier question"}, {"role": "assistant", "content": "earlier answer"}]
+    assert post(w, body).status_code == 200
+    (sent,) = session.bodies
+    system = [m for m in sent["messages"] if m["role"] == "system"]
+    assert sent["messages"][0] == {"role": "system", "content": PERSONA} and len(system) == 1
+    assert [m["role"] for m in sent["messages"]] == ["system", "user"]
+    user = sent["messages"][1]["content"]
+    assert PERSONA not in user and "BUDDY-TURN" not in user
+    assert user == "### user\nearlier question\n\n### assistant\nearlier answer\n\n### user\nExplain the pre-existing failure rule.\n\n"
+    assert sent["model"] == "llama-ai-eng" and sent["stream"] is True and sent["options"]["num_predict"] == 400
+
+
+def test_a_schema_still_reaches_ollama_as_the_format_beside_the_system_message(tmp_path, monkeypatch):
+    w = World({}, "brain.chat", tmp_path, monkeypatch)
+    session = _OllamaSession()
+    monkeypatch.setattr(brain, "build_router", lambda: _real_backend_router(session))
+    schema = {"type": "object", "properties": {"propose": {"enum": ["none", "pause_research"]}}}
+    body = chat()
+    body["messages"][0]["content"] = header(response_schema=schema) + "\n" + PERSONA
+    assert post(w, body).status_code == 200
+    assert session.bodies[0]["format"] == schema and session.bodies[0]["messages"][0]["role"] == "system"
+

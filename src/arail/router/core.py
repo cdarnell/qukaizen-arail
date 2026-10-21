@@ -267,11 +267,14 @@ class ModelRouter:
                  top_p: Optional[float] = None,
                  *, system: Optional[str] = None,
                  messages: Optional[list] = None,
-                 response_schema: Optional[dict] = None) -> ModelResponse:
+                 response_schema: Optional[dict] = None,
+                 system_as_message: bool = False) -> ModelResponse:
         """``response_schema`` (A4): a JSON Schema for grammar-constrained
         output. Handed to the backend only when not None, so every existing
         caller's request is unchanged; only ``OllamaNativeBackend`` accepts it
-        (any other backend raises TypeError, which is traced as an error)."""
+        (any other backend raises TypeError, which is traced as an error).
+        ``system_as_message`` (R1-4c): the same rule, handed on only when True; it
+        asks the backend to send ``system`` as a real system message."""
         ctx = agent_context.current()
         slot = self._slot_info()
         # F10 (latching): read the recorder flag ONCE at call start and use
@@ -292,6 +295,8 @@ class ModelRouter:
         backend_kw: dict = {}
         if response_schema is not None:
             backend_kw["response_schema"] = response_schema
+        if system_as_message:
+            backend_kw["system_as_message"] = True
         agent_context.note_agent_call_entered(ctx)
         try:
             response = self._backend.complete(
@@ -353,8 +358,9 @@ class ModelRouter:
                         top_p: Optional[float] = None,
                         *, system: Optional[str] = None,
                         messages: Optional[list] = None,
-                        response_schema: Optional[dict] = None) -> Iterator[StreamResult]:
-        """See :meth:`complete` for ``response_schema``."""
+                        response_schema: Optional[dict] = None,
+                        system_as_message: bool = False) -> Iterator[StreamResult]:
+        """See :meth:`complete` for ``response_schema`` and ``system_as_message``."""
         ctx = agent_context.current()
         slot = self._slot_info()
         tokens_in = max((len(prompt) + len(system or "")) // 4, 1)
@@ -384,6 +390,8 @@ class ModelRouter:
         backend_kw: dict = {}
         if response_schema is not None:
             backend_kw["response_schema"] = response_schema
+        if system_as_message:
+            backend_kw["system_as_message"] = True
         agent_context.note_agent_call_entered(ctx)
         try:
             for item in self._backend.stream_complete(

@@ -2020,6 +2020,16 @@ class OllamaNativeBackend(OpenAICompatBackend):
         except Exception:  # noqa: BLE001
             return False
 
+    @staticmethod
+    def _chat_messages(prompt: str, system: Optional[str], system_as_message: bool) -> list:
+        """The ``messages`` of the request. Default (every caller but the Buddy edge): ``system`` is prepended to the prompt and
+        the request has one user message, as it always had. ``system_as_message``: a ``system`` message, then the user message."""
+        if system and system_as_message:
+            return [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
+        if system:
+            prompt = f"{system}\n\n{prompt}"
+        return [{"role": "user", "content": prompt}]
+
     def _ollama_root(self) -> str:
         """Return the Ollama root URL (strip trailing /v1 from base_url)."""
         base = self.base_url.rstrip("/")
@@ -2033,18 +2043,25 @@ class OllamaNativeBackend(OpenAICompatBackend):
                  *, system: Optional[str] = None,
                  messages: Optional[list] = None,
                  think: Optional[bool] = None,
-                 response_schema: Optional[dict] = None) -> ModelResponse:
+                 response_schema: Optional[dict] = None,
+                 system_as_message: bool = False) -> ModelResponse:
         """``response_schema`` (sprint 2026-10-20-buddy-always-on, A4): a JSON
         Schema sent as Ollama's ``format`` for grammar-constrained decoding.
-        None (every existing caller) adds nothing to the request body."""
-        if system:
-            prompt = f"{system}\n\n{prompt}"
+        None (every existing caller) adds nothing to the request body.
+
+        ``system_as_message`` (same sprint, R1-4c): send ``system`` as a real
+        ``system`` message instead of prepending it to the one user message.
+        With no system message in the request Ollama substitutes the Modelfile's
+        ``SYSTEM`` (``llama-ai-eng``: "You are an AI engineering assistant ..."),
+        so a persona prepended to the prompt is read as user text under a
+        different persona. Only the Buddy edge asks for it; False (every
+        existing caller) leaves the request bytes as they were."""
         start = time.time()
         num_ctx = getattr(self, "_num_ctx", None)  # F-NEW: defensive read
 
         body: dict = {
             "model": self.model_name,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": self._chat_messages(prompt, system, system_as_message),
             "stream": False,
         }
         # options.num_ctx / num_predict only included when set (else Ollama
@@ -2103,18 +2120,17 @@ class OllamaNativeBackend(OpenAICompatBackend):
                         *, system: Optional[str] = None,
                         messages: Optional[list] = None,
                         think: Optional[bool] = None,
-                        response_schema: Optional[dict] = None) -> Iterator[StreamResult]:
+                        response_schema: Optional[dict] = None,
+                        system_as_message: bool = False) -> Iterator[StreamResult]:
         """Symmetry with OpenAICompatBackend; chat path only calls complete().
         Streams via /api/chat with stream:true, yields deltas then ModelResponse.
-        ``response_schema``: see complete()."""
-        if system:
-            prompt = f"{system}\n\n{prompt}"
+        ``response_schema`` and ``system_as_message``: see complete()."""
         start = time.time()
         num_ctx = getattr(self, "_num_ctx", None)
 
         body: dict[str, Any] = {
             "model": self.model_name,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": self._chat_messages(prompt, system, system_as_message),
             "stream": True,
         }
         # See complete()'s comments: num_predict must be forwarded or Ollama

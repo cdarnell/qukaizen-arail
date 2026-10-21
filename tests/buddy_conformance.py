@@ -97,9 +97,9 @@ class FakeOllama(BaseBackend):
         raise NotImplementedError
 
     def stream_complete(self, prompt, max_tokens=512, temperature=0.7, top_p=None, *, system=None, messages=None,
-                        response_schema=None):
+                        response_schema=None, system_as_message=False):
         self.calls.append({"system": system, "prompt": prompt, "max_tokens": max_tokens,
-                           "response_schema": response_schema})
+                           "response_schema": response_schema, "system_as_message": system_as_message})
         mid = max(1, len(self.reply) // 2)
         yield self.reply[:mid]
         yield self.reply[mid:]

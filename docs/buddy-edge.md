@@ -117,6 +117,12 @@ adapter must accept both).
   that matches the contract's header schema; a persona must follow that line (not empty after stripping whitespace);
   and no later message may be a `system` message. Any failure is `turn_header_invalid`. The edge cannot tell Buddy's
   persona from anyone else's; Buddy proves that on his side.
+- **The persona is the model's system message.** Ollama receives the text after the header line as a real `system` message and
+  the later messages, flattened (`### <role>` blocks), as one `user` message. A request with no system message makes Ollama use
+  the Modelfile's own `SYSTEM`, which for `llama-ai-eng` is an "AI engineering assistant" persona (about 50 prompt tokens), so
+  Buddy's rules would arrive as user text underneath it. Only the edge asks for this (`system_as_message`); every other
+  caller's request is unchanged (debt D7 is paid for the system message only; history roles and `temperature` are still
+  flattened and ignored).
 - **`finish_reason` is always `stop`.** A completed answer ends with `stop` and carries usage on that chunk; the edge never
   sends `length`, even when the answer used all of `max_tokens`. nanobot (Buddy's client) reads `length` as "continue" and
   would call again on a prompt it wrote, turning one phone question into several admitted model calls. A capped answer stays

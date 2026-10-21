@@ -280,8 +280,10 @@ def _core_brain_chat(adm: Admitted) -> ChatPlan:
 
 def _drain(plan: ChatPlan, loop: asyncio.AbstractEventLoop, queue: "asyncio.Queue") -> None:
     """Runs in a worker thread inside a copy of the caller's context (the agent_call is on it)."""
+    # system_as_message: Buddy's persona must be the model's system message (R1-4c). Prepended to the prompt, Ollama would still
+    # substitute the Modelfile's own SYSTEM ("You are an AI engineering assistant ...") and read Buddy's rules as user text.
     for item in plan.router.stream_complete(plan.prompt, plan.max_tokens, system=plan.system,
-                                            response_schema=plan.schema):
+                                            response_schema=plan.schema, system_as_message=True):
         loop.call_soon_threadsafe(queue.put_nowait, item)
 
 

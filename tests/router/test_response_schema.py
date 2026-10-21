@@ -213,3 +213,68 @@ def test_response_schema_is_keyword_only_on_the_router():
     router = ModelRouter.from_backend(_Recording(), "ollama_native")
     with pytest.raises(TypeError):
         router.complete("hi", 10, 0.7, None, SCHEMA)  # type: ignore[misc]
+
+
+# ---------------------------------------------------------------------------
+# system_as_message (R1-4c, F59): the persona is the model's system message
+# ---------------------------------------------------------------------------
+# The backend used to put `system` in front of the prompt and send ONE user message. A request with no system message makes Ollama use the
+# Modelfile's SYSTEM, so `llama-ai-eng` read Buddy's persona as user text under "You are an AI engineering assistant ...". The edge asks for a
+# real system message with this keyword; every other caller's request is the same bytes as before (the golden cases above).
+
+def _edge_calls(b, fn):
+    fn(b)
+    return b._session.calls[0]["json"]["messages"]
+
+
+def test_without_the_keyword_the_system_text_is_still_prepended_to_the_one_user_message():
+    for fn in (lambda b: b.complete("PROMPT", 10, 0.1, system="SYS"), lambda b: list(b.stream_complete("PROMPT", 10, 0.1, system="SYS"))):
+        assert _edge_calls(_backend(), fn) == [{"role": "user", "content": "SYS\n\nPROMPT"}]
+
+
+def test_with_the_keyword_the_system_text_is_a_real_system_message_and_the_prompt_is_the_user_message():
+    for fn in (lambda b: b.complete("PROMPT", 10, 0.1, system="SYS", system_as_message=True),
+               lambda b: list(b.stream_complete("PROMPT", 10, 0.1, system="SYS", system_as_message=True))):
+        assert _edge_calls(_backend(), fn) == [{"role": "system", "content": "SYS"}, {"role": "user", "content": "PROMPT"}]
+
+
+def test_the_keyword_changes_the_messages_and_nothing_else_in_the_request():
+    plain, edge = _backend(4096), _backend(4096)
+    plain.complete("PROMPT", 64, 0.2, system="SYS", response_schema=SCHEMA)
+    edge.complete("PROMPT", 64, 0.2, system="SYS", response_schema=SCHEMA, system_as_message=True)
+    a, b = dict(plain._session.calls[0]["json"]), dict(edge._session.calls[0]["json"])
+    assert a.pop("messages") != b.pop("messages") and a == b and "format" in b and "options" in b
+    assert plain._session.calls[0]["url"] == edge._session.calls[0]["url"]
+
+
+def test_the_keyword_with_no_system_text_sends_only_the_user_message():
+    assert _edge_calls(_backend(), lambda b: b.complete("PROMPT", 10, 0.1, system_as_message=True)) == [{"role": "user", "content": "PROMPT"}]
+    assert _edge_calls(_backend(), lambda b: b.complete("PROMPT", 10, 0.1, system="", system_as_message=True)) == [{"role": "user", "content": "PROMPT"}]
+
+
+def test_system_as_message_is_keyword_only_on_the_backend_and_the_router():
+    with pytest.raises(TypeError):
+        _backend().complete("hello", 10, 0.1, None, "SYS", None, None, None, True)
+    with pytest.raises(TypeError):
+        ModelRouter.from_backend(_Recording(), "ollama_native").complete("hi", 10, 0.7, None, True)  # type: ignore[misc]
+
+
+def test_the_router_forwards_the_keyword_only_when_true():
+    backend = _Recording()
+    router = ModelRouter.from_backend(backend, "ollama_native")
+    router.complete("hi", system="S")
+    list(router.stream_complete("hi", system="S"))
+    assert backend.complete_kw == {} and backend.stream_kw == {}
+    router.complete("hi", system="S", system_as_message=True)
+    list(router.stream_complete("hi", system="S", system_as_message=True))
+    assert backend.complete_kw == {"system_as_message": True} and backend.stream_kw == {"system_as_message": True}
+    router.complete("hi", system="S", system_as_message=False)
+    assert backend.complete_kw == {}
+
+
+def test_a_backend_that_cannot_take_it_fails_loudly_and_is_traced_once():
+    router = ModelRouter.from_backend(_LegacyBackend(), "fake")
+    with agent_context.agent_call("buddy"):
+        with pytest.raises(TypeError):
+            router.complete("hi", system="S", system_as_message=True)
+    assert agent_trace.stats()["recorded"] == 1 and agent_trace.ring(1)[0]["outcome"] == "error"
