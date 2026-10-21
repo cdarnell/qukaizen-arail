@@ -331,7 +331,12 @@ def test_api_instance_and_api_instances_expose_no_field_beyond_spec():
                         # sprints/2026-07-29-elite-cli ARCHITECTURE.md §11.1 /
                         # F16 (WP6, warm-up): additive, booleans/ints/backend-
                         # class only — explicitly NOT a model id.
-                        "warm", "warm_ms", "warm_skipped", "backend"}
+                        "warm", "warm_ms", "warm_skipped", "backend",
+                        # sprints/2026-10-20-boot-model-autoresolve: per-slot
+                        # boot-warm outcome, closed vocabulary
+                        # ok|skipped|failed|deferred|disabled (or null while
+                        # pending) -- no model id.
+                        "warm_a", "warm_b"}
     allowed_roster = {"slug", "display_name", "portal_port", "bind", "checkout",
                       "started_at", "live", "instances"}  # "instances" = envelope
 

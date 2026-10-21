@@ -3436,6 +3436,10 @@ async def api_instance():
         "warm_ms": _MODEL_WARM_MS,
         "warm_skipped": _MODEL_WARM_SKIP_REASON,
         "backend": _MODEL_WARM_BACKEND,
+        # Additive, closed vocabulary ok|skipped|failed|deferred|disabled
+        # (None while the boot warm is still pending); no model ids.
+        "warm_a": _BOOT_WARM.get("a"),
+        "warm_b": _BOOT_WARM.get("b"),
     }
     slug = os.getenv("ARAIL_INSTANCE", "").strip()
     if not slug:
@@ -6840,9 +6844,12 @@ async def _boot_models() -> None:
     the cold-start overlay can't trap the user.
     """
     global _MODEL_WARM, _MODEL_WARM_SKIP_REASON
+    b: dict = {}
     try:
         from arail import model_resolve as _mr
-        res = await asyncio.to_thread(_mr.resolve_and_apply)
+        from arail.portal import model_warmth as _mw
+        skip_b = await asyncio.to_thread(_mw.crashed_model)
+        res = await asyncio.to_thread(_mr.resolve_and_apply, skip_b=skip_b)
         a = (res.get("a") or {})
         b = (res.get("b") or {})
         activity_log.emit(
@@ -6862,7 +6869,7 @@ async def _boot_models() -> None:
         for d in res.get("degraded") or []:
             activity_log.emit("registry", d.get("detail") or d.get("kind"), "warn")
     except Exception as e:  # noqa: BLE001
-        a = {}
+        a, b = {}, {}
         activity_log.emit("registry",
                           f"Model resolution skipped: {type(e).__name__}: {e}", "warn")
 
@@ -6887,6 +6894,13 @@ async def _boot_models() -> None:
             _record_warm("a", "disabled")
         else:
             _record_warm("a", "skipped")
+    # Slot B after A, so a chat turn arriving at boot queues behind at most
+    # one warm. A crash in this load is caught by the sentinel next boot.
+    try:
+        from arail.portal import model_warmth as _mw
+        _record_warm("b", await _mw.boot_warm_deep(b.get("model")))
+    except Exception:  # noqa: BLE001
+        _record_warm("b", "failed")
 
 
 def _boot_warm_explicit() -> bool:

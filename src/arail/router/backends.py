@@ -1955,17 +1955,14 @@ class OllamaNativeBackend(OpenAICompatBackend):
              models Part 3) promises for the resident slot specifically.
           3. "2h" otherwise (any other model, or pin disabled).
 
-        Pinning forever used to be rejected as a *default* because it
-        fights the aeroLLM preload's 0.60 memory-pressure ceiling and the
-        0.75 chat guard on 16 GB boxes — but that objection assumed an
-        arbitrarily large resident model. The resident slot the picker
-        offers by default is capped at <=3B (never past the <8B primary
-        ceiling), so pinned residency is ~1-2 GB: pinned tier0 (~2 GB) +
-        a resident aeroLLM 7B (~4 GB) is still well under 0.60 * 16 GB.
-        Only the model that's actually the registry's tier0 pins — every
-        other Ollama model (picked ad hoc from the rail, or used as a
-        one-off) keeps the old 2h behavior. ARAIL_RESIDENT_PIN=0 restores
-        the pre-Part-3 default everywhere.
+        Pinned residency counts against the boot resolver's RAM budget
+        (A + B together stay under 0.60 x total RAM, A first), so a larger
+        resident model simply makes the resolver drop the deep slot rather
+        than fight the aeroLLM preload's memory-pressure ceiling. Only the
+        model that's actually the registry's tier0 pins -- every other Ollama
+        model (picked ad hoc from the rail, or used as a one-off) keeps the
+        old 2h behavior. ARAIL_RESIDENT_PIN=0 restores the pre-Part-3
+        default everywhere.
         """
         raw = os.getenv("ARAIL_OLLAMA_KEEP_ALIVE")
         if raw is not None:
