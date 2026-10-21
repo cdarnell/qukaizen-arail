@@ -61,9 +61,15 @@ def resolve_entry() -> Any:
     """The registry entry for profile ``fast`` on the agents tab, or None. (seam)
 
     Uses ``peek``: the handshake asks every 20 s and must not write a fallback event
-    and an activity line each time the model is down."""
+    and an activity line each time the model is down.
+
+    A failed call leaves the entry marked unhealthy and ``peek`` never probes, so when
+    the bound entry is a local one in that state it is re-probed here, at most once per
+    ``_PROBE_FAIL_TTL_S``: the brain comes back by itself when Ollama does (TEST_REPORT Q-8)."""
     from arail.registry import get_registry
-    return get_registry().peek("fast", tab="agents")
+    reg = get_registry()
+    reg.recheck_unusable("fast", tab="agents", min_age_s=_PROBE_FAIL_TTL_S, only_if=entry_is_local)
+    return reg.peek("fast", tab="agents")
 
 
 def probe_structured_output(entry: Any) -> bool:

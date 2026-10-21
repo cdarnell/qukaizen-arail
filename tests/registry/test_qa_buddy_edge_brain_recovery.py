@@ -55,8 +55,6 @@ def test_while_the_call_has_just_failed_the_brain_is_reported_unavailable(ollama
     assert brain.describe().reason == "brain_unavailable"
 
 
-@pytest.mark.xfail(strict=True, reason="TEST_REPORT finding Q-8 (must-fix): after one failed call the edge never re-probes the fast "
-                                       "entry, so Buddy stays brain_unavailable until a desk action")
 def test_once_ollama_answers_again_buddy_gets_his_brain_back_without_a_desk_action(ollama_back, monkeypatch):
     ollama_back.report_failure("tier0-local", ConnectionError("connection refused"))
     assert not brain.describe().available
