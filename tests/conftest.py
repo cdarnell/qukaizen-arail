@@ -137,6 +137,27 @@ def _isolated_env_file(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def _hermetic_boot_models(request, monkeypatch):
+    """Keep the portal's boot model resolution/warm off the real machine.
+
+    Starting the app (``with TestClient(app)``) now resolves the two model
+    slots and warms them by default (sprints/2026-10-20-boot-model-
+    autoresolve). Tests must never talk to a developer's real Ollama or load
+    weights, so: warm is off (ARAIL_BOOT_WARM=0) and the resolver's two
+    network reads report "Ollama unreachable". Tests that exercise the
+    resolver patch these themselves (their patch runs after this one);
+    ``@pytest.mark.real_resolver_net`` opts out entirely.
+    """
+    if request.node.get_closest_marker("real_resolver_net"):
+        return
+    monkeypatch.setenv("ARAIL_BOOT_WARM", "0")
+    from arail import model_resolve
+    monkeypatch.setattr(model_resolve, "_fetch_ollama_tags", lambda: None)
+    monkeypatch.setattr(model_resolve, "_fetch_capabilities", lambda name: None)
+    model_resolve.last_resolution().clear()
+
+
+@pytest.fixture(autouse=True)
 def _no_ambient_lab_mode_env(monkeypatch):
     """Delete (and restore after the test) the lab-mode/identity env keys.
 

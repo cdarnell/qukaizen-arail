@@ -184,6 +184,7 @@ def test_ollama_port_env_is_honoured(monkeypatch):  # FM18
     assert mr._ollama_base() == "http://127.0.0.1:22434"
 
 
+@pytest.mark.real_resolver_net
 def test_non_loopback_host_means_unreachable_without_request(monkeypatch):
     monkeypatch.setenv("OLLAMA_HOST", "8.8.8.8")
     import urllib.request

@@ -149,17 +149,29 @@ def apply(path: "Path | None" = None) -> dict[str, Any]:
                 present, model = True, (None if pin == NONE_PIN else pin)
         desired[slot] = (present, model)
 
+    return stamp_env({slot: {"model": desired[slot][1]}
+                      for slot in ("a", "b") if desired[slot][0]})
+
+
+def stamp_env(resolved: dict[str, Any]) -> dict[str, Any]:
+    """Stamp a ``resolved``-shaped mapping (``{a: {model}, b: {model}}``)
+    into MODEL_NAME / AEROLLM_MODEL. A slot whose model is empty clears
+    its env var. Slots absent from *resolved* are left alone. Remembers
+    the pre-stamp value once (see ``env_preference``)."""
     result: dict[str, Any] = {}
     for slot, key in (("a", "default_a"), ("b", "default_b")):
-        present, model = desired[slot]
-        if not present:
+        s = resolved.get(slot)
+        if not isinstance(s, dict) or "model" not in s:
             continue
+        model = str(s["model"]) if s.get("model") else None
         env_name, marker = _ENV_PREF[slot]
         os.environ.setdefault(marker, os.environ.get(env_name, ""))
         if model:
             os.environ[env_name] = model
-        else:
+        elif slot == "b":
             os.environ.pop(env_name, None)
+        else:
+            continue            # an unresolved A never erases MODEL_NAME
         result[key] = model
     return result
 

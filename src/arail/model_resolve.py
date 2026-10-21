@@ -562,3 +562,49 @@ def resolve_boot_bounded(*, timeout: float = RESOLVE_TIMEOUT_S, **kw) -> BootRes
                          f"Model resolver took over {timeout:g}s; using last result")
     finally:
         pool.shutdown(wait=False)
+
+
+# ── resolve + persist + stamp + reconcile (the portal's single entry) ──
+
+_LAST: Dict[str, Any] = {}
+
+
+def last_resolution() -> Dict[str, Any]:
+    """The resolution this process produced (``BootResolution.to_dict()``
+    plus ``warm``); empty until ``resolve_and_apply`` has run."""
+    return _LAST
+
+
+def resolve_and_apply(*, skip_b: Optional[str] = None,
+                      timeout: float = RESOLVE_TIMEOUT_S) -> Dict[str, Any]:
+    """Resolve both slots, rewrite the yaml cache (pins untouched), stamp
+    MODEL_NAME / AEROLLM_MODEL, and reconcile the registry. Runs under
+    ``LOCK`` (FM13). Blocking: call via ``asyncio.to_thread``. Never raises
+    for resolver problems; returns the resolution dict with ``saved``
+    (cache written?) and ``migrated`` (v1 file upgraded?)."""
+    from arail import model_defaults as md
+    with LOCK:
+        migrated = md.migrate_v1()
+        data = md.read()
+        pins = data["pins"] if data["ok"] else {"a": None, "b": None}
+        res = resolve_boot_bounded(
+            timeout=timeout, pins=pins, env_pref=md.env_preference(),
+            cache=data["resolved"], skip_b=skip_b)
+        out = res.to_dict()
+        out["warm"] = {}
+        out["saved"] = md.write_cache(
+            {k: v for k, v in out.items() if k not in ("saved", "migrated")})
+        out["migrated"] = migrated
+        out["file_ok"] = bool(data["ok"])
+        md.stamp_env(out)
+        try:
+            from arail.registry import get_registry
+            from arail.registry import store as reg_store
+            reg = get_registry()
+            reg._ensure_loaded()
+            reg_store.reconcile_from_resolution(reg, out)
+        except Exception as exc:  # noqa: BLE001 — registry hiccup must not block boot
+            _log.warning("model_resolve: registry reconcile skipped: %s", exc)
+        _LAST.clear()
+        _LAST.update(out)
+    return out

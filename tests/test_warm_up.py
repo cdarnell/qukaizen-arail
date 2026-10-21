@@ -79,15 +79,12 @@ def test_boot_warm_explicit_falsy_or_explicit_zero(monkeypatch, val):
     assert app_mod._boot_warm_explicit() is False
 
 
-def test_startup_schedules_warm_on_autochecks_or_explicit_request():
-    """Pins the coupling _boot_warm_explicit() must have with _startup()'s
-    scheduling decision — mirrors the source-inspection pattern this repo
-    already uses for boot-task gating (tests/test_boot_security_scan.py's
-    'we can't easily run the FastAPI startup hook here' note) rather than
-    driving the actual fire-and-forget asyncio.create_task through
-    TestClient's sync wrapper, which does not reliably give a scheduled task
-    a chance to run before the test client tears the loop down.
-    """
+def test_startup_schedules_boot_models_task_unconditionally():
+    """Boot warm is default-on and independent of ARAIL_AUTOCHECKS
+    (sprints/2026-10-20-boot-model-autoresolve): _startup() must schedule
+    _boot_models() with no autochecks/explicit-warm condition. Replaces the
+    old 'if _autochecks_on or _boot_warm_explicit()' pin (T22) — opting out
+    is ARAIL_BOOT_WARM=0, handled inside _boot_models()."""
     text = APP_PY.read_text(encoding="utf-8")
     tree = ast.parse(text)
     startup_src = None
@@ -96,17 +93,9 @@ def test_startup_schedules_warm_on_autochecks_or_explicit_request():
             startup_src = ast.get_source_segment(text, node)
             break
     assert startup_src, "_startup() not found in app.py"
-    assert re.search(
-        r"if\s+_autochecks_on\s+or\s+_boot_warm_explicit\(\)\s*:",
-        startup_src,
-    ), (
-        "_startup()'s warm-scheduling condition no longer reads "
-        "'_autochecks_on or _boot_warm_explicit()' — quiet-boot-with-"
-        "explicit-warm-override (T22) has regressed"
-    )
-    # And the quiet-boot else branch must still flip _MODEL_WARM immediately
-    # (so /api/ready's overlay dismisses even when warming never runs).
-    assert "_MODEL_WARM = True" in startup_src
+    assert re.search(r"^\s*asyncio\.create_task\(_boot_models\(\)\)",
+                     startup_src, re.M)
+    assert "_boot_warm_explicit()" not in startup_src
 
 
 # ---------------------------------------------------------------------------
