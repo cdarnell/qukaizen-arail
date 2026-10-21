@@ -25,3 +25,34 @@
 
 ## Final state
 No portal/Python code changed. No researcher.py change. Python tests not run (no Python code touched).
+
+---
+## Resume 2026-10-21 (after owner approval; D1 server leg passed)
+
+### Executed
+- `src/arail/mcp/researcher_tool.py` (C1): stdio-only FastMCP server, one tool `researcher_run_once`; validation, `wrong_tier`, `researcher_busy`
+  (checks in-process status and `run_state.json`), wraps `ResearcherAgent._run` after `goal_store.set_goal` (archives the previous goal like POST /api/goal).
+  researcher.py NOT modified (0 lines).
+- `integrations/mastra-studio/run-once.mjs`, `src/mastra/{config,run-probe}.mjs`, `index.ts`: exits 3 unless
+  `MASTRA_TELEMETRY_DISABLED=1`, `MASTRA_OFFLINE=1`, `MASTRA_AUTO_REFRESH_PROVIDERS=false` and no platform token; loopback-only scorer endpoint.
+- Tests: `tests/test_researcher_tool.py` 12 passed (validation, tier, busy leaves GoalStore untouched, steps mapping/cap, stdout is MCP frames only).
+- Real run: `scripts/mastra/run-once-env.sh` produced a Researcher run, a Mastra trace and the one-line JSON (score 0 from llama3.2:1b).
+
+### Gate results
+| Gate | Verdict | Evidence |
+|---|---|---|
+| B0.1 ee/licence | STOP: owner decision. No `/ee/` URL, but `core/dist/ee-*.js` chunk loads. Licence census passes with CC-BY-4.0 allowed | gates/B0.1-result.md, loaded-urls.txt |
+| B0.2 D1 | server leg PASS (owner); browser leg FAIL: Studio page requests registry.npmjs.org (x15) and models.dev | gates/D1-egress.json, D1-full-browser-requests.txt |
+| B0.3 | iframe permitted (no XFO/CSP) | studio-headers-test.txt |
+| B0.4 D2 | PASS via public span API (8 children, non-empty I/O, read from Studio API) | gates/D2-spans.json |
+
+### Drift from ARCHITECTURE.md (for the architect)
+1. Three-flag child env (`MASTRA_OFFLINE=1`, `MASTRA_AUTO_REFRESH_PROVIDERS=false` besides telemetry) is required; `_mastra_env()` was not yet written (stopped before step 6).
+2. A6 wrong: `agent_trace.trace_id` is per router call, not per run. Steps are scoped by time window from run start (exact, because the MCP process only runs this one job) and the returned `trace_id` is a minted run id. Ring records exist even with the recorder off (only bodies are stripped), so steps are not empty when the recorder is off.
+3. Driver calls the MCP tool deterministically inside a root `agent_run` span; no LLM tool-calling (1b model is not reliable). `researcher-driver` Agent is registered for Studio only.
+4. `mastra dev` has no `--host`; bind via `server.host` (done, verified `127.0.0.1:4111`).
+5. `addScore` is not persisted by LibSQL; the score lives in the ARAIL ledger.
+
+### Stopped
+Not built: `_mastra_env()`, Python write-back, portal surface, arailctl, THIRD-PARTY-LICENSES, T-U-2..4,7,8,10 (steps 6-8). Reason: browser-leg D1 FAIL and B0.1 ee-chunk decision. No researcher.py change.
+Commits: see `git log` on the branch.

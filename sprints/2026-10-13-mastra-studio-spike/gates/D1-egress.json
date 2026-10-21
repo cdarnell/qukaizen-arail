@@ -45,5 +45,13 @@
    "no idle-baseline capture was taken",
    "server idle only; browser-on-Studio and run-once egress are re-checked at D2/B0.4 and in qa"
   ]
+ },
+ "update_2026-10-21b": {
+  "verdict": "FAIL (browser leg)",
+  "run": "Studio on 127.0.0.1:4111 + headless browser (agent-browser) on / and /observability + run-once.mjs concurrently, 3 flags set",
+  "node_and_ollama_sockets": "all loopback (gates/D1-full-lsof-ours.txt)",
+  "browser_requests": "gates/D1-full-browser-requests.txt: 78 to 127.0.0.1:4111, 15 to https://registry.npmjs.org (mastra, @mastra/core, @mastra/mcp, @mastra/libsql, @mastra/observability version lookups from the Studio page), 1 to https://models.dev/logos/ollama.svg",
+  "rule": "ARCHITECTURE B0.2 step 3: every browser URL host must be loopback",
+  "note": "The owner pcap covered the server only; the browser leg was not in it. Python MCP child sockets not attributable by name (venv python == Homebrew Python); run-once Ollama traffic is 127.0.0.1:11434."
  }
 }

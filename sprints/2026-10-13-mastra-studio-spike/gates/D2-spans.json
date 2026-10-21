@@ -1,0 +1,150 @@
+{
+ "gate": "D2",
+ "verdict": "PASS",
+ "traceId": "f450b5017fcb91eefe605635a5a1927a",
+ "root": "researcher-driver",
+ "root_type": "agent_run",
+ "tool": "researcher_run_once",
+ "tool_type": "tool_call",
+ "child_count": 8,
+ "children_with_input_and_output": 8,
+ "child_kinds": [
+  "model call",
+  "planning",
+  "experiment",
+  "experiment phase"
+ ],
+ "spans": [
+  {
+   "spanId": "fbaeda318ba7401c",
+   "parent": null,
+   "name": "researcher-driver",
+   "type": "agent_run",
+   "input": {
+    "goal": "Measure how responsive this lab is on local hardware"
+   },
+   "output": {
+    "report": "# Research Report\n\n**Goal:** Measure how responsive this lab is on local hardware\n**Domain:** general\n**Experiments:** 3 (0 measured · 2 unmeasured · 1 could-not-run)\n\n## Results\n\n### `7c77e261` — A systematic approach to 'Measure how responsive this lab is on local \n- **Provenance:** unmeasured — unmeasured (no on-device measurement available)\n- **Conclusion:** Not tested: no on-device archetype matches this hypothesis — the engine can measure throughput, prompt variants, retrieval quality, or a game config.\n\n### `6b28e765` — Iterative experimentation will identify optimal parameters for: Measur\n- **Provenance:** unmeasured — unmeasured (no on-device measurement available)\n- **Conclusion:** Not tested: no on-device archetype matches this hypothesis — the engine can measure throughput, prompt variants, retrieval quality, or a game config.\n\n### `44188362` — Baseline: measure this lab's approved-knowledge retrieval for 'general\n- **Provenance:** NOT RUN — no approved knowledge — approve documents on the Knowledge (DaC) page first, then this experiment can measure retrieval quality\n- **Conclusion:** Could not run: no approved knowledge — approve documents on the Knowledge (DaC) page first, then this experiment can measure retrieval quality\n\n## Recommendations\n\n1. Some experiments could not run (e.g. no local model, or no approved knowledge). Install a model and approve documents on the Knowledge page, then re-run.\n\n## What was actually measured\n\n_Emitted from the experiment records, not written by a model._\n\n**Platform:** macOS-26.7.1-arm64-arm-64bit\n\n### `7c77e261` — unmeasured (unmeasured)\n- **not tested** — no on-device archetype matches this hypothesis — the engine can measure throughput, prompt variants, retrieval quality, or a game config.\n- ➡️ No knob in either tuning config varies this — testing it means changing AeroLLM itself, not a lab setting.\n\n### `6b28e765` — unmeasured (unmeasured)\n- **not tested** — no on-device archetype matches this hypothesis — the e"
+   },
+   "startedAt": "2026-10-21T13:01:03.679Z"
+  },
+  {
+   "spanId": "2bc8f9096c3c2123",
+   "parent": "fbaeda318ba7401c",
+   "name": "researcher_run_once",
+   "type": "tool_call",
+   "input": {
+    "goal": "Measure how responsive this lab is on local hardware"
+   },
+   "output": {
+    "experiment_id": "7c77e261",
+    "steps": 8
+   },
+   "startedAt": "2026-10-21T13:01:03.680Z"
+  },
+  {
+   "spanId": "a804a6aab688c12a",
+   "parent": "2bc8f9096c3c2123",
+   "name": "model call: goal-parser",
+   "type": "generic",
+   "input": {
+    "summary": "sys:goal-parser tokens_in=None"
+   },
+   "output": {
+    "summary": "model=None outcome=error tokens_out=None"
+   },
+   "startedAt": "2026-10-21T13:01:04.050Z"
+  },
+  {
+   "spanId": "06ffe8db9ea8bb88",
+   "parent": "2bc8f9096c3c2123",
+   "name": "planning: research hypotheses",
+   "type": "generic",
+   "input": {
+    "summary": "generated 2 research hypotheses."
+   },
+   "output": {
+    "summary": "Generated 2 research hypotheses."
+   },
+   "startedAt": "2026-10-21T13:01:04.509Z"
+  },
+  {
+   "spanId": "366b81a4208fc025",
+   "parent": "2bc8f9096c3c2123",
+   "name": "experiment: Created experiment 7c77e261: A systematic approach to 'Measu",
+   "type": "generic",
+   "input": {
+    "summary": "created experiment 7c77e261: a systematic approach to 'measure how responsive th"
+   },
+   "output": {
+    "summary": "Created experiment 7c77e261: A systematic approach to 'Measure how responsive this lab is on local hardware' "
+   },
+   "startedAt": "2026-10-21T13:01:04.518Z"
+  },
+  {
+   "spanId": "2229a95dbdfa844b",
+   "parent": "2bc8f9096c3c2123",
+   "name": "experiment: Created experiment 6b28e765: Iterative experimentation will ",
+   "type": "generic",
+   "input": {
+    "summary": "created experiment 6b28e765: iterative experimentation will identify optimal par"
+   },
+   "output": {
+    "summary": "Created experiment 6b28e765: Iterative experimentation will identify optimal parameters for: Measure how resp"
+   },
+   "startedAt": "2026-10-21T13:01:05.023Z"
+  },
+  {
+   "spanId": "d65247a781599c37",
+   "parent": "2bc8f9096c3c2123",
+   "name": "experiment: Added a measurable lab-capability baseline (no hypothesis wa",
+   "type": "generic",
+   "input": {
+    "summary": "added a measurable lab-capability baseline (no hypothesis was measurable on-devi"
+   },
+   "output": {
+    "summary": "Added a measurable lab-capability baseline (no hypothesis was measurable on-device)."
+   },
+   "startedAt": "2026-10-21T13:01:05.548Z"
+  },
+  {
+   "spanId": "b43b0a1813fe6b12",
+   "parent": "2bc8f9096c3c2123",
+   "name": "experiment phase: Source gathering complete.",
+   "type": "generic",
+   "input": {
+    "summary": "source gathering complete."
+   },
+   "output": {
+    "summary": "Source gathering complete."
+   },
+   "startedAt": "2026-10-21T13:01:05.552Z"
+  },
+  {
+   "spanId": "30ac87919c95cbba",
+   "parent": "2bc8f9096c3c2123",
+   "name": "experiment phase: Experiments complete.",
+   "type": "generic",
+   "input": {
+    "summary": "experiments complete."
+   },
+   "output": {
+    "summary": "Experiments complete."
+   },
+   "startedAt": "2026-10-21T13:01:05.594Z"
+  },
+  {
+   "spanId": "e49d03a721770683",
+   "parent": "2bc8f9096c3c2123",
+   "name": "experiment phase: Results written to knowledge base (lab/pkm/agents/",
+   "type": "generic",
+   "input": {
+    "summary": "results written to knowledge base (lab/pkm/agents/)."
+   },
+   "output": {
+    "summary": "Results written to knowledge base (lab/pkm/agents/)."
+   },
+   "startedAt": "2026-10-21T13:01:05.612Z"
+  }
+ ]
+}
