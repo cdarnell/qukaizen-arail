@@ -21,6 +21,8 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setenv("ARAIL_MODEL_REGISTRY_FILE", str(tmp_path / "model_registry.json"))
     monkeypatch.setenv("ARAIL_MODEL_DEFAULTS_FILE", str(tmp_path / "model_defaults.yaml"))
     monkeypatch.setenv("ARAIL_MODELS_DIR", str(tmp_path / "models"))
+    # tier 0 follows slot A only when the primary backend fronts Ollama (QA-1)
+    monkeypatch.setenv("MODEL_BACKEND", "ollama_native")
     monkeypatch.setenv("ARAIL_DATA_DIR", str(tmp_path / "data"))
     (tmp_path / "models").mkdir()
     reg_core.reset_registry()
