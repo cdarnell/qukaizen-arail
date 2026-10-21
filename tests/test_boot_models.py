@@ -223,3 +223,42 @@ def test_reresolve_drops_warm_of_slot_whose_model_changed(booted, monkeypatch, t
     out = mr.resolve_and_apply()
     assert out["a"]["model"] == "other:1b"
     assert "a" not in out["warm"] and out["warm"]["b"] == "ok"
+
+
+# ── round 3: QA-1 (MLX primary backend must keep its own MODEL_NAME) ──
+
+@pytest.mark.parametrize("backend", ["mlx", "cuda", "cpu", None])
+def test_non_ollama_primary_backend_keeps_its_model_name(booted, monkeypatch, backend):  # QA-1
+    if backend is None:
+        monkeypatch.delenv("MODEL_BACKEND", raising=False)
+    else:
+        monkeypatch.setenv("MODEL_BACKEND", backend)
+    monkeypatch.setenv("MODEL_NAME", "mlx-community/Qwen3-8B-4bit")
+    out = mr.resolve_and_apply()
+    assert os.environ["MODEL_NAME"] == "mlx-community/Qwen3-8B-4bit"
+    # .env's MLX repo id is not an Ollama preference: no bogus "isn't installed" note
+    assert not [d for d in out["degraded"] if d["slot"] == "a"
+                and "mlx-community" in (d.get("detail") or "")]
+    from arail.registry import get_registry
+    t0 = get_registry().entries["tier0-local"]
+    assert t0.model_id != "llama-ai-eng:latest"
+
+
+def test_non_ollama_backend_still_stamps_slot_b_and_caches_a(booted, monkeypatch, tmp_path):
+    monkeypatch.setenv("MODEL_BACKEND", "mlx")
+    monkeypatch.setenv("MODEL_NAME", "mlx-community/Qwen3-8B-4bit")
+    (tmp_path / "models" / "Good-7B").mkdir(parents=True)
+    monkeypatch.setenv("ARAIL_MODELS_DIR", str(tmp_path / "models"))
+    monkeypatch.setattr(mr, "_deep_slot_available", lambda: None)
+    monkeypatch.setattr(mr, "_scan_models_dir", lambda: [{"id": "Good-7B", "size_gb": 4.0}])
+    mr.resolve_and_apply()
+    assert os.environ["AEROLLM_MODEL"] == "Good-7B"
+    assert md.read(booted)["resolved"]["a"]["model"] == "llama-ai-eng:latest"
+
+
+def test_apply_from_cache_does_not_stamp_a_under_mlx(booted, monkeypatch):
+    mr.resolve_and_apply()                     # cache now names llama-ai-eng
+    monkeypatch.setenv("MODEL_BACKEND", "mlx")
+    monkeypatch.setenv("MODEL_NAME", "mlx-community/Qwen3-8B-4bit")
+    md.apply(booted)
+    assert os.environ["MODEL_NAME"] == "mlx-community/Qwen3-8B-4bit"

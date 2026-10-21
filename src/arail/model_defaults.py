@@ -65,6 +65,17 @@ def _path(path: "Path | None" = None) -> Path:
     return Path(override) if override else _DEFAULT_PATH
 
 
+_OLLAMA_FRONTED = ("ollama_native", "openai_compat")
+
+
+def primary_is_ollama() -> bool:
+    """True iff MODEL_BACKEND fronts Ollama (slot A's runtime). Unset means
+    ``mlx`` -- the same default the registry seed and ModelRouter use.
+    MODEL_NAME is an Ollama tag only in that case; with mlx/cuda/cpu it is a
+    local-runtime repo id and must never be overwritten with a tag."""
+    return (os.getenv("MODEL_BACKEND") or "mlx").strip().lower() in _OLLAMA_FRONTED
+
+
 def _norm_pin(slot: str, v: Any) -> "str | None":
     if v is None:
         return None
@@ -171,6 +182,8 @@ def stamp_env(resolved: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(s, dict) or "model" not in s:
             continue
         model = str(s["model"]) if s.get("model") else None
+        if slot == "a" and not primary_is_ollama():
+            continue            # MODEL_NAME belongs to the mlx/cuda/cpu backend
         env_name, marker = _ENV_PREF[slot]
         os.environ.setdefault(marker, os.environ.get(env_name, ""))
         if model:
@@ -189,6 +202,8 @@ def env_preference() -> dict[str, "str | None"]:
     for slot, (env_name, marker) in _ENV_PREF.items():
         raw = os.environ[marker] if marker in os.environ else os.environ.get(env_name, "")
         out[slot] = raw.strip() or None
+    if not primary_is_ollama():
+        out["a"] = None         # an MLX repo id is not an Ollama slot-A preference
     return out
 
 

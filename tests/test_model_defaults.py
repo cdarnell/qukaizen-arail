@@ -41,6 +41,9 @@ def _clean_env(monkeypatch):
     monkeypatch.delenv("AEROLLM_MODEL", raising=False)
     monkeypatch.delenv("ARAIL_ENV_PREF_A", raising=False)
     monkeypatch.delenv("ARAIL_ENV_PREF_B", raising=False)
+    # Slot A is stamped into MODEL_NAME only when the primary backend fronts
+    # Ollama (round 3, QA-1); unset would mean mlx.
+    monkeypatch.setenv("MODEL_BACKEND", "ollama_native")
     _saved = {k: os.environ.get(k) for k in ("MODEL_NAME", "AEROLLM_MODEL",
                                   "ARAIL_ENV_PREF_A", "ARAIL_ENV_PREF_B")}
     yield
