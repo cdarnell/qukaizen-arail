@@ -722,6 +722,89 @@ opened. Bar on this set: 16 of 20 questions, 9 of 12 pressure (6 of 8), no wrong
 message; L3 under launchd with a venv built exactly as the README says (the finding 1 regression); finding 7 (push); finding 8 (the operator's decision, D35); the 10-minute
 airgapped sampler, hybrid L3 and `nettop` as before.
 
+## Build round 3: QA round 1 (TEST_REPORT.md, verdict FAIL)
+
+Three commits, one per item the orchestrator named, in this order. The blind set was not opened, no dev-set run was needed (nothing here touches the answer path except
+the default mode, which changes which path runs, not what either path does), nothing is pushed, no real token was used, `nanobot/` is P0 to P2 only (3 files, +9 / -3), and
+no frozen name was touched.
+
+### Step 38 (Q-8, must-fix: one failed model call left Buddy without a brain until ARAIL restarted)
+
+**Root cause: ARAIL's edge, one place; Buddy is not at fault.** The chain, each link read in the code:
+
+1. `registry/binding.py` calls `report_failure("tier0-local", exc)` on a failed call; `ModelRegistry.report_failure` (`registry/core.py`) sets `entry.health.status = "unhealthy"`.
+2. `brain.describe()` (`buddy_host/brain.py`) asks `resolve_entry()`, which used `peek("fast", tab="agents")`. `peek` runs `_gate_reason`, which refuses an `unhealthy` entry, and it
+   **never probes**, so the answer is `None`: `brain_unavailable` in every handshake.
+3. `_core_brain_chat` checks `describe()` (step 8) and refuses with 424 **before** any model call, so no call can ever reach `report_success`.
+4. The only other writers of health are `run_preflight`/the interval loop (`start_background`, opt-in via `ARAIL_AUTOCHECKS`, off by default) and a desk action.
+
+**Buddy's side:** none. `ModeGate.tick` replaces `status.handshake` on every good tick and keeps no brain state; `/status` and `Carrier.brain()` read that handshake. A Buddy-side
+test now pins it (below), so a later cache cannot hide the ARAIL fix.
+
+**Fix (ARAIL, `496cdb2a`).**
+* `src/arail/registry/core.py`, new `ModelRegistry.recheck_unusable(profile, tab, *, min_age_s, only_if)`: when the entry bound to the profile is `unhealthy` or `not_installed`,
+  `only_if(entry)` holds, and its verdict is at least `min_age_s` old, probe it once with the registry's own `health.probe_entry`, store the result, and emit the same
+  "recovered" activity line `report_success` does. The verdict's clock is reset before the probe, so concurrent callers and a model that is still down cost **one probe per TTL**,
+  not one per handshake.
+* `src/arail/buddy_host/brain.py`, `resolve_entry()`: calls it first with `min_age_s=_PROBE_FAIL_TTL_S` (10 s, the constant the structured-output probe already uses) and
+  `only_if=entry_is_local`, then `peek`s as before. A cloud entry or a remote endpoint in the `fast` slot is **never probed from the handshake** (no egress from a 20-second timer).
+  `build_router` still uses the real `resolve`, so the call path is unchanged.
+* Recovery therefore happens at the next handshake (at most 20 s) or the next `brain.chat` after the 10 s TTL, without a restart and without a desk action.
+
+**Tests.** QA's strict xfail `tests/registry/test_qa_buddy_edge_brain_recovery.py::test_once_ollama_answers_again_buddy_gets_his_brain_back_without_a_desk_action` now passes: the
+`@pytest.mark.xfail` marker is removed and the body is **unchanged** (QA's other two tests unchanged). New `tests/registry/test_buddy_edge_brain_recheck.py` (6): nothing probed
+inside the TTL; a good probe after it restores the brain and the entry; a model still down is probed once per TTL, not once per handshake (5 handshakes, 1 probe; 2 after the next
+TTL); a cloud entry and a remote endpoint in the `fast` slot are never probed; a healthy entry costs no probe. Buddy (`1c1572c4`, `buddy/tests/test_gate.py`): the brain line follows
+the lab through a lost and regained model with the gate open and one poller start, no restart.
+
+Not run: the live Ollama-down case on a real ARAIL (QA's re-run, TEST_REPORT "Notes for the next QA pass"). The unit test uses a loopback fake Ollama and a faked clock.
+
+Commits: ARAIL `496cdb2a`; Buddy `1c1572c4`.
+
+### Step 39 (template mode is the default; N3; disconfirming #2 fired)
+
+Per VISION 2.3 and "Remaining work" 5: the blind run missed the bar in structured mode in both clean runs (10/20 + 0/8 and 9/20 + 0/8; 14 misses per run were the model's), so
+`Settings.answer_mode` now defaults to `template` (`buddy/src/buddy/configure.py`, named `RECOMMENDED_ANSWER_MODE`) and `docs/S1.md` says so, with the numbers, and says template
+is also below the bar (14/20, 2/8), so S1 ships below the bar by the pre-committed rule.
+
+**Disconfirming #2 (VISION 2.5): FIRED**, recorded here as the ledger asks (TEST_REPORT section 3: the model-caused structured misses are 14 cases in S1 and 14 in S2; template
+misses are D29 and the label rule, not evidence for #2).
+
+**N3 (an existing home).** A changed default never rewrites a file: a home whose `buddy.toml` already says `[answer] mode = "structured"` keeps it, byte for byte (tested). `python -m
+buddy configure` and `python -m buddy verify` each print one `Note:` line when the mode differs from the recommended one (`configure.answer_mode_notice`); neither fails because of it,
+and a home on `template` prints nothing. A home with no `[answer]` key now gets template silently, which is the intended change. The operator's own home was **not** edited here (not
+asked; it needs the token and link); the TEST_REPORT script already tells him to set `mode = "template"` and the notice will say so.
+
+**Deltas.** `Carrier`'s constructor default stays `structured`: it is a test convenience that the shipped path never uses (the seam passes the setting), and 13 carrier tests are about
+the structured path. The suite's structured-path tests now ask for structured explicitly (`tests/seam_rig.py`, `prepare_home` in `test_qa_harness.py`); `test_configure.py` pins
+the new default and the notice, `test_cli.py` pins configure/verify for a new home and for an existing structured one. Commit: Buddy `24b81f1a`.
+
+### Step 40 (D35, the mode half: the launchd log was 0644)
+
+The launchd log holds the conversation. Two layers, in Buddy only (`nanobot/` is untouched, so the plist and the installer are nanobot's):
+* `service install` takes the log paths from the installer's own dry-run preview of the unit (`StandardOutPath`, `StandardErrorPath`) and makes those files 0600 **before** the unit
+  starts (`_files.private_log_file`: created `O_NOFOLLOW`, never truncated, a symlink or someone else's file refuses the install with a fixed line). It also tightens logs an older
+  install left open. launchd then opens an existing 0600 file. A systemd unit has no log path and needs nothing.
+* `buddy.boot.activate` (first line) calls `_files.tighten_log_streams`: when the process's own stdout and stderr are regular files it owns, they are fchmod'ed 0600. This covers a log that
+  was deleted and re-made by launchd. A pipe, a terminal or a closed descriptor is left alone; it never raises.
+
+Tests: `tests/test_log_files.py` (4, including a subprocess started with its streams on a 0644 file) and three in `test_cli.py` (an older 0644 log tightened without losing a byte; the
+dry-run creates no file; a symlinked log refuses the install and calls nothing). **The content-policy question stays open as a debt row** (`buddy/docs/DEBT.md` D35, now split:
+mode done; whether conversation text and sender ids belong in the launchd log at all is the operator's decision before S2, with `log_content=False` as the option the row names).
+`docs/S1.md` line for `~/.nanobot/logs/` says both. Commit: Buddy `ac3b81e1`.
+
+### Step 41 (everything re-run at the end)
+
+| Check | Result |
+|---|---|
+| Buddy suite (`pytest buddy/tests -n 4 --cov=buddy`) | **1980 passed, 1 skipped, 8 xfailed** (was 1969 / 1 / 8); coverage 96.01 %. The xfails are unchanged: D33 x2, D36 x1, Q-3 x5 |
+| nanobot upstream with P0 to P2 and the plugin | **7678 passed, 11 skipped**; ruff clean; `git diff --stat v0.3.5 -- nanobot/`: **3 files, +9 / -3**; `make_nanobot_pin.py --check` ok; `make_nanobot_turn_case.py --check` ok |
+| ARAIL R-BUDDY-98 (`pytest tests/test_*buddy*.py`) | **102 passed, 1 xfailed** (BACKLOG S3). 100 plus QA's two routes tests that match the glob |
+| ARAIL new tests (the nine files) + QA's two files + `tests/registry` | **490 passed** (includes the flipped Q-8 test, QA's edge-routes test and the 6 new rechecks); the registry/health file glob: 132 passed |
+| I1 with the real pins (`integration_i1.py --pins real`), my own `ollama serve` on 11434 from 12:41:43Z to 12:42:08Z | **29/29** |
+| I2 | contract sha256 `48481c1d905df6ed8797de91c6db583f3fc7c1d2f9330c46f79f73b12a785516` equal on both sides; `scripts/sync-buddy-contract.py --check`: ok, 134 files |
+| Blind set / dev set | not opened / not run (the Q-8 fix does not touch the answer path) |
+
 ## Architect feedback required
 
 **G1 to G5 were answered by ARCHITECTURE Addendum A (2026-10-20) and built as answered.** The original text of each gap follows,
@@ -919,6 +1002,13 @@ bounded by retrieval, D29), H2's wording is corrected above, H1, H6, H7 and H9 n
   `test_answer_polarity.py` F58, `test_answer_path.py` and `test_hold_ends.py` F59, `test_hold.py` F60, `test_poller_failures.py` F14 and F61).
 
 ## Final state
+
+**After build round 3 (QA round 1, FAIL).** Q-8 is fixed in ARAIL (`496cdb2a`: the edge re-probes a down local `fast` entry, at most once per 10 s) with QA's strict xfail flipped to a
+pass, and a Buddy-side test pins that Buddy keeps no brain state (`1c1572c4`). Template is the default answer mode and disconfirming #2 is recorded as fired (`24b81f1a`). The launchd
+logs are 0600 (`ac3b81e1`); the content policy is still the operator's. Tests at HEAD: Buddy **1980 passed, 1 skipped, 8 xfailed**; nanobot upstream **7678 passed, 11 skipped**;
+ARAIL R-BUDDY-98 **102 passed, 1 xfailed**; ARAIL new + QA + registry **490 passed**; I1 **29/29**; I2 equal. **Left, unchanged:** Q-3, D36, D29, N1 (debt); Q-9, Q-4, Q-10, Q-1 (debt,
+low); Q-5, Q-11, Q-6, Q-7 (docs and cosmetic); the operator's items (W5 witness line, accounts B and C, push, D35's content policy, the phone win run, setting his own home's
+`buddy.toml` to template, and the live socket-level gates that need a real token). Nothing is pushed.
 
 **After build round 2 (the architect's review, BLOCK).** Findings 1 to 6 are fixed, one commit per finding (4 is a, b and c), each with the regression test the reviewer's
 probe implies. Finding 7 (push the Buddy branch) is **not done: the instruction was to push nothing.** Follow-ups 8 to 12 are filed as debt, and the static G8 test is
