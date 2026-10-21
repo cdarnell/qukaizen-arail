@@ -207,6 +207,10 @@ def test_boot_models_skips_crashed_model_and_reports_it(sentinel, monkeypatch, t
 def test_api_instance_exposes_warm_a_and_warm_b(monkeypatch):
     import arail.portal.app as app_mod
     from fastapi.testclient import TestClient
+    # The startup _boot_models task records "disabled" (conftest sets
+    # ARAIL_BOOT_WARM=0) on the portal loop; if it lands after the setitem
+    # below it overwrites it (TEST_REPORT.md, reproduced with a 0.5 s pause).
+    monkeypatch.setattr(app_mod, "_boot_models", lambda: asyncio.sleep(0))
     with TestClient(app_mod.app) as client:
         monkeypatch.setitem(app_mod._BOOT_WARM, "a", "ok")
         monkeypatch.setitem(app_mod._BOOT_WARM, "b", "deferred")
