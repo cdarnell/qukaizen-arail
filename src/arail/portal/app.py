@@ -6914,25 +6914,6 @@ async def _warm_slot_b(model: "str | None") -> None:
         _record_warm("b", "failed")
 
 
-def _boot_warm_explicit() -> bool:
-    """True only when ARAIL_TIER0_BOOT_WARM is EXPLICITLY set to a truthy
-    value in this process's environment (sprints/2026-07-29-elite-cli
-    ARCHITECTURE.md §11.1).
-
-    Deliberately distinct from _warm_primary_router()'s own read of the same
-    variable (which defaults to truthy when unset, so the completion fires
-    whenever warming runs at all) — this one answers a different question:
-    "did the caller explicitly ask to warm on an otherwise-quiet boot?".
-    Unset ⇒ False, so a plain quiet boot (no --warm, autochecks off) is
-    completely unaffected. An explicit "0"/"false"/"no" also answers False
-    (not-explicitly-true), matching autochecks.py's own _TRUTHY convention.
-    """
-    raw = os.getenv("ARAIL_TIER0_BOOT_WARM")
-    if raw is None:
-        return False
-    return raw.strip().lower() in ("1", "true", "yes", "on")
-
-
 async def _warm_primary_router() -> None:
     """Warm the Tier 0 chat model at boot — for real.
 

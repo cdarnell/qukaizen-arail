@@ -1,7 +1,7 @@
 """Warm-up (sprints/2026-07-29-elite-cli/ARCHITECTURE.md §11, Ruling 6 — WP6).
 
-Covers the Python-side half of the gate list: T22 (``_boot_warm_explicit()``
-gating, ``_warm_primary_router()`` timing/backend recording, the
+Covers the Python-side half of the gate list: T22 (startup scheduling of the
+boot warm, ``_warm_primary_router()`` timing/backend recording, the
 ``/api/instance`` field set), F16 (no model id leaks), and T29 (the
 onboarding allow-list is unchanged by this sprint — the warm signal rides
 the endpoint that was already allow-listed, per A6).
@@ -54,30 +54,9 @@ def wired(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# _boot_warm_explicit() — the new gate function itself
+# Startup scheduling (replaces the _boot_warm_explicit() gate tests: boot warm
+# is default-on now, so there is no "explicit request" gate left to test)
 # ---------------------------------------------------------------------------
-
-def test_boot_warm_explicit_unset_is_false(monkeypatch):
-    from arail.portal import app as app_mod
-    monkeypatch.delenv("ARAIL_TIER0_BOOT_WARM", raising=False)
-    assert app_mod._boot_warm_explicit() is False
-
-
-@pytest.mark.parametrize("val", ["1", "true", "True", "yes", "on"])
-def test_boot_warm_explicit_truthy_values(monkeypatch, val):
-    from arail.portal import app as app_mod
-    monkeypatch.setenv("ARAIL_TIER0_BOOT_WARM", val)
-    assert app_mod._boot_warm_explicit() is True
-
-
-@pytest.mark.parametrize("val", ["0", "false", "no", "garbage", ""])
-def test_boot_warm_explicit_falsy_or_explicit_zero(monkeypatch, val):
-    """An explicit '0'/'false'/'no' must NOT count as an explicit warm
-    request (§11.1: '=0 still disables') — distinct from 'unset'."""
-    from arail.portal import app as app_mod
-    monkeypatch.setenv("ARAIL_TIER0_BOOT_WARM", val)
-    assert app_mod._boot_warm_explicit() is False
-
 
 def test_startup_schedules_boot_models_task_unconditionally():
     """Boot warm is default-on and independent of ARAIL_AUTOCHECKS
@@ -95,7 +74,6 @@ def test_startup_schedules_boot_models_task_unconditionally():
     assert startup_src, "_startup() not found in app.py"
     assert re.search(r"^\s*asyncio\.create_task\(_boot_models\(\)\)",
                      startup_src, re.M)
-    assert "_boot_warm_explicit()" not in startup_src
 
 
 # ---------------------------------------------------------------------------
