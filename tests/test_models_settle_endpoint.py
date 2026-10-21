@@ -108,8 +108,11 @@ def test_settle_default_b_none_is_always_valid(client, monkeypatch, tmp_path):
     assert body["restart_required"] is False
 
     written = (tmp_path / "model_defaults.yaml").read_text(encoding="utf-8")
-    assert "default_a: llama-ai-eng" in written
-    assert "default_b: null" in written
+    # v2 file: settle maps to pins; an omitted B is the explicit "none" pin
+    # (replaces the v1 `default_a:` / `default_b: null` assertions).
+    import yaml
+    data = yaml.safe_load(written)
+    assert data["pins"] == {"a": "llama-ai-eng", "b": "none"}
 
 
 def test_settle_writes_file_and_updates_registry_immediately(client, monkeypatch, tmp_path):

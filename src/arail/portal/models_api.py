@@ -199,6 +199,11 @@ def _boot_settlement() -> Dict[str, Any]:
     cost /api/chat/models already pays on every chat page load."""
     from arail import model_defaults as _md
     slots = _md.resolve_slots()
+    # Interim bridge (removed in the GET /api/models/boot v2 step): "settled"
+    # used to be reported by resolve_slots(); derive it from the v2 reader.
+    _data = _md.read(Path(slots["path"]))
+    slots["settled"] = bool(_data["pins"]["a"] or _data["resolved"].get("a")
+                            or _data["legacy"])
 
     if not slots["settled"]:
         return {"mode": "picker", "settled": False, "problems": [],
@@ -207,12 +212,14 @@ def _boot_settlement() -> Dict[str, Any]:
     problems: List[Dict[str, Any]] = []
 
     # Drift: env no longer matches what was settled (hand-edited .env).
-    try:
-        import yaml
-        file_data = yaml.safe_load(Path(slots["path"]).read_text(
-            encoding="utf-8")) or {}
-    except Exception:  # noqa: BLE001
-        file_data = {}
+    file_data = {}
+    if _data["legacy"]:
+        file_data = {"default_a": _data["pins"]["a"],
+                     "default_b": (None if _data["pins"]["b"] == "none"
+                                   else _data["pins"]["b"])}
+    elif _data["resolved"]:
+        file_data = {"default_a": (_data["resolved"].get("a") or {}).get("model"),
+                     "default_b": (_data["resolved"].get("b") or {}).get("model")}
     file_a = file_data.get("default_a") if isinstance(file_data, dict) else None
     if file_a and slots["default_a"] != file_a:
         problems.append({"slot": "a", "kind": "drift", "model": slots["default_a"],
