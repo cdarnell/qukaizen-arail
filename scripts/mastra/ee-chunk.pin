@@ -2,3 +2,4 @@
 # changed basename (i.e. a Mastra upgrade), fails scripts/mastra/check-ee-loads.mjs and re-triggers review.
 core_version=1.76.0
 chunk=@mastra/core/dist/ee-btY6vXIW-DKf_xOxH.js
+chunk_stem=ee-btY6vXIW

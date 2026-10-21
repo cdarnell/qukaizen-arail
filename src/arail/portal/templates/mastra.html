@@ -39,7 +39,7 @@
     <p>Opening Studio in a normal browser makes about 16 non-loopback requests (npm version lookups and one models.dev logo). That breaks the airgapped promise, so this page deliberately has no link to it. Use:</p>
     <pre id="mst-open-cmd">./arailctl mastra open</pre>
     <button id="mst-copy" type="button">Copy command</button>
-    <p class="mst-label">It starts a separate browser profile in which every address other than 127.0.0.1 / localhost fails locally and no DNS lookup leaves the machine.</p>
+    <p class="mst-label">It starts a separate browser profile configured to refuse every address other than 127.0.0.1 / localhost (name lookups are mapped to "not found" and other connections go to a dead local proxy). In our measurements this produced no DNS lookups and no outside connections, but a packet capture has not yet confirmed it on every machine. Studio's page still attempts the requests; they are refused locally.</p>
   </div>
   {% endif %}
 
@@ -48,8 +48,9 @@
     <h3>Run once via Mastra</h3>
     <p class="mst-label">Manual one-shot. Runs the Researcher once on this goal, then attaches a model-graded probe score (not a 3DEval measurement) to the experiment record.</p>
     <textarea id="mst-goal" rows="3" maxlength="2000" placeholder="Goal for one Researcher run"></textarea>
-    <input id="mst-exp" type="text" maxlength="128" placeholder="Experiment id (optional)">
+    <input id="mst-exp" type="text" maxlength="128" placeholder="Expected experiment id (optional check; must match the one this run creates)">
     <button id="mst-go" type="button">Run once via Mastra</button>
+    <p class="mst-label">Known gap: this page cannot stop a goal being set from elsewhere in the lab while a probe runs; avoid setting a new goal until it finishes.</p>
     <pre id="mst-result" hidden></pre>
   </div>
   {% endif %}

@@ -17,8 +17,11 @@ export async function scoreReport(goal, report) {
   });
   if (!res.ok) throw new Error('model_unavailable');
   const body = await res.json();
-  const n = Number(JSON.parse(body.message.content).score);
-  return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 0;
+  // An unusable reply is a failure, never a score: nothing may be recorded in the ledger.
+  let n;
+  try { n = JSON.parse(body.message.content).score; } catch { throw new Error('bad_score'); }
+  if (typeof n !== 'number' || !Number.isFinite(n) || n < 0 || n > 1) throw new Error('bad_score');
+  return n;
 }
 
 // MCPClient tool results arrive as {result: ...}, {structuredContent: ...} or MCP content[] text.
@@ -66,7 +69,13 @@ export async function runProbe({ mastra, mcp, goal, SpanType, scorerId }) {
     child.end({ output: { summary: s.output_summary } });
   }
   tool.end({ output: { experiment_id: payload.experiment_id, steps: payload.steps.length } });
-  const score = await scoreReport(goal, payload.report);
+  let score;
+  try {
+    score = await scoreReport(goal, payload.report);
+  } catch (e) {
+    root.error({ error: e, endSpan: true });
+    throw e;
+  }
   root.end({ output: { report: String(payload.report).slice(0, 2000) } });
   const traceId = root.traceId ?? root.getTraceId?.() ?? root.id;
   await mastra.observability.addScore({

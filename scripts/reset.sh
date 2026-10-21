@@ -458,6 +458,17 @@ reset_data() {
     if [[ -n "$ollama_pid" ]]; then
         kill "$ollama_pid" 2>/dev/null || true
     fi
+    # Mastra Studio (opt-in) keeps its LibSQL file under $DATA_DIR/mastra; stop it first, but
+    # only a process whose pid is its own group leader AND whose command line mentions mastra.
+    local studio_pidfile="$DATA_DIR/mastra/studio.pid" studio_pid="" studio_pgid=""
+    if [[ -f "$studio_pidfile" ]]; then
+        read -r studio_pid studio_pgid < "$studio_pidfile" || true
+        if [[ "$studio_pid" =~ ^[0-9]+$ && "$studio_pid" == "$studio_pgid" ]] \
+            && ps -p "$studio_pid" -o command= 2>/dev/null | grep -q mastra; then
+            kill -TERM -- "-$studio_pgid" 2>/dev/null || true
+            sleep 1
+        fi
+    fi
     if [[ -d "$DATA_DIR" ]]; then
         local sz
         sz=$(report_size "$DATA_DIR")

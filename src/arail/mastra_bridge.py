@@ -32,6 +32,7 @@ OBSERVATION_TEXT = "mastra probe score (not a 3DEval measurement)"
 RUN_TIMEOUT_S = 15 * 60
 MAX_CHILD_STDOUT = 64 * 1024
 MAX_ID_LEN = 128
+_EXP_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 # The three flags that keep Mastra airgapped. Always forced, never inherited.
 REQUIRED_FLAGS: Dict[str, str] = {
@@ -45,7 +46,6 @@ _ALLOW_EXACT = {
     "LAB_TIER", "LAB_MODE", "OLLAMA_HOST", "ARAIL_OLLAMA_URL", "ARAIL_PYTHON",
     "ARAIL_PROBE_MODEL", "PYTHONPATH", "TMPDIR", "LAB_ROOT", "LAB_PKB", "ARAIL_ROOT",
 }
-_ALLOW_PREFIX = ("NODE_",)
 # Dropped even if an allowlisted name matches (e.g. NODE_AUTH_TOKEN).
 _DENY = re.compile(r"(_API_KEY|_TOKEN|LICENSE_KEY|SECRET|PASSWORD)$|^MASTRA_(PLATFORM|LICENSE|EE_)|^MASTRA_EE", re.I)
 
@@ -60,7 +60,7 @@ def mastra_env(parent: Optional[Dict[str, str]] = None) -> Dict[str, str]:
     src = os.environ if parent is None else parent
     env: Dict[str, str] = {}
     for k, v in src.items():
-        if (k in _ALLOW_EXACT or k.startswith(_ALLOW_PREFIX)) and not _DENY.search(k):
+        if k in _ALLOW_EXACT and not _DENY.search(k):
             env[k] = v
     from arail.config import DATA_DIR
     # ARAIL resolves lab paths relative to its cwd; the Mastra project dir is not the lab,
@@ -96,11 +96,11 @@ def is_installed() -> bool:
     return (MASTRA_DIR / "node_modules" / "mastra").is_dir()
 
 
+STUDIO_PORT = 4111  # fixed: the Studio port is not configurable in this spike
+
+
 def studio_port() -> int:
-    try:
-        return int(os.getenv("MASTRA_STUDIO_PORT") or 4111)
-    except ValueError:
-        return 4111
+    return STUDIO_PORT
 
 
 def port_open(port: int, host: str = STUDIO_HOST, timeout: float = 0.3) -> bool:
@@ -146,6 +146,9 @@ def browser_args(url: Optional[str] = None) -> list:
         f"--user-data-dir={browser_profile_dir()}",
         f"--host-resolver-rules={BROWSER_RULES}",
         "--proxy-server=http://127.0.0.1:9",
+        # WebRTC/STUN UDP to IP literals bypasses the proxy and the resolver rule.
+        "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+        "--webrtc-ip-handling-policy=disable_non_proxied_udp",
         "--proxy-bypass-list=127.0.0.1;localhost;[::1]",
         "--no-first-run", "--no-default-browser-check", "--disable-background-networking",
         "--disable-component-update", "--disable-sync", "--no-pings", "--disable-default-apps",
@@ -197,12 +200,13 @@ def start_studio() -> Dict[str, Any]:
         return {"ok": True, "already_running": True}
     mastra_db_path().parent.mkdir(parents=True, exist_ok=True)
     env = mastra_env()
-    log = open(mastra_db_path().parent / "studio.log", "ab")
-    proc = subprocess.Popen(
-        ["npx", "--no-install", "mastra", "dev"], cwd=str(MASTRA_DIR), env=env,
-        stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
-        start_new_session=True, shell=False)
-    _pid_file().write_text(str(proc.pid))
+    with open(mastra_db_path().parent / "studio.log", "ab") as log:
+        proc = subprocess.Popen(
+            ["npx", "--no-install", "mastra", "dev"], cwd=str(MASTRA_DIR), env=env,
+            stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+            start_new_session=True, shell=False)
+    # start_new_session makes the child its own group leader: pid == pgid.
+    _pid_file().write_text(f"{proc.pid} {os.getpgid(proc.pid)}")
     import time
     for _ in range(120):
         if port_open(studio_port()):
@@ -220,14 +224,43 @@ def start_studio() -> Dict[str, Any]:
     return {"ok": True}
 
 
-def stop_studio() -> Dict[str, Any]:
+def _process_command(pid: int) -> str:
+    try:
+        return subprocess.run(["ps", "-p", str(pid), "-o", "command="], capture_output=True,
+                              text=True, timeout=5).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def pid_is_our_studio(pid: int, pgid: int, command_of: Callable[[int], str] = _process_command) -> bool:
+    """True only if ``pid`` is the live group leader we started and its command line is mastra's."""
+    if pid != pgid:
+        return False
+    try:
+        if os.getpgid(pid) != pgid:
+            return False
+    except (ProcessLookupError, PermissionError):
+        return False
+    return "mastra" in command_of(pid)
+
+
+def stop_studio(command_of: Callable[[int], str] = _process_command) -> Dict[str, Any]:
     pf = _pid_file()
     if not pf.exists():
         return {"ok": True, "was_running": False}
     try:
-        pgid = os.getpgid(int(pf.read_text().strip()))
+        pid_s, pgid_s = pf.read_text().split()
+        pid, pgid = int(pid_s), int(pgid_s)
+    except ValueError:
+        pf.unlink(missing_ok=True)
+        return {"ok": True, "was_running": False, "stale": True}
+    if not pid_is_our_studio(pid, pgid, command_of):
+        # Dead, or the pid now belongs to something else: never signal it.
+        pf.unlink(missing_ok=True)
+        return {"ok": True, "was_running": False, "stale": True}
+    import time
+    try:
         os.killpg(pgid, signal.SIGTERM)
-        import time
         for _ in range(20):
             time.sleep(0.25)
             try:
@@ -236,7 +269,7 @@ def stop_studio() -> Dict[str, Any]:
                 break
         else:
             os.killpg(pgid, signal.SIGKILL)
-    except (ProcessLookupError, ValueError, PermissionError):
+    except (ProcessLookupError, PermissionError):
         pass
     pf.unlink(missing_ok=True)
     return {"ok": True, "was_running": True}
@@ -321,9 +354,10 @@ def run_probe(goal: Any, experiment_id: Optional[str] = None, *,
     from arail.mcp.researcher_tool import validate_goal
     if validate_goal(goal):
         return {"error": "invalid_goal"}
-    if experiment_id is not None and not _is_id(experiment_id):
+    if experiment_id is not None and not (isinstance(experiment_id, str) and _EXP_ID.match(experiment_id)):
         return {"error": "experiment_missing"}
-    if not (is_installed() and node_version() and node_version() >= MIN_NODE):
+    nv = node_version()
+    if not (is_installed() and nv and nv >= MIN_NODE):
         return {"error": "not_installed"}
     if not check_model():
         return {"error": "model_unavailable"}
@@ -345,7 +379,13 @@ def run_probe(goal: Any, experiment_id: Optional[str] = None, *,
         parsed = parse_child_output(stdout)
     except ChildOutputError as exc:
         return {"error": str(exc)}
-    target = experiment_id or parsed.get("experiment_id")
+    created = parsed.get("experiment_id")
+    if created is not None and not _EXP_ID.match(created):
+        return {"error": "bad_child_output"}
+    if experiment_id is not None and created is not None and experiment_id != created:
+        # A caller-supplied id may only confirm the experiment the run created, never redirect the score.
+        return {"error": "experiment_mismatch"}
+    target = experiment_id or created
     if not target:
         return {"error": "experiment_missing"}
     return write_back(tracker, target, parsed)
@@ -375,5 +415,11 @@ def install() -> int:
     if v is None or v < MIN_NODE:
         print("Node 22.13 or newer is required for Mastra Studio.", file=sys.stderr)
         return 2
-    return subprocess.run(["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"],
-                          cwd=str(MASTRA_DIR), shell=False).returncode
+    rc = subprocess.run(["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"],
+                        cwd=str(MASTRA_DIR), shell=False).returncode
+    if rc != 0:
+        return rc
+    # Owner-accepted EE chunk is pinned: a lockfile bump that changes it must fail the install.
+    return subprocess.run([shutil.which("node") or "node",
+                           str(REPO_ROOT / "scripts" / "mastra" / "check-ee-loads.mjs"), "--installed"],
+                          shell=False).returncode

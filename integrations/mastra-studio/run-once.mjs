@@ -48,7 +48,7 @@ try {
   const mastra = buildMastra();
   const mcp = new MCPClient({
     id: `arail-researcher-${process.pid}`,
-    timeout: 14 * 60 * 1000,
+    timeout: 12 * 60 * 1000, // 12 min tool + <=2 min scorer < the bridge's 15 min kill
     servers: {
       arail: {
         command: pyBin,
@@ -74,5 +74,6 @@ try {
   process.exit(0);
 } catch (e) {
   console.error(e);
+  if (e && ['bad_score', 'model_unavailable'].includes(e.message)) fail(e.message);
   fail(`run_failed:${(e && e.name) || 'Error'}`);
 }

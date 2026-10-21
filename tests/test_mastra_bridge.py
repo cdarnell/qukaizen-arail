@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 from pathlib import Path
 
@@ -41,7 +42,7 @@ def test_env_drops_secrets_tokens_and_ee_license_vars():
                 "NODE_AUTH_TOKEN", "AWS_SECRET_ACCESS_KEY", "MASTRA_LICENSE_KEY", "MASTRA_EE_LICENSE",
                 "MASTRA_LICENSE_URL", "SOME_LICENSE_KEY", "RANDOM_UNLISTED", "ARAIL_PASSWORD"):
         assert bad not in env
-    assert env["PATH"] == "/bin" and env["NODE_OPTIONS"] == "--x"
+    assert env["PATH"] == "/bin"
 
 
 def test_ee_guard_fails_if_any_license_var_survives():
@@ -143,6 +144,39 @@ def test_write_back_contract(tmp_path):
 
 # ── T-U-10: failure paths ─────────────────────────────────────────────
 
+def test_user_experiment_id_cannot_redirect_score(tmp_path):
+    from arail.skills.experiment_tracker import ExperimentTracker
+    tr = ExperimentTracker(tmp_path)
+    created, other = tr.create("h", "m", {}), tr.create("h2", "m", {})
+    res = _run(tr, lambda *a: _line(experiment_id=created["id"]), other["id"])
+    assert res == {"error": "experiment_mismatch"}
+    assert tr._load(other["id"])["observations"] == [] and tr._load(created["id"])["observations"] == []
+    ok = _run(tr, lambda *a: _line(experiment_id=created["id"]), created["id"])
+    assert ok["experiment_id"] == created["id"]
+
+
+@pytest.mark.parametrize("bad", ["../../etc", "a/b", "x" * 65, "..", "a b", ""])
+def test_experiment_id_charset(tmp_path, bad):
+    from arail.skills.experiment_tracker import ExperimentTracker
+    called = []
+    res = _run(ExperimentTracker(tmp_path), lambda *a: called.append(1), bad)
+    assert res == {"error": "experiment_missing"} and not called
+
+
+def test_child_experiment_id_charset_enforced(tmp_path):
+    from arail.skills.experiment_tracker import ExperimentTracker
+    tr = ExperimentTracker(tmp_path)
+    assert _run(tr, lambda *a: _line(experiment_id="../../x"), None) == {"error": "bad_child_output"}
+
+
+def test_bad_score_from_child_writes_nothing(tmp_path):
+    from arail.skills.experiment_tracker import ExperimentTracker
+    tr = ExperimentTracker(tmp_path)
+    exp = tr.create("h", "m", {})
+    assert _run(tr, lambda *a: '{"error":"bad_score"}\n', exp["id"]) == {"error": "bad_score"}
+    assert tr._load(exp["id"])["observations"] == []
+
+
 def test_experiment_missing(tmp_path):
     from arail.skills.experiment_tracker import ExperimentTracker
     tr = ExperimentTracker(tmp_path)
@@ -203,6 +237,8 @@ def test_browser_args_block_non_loopback():
     rules = next(a for a in args if a.startswith("--host-resolver-rules="))
     assert "MAP * ~NOTFOUND" in rules and "EXCLUDE 127.0.0.1" in rules and "EXCLUDE localhost" in rules
     assert any(a.startswith("--proxy-server=http://127.0.0.1:") for a in args)
+    assert "--force-webrtc-ip-handling-policy=disable_non_proxied_udp" in args
+    assert "--webrtc-ip-handling-policy=disable_non_proxied_udp" in args
     assert any(a.startswith("--user-data-dir=") and "/mastra/browser" in a for a in args)
     assert args[-1].startswith("http://127.0.0.1:")
 
@@ -316,3 +352,198 @@ def test_ee_check_allows_only_pinned_chunk(tmp_path):
 def test_third_party_licences_state_no_ee_use():
     readme = (mb.REPO_ROOT / "THIRD-PARTY-LICENSES" / "mastra" / "README.md").read_text()
     assert "not used, not redistributed" in readme and "Apache-2.0" in readme
+
+
+# ── Fix round: env, stop, install, port, scorer, reset ───────────────
+
+def test_node_options_and_friends_never_reach_child():
+    parent = {"PATH": "/bin", "NODE_OPTIONS": "--inspect=0.0.0.0", "NODE_PATH": "/x",
+              "NODE_EXTRA_CA_CERTS": "/ca.pem", "NODE_ENV": "production"}
+    env = mb.mastra_env(parent)
+    assert not [k for k in env if k.startswith("NODE_")]
+    js = (mb.MASTRA_DIR / "run-once.mjs").read_text()
+    grand = js[js.index("Object.fromEntries(["):js.index(".filter((k) => process.env[k])")]
+    assert "NODE_" not in grand  # the Python MCP grandchild list
+
+
+def test_real_node_child_env_dump_has_no_node_options(monkeypatch):
+    import shutil, subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node missing")
+    monkeypatch.setenv("NODE_OPTIONS", "--no-warnings")
+    env = mb.mastra_env()
+    out = subprocess.run([node, "-e", "console.log(JSON.stringify(Object.keys(process.env)))"],
+                         env=env, capture_output=True, text=True).stdout
+    assert "NODE_OPTIONS" not in json.loads(out)
+
+
+def test_studio_port_is_fixed(monkeypatch):
+    monkeypatch.setenv("MASTRA_STUDIO_PORT", "9999")
+    assert mb.studio_port() == 4111
+
+
+def _spawn_sleeper(tmp_path, name):
+    import subprocess
+    script = tmp_path / name
+    script.write_text("#!/bin/bash\nexec sleep 120\n")
+    script.chmod(0o755)
+    # bash <script> keeps the script name in the command line; sleep after exec would not.
+    script.write_text("#!/bin/bash\nsleep 120\n")
+    return subprocess.Popen(["/bin/bash", str(script)], start_new_session=True)
+
+
+def test_stop_never_signals_unrelated_reused_pid(tmp_path, monkeypatch):
+    monkeypatch.setattr(mb, "mastra_db_path", lambda: tmp_path / "mastra" / "mastra.db")
+    (tmp_path / "mastra").mkdir()
+    victim = _spawn_sleeper(tmp_path, "unrelated.sh")
+    try:
+        mb._pid_file().write_text(f"{victim.pid} {victim.pid}")   # "reused" pid, not mastra
+        res = mb.stop_studio()
+        assert res["stale"] is True and not mb._pid_file().exists()
+        assert victim.poll() is None            # still alive
+        mb._pid_file().write_text(f"{victim.pid} 1")              # pgid mismatch
+        assert mb.stop_studio().get("stale") is True and victim.poll() is None
+        mb._pid_file().write_text("garbage")
+        assert mb.stop_studio().get("stale") is True
+        mb._pid_file().write_text("999999 999999")                # dead pid
+        assert mb.stop_studio().get("stale") is True
+    finally:
+        victim.kill()
+        victim.wait()
+
+
+def test_stop_kills_a_genuine_studio_group_and_leaves_no_process(tmp_path, monkeypatch):
+    monkeypatch.setattr(mb, "mastra_db_path", lambda: tmp_path / "mastra" / "mastra.db")
+    (tmp_path / "mastra").mkdir()
+    p = _spawn_sleeper(tmp_path, "mastra-fake.sh")   # T-I-5 analogue: command line mentions mastra
+    import os, time
+    mb._pid_file().write_text(f"{p.pid} {os.getpgid(p.pid)}")
+    assert mb.stop_studio()["was_running"] is True
+    p.wait(timeout=10)
+    time.sleep(0.2)
+    with pytest.raises(ProcessLookupError):
+        os.killpg(p.pid, 0)
+    assert not mb._pid_file().exists()
+
+
+def test_install_runs_ee_pin_check_and_fails_on_mismatch(monkeypatch):
+    calls = []
+
+    class R:
+        def __init__(self, rc): self.returncode = rc
+
+    def fake_run(argv, **kw):
+        calls.append(argv)
+        return R(0 if argv[0] == "npm" else 1)
+
+    monkeypatch.setattr(mb, "node_version", lambda: (25, 0, 0))
+    monkeypatch.setattr(mb.subprocess, "run", fake_run)
+    assert mb.install() == 1
+    assert calls[0][:2] == ["npm", "ci"] and "--ignore-scripts" in calls[0]
+    assert calls[1][-2:] == [str(mb.REPO_ROOT / "scripts/mastra/check-ee-loads.mjs"), "--installed"]
+
+
+def test_ee_installed_check_passes_on_current_install():
+    import shutil, subprocess
+    if not shutil.which("node") or not mb.is_installed():
+        pytest.skip("Mastra not installed")
+    r = subprocess.run([shutil.which("node"), str(mb.REPO_ROOT / "scripts/mastra/check-ee-loads.mjs"),
+                        "--installed"], capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout
+
+
+def test_start_studio_closes_log_handle():
+    import inspect
+    assert "with open(mastra_db_path().parent" in inspect.getsource(mb.start_studio)
+
+
+def test_timeout_budget_fits_inside_kill():
+    js = (mb.MASTRA_DIR / "run-once.mjs").read_text()
+    probe = (mb.MASTRA_DIR / "src/mastra/run-probe.mjs").read_text()
+    tool_min = int(re.search(r"timeout:\s*(\d+)\s*\*\s*60", js).group(1))
+    scorer_s = int(re.search(r"AbortSignal\.timeout\((\d+)_?(\d+)\)", probe).expand(r"\1\2")) // 1000
+    assert tool_min * 60 + scorer_s < mb.RUN_TIMEOUT_S
+
+
+def _serve_reply(content):
+    import http.server, threading
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.rfile.read(int(self.headers.get("content-length", 0)))
+            body = json.dumps({"message": {"content": content}}).encode()
+            self.send_response(200); self.send_header("content-length", str(len(body))); self.end_headers()
+            self.wfile.write(body)
+        def log_message(self, *a): pass
+
+    srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv
+
+
+@pytest.mark.parametrize("reply,expect", [
+    ("not json at all", "bad_score"), ('{"score": "high"}', "bad_score"), ('{"score": null}', "bad_score"),
+    ('{"score": 1.5}', "bad_score"), ('{"score": -1}', "bad_score"), ("{}", "bad_score"),
+    ('{"score": 0.25}', 0.25), ('{"score": 0}', 0)])
+def test_scorer_never_coerces_unusable_reply_to_a_number(reply, expect):
+    import shutil, subprocess
+    node = shutil.which("node")
+    if not node or not mb.is_installed():
+        pytest.skip("Mastra not installed")
+    srv = _serve_reply(reply)
+    try:
+        code = ("import('./src/mastra/run-probe.mjs').then(m=>m.scoreReport('g','r'))"
+                ".then(v=>console.log('OK '+v),e=>console.log('ERR '+e.message))")
+        out = subprocess.run([node, "-e", code], cwd=str(mb.MASTRA_DIR), capture_output=True, text=True,
+                             env={"PATH": os.environ["PATH"],
+                                  "ARAIL_OLLAMA_URL": f"http://127.0.0.1:{srv.server_address[1]}"}).stdout.strip()
+    finally:
+        srv.shutdown()
+    assert out == (f"ERR {expect}" if expect == "bad_score" else f"OK {expect}")
+
+
+# T-I-4 / T-I-5: drive the real reset.sh (scoped `data` mode only) in a sandbox
+def _reset_sandbox(tmp_path):
+    import shutil
+    fake = tmp_path / "fakerepo"
+    (fake / "scripts").mkdir(parents=True)
+    shutil.copy2(mb.REPO_ROOT / "scripts" / "reset.sh", fake / "scripts" / "reset.sh")
+    return fake
+
+
+def _reset(fake, env=None):
+    import subprocess
+    return subprocess.run(["/bin/bash", "scripts/reset.sh", "data", "--yes"], cwd=fake, capture_output=True,
+                          text=True, timeout=60,
+                          env={"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "HOME": str(fake / "home"), **(env or {})})
+
+
+def test_reset_wipes_lab_data_mastra(tmp_path):                                  # T-I-4
+    fake = _reset_sandbox(tmp_path)
+    d = fake / "lab" / "data" / "mastra" / "browser"
+    d.mkdir(parents=True)
+    (fake / "lab" / "data" / "mastra" / "mastra.db").write_text("db")
+    r = _reset(fake)
+    assert r.returncode == 0, r.stderr
+    assert not (fake / "lab" / "data" / "mastra").exists()
+
+
+def test_reset_stops_running_studio_but_not_unrelated_pid(tmp_path):            # T-I-5
+    import os
+    fake = _reset_sandbox(tmp_path)
+    mdir = fake / "lab" / "data" / "mastra"
+    mdir.mkdir(parents=True)
+    studio = _spawn_sleeper(tmp_path, "mastra-fake.sh")
+    other = _spawn_sleeper(tmp_path, "unrelated.sh")
+    try:
+        (mdir / "studio.pid").write_text(f"{studio.pid} {os.getpgid(studio.pid)}")
+        assert _reset(fake).returncode == 0
+        studio.wait(timeout=10)
+        (fake / "lab" / "data" / "mastra").mkdir(parents=True, exist_ok=True)
+        (mdir / "studio.pid").write_text(f"{other.pid} {other.pid}")
+        assert _reset(fake).returncode == 0
+        assert other.poll() is None                      # unrelated process untouched
+    finally:
+        for p in (studio, other):
+            p.kill(); p.wait()
