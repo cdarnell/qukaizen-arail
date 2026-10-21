@@ -37,6 +37,74 @@ def test_busy_refuses_without_touching_goal_store(monkeypatch):
     assert researcher.goal_store.get_current() == before
 
 
+@pytest.fixture()
+def lockdir(tmp_path, monkeypatch):
+    monkeypatch.setattr(rt, "lock_path", lambda: tmp_path / "mastra" / "run-once.lock")
+    return tmp_path
+
+
+def test_lock_is_exclusive_and_released(lockdir):
+    with rt.exclusive_run_lock() as a:
+        with rt.exclusive_run_lock() as b:
+            assert a is True and b is False
+        assert rt.lock_path().exists()          # a refused caller never deletes the holder's lock
+    with rt.exclusive_run_lock() as c:
+        assert c is True
+
+
+def test_lock_from_killed_holder_is_not_stale(lockdir):
+    code = ("import sys; from arail.mcp import researcher_tool as rt; import pathlib;"
+            "rt.lock_path = lambda: pathlib.Path(sys.argv[1]);"
+            "cm = rt.exclusive_run_lock(); cm.__enter__(); print('held', flush=True); import time; time.sleep(60)")
+    p = subprocess.Popen([sys.executable, "-c", code, str(rt.lock_path())], stdout=subprocess.PIPE, text=True)
+    try:
+        assert p.stdout.readline().strip() == "held"
+        with rt.exclusive_run_lock() as live:
+            assert live is False                # live holder keeps it
+        p.kill(); p.wait()
+        with rt.exclusive_run_lock() as dead:
+            assert dead is True                 # dead holder's lock is simply free; nothing was deleted
+    finally:
+        p.kill()
+
+
+def test_two_concurrent_run_once_exactly_one_proceeds(lockdir, monkeypatch):
+    monkeypatch.setenv("LAB_TIER", "maximus")
+    monkeypatch.setattr(rt, "researcher_is_busy", lambda: False)
+    monkeypatch.setattr(rt, "owner_goal_in_progress", lambda: False)
+    entered = []
+
+    async def fake_locked(goal):
+        entered.append(goal)
+        await asyncio.sleep(0.3)
+        return {"report": "r", "experiment_id": "e", "trace_id": "t", "steps": []}
+
+    monkeypatch.setattr(rt, "_run_locked", fake_locked)
+
+    async def both():
+        return await asyncio.gather(rt.run_once("goal one"), rt.run_once("goal two"))
+
+    results = asyncio.run(both())
+    assert len(entered) == 1
+    assert sorted("error" in r for r in results) == [False, True]
+    assert {"error": "researcher_busy"} in results
+
+
+def test_lock_released_after_failure(lockdir, monkeypatch):
+    monkeypatch.setenv("LAB_TIER", "maximus")
+    monkeypatch.setattr(rt, "researcher_is_busy", lambda: False)
+    monkeypatch.setattr(rt, "owner_goal_in_progress", lambda: False)
+
+    async def boom(goal):
+        raise RuntimeError("x")
+
+    monkeypatch.setattr(rt, "_run_locked", boom)
+    with pytest.raises(RuntimeError):
+        asyncio.run(rt.run_once("g"))
+    with rt.exclusive_run_lock() as got:
+        assert got is True
+
+
 def test_unfinished_owner_goal_is_never_displaced(monkeypatch):
     monkeypatch.setenv("LAB_TIER", "maximus")
     monkeypatch.setattr(rt, "researcher_is_busy", lambda: False)

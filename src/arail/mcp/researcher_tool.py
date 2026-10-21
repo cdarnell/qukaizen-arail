@@ -10,7 +10,10 @@ background loop.
 """
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import logging
+import os
 import secrets
 import sys
 import time
@@ -30,6 +33,41 @@ GOAL_IN_PROGRESS = "goal_in_progress"
 
 def _trunc(value: Any) -> str:
     return str(value if value is not None else "")[:SUMMARY_CHARS]
+
+
+def lock_path():
+    from pathlib import Path
+    from arail.config import DATA_DIR
+    return Path(DATA_DIR) / "mastra" / "run-once.lock"
+
+
+@contextlib.contextmanager
+def exclusive_run_lock():
+    """Hold an exclusive lock for the whole run; yields True if acquired, else False.
+
+    An flock on a persistent file: the kernel drops it when the holder dies, so a dead
+    holder's lock is never stale, and we never delete or steal a live holder's lock
+    (the file itself is never unlinked). The holder pid is written for diagnostics only.
+    Taken BEFORE the busy / goal checks, so check-then-act cannot interleave between
+    two run_once callers (CLI + portal, two tabs).
+    """
+    path = lock_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            yield False
+            return
+        os.ftruncate(fd, 0)
+        os.write(fd, f"{os.getpid()}\n".encode())
+        try:
+            yield True
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
 
 
 def validate_goal(goal: Any) -> str | None:
@@ -127,11 +165,17 @@ async def run_once(goal: Any) -> Dict[str, Any]:
     from arail.tier import get_current_tier
     if get_current_tier() != "maximus":
         return {"error": WRONG_TIER}
-    if researcher_is_busy():
-        return {"error": RESEARCHER_BUSY}
-    if owner_goal_in_progress():
-        return {"error": GOAL_IN_PROGRESS}
+    with exclusive_run_lock() as got:
+        if not got:
+            return {"error": RESEARCHER_BUSY}
+        if researcher_is_busy():
+            return {"error": RESEARCHER_BUSY}
+        if owner_goal_in_progress():
+            return {"error": GOAL_IN_PROGRESS}
+        return await _run_locked(goal)
 
+
+async def _run_locked(goal: str) -> Dict[str, Any]:
     from arail import agent_trace
     from arail.activity import activity_log
     from arail.agents.researcher import researcher
