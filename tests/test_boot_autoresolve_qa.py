@@ -451,3 +451,14 @@ def test_airgapped_remains_the_default_lab_mode(monkeypatch):
     monkeypatch.delenv("LAB_MODE", raising=False)
     from arail import airgap
     assert airgap.is_airgapped() is True
+
+
+@pytest.mark.parametrize("headers", [
+    {"Origin": "http://evil.example"},
+    {"Sec-Fetch-Site": "cross-site"},
+])
+def test_pin_refuses_cross_site_requests(client, lab, headers):
+    md.write_pin("b", "none")
+    r = client.post("/api/models/pin", json={"slot": "b", "model": None}, headers=headers)
+    assert r.status_code == 403, (r.status_code, r.text[:200])
+    assert md.read()["pins"]["b"] == "none"      # the crash workaround survives
