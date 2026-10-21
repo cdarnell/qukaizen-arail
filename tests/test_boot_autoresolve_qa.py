@@ -222,10 +222,6 @@ def test_cli_banner_json_get_survive_garbage_yaml(tmp_path):
     assert f.read_bytes() == b"\x00\xff garbage: [\n"
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "TEST_REPORT.md QA-3 (LOW): an unreadable yaml drops a `b: none` pin for "
-    "the boot, so auto-B is picked and warmed - the SIGABRT workaround is "
-    "lost for one boot until the crash sentinel catches it"))
 def test_unreadable_yaml_with_b_none_does_not_auto_pick_a_deep_model(lab, monkeypatch, tmp_path):
     d = tmp_path / "models" / "Qwen2.5-7B-Instruct-4bit"
     d.mkdir(parents=True)
@@ -268,10 +264,6 @@ def test_odd_sentinels_never_raise_and_never_wedge(sentinel, raw):
     assert elsewhere is False
 
 
-@pytest.mark.xfail(strict=True, raises=OverflowError, reason=(
-    "TEST_REPORT.md QA-5 (LOW): _pid_alive lets OverflowError from os.kill "
-    "escape for a pid > INT_MAX; _boot_models catches it but skips the whole "
-    "resolve for that boot"))
 def test_sentinel_with_an_out_of_range_pid_is_stale_not_an_exception(sentinel):
     mw, p = sentinel
     p.write_text(json.dumps({"model": "M", "pid": 2 ** 40, "started_at": time.time()}))
@@ -387,9 +379,6 @@ def test_pin_b_rejects_traversal_absolute_and_garbage(client, lab, model):
     assert md.read()["pins"]["b"] in (None, "none")
 
 
-@pytest.mark.xfail(strict=True, raises=ValueError, reason=(
-    "TEST_REPORT.md QA-4 (LOW): a NUL byte in a slot-B pin raises "
-    "ValueError('embedded null byte') from os.path.realpath -> HTTP 500, not 400"))
 def test_pin_b_with_a_nul_byte_is_a_400_not_a_500(client):
     r = client.post("/api/models/pin", json={"slot": "b", "model": "a\x00b"})
     assert r.status_code == 400

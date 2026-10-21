@@ -604,7 +604,11 @@ def resolve_and_apply(*, skip_b: Optional[str] = None,
         prev = {k: (dict(v) if isinstance(v, dict) else v) for k, v in _LAST.items()}
         migrated = md.migrate_v1()
         data = md.read()
-        pins = data["pins"] if data["ok"] else {"a": None, "b": None}
+        # An unreadable file may hold `b: none` (the operator's crash
+        # workaround): keep the deep slot off for this boot rather than
+        # auto-picking a model that may be the one that crashes (QA-3).
+        pins = data["pins"] if data["ok"] else (
+            {"a": None, "b": "none"} if data["exists"] else {"a": None, "b": None})
         res = resolve_boot_bounded(
             timeout=timeout, pins=pins, env_pref=md.env_preference(),
             cache=data["resolved"], skip_b=skip_b)
