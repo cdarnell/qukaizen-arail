@@ -15,7 +15,7 @@ Embed Mastra Studio as an ARAIL surface (like terminal/notebook), not a merge. E
 | plan | architect (design) | ARCHITECTURE.md | done | 2026-10-13 | 2026-10-13 | gates-first design; ledger (a) ExperimentTracker; stdio MCP |
 | build | builder | BUILD_LOG.md | built; one gate open (D1 browser leg INCONCLUSIVE, owner pcap) | 2026-10-13 | — | D1 server PASS; D1 browser INCONCLUSIVE; D2 PASS; ee accepted w/ guard |
 | review | architect (review) | REVIEW.md | done | 2026-10-21 | 2026-10-21 | WEAK_PASS, conditional on clean owner D1 browser pcap (else BLOCK); ASKs 1,2,3,4,12 before QA |
-| test | qa | TEST_REPORT.md | done | 2026-10-21 | 2026-10-21 | FAIL: F-1 HIGH (default-config run-once always bad_db_path), F-2/F-3/F-7 MEDIUM; security clean; D1 browser pcap still owner-pending |
+| test | qa | TEST_REPORT.md | done (re-test at 80ebd218) | 2026-10-21 | 2026-10-21 | Re-test FAIL (narrow): F-1..F-8 fixed and re-verified live; new R-1 MEDIUM (no lsof: stop orphans own Studio), R-2 LOW; security clean; D1 browser pcap owner-pending |
 | ship | — | PR | pending | — | — | — |
 
 ## Decisions log

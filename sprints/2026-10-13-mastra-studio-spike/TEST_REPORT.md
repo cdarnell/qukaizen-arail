@@ -139,3 +139,71 @@ Measured with `uv run --frozen --with pytest-cov`. Code that runs only inside su
 - Mocked `spawn` hid F-1. Every integration seam (Python → Node → Python) needs at least one real-process test **in the default configuration**, not only through the gate scripts' explicit env.
 - The process manager is pid-file based and is the weakest area (F-2, F-3, F-5). If the spike graduates, it should be replaced, for example with a supervisor that holds the Popen handle, or with a start-time-stamped pid.
 - The 1b scorer's `bad_score` rate is high enough to make probes flaky. Report it as a measured rate before anyone reads probe scores as signal.
+
+---
+
+## Re-test 2026-10-21 against 80ebd218 (builder's QA fix round)
+
+**Verdict: FAIL** (narrow).
+- All eight original findings are fixed and re-verified with fresh, real repros.
+- Security is still clean, and there are no regressions.
+- One new MEDIUM defect remains in the new stop logic (R-1), plus one LOW (R-2). Each has a failing test.
+- If R-1 is fixed (or ticketed with Studio formally declared macOS-only and lsof required), this becomes WEAK_PASS, still conditional on the owner's D1 browser pcap.
+
+### Original findings: fresh repros, not just the defect tests
+
+| # | Fresh repro (real processes) | Result |
+|---|---|---|
+| F-1 | `env -i PATH HOME ./arailctl mastra run-once "List two facts about the moon"` | `{"experiment_id":"da3e76a0", …, "score":0.5}` in 6.8 s. **Fixed.** Also run from a foreign cwd: succeeded, with the lab resolved relative to the cwd (ARAIL's normal semantics). |
+| F-2 | `start`, then `kill -9 <npm leader>`, then `stop` | `was_running: true`; no mastra/esbuild/output process left and :4111 free. **Fixed.** Also: deleting `studio.pid` while Studio runs, then `stop`, recovers through the listener path. |
+| F-3 | `python3 -m http.server 4111` (bound to 127.0.0.1, and also to 0.0.0.0) | status `port_in_use`; start returns `port_in_use` 409 with rc 1; stop returns `was_running: false` and the foreign server stays alive. **Fixed.** |
+| F-4 | `chmod 555 lab/data`, then start / run-once | `{"error":"data_dir_not_writable"}` and a plain one-line CLI message, rc 1, no traceback. **Fixed.** |
+| F-5 | stale pid file pointing at a live, unrelated group leader: (a) `perl -e sleep(300) integrations/mastra-studio/notes.md`; (b) `node -e … mastra dev` run outside the mastra dir | Both give `stale` and both processes stay alive. **Fixed** (argv shape AND cwd). |
+| F-6 | `run-once "🧪"×2000` vs ×2001 | 2000 is accepted and reached the scorer (llama3.2:1b returned `bad_score`, so nothing was written). 2001 gives `invalid_goal`. **Fixed.** |
+| F-7 | CLI with the lock held; CLI with an owner goal active; LAB_TIER=minimalist; portal (TestClient, real bridge and child) with the lock held | `researcher_busy` / `goal_in_progress` / `wrong_tier`; portal `409 {"error":"researcher_busy"}`. **Fixed.** |
+| F-8 | `git diff -- uv.lock` after the full run (all runs used `uv run --frozen`) | Empty. Not re-locked (ticketed follow-up per BUILD_LOG). **Accepted as follow-up.** |
+
+All 7 original `test_defect_*` tests now pass, and the builder did not edit them.
+
+**Review of the builder's test edit** (`test_concurrent_real_probes_exactly_one_runs`): **accepted.** The old filter identified losers by `run_failed:*`, which was exactly the lossy form F-7 removed. The new filter adds `researcher_busy` as a loser. The invariants are unchanged:
+- exactly one run reached scoring
+- the ledger probe count equals the number of successes
+- no leftover `researcher_tool`
+
+The edit does not weaken the test. A loser with any other code would still fail it.
+
+### New defects (re-test)
+
+| # | Severity | Finding | Minimal repro | Failing test |
+|---|---|---|---|---|
+| R-1 | **MEDIUM** | **Without `lsof`, ARAIL cannot see or stop its own Studio.** `_process_cwd` and `listener_pids` return nothing when lsof is not on PATH. Effects:<br>- `listener_state` falls back to a connect and calls ARAIL's own Studio `foreign`, so status and start report `port_in_use`.<br>- `pid_is_our_studio` fails on the empty cwd, so `stop` judges the live, genuine leader "recycled". It returns `stale`, **deletes `studio.pid`** and signals nothing.<br>- Studio keeps listening, and only a run with lsof present recovers it. This is F-2 again, on any machine without lsof (minimal Linux). | `./arailctl mastra start`, then with `PATH=<node dir>:/usr/bin:/bin` (no `/usr/sbin`) run `./arailctl mastra stop`. Observed: `{"stale": true}`, and `node …/.mastra/output/index.mjs` was still on 127.0.0.1:4111. | `test_defect_stop_without_lsof_orphans_genuine_studio` |
+| R-2 | LOW | **"Ours" means only "listener cwd is under integrations/mastra-studio".** Any program a user starts from that directory on :4111 is reported as Studio "running" and is killed with its whole group by `stop`. Separately, `reset.sh`'s cwd test is an unanchored glob (`*/integrations/mastra-studio*`), so it also accepts `mastra-studio-x` or another checkout's copy. That one is only reachable with a matching `npm/node … mastra dev` argv, so its risk is negligible. | `cd integrations/mastra-studio && python3 -m http.server 4111` (own session), then `arailctl mastra stop`: the server is killed. | `test_defect_stop_kills_non_studio_listener_whose_cwd_is_in_mastra_dir` |
+| R-3 | INFO | **Possible pgid reuse after a leader dies.** "Group alive and leader dead means our orphans" assumes the recorded pgid still belongs to the group ARAIL started. That pgid could only belong to another group if the pid was recycled into a new session leader that has since died while its members live. That is theoretically possible, so I record it, but it is not practically reachable. | | none |
+| R-4 | INFO | **Page states and the spec.** There are now six page states (`port_in_use` was added), which amends the five in ARCHITECTURE C3. BUILD_LOG records this, and docs/cli.md lists it. In that state the page offers no start, stop, open or run controls, and the routes keep their 404 / 403 gates. Tested. | | `test_port_in_use_page_offers_no_controls_and_routes_stay_gated` (pass) |
+
+Also verified:
+- **reset.sh with a space in the repo path:** an orphaned group (leader dead) and a node-shaped `… mastra dev` leader in `fake repo/integrations/mastra-studio` are both stopped, with exit 0 and quoting correct. Test: `test_reset_stops_orphaned_studio_group_in_path_with_spaces` (pass).
+- **Portal refusal mapping:** `researcher_busy`, `goal_in_progress`, `wrong_tier` and `experiment_mismatch` all return 409 verbatim (pass).
+- **Page XSS with the new `REASONS` map:** still `textContent` only (pass).
+
+### Suites (re-test)
+
+- `tests/test_mastra_qa.py`: **133 passed, 2 failed** (R-1 and R-2, both by design).
+- node `qa-run-once.test.mjs`: 6/6 passed.
+- **Wider regression set:** the same suites as before, plus bridge, researcher_tool and portal. **773 passed, 10 failed, 1 skipped, 2 xfailed.** The 10 are exactly the base-20f334b4 failures: build_tab ×4, models_api, opencode ×2, token_compliance, cli_verbs doctor-healthy, cli_status T34. No new regressions.
+- **ee guard:**
+  - `check-ee-loads.mjs --installed`: core 1.76.0, only the pinned `ee-btY6vXIW` chunk, no problems.
+  - The run against the committed trace: pinned chunk loaded, no problems.
+  - Licence census: ALL ALLOWED.
+- **Server-leg egress harness** (`MODE=test SECS=60`, with GATES in scratch): lsof saw only `127.0.0.1:4111 LISTEN` plus loopback ESTABLISHED pairs. **Non-loopback endpoints: none.**
+- **Hygiene at the end:**
+  - No mastra dev, `.mastra/output`, esbuild, `researcher_tool` or http.server process is running, and nothing is listening on :4111. I checked with `pgrep` and `lsof` after the last run.
+  - `uv.lock` is unmodified.
+  - The tests write untracked `logs/scheduler/*.json` files on every suite run (pre-existing test pollution). I deleted them and did not commit them.
+
+### Remaining ship conditions
+
+1. Fix R-1, or ticket it with an explicit "Studio controls require lsof (macOS)" statement plus a plain error, instead of a silent stale result that deletes the pid file. The minimal fix: never unlink `studio.pid` or declare it stale when identity cannot be determined.
+2. R-2: fix or ticket it (LOW).
+3. Ticket F-8 (re-lock `uv.lock` for the `mastra` extra) in a dedicated change.
+4. **The owner runs the D1 browser-leg pcap** against `./arailctl mastra open` with the final flags (including the WebRTC flags). It must show zero non-loopback packets from the restricted-browser PIDs. **Not run by QA and not marked passed.** A dirty capture makes the verdict BLOCK, per REVIEW.md. Nothing is left listening on :4111 for that run.

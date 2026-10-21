@@ -657,3 +657,109 @@ def test_setup_path_untouched_by_branch():
     if r.returncode != 0:
         pytest.skip("base commit not available")
     assert r.stdout.strip() == ""
+
+
+# ═══ RE-TEST (after QA fix round 80ebd218) ═════════════════════════════
+
+def test_port_in_use_page_offers_no_controls_and_routes_stay_gated(client, monkeypatch, no_side_effects):
+    monkeypatch.setattr(mb, "resolve_page_state", lambda: {"state": "port_in_use", "detail": "Port 4111 is in use"})
+    html = client.get("/mastra").text
+    for el in ('id="mst-start"', 'id="mst-stop"', 'id="mst-go"', 'id="mst-open"', ":4111"):
+        assert el not in html, el
+    for path in MUTATING:
+        assert client.post(path, json={"goal": "x"}, headers={"Origin": "http://127.0.0.1:4111"}).status_code == 403
+    monkeypatch.setenv("LAB_TIER", "minimalist")
+    assert client.get("/mastra").status_code == 404
+
+
+def test_portal_maps_refusals_to_409_verbatim(client, monkeypatch):
+    for code in ("researcher_busy", "goal_in_progress", "wrong_tier", "experiment_mismatch"):
+        monkeypatch.setattr(mb, "run_probe", lambda g, e, c=code: {"error": c})
+        r = client.post("/api/mastra/run-once", json={"goal": "x"})
+        assert (r.status_code, r.json()) == (409, {"error": code})
+
+
+def _real_studio_or_skip(tmp_path):
+    _need_node_mastra()
+    if mb.port_open(4111):
+        pytest.skip("4111 busy")
+    env = _sandbox_env(tmp_path)
+    r = _cli(["start"], env, timeout=120)
+    if json.loads(r.stdout or "{}") != {"ok": True}:
+        pytest.skip("studio did not start: " + r.stdout + r.stderr)
+    return env
+
+
+def _force_stop_4111():
+    for pid in mb.listener_pids(4111) or []:
+        try:
+            os.killpg(os.getpgid(pid), signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
+def test_defect_stop_without_lsof_orphans_genuine_studio(tmp_path):
+    """R-1 (MEDIUM): with lsof absent (common on minimal Linux), the leader cwd check returns ''
+    so a LIVE genuine Studio leader is judged 'recycled': stop says stale, deletes studio.pid,
+    signals nothing and Studio keeps listening (F-2 reappears). status/start also say port_in_use
+    for ARAIL's own Studio."""
+    env = _real_studio_or_skip(tmp_path)
+    node_dir = os.path.dirname(NODE)
+    nolsof = {**env, "PATH": f"{node_dir}:/usr/bin:/bin"}
+    assert not shutil.which("lsof", path=nolsof["PATH"])
+    try:
+        _cli(["stop"], nolsof)
+        time.sleep(1)
+        assert not mb.port_open(4111), "genuine Studio still listening after stop without lsof"
+    finally:
+        _force_stop_4111()
+
+
+def test_defect_stop_kills_non_studio_listener_whose_cwd_is_in_mastra_dir(tmp_path):
+    """R-2 (LOW): 'ours' is decided by listener cwd only, so any program a user runs from
+    integrations/mastra-studio on :4111 (e.g. a quick http.server) is shown as Studio and
+    killed with its whole group by stop."""
+    if mb.port_open(4111):
+        pytest.skip("4111 busy")
+    p = subprocess.Popen([PY, "-m", "http.server", "4111", "--bind", "127.0.0.1"], cwd=str(mb.MASTRA_DIR),
+                         start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        for _ in range(50):
+            if mb.port_open(4111):
+                break
+            time.sleep(0.1)
+        _cli(["stop"], _sandbox_env(tmp_path))
+        time.sleep(0.5)
+        assert p.poll() is None, "non-Studio listener was killed by stop"
+    finally:
+        p.kill()
+        p.wait()
+
+
+def test_reset_stops_orphaned_studio_group_in_path_with_spaces(tmp_path):
+    fake = tmp_path / "fake repo"
+    (fake / "scripts").mkdir(parents=True)
+    (fake / "integrations" / "mastra-studio").mkdir(parents=True)
+    (fake / "lab" / "data" / "mastra").mkdir(parents=True)
+    shutil.copy2(REPO / "scripts" / "reset.sh", fake / "scripts" / "reset.sh")
+    leader, child = _group_with_orphan(tmp_path)
+    try:
+        (fake / "lab" / "data" / "mastra" / "studio.pid").write_text(f"{leader.pid} {leader.pid}")
+        os.kill(leader.pid, signal.SIGKILL)
+        leader.wait()
+        r = subprocess.run(["/bin/bash", "scripts/reset.sh", "data", "--yes"], cwd=fake, capture_output=True,
+                           text=True, timeout=60, env={"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "HOME": str(tmp_path)})
+        assert r.returncode == 0, r.stderr
+        time.sleep(0.5)
+        with pytest.raises(ProcessLookupError):
+            os.kill(child, 0)
+    finally:
+        try:
+            os.killpg(leader.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
+def test_uv_lock_untouched():
+    r = subprocess.run(["git", "diff", "--quiet", "--", "uv.lock"], cwd=str(REPO))
+    assert r.returncode == 0
