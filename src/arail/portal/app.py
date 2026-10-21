@@ -193,7 +193,7 @@ _TIER_SURFACES: dict[str, set[str]] = {
     "minimalist": {"dashboard", "chat", "research", "dac", "agents", "docs", "study"},
     "maximus": {"dashboard", "chat", "research", "dac", "agents",
                 "admin", "docs", "notebooks", "terminal", "tuning", "plugins",
-                "build", "study"},
+                "build", "study", "mastra"},
 }
 
 # v1.0.0 tier rename + the LAB_TIER lookup now live in arail.tier, the single
@@ -227,6 +227,7 @@ _OPTIONAL_SERVICES: dict[str, str] = {
     "open-notebook": "maximus",
     "neo4j": "maximus",
     "opencode": "maximus",
+    "mastra-studio": "maximus",
 }
 
 # Sanity-check at import: every entry must declare a known tier.
@@ -247,6 +248,7 @@ def _build_services_dict(
     ollama_up: bool,
     neo4j_up: bool,
     opencode_up: bool,
+    mastra_studio_up: bool = False,
 ) -> dict[str, bool]:
     """Return the tier-filtered services dict for /api/system/health.
 
@@ -278,6 +280,7 @@ def _build_services_dict(
         "ollama": ollama_up,
         "neo4j": neo4j_up,
         "opencode": opencode_up,
+        "mastra-studio": mastra_studio_up,
     }
 
     services: dict[str, bool] = {
@@ -2582,6 +2585,69 @@ async def marimo_stop():
     if result.returncode != 0:
         return {"ok": False, "error": result.stderr[-500:] if result.stderr else "unknown"}
     return {"ok": True}
+
+
+# ── Mastra Studio (experimental spike, maximus only) ─────────────────
+# ARAIL stays the source of truth: these endpoints only start/stop the local
+# Studio process and trigger one manual probe. See
+# sprints/2026-10-13-mastra-studio-spike/ARCHITECTURE.md C3.
+
+@app.get("/mastra", response_class=HTMLResponse)
+async def mastra_page(request: Request):
+    if (gate := _require_surface("mastra")) is not None:
+        return gate
+    from arail import mastra_bridge
+    st = mastra_bridge.resolve_page_state()
+    return templates.TemplateResponse(request, "mastra.html", {
+        **_identity_ctx(), "state": st["state"], "detail": st["detail"],
+    })
+
+
+def _mastra_gate(request: Request):
+    """Tier 404, then the local-mutation CSRF envelope. Returns a response or None."""
+    if (gate := _require_surface("mastra")) is not None:
+        return gate
+    return _check_local_mutation_request(request)
+
+
+@app.post("/api/mastra/start")
+async def mastra_start(request: Request):
+    if (gate := _mastra_gate(request)) is not None:
+        return gate
+    from fastapi.responses import JSONResponse
+    from arail import mastra_bridge
+    res = await asyncio.to_thread(mastra_bridge.start_studio)
+    if not res.get("ok"):
+        return JSONResponse(status_code=res.get("status", 409), content={"error": res["error"]})
+    return {"ok": True}
+
+
+@app.post("/api/mastra/stop")
+async def mastra_stop(request: Request):
+    if (gate := _mastra_gate(request)) is not None:
+        return gate
+    from arail import mastra_bridge
+    return await asyncio.to_thread(mastra_bridge.stop_studio)
+
+
+@app.post("/api/mastra/run-once")
+async def mastra_run_once(request: Request):
+    if (gate := _mastra_gate(request)) is not None:
+        return gate
+    from fastapi.responses import JSONResponse
+    from arail import mastra_bridge
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    res = await asyncio.to_thread(
+        mastra_bridge.run_probe, body.get("goal"), body.get("experiment_id"))
+    if "error" in res:
+        return JSONResponse(status_code=400 if res["error"] in ("invalid_goal", "experiment_missing") else 502,
+                            content=res)
+    return res
 
 
 @app.get("/plugins", response_class=HTMLResponse)
@@ -11247,6 +11313,8 @@ async def system_health():
     kc_up = kc_full_store_up or (KC_FRONTEND_DIST_DIR.exists() or KC_FRONTEND_DIR.exists())
     marimo_running = marimo_up and _container_running("arail-marimo")
     open_notebook_running = open_notebook_up and _container_running("arail-open-notebook")
+    from arail import mastra_bridge as _mastra_bridge
+    mastra_studio_up = await _port_open("127.0.0.1", _mastra_bridge.studio_port())
 
     services = _build_services_dict(
         portal_up=portal_up,
@@ -11259,6 +11327,7 @@ async def system_health():
         ollama_up=ollama_up,
         neo4j_up=neo4j_up,
         opencode_up=opencode_up,
+        mastra_studio_up=mastra_studio_up,
     )
 
     # Model registry tiers — entries + health from arail.registry.

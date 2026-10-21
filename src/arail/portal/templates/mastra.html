@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% set active = 'mastra' %}
+{% block title %}{{ brand.name }} — Mastra Studio{% endblock %}
+{% block head %}
+<style>
+  .mst-wrap { max-width: 780px; margin: 0 auto; padding: 1.2rem 1rem; color: var(--text); }
+  .mst-wrap h1 { color: var(--text-strong); margin-top: 0; }
+  .mst-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-l); padding: 1.2rem 1.5rem; margin-bottom: 1rem; }
+  .mst-warn { border-color: var(--danger); }
+  .mst-wrap pre { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-s); padding: 0.8rem 1rem; font-family: var(--font-mono); font-size: 0.85rem; white-space: pre-wrap; }
+  .mst-label { color: var(--text-muted); font-size: 0.8rem; }
+  .mst-wrap input[type=text], .mst-wrap textarea { width: 100%; box-sizing: border-box; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="mst-wrap" id="mastra-page" data-state="{{ state }}">
+  <h1>Mastra Studio <span class="mst-label">(experimental, maximus, opt-in)</span></h1>
+  <p class="mst-label">Trace view of one Researcher run. ARAIL stays the source of truth; Studio only reads its own local database.</p>
+
+  <div class="mst-card" id="mst-state">
+  {% if state == 'node_missing' %}
+    <h3>Node.js not found</h3><p>{{ detail }}</p>
+  {% elif state == 'node_too_old' %}
+    <h3>Node.js is too old</h3><p>{{ detail }}</p>
+  {% elif state == 'not_installed' %}
+    <h3>Not installed</h3><p>{{ detail }}</p><pre>./arailctl mastra install</pre>
+  {% elif state == 'not_running' %}
+    <h3>Not running</h3><p>{{ detail }}</p>
+    <button id="mst-start" type="button">Start Studio</button>
+  {% else %}
+    <h3>Running</h3><p>{{ detail }}</p>
+    <button id="mst-stop" type="button">Stop Studio</button>
+  {% endif %}
+  </div>
+
+  {% if state in ('not_running', 'running') %}
+  <div class="mst-card mst-warn" id="mst-open">
+    <h3>Open Studio only with the restricted browser</h3>
+    <p>Opening Studio in a normal browser makes about 16 non-loopback requests (npm version lookups and one models.dev logo). That breaks the airgapped promise, so this page deliberately has no link to it. Use:</p>
+    <pre id="mst-open-cmd">./arailctl mastra open</pre>
+    <button id="mst-copy" type="button">Copy command</button>
+    <p class="mst-label">It starts a separate browser profile in which every address other than 127.0.0.1 / localhost fails locally and no DNS lookup leaves the machine.</p>
+  </div>
+  {% endif %}
+
+  {% if state == 'running' %}
+  <div class="mst-card" id="mst-run">
+    <h3>Run once via Mastra</h3>
+    <p class="mst-label">Manual one-shot. Runs the Researcher once on this goal, then attaches a model-graded probe score (not a 3DEval measurement) to the experiment record.</p>
+    <textarea id="mst-goal" rows="3" maxlength="2000" placeholder="Goal for one Researcher run"></textarea>
+    <input id="mst-exp" type="text" maxlength="128" placeholder="Experiment id (optional)">
+    <button id="mst-go" type="button">Run once via Mastra</button>
+    <pre id="mst-result" hidden></pre>
+  </div>
+  {% endif %}
+</div>
+<script>
+(function () {
+  const post = (u, b) => fetch(u, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(b || {})}).then(r => r.json());
+  const $ = id => document.getElementById(id);
+  if ($('mst-start')) $('mst-start').onclick = async () => { $('mst-start').disabled = true; await post('/api/mastra/start'); location.reload(); };
+  if ($('mst-stop')) $('mst-stop').onclick = async () => { await post('/api/mastra/stop'); location.reload(); };
+  if ($('mst-copy')) $('mst-copy').onclick = async () => {
+    try { await navigator.clipboard.writeText($('mst-open-cmd').textContent); } catch (_) { window.prompt('Copy:', $('mst-open-cmd').textContent); }
+  };
+  if ($('mst-go')) $('mst-go').onclick = async () => {
+    $('mst-go').disabled = true; $('mst-result').hidden = false; $('mst-result').textContent = 'Running (can take several minutes)...';
+    const exp = $('mst-exp').value.trim();
+    const r = await post('/api/mastra/run-once', {goal: $('mst-goal').value, experiment_id: exp || undefined});
+    $('mst-result').textContent = r.error ? ('Could not run: ' + r.error) : ('Experiment ' + r.experiment_id + ': probe score ' + r.score + ' (not a 3DEval measurement)');
+    $('mst-go').disabled = false;
+  };
+})();
+</script>
+{% endblock %}

@@ -749,6 +749,18 @@ Unchanged.
 Measure local model TPS for autoresearch routing. Defaults to `--all`
 when no args are given. Unchanged.
 
+### `mastra <op>`
+
+Opt-in, maximus-only Mastra Studio spike (experimental). Not part of `setup`; needs Node 22.13+.
+
+| Op | What it does |
+|---|---|
+| `install` | `npm ci --ignore-scripts` in `integrations/mastra-studio` (pinned versions) |
+| `start` / `stop` | Start or stop Studio on `127.0.0.1:4111` with telemetry, provider refresh and online lookups forced off |
+| `open` | Open Studio in a separate, network-restricted Chrome/Chromium profile (the only supported way: a normal browser makes ~16 non-loopback requests) |
+| `run-once "<goal>" [experiment_id]` | Run the Researcher once, trace it in Studio, and attach a `kind:"probe"` score (not a 3DEval measurement) to the experiment record |
+| `status` | Print the page state (`node_missing`, `node_too_old`, `not_installed`, `not_running`, `running`) |
+
 ### `autoresearch <op>`
 
 Retention for what the tuning loop leaves behind. The loop creates a

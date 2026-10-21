@@ -10,11 +10,17 @@ const REQUIRED = {
   MASTRA_OFFLINE: '1',
   MASTRA_AUTO_REFRESH_PROVIDERS: 'false',
 };
-const out = (obj) => process.stdout.write(JSON.stringify(obj) + '\n');
+// The result line is the ONLY thing that may reach stdout: capture the real writer, then
+// reroute everything else (library logging via console.* or process.stdout) to stderr.
+const writeResult = process.stdout.write.bind(process.stdout);
+process.stdout.write = (...a) => process.stderr.write(...a);
+const out = (obj) => writeResult(JSON.stringify(obj) + '\n');
 const fail = (code, exit = 1) => { out({ error: code }); process.exit(exit); };
 
 for (const [k, v] of Object.entries(REQUIRED)) if (process.env[k] !== v) fail(`env_${k}_not_${v}`, 3);
 if (process.env.MASTRA_PLATFORM_ACCESS_TOKEN) fail('platform_token_present', 3);
+// EE guard: never run with anything that could switch on Mastra enterprise features.
+for (const k of ['MASTRA_LICENSE_KEY', 'MASTRA_EE_LICENSE']) if (process.env[k]) fail('ee_license_present', 3);
 
 const dbPath = process.env.ARAIL_MASTRA_DB;
 const dataDir = process.env.ARAIL_DATA_DIR;
@@ -28,6 +34,7 @@ try {
 } catch { fail('bad_request'); }
 
 const pyBin = process.env.ARAIL_PYTHON;
+if (!process.env.ARAIL_ROOT) fail('no_arail_root', 3);
 if (!pyBin) fail('no_python', 3);
 
 // Everything below writes to stderr only; stdout carries the single result line.
@@ -46,8 +53,9 @@ try {
       arail: {
         command: pyBin,
         args: ['-m', 'arail.mcp.researcher_tool'],
+        cwd: process.env.ARAIL_ROOT,
         env: {
-          ...Object.fromEntries(['PATH', 'HOME', 'ARAIL_DATA_DIR', 'ARAIL_EXPERIMENTS_DIR', 'LAB_TIER', 'LAB_MODE',
+          ...Object.fromEntries(['PATH', 'HOME', 'ARAIL_DATA_DIR', 'ARAIL_EXPERIMENTS_DIR', 'ARAIL_ROOT', 'LAB_ROOT', 'LAB_PKB', 'PYTHONPATH', 'LAB_TIER', 'LAB_MODE',
             'OLLAMA_HOST', 'ARAIL_OLLAMA_URL'].filter((k) => process.env[k]).map((k) => [k, process.env[k]])),
           ...REQUIRED,
         },
