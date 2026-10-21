@@ -53,5 +53,15 @@
   "browser_requests": "gates/D1-full-browser-requests.txt: 78 to 127.0.0.1:4111, 15 to https://registry.npmjs.org (mastra, @mastra/core, @mastra/mcp, @mastra/libsql, @mastra/observability version lookups from the Studio page), 1 to https://models.dev/logos/ollama.svg",
   "rule": "ARCHITECTURE B0.2 step 3: every browser URL host must be loopback",
   "note": "The owner pcap covered the server only; the browser leg was not in it. Python MCP child sockets not attributable by name (venv python == Homebrew Python); run-once Ollama traffic is 127.0.0.1:11434."
+ },
+ "update_2026-10-21c": {
+  "verdict": "INCONCLUSIVE (browser leg): mitigation works locally; owner pcap still required; request log is not literally zero",
+  "mitigation": "./arailctl mastra open = separate profile (lab/data/mastra/browser) with --host-resolver-rules='MAP * ~NOTFOUND , EXCLUDE 127.0.0.1 , EXCLUDE localhost', --proxy-server=http://127.0.0.1:9 (dead local proxy), --proxy-bypass-list=127.0.0.1;localhost;[::1], background networking/sync/component update disabled",
+  "run": "Studio started by `arailctl mastra start`; browser (agent-browser, same proxy flags; its arg parser cannot carry the host-resolver rule) on / and /observability; `arailctl mastra run-once` executing; whole run polled with lsof",
+  "lsof_node_ollama_browser_driver": "no non-loopback socket (D1-full-lsof-ours.txt)",
+  "chrome_netlog_proxy_flags_run": "scripts/mastra/netlog-summary.py on --log-net-log: resolver jobs [], TCP connects only 127.0.0.1:4111 and 127.0.0.1:9 (dead proxy), non-loopback TCP [] (D1-full-netlog-summary.json)",
+  "chrome_netlog_host_resolver_rule_run": "direct Chrome launch with the exact `arailctl mastra open` flags (headless): resolver jobs [], TCP only 127.0.0.1:4111 and :9, non-loopback TCP []",
+  "request_log": "Studio JS still ATTEMPTS ~16 non-loopback requests (registry.npmjs.org x15, models.dev x1; D1-full-browser-requests.txt). They are refused locally (connection to the dead proxy / NOTFOUND), but the attempts are visible in the browser request log, so the literal 'zero non-loopback URLs in the request log' condition cannot be met by any launch flag. Needs owner reading of the rule: 'no packets/DNS leave the machine' (supported by netlog) vs 'no attempts' (impossible without patching Studio).",
+  "owner_pcap_command": "sudo tcpdump -i any -n -w sprints/2026-10-13-mastra-studio-spike/gates/D1-browser.pcap 'not (host 127.0.0.1 or host ::1)'   # run for ~90 s while doing: ./arailctl mastra start; ./arailctl mastra open; ./arailctl mastra run-once \"Measure how responsive this lab is on local hardware\"; then: tcpdump -nr sprints/2026-10-13-mastra-studio-spike/gates/D1-browser.pcap 'udp port 53' | grep -iE 'npmjs|models\\.dev|netlify|posthog|mastra'   # expect no lines (diff vs a 60 s idle baseline for OS noise)"
  }
 }

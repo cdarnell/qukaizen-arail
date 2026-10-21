@@ -17,3 +17,11 @@ Date: 2026-10-21. Sprint: 2026-10-13-mastra-studio-spike. Supersedes the "D1 PAS
 - Options for the owner (builder does not pick): block browser requests (e.g. launch Studio in a browser profile with
   allowlist-only network, or a loopback-only proxy: ARCHITECTURE currently forbids a proxy in this spike), accept
   the Studio page's version/logo fetches as documented non-telemetry egress and relax the rule, or shelve.
+
+## Update (same day, after owner decisions)
+- Browser egress mitigated, not eliminated: `arailctl mastra open` (host-resolver NOTFOUND rule + dead local proxy + background networking off)
+  gave zero DNS resolver jobs and zero non-loopback TCP connects in Chrome's net-log and no non-loopback lsof sockets, while Studio's JS
+  still issues ~16 requests that are refused locally. A request log of literally zero URLs is unachievable without patching Studio.
+- agent-browser's `--args` cannot carry `--host-resolver-rules` (spaces/commas split into extra targets); use a direct Chrome launch for that flag.
+- ARAIL paths are cwd-relative: any child process launched from another directory must get absolute LAB_ROOT/LAB_PKB or it writes a stray `lab/` tree.
+- Library logging reaches stdout in Node; a "one JSON line" contract needs process.stdout.write rerouted, not just console.log.

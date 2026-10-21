@@ -54,5 +54,39 @@ No portal/Python code changed. No researcher.py change. Python tests not run (no
 5. `addScore` is not persisted by LibSQL; the score lives in the ARAIL ledger.
 
 ### Stopped
-Not built: `_mastra_env()`, Python write-back, portal surface, arailctl, THIRD-PARTY-LICENSES, T-U-2..4,7,8,10 (steps 6-8). Reason: browser-leg D1 FAIL and B0.1 ee-chunk decision. No researcher.py change.
-Commits: see `git log` on the branch.
+(superseded by "Completion 2026-10-21" below)
+
+---
+## Completion 2026-10-21 (owner decisions: block browser egress; accept ee chunk with a guard)
+
+### Built (steps 6-8)
+- `src/arail/mastra_bridge.py`: `mastra_env()` allowlist (always sets the three flags; drops platform token, *_API_KEY, *_TOKEN, *LICENSE_KEY*, MASTRA_EE_*), strict one-line child parser, `write_back` through `ExperimentTracker.observe` (kind `probe`, "not a 3DEval measurement"), Studio start/stop with a loopback LISTEN check (lsof), page-state resolver (5 states), restricted-browser args, `run_probe` (15 min timeout, process-group kill, shell=False, stdin JSON).
+- `src/arail/mastra_cli.py` + `./arailctl mastra install|start|stop|open|run-once|status` (documented in docs/cli.md; F33 guard satisfied). `install` = `npm ci --ignore-scripts`; start uses `npx --no-install mastra dev` (never the registry).
+- Portal: `_TIER_SURFACES["maximus"] += "mastra"`, `_OPTIONAL_SERVICES["mastra-studio"] = "maximus"`, `_build_services_dict(..., mastra_studio_up=False)` (defaulted kwarg so existing callers/tests are unchanged), `GET /mastra` (404 on minimalist, no iframe, no link to Studio, shows `./arailctl mastra open` + copy button and the ~16-request warning), `POST /api/mastra/{start,stop,run-once}` behind tier 404 + `_check_local_mutation_request`.
+- `run-once.mjs`: stdout is exactly one JSON line (library logging rerouted to stderr; the first CLI run exposed `bad_child_output` from stray lines), exits 3 unless all three flags set, no platform token, no EE vars, and ARAIL_ROOT set; MCP server runs with `cwd=ARAIL_ROOT` and absolute LAB_ROOT/LAB_PKB (first real run wrote into integrations/mastra-studio/lab/ because ARAIL paths are cwd-relative).
+- EE guard: `ee-chunk.pin`, `check-ee-loads.mjs`; `THIRD-PARTY-LICENSES/mastra/` (README + the five LICENSE files). No EE feature used or redistributed.
+- Reset: `scripts/reset.sh` `reset_data` does `rm -rf "$DATA_DIR"` (lab/data), which contains lab/data/mastra incl. the browser profile; no edit needed. T-I-4 was verified by reading, not executed (a real reset is destructive).
+
+### Architecture amendments (drift)
+1. Child env needs `MASTRA_OFFLINE=1` and `MASTRA_AUTO_REFRESH_PROVIDERS=false` besides telemetry; `mastra dev` has no `--host`, bind via `server.host` in config (asserted by test).
+2. A6 corrected: agent_trace trace_id is per router call. Steps are scoped by a time window from run start; returned `trace_id` is a minted run id; ring records exist with the recorder off (bodies only are stripped).
+3. The driver calls the MCP tool deterministically inside a root `agent_run` span (a 1b model is not reliable at tool-calling); `researcher-driver` Agent is for Studio only.
+4. Span input/output must be objects (bare strings are stored as `{}`); child end times are export wall-clock.
+5. `addScore` is not persisted by LibSQL; the score lives in the ARAIL ledger only.
+6. `set_goal` inside run_once archives the owner's current goal like POST /api/goal. Safe behaviour chosen: refuse with `goal_in_progress` when the current goal is active and progress < 1.0 (and `researcher_busy` while a run is active in any process via run_state.json); otherwise proceed (the previous goal is archived, not lost).
+7. Studio must not be opened in a normal browser (npm version lookups x15 + models.dev logo x1). The portal has no direct link; `arailctl mastra open` uses a restricted profile. Request attempts still appear in the browser request log, they are refused locally.
+8. ee: one inert bundled chunk (`ee-*.js`) loads; accepted by owner with the pin guard.
+
+### Gate verdicts (final)
+| Gate | Verdict |
+|---|---|
+| B0.1 ee/licence | PASS with guard (no `/ee/` URL; only the pinned inert chunk; census all allowed incl. CC-BY-4.0) |
+| B0.2 D1 server leg | PASS (owner pcap, 2026-10-21) |
+| B0.2 D1 browser leg | INCONCLUSIVE: restricted launch yields no resolver jobs / no non-loopback TCP in Chrome netlog and no non-loopback sockets in lsof, but Studio's JS still attempts ~16 non-loopback requests (visible in the request log, refused locally); owner pcap + rule reading needed (command in gates/D1-egress.json) |
+| B0.3 framing | iframe would be allowed, but the portal does not embed Studio at all (egress) |
+| B0.4 D2 | PASS |
+
+### Tests
+- tests/test_researcher_tool.py + tests/test_mastra_bridge.py: 63 passed (T-U-1,2,3,4,5,6,7,8,9,10, T-SEC-3/5, EE guard, loopback-bind, restricted-browser args, service registry).
+- Not executed (need owner/Mac with real hardware or are destructive): T-I-2 timeout kill (unit-tested via mocked Popen), T-I-3 clean-machine setup (setup.sh and ensure_node untouched, `git diff` shows neither), T-I-4, T-I-5 (stop verified manually: no node/mastra process or :4111 listener afterwards), T-SEC-1 final-build pcap (owner).
+- Regression: existing portal + experiment + tier suites: 8 failures in tests/portal (test_build_tab x4, test_models_api, opencode x2, token_compliance) fail identically on the base commit 20f334b4; test_cli_verbs "doctor healthy" and test_cli_status T34 (timing) also fail on/independent of this change. New failures: none.

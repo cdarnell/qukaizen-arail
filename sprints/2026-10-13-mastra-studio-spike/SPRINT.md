@@ -13,7 +13,7 @@ Embed Mastra Studio as an ARAIL surface (like terminal/notebook), not a merge. E
 |---|---|---|---|---|---|---|
 | think | visionary | VISION.md | done | 2026-10-13 | 2026-10-13 | proceed (time-boxed; D1/D2 kill gates first) |
 | plan | architect (design) | ARCHITECTURE.md | done | 2026-10-13 | 2026-10-13 | gates-first design; ledger (a) ExperimentTracker; stdio MCP |
-| build | builder | BUILD_LOG.md | stopped (D1 browser leg; B0.1 ee chunk) | 2026-10-13 | — | D1 server PASS, browser FAIL; D2 PASS; ee chunk needs owner decision |
+| build | builder | BUILD_LOG.md | built; one gate open (D1 browser leg INCONCLUSIVE, owner pcap) | 2026-10-13 | — | D1 server PASS; D1 browser INCONCLUSIVE; D2 PASS; ee accepted w/ guard |
 | review | architect (review) | REVIEW.md | pending | — | — | — |
 | test | qa | TEST_REPORT.md | pending | — | — | — |
 | ship | — | PR | pending | — | — | — |
