@@ -3,7 +3,7 @@
 **Date:** 2026-10-21
 **Build:** [BUILD_LOG.md](./BUILD_LOG.md) round 2 at `579d6038`; branch HEAD under test `a248e8e3` (QA commits on top: `7f82beef`, `bccec418`, `dbc0b1db`, `47ba7830`, `2cac4aa4`)
 **Baseline:** merge-base `ac83fc47` (exported to a scratch dir, not a worktree)
-**Verdict:** FAIL
+**Verdict:** PASS (final, after round 2 below; round 1 was FAIL)
 
 One HIGH defect (QA-1) that the sprint's own fixtures could not see. On a fresh **maximus** setup on Apple Silicon, `setup.sh` writes `MODEL_BACKEND=mlx` and `MODEL_NAME=mlx-community/Qwen3-8B-4bit`. On every boot the resolver then stamps the Ollama tag `llama-ai-eng:latest` into `MODEL_NAME`, so the env-built primary router (`ModelRouter()`) gets an MLX backend paired with an Ollama tag. This was reproduced on a real `./arailctl start`: the boot warm dies with `HFValidationError`, and every `ModelRouter()` caller inherits the broken pair. That includes the portal's primary router, librarian scout, dictionary, world routes and the goal parser. Base leaves the MLX pair intact. Everything else the brief asked for holds.
 
@@ -104,3 +104,30 @@ Not measured: `pytest-cov` is not installed in the shared venv, and I did not ad
 - **Banner cosmetics (INFO):** with no cache yet, the `start.sh` banner prints the unvalidated env B (`Qwen2.5-7B-Instruct-4bit … source: env`) before the portal resolves. With an unreadable yaml it shows A as `llama-ai-eng size unknown` plus a pull hint even when installed. Display-only; nothing is loaded.
 - The REVIEW round-2 ASKs and both BUILD_LOG debts are now in `sprints/BACKLOG.md` (`47ba7830`).
 - Ollama was down at the start of QA; I started it for the live checks and stopped it afterwards. The operator's real lab, `.env` and pins were only read (one `grep ^MODEL_BACKEND=`), never written.
+
+---
+
+# Round 2 (re-test after builder round 3)
+
+**Date:** 2026-10-21
+**Build:** BUILD_LOG.md "Round 3" (`c753cbf2`, `e89e61c7`, `f216dba8`, `dd556019`, `1dc50ed0`, `3db78dde`); tested at `34dbb573` (includes the QA isolation fix below)
+**Verdict:** PASS
+
+## Re-verification
+
+| # | Check | Result |
+|---|---|---|
+| R1 | QA-1 on a real `./arailctl start` (scratch clone, pinned `.env`, airgapped), `MODEL_BACKEND` = mlx / unset / cuda / cpu with a non-Ollama `MODEL_NAME` | PASS. No `HFValidationError` in any boot. The banner and the primary router error both carry the `.env` `MODEL_NAME` (e.g. `mlx-community/Qwen3-8B-4bit`), so it was not overwritten. Warm A: mlx/unset `failed` with `EgressBlocked: huggingface.co` (no weights in the scratch lab, and the airgap guard correctly blocks the lookup); cpu `failed` with `ImportError: llama-cpp-python` (not installed); cuda `skipped` ("loads weights in-process"). All are environment outcomes for a lab with no weights, not resolver defects |
+| R2 | Same, `ollama_native` and `openai_compat` (`MODEL_API_BASE` = local Ollama) | PASS: `warm_a: ok`, "weights resident", A source `env` |
+| R3 | `test_setup_maximus_mlx_env_keeps_a_loadable_primary_backend_model_pair` | PASS (was the deliberate failure) |
+| R4 | QA-3/4/5 flipped xfails | PASS: all three pass as plain tests and no `xfail` markers remain (77/77). On the real boots with garbage yaml and with a v2 typo, B now resolves `none`/`pin` while the file stays byte-identical |
+| R5 | Seven bad-boot scenarios rerun on a real start | PASS: ready 1.19–1.29 s; no traceback, drift text or bare 400 in any log; pins kept; v1 migrates to `b: none` + `.v1.bak`; `ARAIL_BOOT_WARM=0` leaves both slots `disabled` |
+| R6 | Time-to-ready vs base, minimalist setup `.env`, 5+5 alternating runs | PASS: branch median 1.24 s (1.19–1.25, sd 0.02) vs base 1.21 s (1.20–1.22, sd 0.01), +0.03 s against the +0.20 s threshold; warm A done at a median of 2.43 s |
+| R7 | `tests/test_warm_up.py::test_api_instance_world_branch_exposes_warm_fields` race | FIXED in `34dbb573` (stub `_boot_models`, the same fix as `bccec418`). With a 0.5 s pause before the GET it failed 3/3 without the fix and passed 3/3 with it; the whole file passes 8/8 |
+| R8 | Full suite, by name vs base `ac83fc47` | PASS: branch 65F / 5728P / 34S / 7xF; base 81F. **Zero branch-only failures**; 17 base failures don't occur on the branch |
+
+## Remaining notes (INFO, non-blocking)
+
+- **Banner mislabel under a non-Ollama backend.** `start.sh` prints `A (resident): mlx-community/Qwen3-8B-4bit  1.2 GB  source: auto`, which joins the `.env` MLX name with the size and source of the Ollama slot-A resolution (`llama-ai-eng`). Display only. Suggest printing the resolved Ollama A, or labelling the primary backend separately.
+- **Accepted behaviour change (A8), worth stating in the PR.** On a maximus mlx lab, the boot warm now constructs the MLX primary router in-process at every boot (main did that only with `ARAIL_AUTOCHECKS`). With real weights present, that loads Qwen3-8B at boot.
+- The `start.sh` cosmetics from round 1 (unvalidated env B before the first resolve) and the CLI-driver/worktree `.env` notes still apply.
