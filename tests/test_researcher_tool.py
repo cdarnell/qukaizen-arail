@@ -37,6 +37,22 @@ def test_busy_refuses_without_touching_goal_store(monkeypatch):
     assert researcher.goal_store.get_current() == before
 
 
+def test_unfinished_owner_goal_is_never_displaced(monkeypatch):
+    monkeypatch.setenv("LAB_TIER", "maximus")
+    monkeypatch.setattr(rt, "researcher_is_busy", lambda: False)
+    monkeypatch.setattr(rt, "owner_goal_in_progress", lambda: True)
+    assert asyncio.run(rt.run_once("measure it")) == {"error": "goal_in_progress"}
+
+
+def test_owner_goal_in_progress_rules(monkeypatch):
+    from arail.agents.researcher import researcher
+    for cur, want in [({}, False), ({"status": "active", "progress": 0.4}, True),
+                      ({"status": "active", "progress": 1.0}, False),
+                      ({"status": "archived", "progress": 0.2}, False)]:
+        monkeypatch.setattr(researcher.goal_store, "get_current", lambda c=cur: c or None)
+        assert rt.owner_goal_in_progress() is want
+
+
 def test_build_steps_maps_and_caps():
     recs = [{"ts": 100.0 + i, "latency_ms": 500, "label": "researcher", "model": "m",
              "outcome": "ok", "tokens_in": 1, "tokens_out": 2} for i in range(250)]

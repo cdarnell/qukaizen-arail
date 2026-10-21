@@ -25,6 +25,7 @@ SUMMARY_CHARS = 500
 INVALID_GOAL = "invalid_goal"
 RESEARCHER_BUSY = "researcher_busy"
 WRONG_TIER = "wrong_tier"
+GOAL_IN_PROGRESS = "goal_in_progress"
 
 
 def _trunc(value: Any) -> str:
@@ -51,6 +52,22 @@ def researcher_is_busy() -> bool:
         return True
     state = goals_mod.load_run_state() or {}
     return state.get("status") in ("running", "paused")
+
+
+def owner_goal_in_progress() -> bool:
+    """True when the lab's current goal is unfinished.
+
+    run_once sets a goal (``GoalStore.set_goal`` archives the previous one, exactly
+    like POST /api/goal). To never displace work the owner has not finished, it
+    refuses while the current goal is active with progress < 1.0.
+    """
+    from arail.agents.researcher import researcher
+    cur = researcher.goal_store.get_current() or {}
+    try:
+        progress = float(cur.get("progress") or 0.0)
+    except (TypeError, ValueError):
+        progress = 0.0
+    return bool(cur) and cur.get("status") == "active" and progress < 1.0
 
 
 def _iso_to_ts(iso: Any) -> float:
@@ -112,6 +129,8 @@ async def run_once(goal: Any) -> Dict[str, Any]:
         return {"error": WRONG_TIER}
     if researcher_is_busy():
         return {"error": RESEARCHER_BUSY}
+    if owner_goal_in_progress():
+        return {"error": GOAL_IN_PROGRESS}
 
     from arail import agent_trace
     from arail.activity import activity_log
