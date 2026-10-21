@@ -1,0 +1,28 @@
+# D1 pcap summary (2026-10-21) - extracted from D1.pcap (gitignored: whole-machine capture)
+capture: 08:51:56 - 08:55:13 | Mastra server alive: 08:52:01 - 08:53:01 (harness MODE=test, 3 flags) | 2nd concurrent run failed to bind
+
+## DNS names first seen (time name)
+08:52:06.384379 waa-pa.clients6.google.com.
+08:52:14.390592 dyna.wikimedia.org.
+08:52:14.510616 example.com.
+08:52:23.511174 p107-quota.icloud.com.
+08:52:23.549732 setup.icloud.com.
+08:52:23.689998 ocsp2.g.aaplimg.com.
+08:52:23.832921 gsa.apple.com.
+08:52:23.865221 gsa.idms-apple.com.akadns.net.
+08:52:24.079095 p107-mcc.icloud.com.
+08:52:24.582100 p107-caldav.icloud.com.
+08:52:28.571207 api.github.com.
+08:53:15.442337 github.com.
+08:53:16.203267 registry.npmjs.org.
+08:53:17.176253 http-intake.logs.us5.datadoghq.com.
+08:53:19.227833 nexus-websocket-a.intercom.io.
+08:53:49.542151 api.apple-cloudkit.fe2.apple-dns.net.
+08:53:54.923107 signaler-pa.clients6.google.com.
+08:54:05.054258 tokenghub.actions.githubusercontent.com.
+08:54:05.073058 tokenghubeus21.actions.githubusercontent.com.
+08:54:07.358451 accounts.google.com.
+08:55:06.361222 play.google.com.
+
+## Target names (models.dev, netlify, posthog, mastra.ai): count in capture
+0
