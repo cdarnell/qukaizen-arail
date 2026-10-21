@@ -176,6 +176,31 @@ def test_timeout_keeps_cache(world, monkeypatch):  # FM9
     assert res.degraded[0]["kind"] == "resolver_timeout"
 
 
+def test_timeout_fallback_honours_the_crash_list(world, monkeypatch):  # review A1 / FM5
+    monkeypatch.setattr(mr, "_fetch_ollama_tags", lambda: time.sleep(1) or [])
+    cache = {"a": {"model": "cached:1b"}, "b": {"model": "Bad-7B", "size_gb": 4.0}}
+    res = mr.resolve_boot_bounded(timeout=0.1, cache=cache, skip_b="Bad-7B")
+    assert res.b.model is None
+    assert res.a.model == "cached:1b"
+    kinds = [d["kind"] for d in res.degraded]
+    assert "resolver_timeout" in kinds and "crashed_last_boot" in kinds
+
+
+def test_exception_fallback_honours_the_crash_list(world, monkeypatch):  # review A1
+    def boom():
+        raise RuntimeError("x")
+    monkeypatch.setattr(mr, "_total_ram_gb", boom)
+    res = mr.resolve_boot(cache={"b": {"model": "Bad-7B"}}, skip_b="Bad-7B")
+    assert res.b.model is None
+    assert any(d["kind"] == "crashed_last_boot" for d in res.degraded)
+
+
+def test_fallback_keeps_a_cached_b_that_did_not_crash(world, monkeypatch):
+    monkeypatch.setattr(mr, "_total_ram_gb", lambda: 1 / 0)
+    res = mr.resolve_boot(cache={"b": {"model": "Good-7B"}}, skip_b="Bad-7B")
+    assert res.b.model == "Good-7B"
+
+
 @pytest.mark.parametrize("host,ok", [("127.0.0.1", True), ("localhost", True),
                                      ("8.8.8.8", False), ("evil.example.com", False)])
 def test_ollama_base_is_loopback_only(monkeypatch, host, ok):  # FM14

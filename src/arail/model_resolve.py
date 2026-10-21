@@ -539,17 +539,29 @@ def resolve_boot(*, pins: Optional[Dict[str, Any]] = None,
     except Exception as exc:  # noqa: BLE001 — boot must never fail on this
         _log.warning("model_resolve: resolver failed: %s", exc)
         return _fallback(cache, stamp, "resolver_timeout",
-                         f"Model resolver failed ({type(exc).__name__}); using last result")
+                         f"Model resolver failed ({type(exc).__name__}); using last result",
+                         skip_b=skip_b)
 
 
-def _fallback(cache: Dict[str, Any], stamp: str, kind: str, detail: str) -> BootResolution:
+def _fallback(cache: Dict[str, Any], stamp: str, kind: str, detail: str,
+              skip_b: Optional[str] = None) -> BootResolution:
+    """Last-known result when the resolver can't run. The cache written during
+    a crashing boot names the crashing deep model, so *skip_b* is honoured
+    here too (FM5): that model is never re-picked from the cache."""
+    notes: List[Dict[str, Any]] = [{"slot": "a", "kind": kind, "detail": detail}]
+
     def _slot(key):
         c = cache.get(key) if isinstance(cache.get(key), dict) else {}
         model = c.get("model")
+        if key == "b" and model and skip_b and model == skip_b:
+            msg = (f"{model} crashed or was killed while loading last boot — "
+                   "skipped. Pin a different deep model or clear the pin to retry.")
+            notes.append({"slot": "b", "kind": "crashed_last_boot", "detail": msg})
+            return SlotResolution(model=None, source="none", reason=msg)
         return SlotResolution(model=model, source="cache" if model else "none",
                               reason=detail, size_gb=c.get("size_gb"))
-    return BootResolution(a=_slot("a"), b=_slot("b"), resolved_at=stamp,
-                          degraded=[{"slot": "a", "kind": kind, "detail": detail}])
+    a, b = _slot("a"), _slot("b")
+    return BootResolution(a=a, b=b, resolved_at=stamp, degraded=notes)
 
 
 def resolve_boot_bounded(*, timeout: float = RESOLVE_TIMEOUT_S, **kw) -> BootResolution:
@@ -563,7 +575,8 @@ def resolve_boot_bounded(*, timeout: float = RESOLVE_TIMEOUT_S, **kw) -> BootRes
     except concurrent.futures.TimeoutError:
         stamp = time.strftime("%Y-%m-%dT%H:%M:%S%z")
         return _fallback(kw.get("cache") or {}, stamp, "resolver_timeout",
-                         f"Model resolver took over {timeout:g}s; using last result")
+                         f"Model resolver took over {timeout:g}s; using last result",
+                         skip_b=kw.get("skip_b"))
     finally:
         pool.shutdown(wait=False)
 
