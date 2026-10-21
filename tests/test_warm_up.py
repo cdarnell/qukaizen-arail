@@ -191,6 +191,9 @@ def test_api_instance_world_branch_exposes_warm_fields(monkeypatch):
     import arail.portal.app as app_mod
     monkeypatch.setenv("ARAIL_INSTANCE", "finance")
     monkeypatch.setenv("ARAIL_INSTANCE_TOKEN", "abc123")
+    # The startup _boot_models task flips _MODEL_WARM on the portal loop and
+    # can land after the setattrs below; stub it (same fix as bccec418).
+    monkeypatch.setattr(app_mod, "_boot_models", lambda: asyncio.sleep(0))
     with TestClient(app_mod.app) as client:
         # See the sibling root-branch test for why this happens AFTER entry.
         monkeypatch.setattr(app_mod, "_MODEL_WARM", False)
