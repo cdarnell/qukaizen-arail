@@ -43,6 +43,8 @@ the brief's nine questions.
 
 14. (2026-10-21) The goal for the swarm crew: teams "that can build or codify any workflow": "have a computer process to automate, or move a batch job to a real-time job and manage that logic."
 
+15. (2026-10-21) "You can trust Buddy to do it and find the right tools to do so, to put in the registry to clear with you, and so you can begin seeing audit; and 3D.EVAL is there for this TEAM of PaperAgents running on a Paperclip AI engine or something along those lines." (Registry write path = Buddy proposes, operator clears at the desk; audit = the ledgers; the team engine question re-opens the 2026-09-28 "no Paperclip dependency" decision only if "or something along those lines" resolves to Paperclip itself: for S2's vision pass.)
+
 ## 2. The field (verified against each repo via the GitHub API today)
 
 | | nanobot (HKUDS) | Hermes Agent (Nous) | OpenClaw | OpenBot (nightly-labs) |

@@ -96,7 +96,7 @@ in `RESEARCH_NOTES.md` §1. Do not design or code until VISION.md is in.
 | O5 | Accept that proposal cards go only to the confirmer who asked. | nothing |
 | O6 | Accept sha256-pinned sources for unversioned files such as `~/.claude/agents/qa.md`. | C1 |
 | O7 | **Done 2026-10-20** (operator: "Allow groups is off in BotFather"). | — |
-| O9 | S2 scope: Buddy's own system (container/VM/box) for hands (shell, browser, computer use), device reach (phone app via `qukaizen-gateway`, tailnet), per-team networks. Working assumption: resident 1B lives on Buddy's own system (Ollama on Linux), QueueLLM stays on the lab Mac over a credentialed, authenticated edge. | nothing in S1 |
+| O9 | S2 scope: Buddy's own system (container/VM/box) for hands (shell, browser, computer use), device reach (phone app via `qukaizen-gateway`, tailnet), per-team networks; the registry write path (Buddy proposes a tool entry with schema, source pin and policy class; the operator clears it at the desk; then it exists to the crew); the team engine (paperagents' own daemon vs nanobot vs Paperclip: the 2026-09-28 "no dependency" decision stands until the S2 vision pass rules); 3D.EVAL gains a paperagents team as a system under test. Working assumption: resident 1B lives on Buddy's own system (Ollama on Linux), QueueLLM stays on the lab Mac over a credentialed, authenticated edge. | nothing in S1 |
 | O8 | Is `qukaizen-buddy` the seed of `qukaizen-harness` (page: "five modules, zero product imports"), or does Buddy later consume a separate harness repo? Working assumption: separate repo, extracted when the TEAM crew needs the same floor. | nothing in S1 |
 
 ## Notes
