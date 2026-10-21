@@ -144,3 +144,9 @@ Identity now has four outcomes instead of a guess: **ours / foreign / unknown / 
 Live checks (real Studio, `lsof` hidden from PATH): `start` with lsof, then `status` -> running, `start` -> already_running, `stop` -> was_running true, 0 listeners, pid file removed. A foreign `http.server` on 4111 without lsof: `status_unknown`, `stop` -> `cannot_verify_identity`, the server survived. `http.server` started from inside `integrations/mastra-studio`: `port_in_use`, `stop` -> was_running false, survived.
 
 Tests: test_mastra_qa.py + test_mastra_bridge.py (91) + test_researcher_tool.py: 239 passed; node qa-run-once: 6/6; wider portal/tier/CSRF/health/experiments/reset suites: only the known base failures (test_build_tab x4, test_models_api, opencode x2, token_compliance, test_cli_verbs doctor-healthy, test_cli_status T34). D1 browser leg remains INCONCLUSIVE (owner pcap).
+
+---
+## Re-test 2 fix 2026-10-21 (R2-1, R2-2)
+- R2-1: `arailctl mastra stop` exits 1 whenever the result is not ok (e.g. `cannot_verify_identity`); exit 0 for a real stop and for `was_running:false`. Checked the other verbs: `start` and `run-once` already exit 1 on errors, `status`/`open`/`install` were correct.
+- R2-2: `reset.sh` no longer aborts under `set -euo pipefail` when lsof is absent (`command -v lsof` guard, empty cwd = unknown). Behaviour conforms to the QA test: a live leader with Studio's argv shape and unknown cwd is proven by shape + recorded pid==pgid, stopped, and the wipe proceeds (rc 0). If the recorded leader looks live but its command line cannot be read at all, reset refuses (option a): prints "Studio (pid N) could not be verified ... Stop it first with ./arailctl mastra stop", returns nonzero, signals nothing and wipes nothing (own test with `ps` and `lsof` hidden).
+- Results: 784 passed, 10 failed = the known base failures only; node qa test 6/6; no leftover processes or listeners; uv.lock untouched. D1 browser leg remains INCONCLUSIVE (owner pcap).

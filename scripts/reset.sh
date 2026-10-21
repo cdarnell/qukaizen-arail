@@ -472,8 +472,20 @@ reset_data() {
                 studio_ok="true"
             else
                 studio_cmd="$(ps -p "$studio_pid" -o command= 2>/dev/null || true)"
-                studio_cwd="$(lsof -a -p "$studio_pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1)"
+                # lsof may be absent (set -e/pipefail would abort the whole reset): an unknown cwd is
+                # "unknown", never a mismatch and never a reason to abort silently.
+                studio_cwd=""
+                if command -v lsof >/dev/null 2>&1; then
+                    studio_cwd="$(lsof -a -p "$studio_pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1 || true)"
+                fi
                 studio_root="$(cd -P "$REPO_ROOT/integrations/mastra-studio" 2>/dev/null && pwd -P || true)"
+                if [[ -z "$studio_cmd" ]]; then
+                    # The recorded leader looks live but cannot be identified: never signal on a guess,
+                    # and never wipe the database under a Studio that may still be running.
+                    error "Studio (pid $studio_pid) could not be verified, so it was not stopped and nothing was wiped."
+                    error "Stop it first with ./arailctl mastra stop, then re-run reset."
+                    return 1
+                fi
                 # argv shape must match; the cwd must be under THIS repo's Studio dir (anchored prefix),
                 # or be unknown (no lsof) in which case shape + recorded pid==pgid is the proof.
                 if [[ "$studio_cmd" =~ ^([^[:space:]]*/)?(npm|npx|node)[[:space:]]([^[:space:]]+[[:space:]])*mastra[[:space:]]dev([[:space:]]|$) ]] \

@@ -27,8 +27,9 @@ def _main(argv: list) -> int:
         print(json.dumps(r))
         return 0 if r.get("ok") else 1
     if op == "stop":
-        print(json.dumps(mb.stop_studio()))
-        return 0
+        r = mb.stop_studio()
+        print(json.dumps(r))
+        return 0 if r.get("ok") else 1      # was_running:false is still ok; an unverified Studio is not
     if op == "status":
         print(json.dumps(mb.resolve_page_state()))
         return 0

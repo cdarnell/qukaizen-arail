@@ -714,3 +714,43 @@ def test_reset_sh_cwd_match_is_anchored():
     sh = (mb.REPO_ROOT / "scripts" / "reset.sh").read_text()
     assert '*/integrations/mastra-studio*' not in sh
     assert '"$studio_cwd" == "$studio_root"/*' in sh
+
+
+def test_cli_exit_codes_follow_result(monkeypatch, capsys):
+    from arail import mastra_cli
+    for res, want in [({"ok": True, "was_running": False}, 0), ({"ok": True, "was_running": True}, 0),
+                      ({"ok": False, "error": "cannot_verify_identity"}, 1)]:
+        monkeypatch.setattr(mb, "stop_studio", lambda r=res: r)
+        assert mastra_cli.main(["stop"]) == want
+    monkeypatch.setattr(mb, "start_studio", lambda: {"ok": False, "error": "port_in_use", "status": 409})
+    assert mastra_cli.main(["start"]) == 1
+    monkeypatch.setattr(mb, "run_probe", lambda *a: {"error": "researcher_busy"})
+    assert mastra_cli.main(["run-once", "g"]) == 1
+
+
+def test_reset_refuses_to_wipe_when_live_leader_cannot_be_identified(tmp_path):
+    import shutil, subprocess, time
+    fake = tmp_path / "fakerepo"
+    (fake / "scripts").mkdir(parents=True)
+    (fake / "integrations" / "mastra-studio").mkdir(parents=True)
+    (fake / "lab" / "data" / "mastra").mkdir(parents=True)
+    (fake / "lab" / "data" / "mastra" / "mastra.db").write_text("db")
+    shutil.copy2(mb.REPO_ROOT / "scripts" / "reset.sh", fake / "scripts" / "reset.sh")
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    for t in ("sed", "head", "rm", "du", "find", "cat", "date", "mkdir", "ls", "awk", "grep", "tr", "uname",
+              "sleep", "wc", "sort", "cut", "dirname", "basename", "stat", "pgrep", "kill"):   # no ps, no lsof
+        w = shutil.which(t, path="/usr/bin:/bin:/usr/sbin:/sbin")
+        if w:
+            (bindir / t).symlink_to(w)
+    victim = subprocess.Popen(["/bin/sleep", "120"], start_new_session=True)
+    try:
+        (fake / "lab" / "data" / "mastra" / "studio.pid").write_text(f"{victim.pid} {victim.pid}")
+        time.sleep(0.2)
+        r = subprocess.run(["/bin/bash", "scripts/reset.sh", "data", "--yes"], cwd=fake, capture_output=True,
+                           text=True, timeout=60, env={"PATH": str(bindir), "HOME": str(tmp_path)})
+        assert r.returncode != 0 and "mastra stop" in (r.stdout + r.stderr)
+        assert victim.poll() is None                                   # nothing signalled on a guess
+        assert (fake / "lab" / "data" / "mastra" / "mastra.db").exists()   # nothing wiped
+    finally:
+        victim.kill(); victim.wait()
