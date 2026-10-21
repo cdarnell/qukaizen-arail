@@ -169,31 +169,8 @@ _BOOT_CANDIDATES_CACHE: Dict[str, Any] = {"ts": 0.0, "payload": None}
 _BOOT_CANDIDATES_TTL = 30.0
 
 
-def _fit_primary(model_id: str) -> Dict[str, Any]:
-    from arail import model_specs as _specs
-    from arail.registry.ceiling import PRIMARY_CEILING_B
-    params, _src = _specs.resolve_params_b(model_id)
-    if params is None:
-        return {"verdict": "unknown", "detail": "parameter count unknown"}
-    if params < PRIMARY_CEILING_B:
-        return {"verdict": "fits", "detail": f"~{params:g}B"}
-    return {"verdict": "too_big",
-            "detail": f"~{params:g}B — at/over the {PRIMARY_CEILING_B:g}B "
-                      "primary ceiling"}
-
-
-def _fit_secondary(model_id: str, model_path: Optional[str]) -> Dict[str, Any]:
-    from arail import hardware as _hw
-    from arail import model_specs as _specs
-    cap = _hw.secondary_model_cap_b()
-    params, _src = _specs.resolve_params_b(model_id, model_path)
-    if params is None:
-        return {"verdict": "unknown", "detail": "parameter count unknown"}
-    if params <= cap:
-        return {"verdict": "fits", "detail": f"~{params:g}B (cap ~{cap:g}B)"}
-    return {"verdict": "too_big",
-            "detail": f"~{params:g}B — over the ~{cap:g}B this machine's "
-                      "discovered RAM can hold stably"}
+from arail.model_resolve import fit_primary as _fit_primary  # noqa: E402
+from arail.model_resolve import fit_secondary as _fit_secondary  # noqa: E402
 
 
 def _tier1_resident_model_differs(new_default_b: Optional[str]) -> bool:
@@ -285,66 +262,14 @@ def _boot_settlement() -> Dict[str, Any]:
             "default_a": a, "default_b": b}
 
 
-_TIER_ORDER = {"recommended": 0, "flagship": 1, "optional": 2}
-
-
 def _slot_a_candidates(airgapped: bool) -> List[Dict[str, Any]]:
-    from arail.chat import _ollama_installed_models, load_catalog
-    rows: List[Dict[str, Any]] = []
-    seen: set = set()
-    for m in _ollama_installed_models():
-        rid = m["id"]
-        fit = _fit_primary(rid)
-        rows.append({"id": rid, "name": rid, "source": "ollama",
-                     "size_gb": m.get("size_gb"), "present": True,
-                     "fit": fit, "install_command": None, "hf_url": None})
-        seen.add(rid)
-        seen.add(rid.split(":", 1)[0])
-    catalog = sorted(
-        (e for e in load_catalog() if e.source == "ollama"),
-        key=lambda e: _TIER_ORDER.get(e.tier, 3))
-    for e in catalog:
-        if e.id in seen or e.id.split(":", 1)[0] in seen:
-            continue
-        fit = _fit_primary(e.id)
-        rows.append({"id": e.id, "name": e.name, "source": "ollama",
-                     "size_gb": e.size_gb, "present": False, "fit": fit,
-                     "install_command": e.install or None, "hf_url": None})
-        seen.add(e.id)
-    return rows
+    from arail.model_resolve import slot_a_candidates
+    return slot_a_candidates(airgapped)
 
 
 def _slot_b_candidates(airgapped: bool) -> List[Dict[str, Any]]:
-    from arail.chat import _mlx_dir_installed_models, load_catalog
-    models_dir = os.getenv("ARAIL_MODELS_DIR", "lab/models")
-    rows: List[Dict[str, Any]] = []
-    seen: set = set()
-    for m in _mlx_dir_installed_models():
-        rid = m["id"]
-        path = os.path.join(models_dir, rid)
-        fit = _fit_secondary(rid, path)
-        rows.append({"id": rid, "name": rid, "source": "mlx",
-                     "size_gb": m.get("size_gb"), "present": True,
-                     "fit": fit, "install_command": None, "hf_url": None})
-        seen.add(rid)
-    catalog = sorted(
-        (e for e in load_catalog()
-         if e.source in ("mlx", "hf") and not e.id.startswith("__")),
-        key=lambda e: _TIER_ORDER.get(e.tier, 3))
-    for e in catalog:
-        if e.id in seen:
-            continue
-        path = os.path.join(models_dir, e.id)
-        present = os.path.isdir(path)
-        fit = _fit_secondary(e.id, path if present else None)
-        hf_url = None if (present or airgapped) else (
-            f"https://huggingface.co/{e.hf_repo}" if e.hf_repo else None)
-        rows.append({"id": e.id, "name": e.name, "source": e.source,
-                     "size_gb": e.size_gb, "present": present, "fit": fit,
-                     "install_command": None if present else (e.install or None),
-                     "hf_url": hf_url})
-        seen.add(e.id)
-    return rows
+    from arail.model_resolve import slot_b_candidates
+    return slot_b_candidates(airgapped)
 
 
 def _boot_candidates(airgapped: bool, *, refresh: bool = False) -> Dict[str, Any]:
