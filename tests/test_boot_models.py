@@ -172,3 +172,26 @@ def test_portal_starts_ready_with_ollama_down(booted, monkeypatch):  # integrati
     from fastapi.testclient import TestClient
     with TestClient(app_mod.app) as client:
         assert client.get("/api/ready").json()["ready"] is True
+
+
+# ── round 2: review BLOCK 1 / ASK 2 ────────────────────────────────
+
+_MANGLED = ("version: 2\npins:\n  a: llama-ai-eng\n  b: none\n"
+            "resolved: [unclosed\n")
+
+
+def test_corrupt_yaml_is_never_overwritten_by_boot(booted):  # review B1
+    booted.write_text(_MANGLED)
+    out = mr.resolve_and_apply()
+    assert booted.read_text() == _MANGLED          # bytes untouched, pins survive
+    assert out["saved"] is False and out["file_ok"] is False
+    note = [d for d in out["degraded"] if d["kind"] == "cache_unsaved"][0]
+    assert "unreadable" in note["detail"] and "left untouched" in note["detail"]
+    assert "couldn't save" not in note["detail"]
+
+
+def test_unwritable_but_readable_yaml_keeps_the_save_wording(booted, monkeypatch):
+    monkeypatch.setattr(os, "replace", lambda *a, **k: (_ for _ in ()).throw(OSError("ro")))
+    out = mr.resolve_and_apply()
+    note = [d for d in out["degraded"] if d["kind"] == "cache_unsaved"][0]
+    assert "couldn't save" in note["detail"]

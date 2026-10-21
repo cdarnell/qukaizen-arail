@@ -600,11 +600,17 @@ def resolve_and_apply(*, skip_b: Optional[str] = None,
             {k: v for k, v in out.items() if k not in ("saved", "migrated")})
         out["migrated"] = migrated
         out["file_ok"] = bool(data["ok"])
-        if not out["saved"] or not out["file_ok"]:
+        if not out["file_ok"]:
             out["degraded"].append({
                 "slot": "a", "kind": "cache_unsaved",
-                "detail": "couldn't read or save the model cache "
-                          "(model_defaults.yaml) -- resolved in memory only"})
+                "detail": "model_defaults.yaml is unreadable (fix or delete it) "
+                          "-- left untouched, your pins are not applied this "
+                          "boot; resolved in memory only"})
+        elif not out["saved"]:
+            out["degraded"].append({
+                "slot": "a", "kind": "cache_unsaved",
+                "detail": "couldn't save the model cache (model_defaults.yaml "
+                          "not writable) -- resolved in memory only"})
         md.stamp_env(out)
         try:
             from arail.registry import get_registry

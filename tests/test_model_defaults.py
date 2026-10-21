@@ -451,3 +451,22 @@ def test_cli_json_v2_shape(tmp_path):
     assert {"pins", "resolved"} <= set(payload)
     assert "settled" not in payload
     assert payload["resolved"]["a"]["model"] == "llama-ai-eng:latest"
+
+
+# ── round 2: review BLOCK 1 (write_pin on an unreadable file) ──────
+
+def test_write_pin_backs_up_an_unreadable_file_before_replacing_it(tmp_path):
+    f = tmp_path / "model_defaults.yaml"
+    mangled = "pins:\n  b: none\nresolved: [unclosed\n"
+    f.write_text(mangled)
+    model_defaults.write_pin("a", "llama-ai-eng", path=f)
+    bak = tmp_path / ".model_defaults.corrupt.bak"
+    assert bak.read_text() == mangled
+    assert model_defaults.read(f)["pins"]["a"] == "llama-ai-eng"
+
+
+def test_write_cache_refuses_an_unreadable_file(tmp_path):
+    f = tmp_path / "model_defaults.yaml"
+    f.write_text("pins: [oops\n")
+    assert model_defaults.write_cache({"a": {"model": "x"}}, path=f) is False
+    assert f.read_text() == "pins: [oops\n"

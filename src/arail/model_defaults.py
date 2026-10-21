@@ -25,6 +25,7 @@ import logging
 import os
 import tempfile
 import threading
+import time
 import warnings
 from pathlib import Path
 from typing import Any
@@ -217,14 +218,37 @@ def _atomic_write(p: Path, content: str) -> None:
         raise
 
 
+def _backup_unreadable(p: Path) -> "Path | None":
+    """Copy an unreadable file to ``.model_defaults.corrupt.bak`` beside it
+    (the operator's pins may be in there). An existing backup with
+    different bytes is kept and the new copy gets a timestamp suffix."""
+    try:
+        data = p.read_bytes()
+        bak = p.with_name(".model_defaults.corrupt.bak")
+        if bak.exists() and bak.read_bytes() != data:
+            bak = p.with_name(f".model_defaults.corrupt.{int(time.time())}.bak")
+        if not bak.exists():
+            bak.write_bytes(data)
+        return bak
+    except OSError as e:
+        _log.warning("model_defaults: couldn't back up %s: %s", p, e)
+        return None
+
+
 def _write_cache_unlocked(resolution: dict[str, Any], path: "Path | None" = None) -> bool:
     """Replace the ``resolved`` block (atomic); pins are re-emitted as read.
     *resolution* is ``BootResolution.to_dict()`` (plus optional ``warm``).
     Returns False (after one warning) when the file can't be written —
-    a read-only checkout must never block boot (FM10)."""
+    a read-only checkout must never block boot (FM10). An existing but
+    unreadable file is NEVER overwritten (its pins are the operator's
+    crash workaround): the cache is simply not saved."""
     p = _path(path)
     cur = read(p)
-    pins = cur["pins"] if cur["ok"] else {"a": None, "b": None}
+    if cur["exists"] and not cur["ok"]:
+        _log.warning("model_defaults: %s is unreadable -- cache not saved, "
+                     "file left untouched", p)
+        return False
+    pins = cur["pins"]
     resolved = {k: v for k, v in resolution.items() if k != "degraded"}
     resolved.setdefault("warm", (cur["resolved"].get("warm") or {}))
     try:
@@ -264,6 +288,8 @@ def _write_pin_unlocked(slot: str, value: "str | None", path: "Path | None" = No
         raise ValueError("slot a cannot be pinned to 'none'")
     p = _path(path)
     cur = read(p)
+    if cur["exists"] and not cur["ok"]:
+        _backup_unreadable(p)       # an explicit pin may replace it, never silently
     pins = dict(cur["pins"]) if cur["ok"] else {"a": None, "b": None}
     pins[slot] = _norm_pin(slot, value)
     notes = dict(cur["pin_notes"])

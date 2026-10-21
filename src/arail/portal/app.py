@@ -6863,9 +6863,6 @@ async def _boot_models() -> None:
             activity_log.emit(
                 "registry", "model_defaults.yaml upgraded to v2 (old copy kept "
                 "as .model_defaults.v1.bak).", "info")
-        if not res.get("saved"):
-            activity_log.emit("registry", "Couldn't save the model cache "
-                              "(model_defaults.yaml not writable).", "warn")
         for d in res.get("degraded") or []:
             activity_log.emit("registry", d.get("detail") or d.get("kind"), "warn")
     except Exception as e:  # noqa: BLE001
