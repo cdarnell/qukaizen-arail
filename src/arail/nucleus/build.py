@@ -673,8 +673,14 @@ def run(argv: Sequence[str]) -> int:
     # those are reported but non-fatal at the API level, so this function
     # is the one that turns report.has_red into a refusal for that case.
     preflight_models = _resolve_preflight_models(domain)
+    # Stub builds have zero real-model dependency (ARCHITECTURE.md §7), so
+    # the deep-runtime / mlx_lm probes are skipped. Only reachable when
+    # _is_stub() (non-stub is refused above); real builds keep every probe.
+    probes = {k: v for k, v in preflight_mod._default_capability_probes().items()
+              if k not in ("deep_runtime_importable", "mlx_lm_version")}
     report = preflight_mod.run_preflight(domain, memory_budget_gb=parsed["memory_budget_gb"],
                                          runtime_streams=(domain.runtime == "queuellm"),
+                                         capability_probes=probes,
                                          **preflight_models)
     if report.has_red:
         bad = [r.name for r in report.rows if r.status == "red"]

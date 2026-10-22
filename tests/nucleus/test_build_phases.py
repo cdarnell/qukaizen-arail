@@ -252,3 +252,17 @@ def test_score_open_lc_refuses_when_judge_identity_matches_teacher(tmp_path, mon
 
     # Refused BEFORE any generation -- no provider output on disk.
     assert not any((tmp_path / "fused").rglob("*"))
+
+
+def test_default_preflight_still_flags_missing_capabilities(monkeypatch):
+    """Regression: the stub skip lives in build.run only; the default
+    (real-build) probes still go red when the deep runtime / mlx_lm are absent."""
+    from arail.nucleus import preflight as preflight_mod
+    from arail.nucleus.runtime_names import PY_MODULE
+
+    monkeypatch.delenv("ARAIL_NUCLEUS_STUB", raising=False)
+    monkeypatch.setitem(sys.modules, PY_MODULE, None)  # import -> ImportError
+    monkeypatch.setitem(sys.modules, "mlx_lm", None)
+    probes = preflight_mod._default_capability_probes()
+    assert probes["deep_runtime_importable"]().status == "red"
+    assert probes["mlx_lm_version"]().status == "red"
