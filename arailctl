@@ -838,6 +838,29 @@ case "$cmd" in
     status)  exec bash "$REPO_ROOT/scripts/status.sh" "$@" ;;
     logs)
         LOG_FILE="$REPO_ROOT/lab/data/activity.jsonl"
+        if [[ "${1:-}" == "--since" ]]; then
+            # Non-streaming window for Buddy: events from the last 2m|10m|1h, then exit.
+            [[ -f "$LOG_FILE" ]] || die "No activity log yet — start the lab first: ./arailctl start"
+            case "${2:-}" in 2m) _win=120 ;; 10m) _win=600 ;; 1h) _win=3600 ;;
+                *) die "logs --since takes 2m, 10m or 1h" ;; esac
+            python3 -I - "$LOG_FILE" "$_win" <<'PYSINCE'
+import sys, json
+from datetime import datetime, timezone
+path, win = sys.argv[1], int(sys.argv[2])
+now = datetime.now(timezone.utc)
+for line in open(path, encoding="utf-8", errors="replace"):
+    try:
+        e = json.loads(line)
+        ts = datetime.fromisoformat(e["ts"])
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        if (now - ts).total_seconds() <= win:
+            print(f"{e['ts'][:19].replace('T',' ')}  {str(e.get('source','?')):<12}  {e.get('message','')}")
+    except (ValueError, KeyError, TypeError):
+        pass
+PYSINCE
+            exit 0
+        fi
         COMP="${1:-all}"; shift || true
         LINES="${1:-50}"; shift || true
         if [[ ! -f "$LOG_FILE" ]]; then
@@ -936,6 +959,17 @@ LOGSEOF
                 die "Unknown component: $COMP — run ./arailctl logs help for options"
                 ;;
         esac
+        ;;
+    drift)
+        # Buddy's vocabulary: spec-vs-actual gate. Alias of `db drift`.
+        exec "$REPO_ROOT/arailctl" db drift "$@"
+        ;;
+    rule)
+        # The `y` a person presses: ./arailctl rule "<rendered command>" allow|deny
+        [[ $# -eq 2 && ( "$2" == "allow" || "$2" == "deny" ) ]] \
+            || die 'usage: ./arailctl rule "<rendered command>" allow|deny'
+        [[ -x "$REPO_ROOT/.venv/bin/python" ]] || die "missing .venv — run ./arailctl setup first"
+        exec "$REPO_ROOT/.venv/bin/python" -m arail.ops.buddy_floor rule "$1" "$2"
         ;;
     doctor)
         # Exit-code contract (ARCHITECTURE.md §12/§13): 0 healthy · 1 broken
