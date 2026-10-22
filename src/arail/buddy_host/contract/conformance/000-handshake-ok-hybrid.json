@@ -1,0 +1,64 @@
+{
+  "name": "handshake-ok-hybrid",
+  "method": "handshake",
+  "setup": {},
+  "request": {
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer $CREDENTIAL",
+      "X-Buddy-Contract": "sha256:$CONTRACT_SHA256"
+    },
+    "body": {
+      "v": 1,
+      "contract_sha256": "$CONTRACT_SHA256",
+      "buddy": {
+        "version": "0.1.0",
+        "nanobot_pin": "v0.3.5",
+        "instance_id": "0123456789abcdef",
+        "started_at": "$NOW-30s"
+      },
+      "world": {
+        "slug": "qa-practice",
+        "world_sha256": "abababababababababababababababababababababababababababababababab"
+      }
+    }
+  },
+  "expect": {
+    "status": 200,
+    "error_code": null,
+    "body_subset": {
+      "v": 1,
+      "contract_sha256": "$CONTRACT_SHA256",
+      "lab": {
+        "mode": "hybrid",
+        "tier": "maximus",
+        "root": true
+      },
+      "consent": {
+        "api.telegram.org": true
+      },
+      "hold": {
+        "held": false,
+        "readable": true
+      },
+      "brain": {
+        "available": true,
+        "local": true,
+        "model_id": "llama-ai-eng",
+        "backend": "ollama_native",
+        "structured_output": true,
+        "attribution": "Built with Llama",
+        "reason": null
+      },
+      "budget": {
+        "turns_used": 0,
+        "turns_cap": 300,
+        "tokens_used": 0,
+        "tokens_cap": 600000
+      },
+      "research": {
+        "status": "running"
+      }
+    }
+  }
+}

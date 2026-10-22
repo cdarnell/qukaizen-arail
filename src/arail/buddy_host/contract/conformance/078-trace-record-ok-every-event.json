@@ -1,0 +1,231 @@
+{
+  "name": "trace-record-ok-every-event",
+  "method": "trace.record",
+  "setup": {},
+  "request": {
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer $CREDENTIAL",
+      "X-Buddy-Contract": "sha256:$CONTRACT_SHA256"
+    },
+    "body": {
+      "v": 1,
+      "records": [
+        {
+          "event": "gate_change",
+          "trace_id": "0123456789abcdef",
+          "client_ts": "$NOW-1s",
+          "channel": null,
+          "identity": null,
+          "outcome": null,
+          "reason": "open",
+          "attrs": {
+            "state": "open"
+          }
+        },
+        {
+          "event": "inbound_refused",
+          "trace_id": "0123456789abcdef",
+          "client_ts": "$NOW-1s",
+          "channel": "telegram",
+          "identity": {
+            "pseudonym": "p_0123456789",
+            "role": "talker"
+          },
+          "outcome": null,
+          "reason": "rate_limited",
+          "attrs": {
+            "count": 3
+          }
+        },
+        {
+          "event": "unknown_dropped",
+          "trace_id": "0123456789abcdef",
+          "client_ts": "$NOW-1s",
+          "channel": "telegram",
+          "identity": {
+            "pseudonym": null,
+            "role": "unknown"
+          },
+          "outcome": null,
+          "reason": null,
+          "attrs": {
+            "count": 4,
+            "distinct": 2,
+            "window_s": 60
+          }
+        },
+        {
+          "event": "reply_sent",
+          "trace_id": "0123456789abcdef",
+          "client_ts": "$NOW-1s",
+          "channel": "telegram",
+          "identity": {
+            "pseudonym": "p_0123456789",
+            "role": "talker"
+          },
+          "outcome": null,
+          "reason": "answer",
+          "attrs": {
+            "e2e_ms": 5200,
+            "chips": 1,
+            "chars": 240
+          }
+        },
+        {
+          "event": "citation_check",
+          "trace_id": "0123456789abcdef",
+          "client_ts": "$NOW-1s",
+          "channel": "telegram",
+          "identity": {
+            "pseudonym": "p_0123456789",
+            "role": "talker"
+          },
+          "outcome": null,
+          "reason": "ok",
+          "attrs": {
+            "offered": 6,
+            "cited": 1,
+            "valid": 1,
+            "dropped": 0,
+            "valid_slugs": [
+              "pre-existing-failure"
+            ]
+          }
+        },
+        {
+          "event": "proposal_created",
+          "trace_id": "0123456789abcdef",
+          "client_ts": "$NOW-1s",
+          "channel": "telegram",
+          "identity": {
+            "pseudonym": "p_3f9a1c2e7b",
+            "role": "confirmer"
+          },
+          "outcome": null,
+          "reason": "rule",
+          "attrs": {
+            "proposal_id": "7f3a9c2e",
+            "action": "pause_research",
+            "expires_at": "2026-10-20T14:12:00Z"
+          }
+        },
+        {
+          "event": "proposal_suppressed",
+          "trace_id": "0123456789abcdef",
+          "client_ts": "$NOW-1s",
+          "channel": "telegram",
+          "identity": {
+            "pseudonym": "p_0123456789",
+            "role": "talker"
+          },
+          "outcome": null,
+          "reason": "requester_not_confirmer",
+          "attrs": {
+            "action": "pause_research"
+          }
+        },
+        {
+          "event": "confirm_attempt",
+          "trace_id": "0123456789abcdef",
+          "client_ts": "$NOW-1s",
+          "channel": "telegram",
+          "identity": {
+            "pseudonym": "p_3f9a1c2e7b",
+            "role": "confirmer"
+          },
+          "outcome": null,
+          "reason": "bad_nonce",
+          "attrs": {
+            "proposal_id": "7f3a9c2e",
+            "via": "typed",
+            "attempts": 1
+          }
+        },
+        {
+          "event": "action_result",
+          "trace_id": "0123456789abcdef",
+          "client_ts": "$NOW-1s",
+          "channel": "telegram",
+          "identity": {
+            "pseudonym": "p_3f9a1c2e7b",
+            "role": "confirmer"
+          },
+          "outcome": null,
+          "reason": "paused",
+          "attrs": {
+            "proposal_id": "7f3a9c2e",
+            "action": "pause_research"
+          }
+        },
+        {
+          "event": "deny",
+          "trace_id": "0123456789abcdef",
+          "client_ts": "$NOW-1s",
+          "channel": "telegram",
+          "identity": {
+            "pseudonym": "p_3f9a1c2e7b",
+            "role": "confirmer"
+          },
+          "outcome": null,
+          "reason": null,
+          "attrs": {
+            "proposal_id": "7f3a9c2e"
+          }
+        },
+        {
+          "event": "stop",
+          "trace_id": "0123456789abcdef",
+          "client_ts": "$NOW-1s",
+          "channel": "telegram",
+          "identity": {
+            "pseudonym": "p_0123456789",
+            "role": "talker"
+          },
+          "outcome": null,
+          "reason": "lab_held",
+          "attrs": {}
+        },
+        {
+          "event": "outbound_suppressed",
+          "trace_id": "0123456789abcdef",
+          "client_ts": "$NOW-1s",
+          "channel": null,
+          "identity": null,
+          "outcome": null,
+          "reason": "gate_closed",
+          "attrs": {
+            "count": 1
+          }
+        },
+        {
+          "event": "self_check_failed",
+          "trace_id": "0123456789abcdef",
+          "client_ts": "$NOW-1s",
+          "channel": null,
+          "identity": null,
+          "outcome": null,
+          "reason": "r2",
+          "attrs": {}
+        },
+        {
+          "event": "config_changed",
+          "trace_id": "0123456789abcdef",
+          "client_ts": "$NOW-1s",
+          "channel": null,
+          "identity": null,
+          "outcome": null,
+          "reason": null,
+          "attrs": {}
+        }
+      ]
+    }
+  },
+  "expect": {
+    "status": 202,
+    "error_code": null,
+    "body_subset": {
+      "accepted": 14
+    }
+  }
+}

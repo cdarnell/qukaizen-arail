@@ -6,8 +6,8 @@ import json
 import threading
 import time
 from collections import deque
-from dataclasses import asdict, dataclass, field
-from typing import Any, Deque, Dict, List, Optional
+from dataclasses import asdict, dataclass, field, replace
+from typing import Any, Callable, Deque, Dict, List, Optional
 
 TASK_PROFILES = ("fast", "reasoning", "long_context", "tool_use", "build")
 
@@ -160,6 +160,11 @@ def _is_cloud_entry(entry: ModelEntry) -> bool:
     return False
 
 
+# Public name for callers outside this package (the Buddy edge refuses a cloud
+# brain). Same function; the underscore name stays for the existing callers.
+is_cloud_entry = _is_cloud_entry
+
+
 class ModelRegistry:
     """Process-wide registry. Use ``get_registry()``; do not construct."""
 
@@ -298,6 +303,39 @@ class ModelRegistry:
                        f"Model '{entry.display_name}' recovered.",
                        {"entry_id": entry_id, "kind": "recovery"})
 
+    def recheck_unusable(self, profile: str, tab: Optional[str] = None, *,
+                         min_age_s: float,
+                         only_if: Optional[Callable[[ModelEntry], bool]] = None) -> bool:
+        """Re-probe the entry bound to *profile* when its last verdict says it is down.
+
+        ``report_failure`` marks an entry unhealthy and nothing but a probe (the opt-in
+        health loop, a desk re-probe) clears it, so a caller that only asks
+        (``peek``) would see the outage as permanent. A caller on a timer, like the
+        Buddy edge's handshake, calls this first: an ``unhealthy`` or ``not_installed``
+        entry whose verdict is at least *min_age_s* old is probed once (the verdict's
+        clock is reset before the probe, so concurrent callers do not pile on) and the
+        result stored. *only_if* narrows which entries may be probed. Returns True when
+        a probe ran."""
+        self._ensure_loaded()
+        with self._lock:
+            entry = self._bound_entry(profile, tab)
+            if entry is None or not entry.enabled or entry.health.status not in ("unhealthy", "not_installed"):
+                return False
+            if only_if is not None and not only_if(entry):
+                return False
+            if time.time() - entry.health.checked_at < min_age_s:
+                return False
+            entry.health = replace(entry.health, checked_at=time.time())
+        from arail.registry.health import probe_entry
+        state = probe_entry(entry)
+        with self._lock:
+            was = entry.health.status
+            entry.health = state
+        if state.usable and was == "unhealthy":
+            self._emit("info", f"Model '{entry.display_name}' recovered.",
+                       {"entry_id": entry.id, "kind": "recovery"})
+        return True
+
     def record_fallback(self, event: FallbackEvent) -> None:
         with self._lock:
             self.recent_events.append(event)
@@ -357,6 +395,29 @@ class ModelRegistry:
         if eid and eid in self.entries:
             return self.entries[eid]
         return self._builtin_binding(profile)
+
+    def peek(self, profile: str, tab: Optional[str] = None) -> Optional[ModelEntry]:
+        """The entry ``resolve()`` would pick, or None -- recording nothing.
+
+        ``resolve()`` writes a fallback event (and an activity-log line) every time
+        the bound entry is unusable. A caller that asks on a timer, like the Buddy
+        edge's 20-second handshake, would turn one down model into thousands of
+        warnings; it asks with ``peek`` and lets the real call path report."""
+        self._ensure_loaded()
+        if profile not in TASK_PROFILES:
+            raise ValueError(f"unknown task profile '{profile}'")
+        with self._lock:
+            requested = self._bound_entry(profile, tab)
+            if requested is None:
+                return None
+            if _gate_reason(requested) is None:
+                return requested
+            for fb_profile in FALLBACK_CHAIN.get(profile, []):
+                candidate = self._bound_entry(fb_profile, tab)
+                if candidate is not None and candidate.id != requested.id \
+                        and _gate_reason(candidate) is None:
+                    return candidate
+            return None
 
     def resolve(self, profile: str, tab: Optional[str] = None, *,
                 allow_fallback: bool = True) -> Resolution:

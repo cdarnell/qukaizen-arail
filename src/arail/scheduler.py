@@ -222,6 +222,12 @@ _halt_lock = threading.Lock()
 _halted = False
 _halt_loaded = False
 _halt_changed_at: str | None = None
+# True when halt.json existed at load but could not be read as a hold record
+# (unreadable, unparseable, or not a JSON object). ARAIL's own behaviour is
+# unchanged -- such a file still loads as "not held" (debt D10) -- but a caller
+# that must not guess, like the Buddy edge, can ask. Cleared by the next
+# successful write of the file (a hold or a resume).
+_halt_load_failed = False
 
 
 def _halt_path():
@@ -230,7 +236,7 @@ def _halt_path():
 
 
 def _load_halt_locked() -> None:
-    global _halted, _halt_loaded, _halt_changed_at
+    global _halted, _halt_loaded, _halt_changed_at, _halt_load_failed
     if _halt_loaded:
         return
     _halt_loaded = True
@@ -240,14 +246,17 @@ def _load_halt_locked() -> None:
     try:
         data = json.loads(path.read_text())
     except (OSError, ValueError):
+        _halt_load_failed = True
         return
     if isinstance(data, dict):
         _halted = bool(data.get("halted", False))
         _halt_changed_at = data.get("changed_at")
+    else:
+        _halt_load_failed = True
 
 
 def _persist_halt_locked() -> None:
-    global _halt_changed_at
+    global _halt_changed_at, _halt_load_failed
     path = _halt_path()
     try:
         if not _halted:
@@ -260,6 +269,7 @@ def _persist_halt_locked() -> None:
                 "halted": True,
                 "changed_at": _halt_changed_at,
             }, indent=2))
+        _halt_load_failed = False  # a good file (or no file) now stands on disk
     except OSError:
         pass  # best-effort persistence; in-memory state still applies
 
@@ -268,6 +278,14 @@ def jobs_halted() -> bool:
     with _halt_lock:
         _load_halt_locked()
         return _halted
+
+
+def halt_load_failed() -> bool:
+    """True when halt.json was present but unreadable at load, until the next
+    successful write. See ``_halt_load_failed``."""
+    with _halt_lock:
+        _load_halt_locked()
+        return _halt_load_failed
 
 
 def halt_changed_at() -> str | None:
@@ -297,11 +315,12 @@ def resume_all_jobs() -> None:
 
 
 def _reset_halt_for_tests() -> None:
-    global _halted, _halt_loaded, _halt_changed_at
+    global _halted, _halt_loaded, _halt_changed_at, _halt_load_failed
     with _halt_lock:
         _halted = False
         _halt_loaded = True
         _halt_changed_at = None
+        _halt_load_failed = False
         _halt_path().unlink(missing_ok=True)
 
 

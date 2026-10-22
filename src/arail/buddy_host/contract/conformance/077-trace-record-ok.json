@@ -1,0 +1,81 @@
+{
+  "name": "trace-record-ok",
+  "method": "trace.record",
+  "setup": {},
+  "request": {
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer $CREDENTIAL",
+      "X-Buddy-Contract": "sha256:$CONTRACT_SHA256"
+    },
+    "body": {
+      "v": 1,
+      "records": [
+        {
+          "event": "startup",
+          "trace_id": "0123456789abcdef",
+          "client_ts": "$NOW-1s",
+          "channel": null,
+          "identity": {
+            "pseudonym": null,
+            "role": "system"
+          },
+          "outcome": null,
+          "reason": null,
+          "attrs": {
+            "buddy_version": "0.1.0",
+            "nanobot_pin": "v0.3.5",
+            "world_sha8": "abababab",
+            "contract_sha8": "12345678",
+            "persona_sha8": "9abcdef0",
+            "seam_ok": true
+          }
+        },
+        {
+          "event": "inbound_accepted",
+          "trace_id": "0123456789abcdef",
+          "client_ts": "$NOW-1s",
+          "channel": "telegram",
+          "identity": {
+            "pseudonym": "p_0123456789",
+            "role": "talker"
+          },
+          "outcome": null,
+          "reason": null,
+          "attrs": {
+            "input_chars": 57,
+            "tg_lag_s": 1,
+            "is_callback": false
+          }
+        }
+      ]
+    }
+  },
+  "expect": {
+    "status": 202,
+    "error_code": null,
+    "body_subset": {
+      "accepted": 2
+    },
+    "edge_only": {
+      "ring": [
+        {
+          "record_type": "event",
+          "event": "startup",
+          "origin": "edge",
+          "agent_id": "buddy"
+        },
+        {
+          "record_type": "event",
+          "event": "inbound_accepted",
+          "origin": "edge",
+          "channel": "telegram",
+          "identity": {
+            "pseudonym": "p_0123456789",
+            "role": "talker"
+          }
+        }
+      ]
+    }
+  }
+}

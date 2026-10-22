@@ -1,0 +1,45 @@
+{
+  "name": "brain-chat-refused-last-message-not-user",
+  "method": "brain.chat",
+  "setup": {},
+  "request": {
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer $CREDENTIAL",
+      "X-Buddy-Contract": "sha256:$CONTRACT_SHA256"
+    },
+    "body": {
+      "model": "buddy-fast",
+      "messages": [
+        {
+          "role": "system",
+          "content": "BUDDY-TURN/1 {\"trace_id\":\"0123456789abcdef\",\"channel\":\"telegram\",\"identity\":{\"pseudonym\":\"p_0123456789\",\"role\":\"talker\"},\"response_schema\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"kind\",\"answer\",\"cite\",\"propose\"],\"properties\":{\"kind\":{\"enum\":[\"answer\",\"abstain\",\"refuse\",\"escalate\"]},\"answer\":{\"type\":\"string\",\"maxLength\":600},\"cite\":{\"type\":\"array\",\"maxItems\":3,\"uniqueItems\":true,\"items\":{\"enum\":[\"pre-existing-failure\",\"flaky-test\"]}},\"propose\":{\"enum\":[\"none\",\"pause_research\"]}}}}\nYou are Buddy, a QA expert. Answer from the qa-practice World terms only. Built with Llama."
+        },
+        {
+          "role": "user",
+          "content": "If a test also fails on main, can I call it pre-existing?"
+        },
+        {
+          "role": "assistant",
+          "content": "x"
+        }
+      ],
+      "stream": true,
+      "stream_options": {
+        "include_usage": true
+      },
+      "max_tokens": 400
+    }
+  },
+  "expect": {
+    "status": 422,
+    "error_code": "schema_invalid",
+    "body_subset": {
+      "error": {
+        "type": "buddy_host_error",
+        "code": "schema_invalid",
+        "message": "The request does not match the contract."
+      }
+    }
+  }
+}

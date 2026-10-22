@@ -2198,3 +2198,65 @@ earlier router. Either way it is outside nucleus.
 
 The fallback in §7.2 remains valid for CI: CI runs `tests/nucleus` alone, on ubuntu, where `_auto_detect`
 never picks `mlx`.
+
+---
+
+## Buddy always-on (S1): tech debt D1 to D14
+
+**Filed by:** `sprints/2026-10-20-buddy-always-on/` (ARCHITECTURE.md §10, filed at build step A9).
+Fourteen deliberate deferrals the design accepted knowingly. Each row names the trigger that pays it down.
+
+| # | Debt | Trigger that pays it down |
+|---|---|---|
+| D1 | **No OS boundary.** Buddy runs as the operator. S1 limits what the model can do, not what Buddy's own code can do. | The first tool that runs a command or writes outside Buddy's home: a container sprint. |
+| D2 | **Two hold flags** (Buddy's `<home>/state/hold.json` and ARAIL's `halt.json`); resume needs two desk actions. | S2's paperagents `arail-agent` runtime with `haltPath`, or one desk "resume Buddy and lab" control. |
+| D3 | **Unauthenticated portal routes** stay reachable by any local process, including a compromised Buddy. The edge is the portal's first per-request credential and closes none of that. | Any Buddy tool, or the container, or the portal-auth sprint, whichever comes first. |
+| D4 | **Fast-changing upstream seam.** Patches to nanobot plus a seam lock over the files Buddy depends on; every upstream release needs a review. | Disconfirming #5 (a rebase takes more than a day): re-evaluate the base. Upstream PRs shrink the patch set. |
+| D5 | **Private-method overrides** in `BuddyTelegramChannel`. | Upstream accepts a channel intake hook. |
+| D6 | **Turn metadata rides in a system-message header**, because nanobot's provider has no per-request metadata. | Upstream per-request headers or `extra_body`. |
+| D7 | **The edge flattens the conversation into one user prompt**; ARAIL's Ollama backend ignores `messages` and `temperature`. **Paid for the system message only (review round 1, R1-4c, 2026-10-20):** `OllamaNativeBackend` takes `system_as_message`, which the edge sets, so Buddy's persona is the model's `system` message and the Modelfile's own `SYSTEM` is no longer substituted (about 50 prompt tokens). History roles are still `### <role>` blocks in one user message, and `temperature` is still the Modelfile's 0.7. | An ARAIL backend task to send real chat messages and options. |
+| D8 | **Two Buddy loops** (the desk `BuddyAgent` and the phone) in one lane. | Disconfirming #6, or S2's "desk as a channel". |
+| D9 | **`agent_trace` v2**; 3D.EVAL reads v1 by name. | 3D.EVAL sprint 2: its adapter accepts v1 and v2. (Notice to 3D.EVAL is relayed by the orchestrator, not made from this repo.) |
+| D10 | **ARAIL's own `halt.json` fails open when corrupt**; only the Buddy edge compensates (`scheduler.halt_load_failed()`). | The next ARAIL hardening sprint. |
+| D11 | **`api.telegram.org` on the shared consent allowlist**; other ARAIL agents could auto-approve fetches there. | Per-agent consent scoping. |
+| D12 | **launchd logs in `~/.nanobot/logs/`** (nanobot's installer hard-codes the path). | Upstream log-path option, or Buddy's own plist writer. |
+| D13 | **Lanes `recent` is 50 records inside a 500-record ring.** Long sessions evict. | The W5-driven lanes rewrite. |
+| D14 | **Sleep detection relies on macOS clock semantics.** | Linux becomes a tested platform. |
+
+**Added during the build (BUILD_LOG.md "Architect feedback required"):**
+
+| # | Debt | Trigger |
+|---|---|---|
+| D15 | **Closed 2026-10-20.** The turn header could not be written by a `before_iteration` hook at nanobot v0.3.5 (the runner sends the compaction state's accepted copy of the system message). ARCHITECTURE Addendum A section A1 resolved it with no nanobot patch: `install()` (R8) wraps `agent.context.build_system_prompt` and `agent._build_transcript_input` on the live agent. | Closed by Addendum A section A1; proved by U-HDR-03 to 07 in qukaizen-buddy. |
+| D16 | **Buddy's `link.json` is a second cross-repo file shape** (`qukaizen-buddy.link/v1`), written by ARAIL and read by Buddy, outside the contract. | Move it into the contract the next time the contract version changes. |
+| D17 | **Admission-level refusals are coalesced** to one `edge_refused` event per code per 5 s, so a flood cannot flush the trace ring; the count is in `attrs`. | Per-caller rate limiting once the portal has real auth (D3). |
+| D18 | **The vendored contract is not declared as package data.** `pyproject.toml` is a frozen path of the QueueLLM rename sprint (`tests/test_queuellm_rename_frozen_surface.py`), so the `arail.buddy_host` JSON files are not listed there. ARAIL runs from a checkout (`pip install -e .`), where they are present; a built wheel would lack them and the portal would then start without the edge (it fails closed). | The first time ARAIL ships a wheel: add `"arail.buddy_host" = ["contract/*.json", "contract/conformance/*.json"]` to `[tool.setuptools.package-data]` and update that test's frozen list in the same change. |
+
+**Added by ARCHITECTURE Addendum A (2026-10-20), filed at the resumed build:**
+
+| # | Debt | Trigger that pays it down |
+|---|---|---|
+| D4 (grows) | **Sixteen seam-locked nanobot files** (was ten), two instance-level wraps, one of them on a private method (`AgentLoop._build_transcript_input`), and four more private overrides in the channel. | Unchanged, plus the two upstream-PR candidates in qukaizen-buddy's `UPSTREAM.md` (a per-request system-prompt provider; a caller-owned history window). |
+| D6 (same kind) | **The header still rides in the system message**; a wrapped `build_system_prompt` now composes it. | Upstream per-request metadata, or a system-prompt provider. |
+| D23 | **Three upstream WebUI gateway smoke tests are deselected under P0** (`tests/webui/test_gateway_webui_smoke.py`): P0 makes `python -m nanobot` Buddy-only and the tests spawn it. Coverage of nanobot's WebUI gateway path stays upstream's, not Buddy's. | Any sprint that enables the WebUI, the websocket channel or a second channel in Buddy (P0 then gets a narrower, tested form); and every pin move, where `UPSTREAM.md` records that the three passed at the bare new tag before P0 is re-applied. |
+| D24 | **`contextWindowTokens` is a switch, not a context size.** Buddy's nanobot is configured with 200,000 so that its model-calling compaction can never start; the edge's 24,000-character cap is the only real prompt limit, and the history window is sized to it. | ARAIL reports the brain's context size in the handshake; both limits are then derived from it. |
+| D25 | **nanobot's session store keeps every message until `/new`**; only replay is windowed (at most 8 messages and the character budget). | A retention policy in S2, or a session-size alarm. |
+| D26 | **The edge reports `finish_reason: stop` for token-capped answers**, a deviation from OpenAI: nanobot reads `length` as "continue" and calls again on a prompt it wrote (`runner.py:631-655`). A capped answer stays visible as `tokens_out == max_tokens`, and Buddy's parser turns truncated JSON into an abstain. | nanobot makes length recovery configurable. |
+| D27 | **Trace lines carry no hash**; only the approvals ledger does, so "a ledger line with a hash" (the harness page) holds for the action but not for turns. | Adopting the harness Loop module, or 3D.EVAL treating lanes as evidence. |
+
+**Found by the first run against a real server (I1, 2026-10-20):**
+
+| # | Debt | Trigger |
+|---|---|---|
+| D28 | **A lab that has not been onboarded answers every `/api` route, the edge's included, with `401 lab_not_onboarded`**, a body that is not a contract error, so Buddy cannot tell it from an unreachable lab and reports "The lab is not reachable". The TestClient tests never see it. It is correct (an un-onboarded lab is not usable) but unhelpful. | An `edge` error code for it in the next contract version, or an exemption of `/api/host/v1/` from the onboarding gate (a decision for the portal's owner). |
+
+**Found by the architect's review, round 1 (2026-10-20); the Buddy-side rows are D33 to D40 in `qukaizen-buddy/buddy/docs/DEBT.md`:**
+
+| # | Debt | Trigger that pays it down |
+|---|---|---|
+| D29 | **Retrieval is lexical** (Buddy's `world.py`); on the 20 dev questions the right card ranks first for 12, which is what bounds template mode. Filed in Buddy's DEBT.md; named here because the fix may be an edge route (embeddings), which is a contract change and so ARAIL's. | An embedding ranking, or the World authors' `aka` fields; scheduled with disconfirming #2's bake-off, not after it. |
+| D30 | **A model-using run varies by about two cases** because `temperature` is ignored (D7 above): `llama-ai-eng` answers at its Modelfile's 0.7. QA runs each mode at least twice. | The backend forwards options. |
+| D34 | **The contract's `gate_change` reasons have no "poller died".** Buddy closes its gate without a record. | The next contract version; re-vendor here with equal sha256. |
+| D35 | **The launchd log holds phone text, Telegram ids and usernames** (Buddy's `~/.nanobot/logs/`). The operator decides before S2 adds people. | See Buddy's DEBT.md. |
+| D36 | **Buddy's exec guard misses `_posixsubprocess.fork_exec`; `ctypes` bypasses its socket guard.** Not ARAIL's, but it is the layer under G1/G9 on the Mac. | Buddy's container sprint (D1). |
+| D41 | **The vendored contract's `PROVENANCE.json` names a Buddy commit that exists only on the builder's Mac** until `qukaizen/buddy-always-on` is pushed (review finding 7). Re-run `scripts/sync-buddy-contract.py --check` against the pushed ref. | **Before the ARAIL PR merges:** push the Buddy branch (or merge it) and re-check. Not done in build round 2: the instruction was to push nothing. |

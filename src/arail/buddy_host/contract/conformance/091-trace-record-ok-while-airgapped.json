@@ -1,0 +1,38 @@
+{
+  "name": "trace-record-ok-while-airgapped",
+  "method": "trace.record",
+  "setup": {
+    "lab_mode": "airgapped"
+  },
+  "request": {
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer $CREDENTIAL",
+      "X-Buddy-Contract": "sha256:$CONTRACT_SHA256"
+    },
+    "body": {
+      "v": 1,
+      "records": [
+        {
+          "event": "gate_change",
+          "trace_id": "0123456789abcdef",
+          "client_ts": "$NOW-1s",
+          "channel": null,
+          "identity": null,
+          "outcome": null,
+          "reason": "airgapped",
+          "attrs": {
+            "state": "closed"
+          }
+        }
+      ]
+    }
+  },
+  "expect": {
+    "status": 202,
+    "error_code": null,
+    "body_subset": {
+      "accepted": 1
+    }
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "name": "handshake-ok-budget-used",
+  "method": "handshake",
+  "setup": {
+    "budget_used": {
+      "turns": 12,
+      "tokens": 3400
+    }
+  },
+  "request": {
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer $CREDENTIAL",
+      "X-Buddy-Contract": "sha256:$CONTRACT_SHA256"
+    },
+    "body": {
+      "v": 1,
+      "contract_sha256": "$CONTRACT_SHA256",
+      "buddy": {
+        "version": "0.1.0",
+        "nanobot_pin": "v0.3.5",
+        "instance_id": "0123456789abcdef",
+        "started_at": "$NOW-30s"
+      },
+      "world": {
+        "slug": "qa-practice",
+        "world_sha256": "abababababababababababababababababababababababababababababababab"
+      }
+    }
+  },
+  "expect": {
+    "status": 200,
+    "error_code": null,
+    "body_subset": {
+      "budget": {
+        "turns_used": 12,
+        "tokens_used": 3400
+      }
+    }
+  }
+}

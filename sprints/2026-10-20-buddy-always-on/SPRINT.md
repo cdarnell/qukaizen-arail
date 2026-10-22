@@ -1,0 +1,114 @@
+# Sprint: buddy-always-on — Buddy reachable from the phone through a nanobot gateway
+
+**ID:** 2026-10-20-buddy-always-on
+**Started:** 2026-10-20 10:05 CDT
+**Product:** arail
+**Branch:** `qukaizen/arail-buddy-always-on` (cut from `origin/main` `ca0a8f81`)
+**Worktree:** `~/ProJects/.claude/worktrees/sprint-command-error-060a85/arail-buddy-wt`
+(the app's write hook refuses edits under `~/ProJects` outside the session
+folder; `~/ProJects/arail-buddy-wt` is back on `main` and untouched).
+
+## Task
+
+Turn Buddy, ARAIL's default agent, into an always-on bot the operator can
+reach from the phone through a gateway built on nanobot (HKUDS, MIT). Buddy is
+a specialised QA subject-matter expert who cites a DDaC World. The operator's
+brief (nine forcing questions: shape A/B, trust, mode vs airgapped, control,
+process supervision, QA-SME World, first channel, one pass/fail win test, the
+gateway as 3D.EVAL's test surface) is reproduced in the visionary's prompt and
+in `RESEARCH_NOTES.md` §1. Do not design or code until VISION.md is in.
+
+## Inputs
+
+- `LANDSCAPE.md` — OSS field survey (Grok Bot is closed; OpenClaw / Hermes /
+  nanobot / OpenBot) + code-verified map of Buddy on main.
+- `RESEARCH_NOTES.md` — operator steers in order, fork comparison, the
+  paperagents agent-control-plane rule model ("the gateway we designed"),
+  verified brain facts (llama-ai-eng resident; nucleus-baked = roadmap;
+  QueueLLM has no HTTP server), nanobot docs facts.
+- `VISION.md` v1 (`83c5589a`, "stay in ARAIL") — superseded by this pass.
+- `../2026-09-20-buddy-front-and-center/OPERATOR_BRIEF.md` D1–D18 stand.
+
+## Phases
+
+| Phase | Subagent | Artifact | Status | Started | Finished | Verdict |
+|---|---|---|---|---|---|---|
+| think | visionary | VISION.md | done | 2026-10-20 11:40 | 2026-10-20 12:05 | proceed (3 preconditions; commit `6a9cbc21`) |
+| plan | architect (design) | ARCHITECTURE.md | done | 2026-10-20 12:30 | 2026-10-20 13:15 | complete, 1,741 lines (commit `b2af01d7`) |
+| build | builder | BUILD_LOG.md | round 3 done | 2026-10-20 13:20 | 2026-10-21 | Q-8 fixed (ARAIL `496cdb2a`), template default (`24b81f1a`), logs 0600 (`ac3b81e1`) |
+| review | architect (review) | REVIEW.md | done | 2026-10-21 | 2026-10-21 | **WEAK_PASS** round 2 (`c479750d`); round 1 BLOCK (`75a63bf8`) |
+| test | qa | TEST_REPORT.md | done | 2026-10-21 | 2026-10-21 | **WEAK_PASS** round 2; round 1 FAIL (Q-8) |
+| ship | — | PR | in progress (PRs open; merge after the operator's phone win run) | 2026-10-21 | — | — |
+
+## Decisions log
+
+| Date | Decision | Rationale |
+|---|---|---|
+| 2026-10-20 | Grok Bot is a behaviour reference, not a code source. | Proprietary, cloud-only (LANDSCAPE §0). |
+| 2026-10-20 | Fork base: **nanobot**, over Hermes Agent and OpenClaw. | Operator: "I like the nanobot footprint… we build what we need but will be more configurable; otherwise, why not just use Hermes?" Hermes stays the reference for approval UX and pairing hardening (RESEARCH_NOTES §2). |
+| 2026-10-20 | "The gateway we designed" = the paperagents agent control plane rule model; it carries into Buddy's tool path. | Operator steer 4; RESEARCH_NOTES §3. |
+| 2026-10-20 | Two brains: ~1B resident always on (Ollama `llama-ai-eng` today, nucleus-baked later), QueueLLM on demand via ARAIL's `deep_policy`. | Operator steer 6; nucleus has no usable 1B yet; QueueLLM has no server (RESEARCH_NOTES §4). |
+| 2026-10-20 | Buddy is a specialised QA SME on a DDaC World; the gateway is 3D.EVAL's test surface. | Operator's final brief. |
+| 2026-10-20 | Shape A vs B (gateway-only vs re-host on nanobot) is the visionary's call; the earlier "break Buddy out" steer is an input, not a constraint. | Final brief, question 1. The `<session>/qukaizen-buddy` scaffold waits on it. |
+| 2026-10-20 | **Buddy is its own app outside ARAIL; ARAIL is the initial target.** Deployment: feel like an agent on the Mac, or its own container / Linux system ("AI operating system"); the visionary recommends one for S1. | Operator steer during the VISION pass. Overrides shape A of the brief's question 1; the earlier "break Buddy out" steer stands. |
+| 2026-10-20 | **Shape B′ (visionary).** Buddy is a nanobot app outside ARAIL; ARAIL is his only brain (via a `brain.chat` edge through `ModelRouter`), kill-switch authority and trace store; Buddy's code calls ARAIL actions, the model cannot; no MCP in S1. | VISION §3.1: nanobot cannot be a channel-only gateway (always builds an `AgentLoop`); B as stated loses hold/trace/airgap and breaks "no facts from the agent's own output" (Dream → raw `MEMORY.md` in prompt). |
+| 2026-10-20 | **Deployment (i): user-level launchd process on the Mac for S1.** Container before the first tool that runs a command or writes outside Buddy's home; separate Linux box rejected for now. | VISION §3.1 deployment table; S1 gives the model no shell/file/web tools. |
+| 2026-10-20 | First channel: Telegram, long-poll, DM only. Hybrid only; airgapped always wins. | VISION §3.3, §3.7. |
+| 2026-10-20 | QA-SME = a sealed DDaC World `qa-practice` (working name) of the operator's own QA rules, sourced to pinned files; chips rendered by code from sealed terms. | VISION §3.6. Scope (what "QA" means) is precondition (a), operator's one-line answer. |
+| 2026-10-20 | S1 cuts: no unsolicited messages (no pushes, cron, Dream); no QueueLLM on the phone path; one reductive action ("pause research"); no container. | VISION §0, §2.4. |
+| 2026-10-20 | **Architect overrides of the VISION on code facts (builder follows ARCHITECTURE.md):** no nanobot `--home` (use `--config`/`--workspace`); no tool calls through the edge (proposal = structured output, grammar-constrained `propose ∈ {none, pause_research}`); patch set is P0 `__main__.py` (+1), P1 `gateway_runtime.py` (+4/~2), P2 Telegram regex (~1), with the VISION's `base.py`/username patches replaced by a `BuddyTelegramChannel` subclass behind a seam lock; confirms handled at the channel boundary so the nonce never enters nanobot; ARAIL-unreachable window 40 s (not 120 s) to keep G1's 60 s; `presence_meter` skip and a per-step lanes list added in ARAIL; idle auto-compact off; cards only to the requesting confirmer. | ARCHITECTURE.md §2.4, §0. |
+| 2026-10-20 | Edge transport: loopback HTTP on ARAIL's existing portal port under `/api/host/v1/*`; credential `bhc1_`+32 random bytes (ARAIL keeps the sha256 only); contract `buddy.host.v1.json` owned by Buddy, vendored byte-identical into ARAIL with a provenance stamp, sha256 on every request (mismatch → 412, Buddy closes his gate). Egress guard = CPython audit hook installed before any nanobot import. | ARCHITECTURE.md §5.1–5.3, §5.15. |
+| 2026-10-20 | Build runs as one builder across both repos in ARCHITECTURE §9 order (B1 → A1–A9 → B3–B11), with B2/B7 last because they need the sealed `qa-practice` World (Phase C) on ddac main. Phase C drafting (C1) runs in parallel in a ddac worktree inside the session folder; C2 is the operator's approval line. | Dependency order in §9; sprint skill says phases are sequential, builders on disjoint repos are one phase. |
+| 2026-10-20 | **Build stop point (by design).** ARAIL A1–A9 landed (`36349f7f` … `2ab0f244`, A5c `4395ca50`); Buddy B1, B3–B6, B8, B9, B11a, P0 (`f84aa75a`), P2 (`f696874d`) landed on `qukaizen/buddy-always-on`. Tests: upstream nanobot 7678 passed + 3 deselected (G3); ARAIL R-BUDDY-98 unchanged (100 passed, 1 xfailed); new ARAIL tests 406 incl. 127 conformance cases; whole ARAIL suite fails the same 70 tests on branch and main (none branch-only); Buddy 1070 passed. | BUILD_LOG.md steps 1–23. Nothing pushed. |
+| 2026-10-20 | Blocked: B2/B7 need the sealed World on ddac main (C2 operator approval → C3); B7/B10/B11b/Phase I also need the architect's answer to **G1** (a `before_iteration` hook cannot rewrite `messages[0]` at the pin: `runner.py:443-447`, `context_governance.py:139-173`), plus ratification of G2/G4 interpretations, G3 (P0 deselects 3 upstream WebUI smoke tests) and G5 (tap removes the keyboard, so a lost edge answer cannot be retried by tap). | BUILD_LOG.md "Architect feedback required". Architect addendum requested. |
+| 2026-10-20 | **C2 (operator): qa-practice cards approved.** Operator's words, verbatim: "approved please go". 20 cards at ddac branch `qukaizen/ddac-qa-practice-world` commit `796c13d`. | Written by the operator in chat; recorded verbatim. Unblocks C3 → B2/B7. |
+| 2026-10-20 | **Harness alignment** (operator: "see qukaizen.com/harness and update and align accordingly"): S1 mapped onto Registry/Model/Context/Guardrails/Loop; two recorded differences (8–14B resident vs the 1B S1 brain; "nothing leaves the machine" → proposed gate G13: off-box messages carry World rules, fixed texts and the operator's own words, never lab data). `qukaizen-harness` extraction = later sprint (O8). | `HARNESS_ALIGNMENT.md`; architect ratifies G13 in Addendum A. |
+| 2026-10-20 | **C3 done, World merged.** ddac PR #53 merged; ddac `main` = `da2fb18` is the `qa-practice` pin (20 terms, gate ok, roster drift 0, tests 1377/1385 pass = main). Operator's blanket go: "do not stop and you have my approval to make this work." | Unblocks B2/B7. |
+| 2026-10-20 | **Addendum A (architect, `162d9d22`):** G1 = no fourth patch; `install()` R8 wraps `agent.context.build_system_prompt` (header + persona, fail-closed) and `agent._build_transcript_input` (window + scrub); edge requires `messages[0]` system, no other system message, non-empty persona; test U-HDR-03. G3 = P0 stays, deselection is debt D23 paid at each pin move. G5 = code never printed; one automatic resend of the stored approval record 2 s after a lost answer (I-CRASH-02a–d). G2 all ratified; A8 deltas: edge never reports `length`, atomic budget re-check after the slot. G4: `/stop` survives a closed gate; unlabelled replies default to `error`. Contract changed additively → A5 re-run. New failure modes F46–F55. | BUILD_LOG "Architect feedback required" answered. Harness subsection (G13) being appended. |
+| 2026-10-20 | **§A11 harness alignment landed (`4fe3acf6`); G13 accepted** under the operator's instruction "see qukaizen.com/harness and update and align accordingly" + "you have my approval to make this work": off-box messages carry sealed World rules, fixed texts and the operator's own words, never lab data. Built code breaks it in three places (`commands.py:85-90` `/status` lab-mode/research/brain lines; `confirm.py:93` card "Research now" line): builder fixes them in the resumed build. | ARCHITECTURE §A11; HARNESS_ALIGNMENT.md. If the operator rejects G13, those three lines return and the ledger records it. |
+| 2026-10-20 | Build resumed in Addendum A §A6 order: B1d → A5d → A8b; B4b → B8b → B9b; B7a → B10 → B11b → I1–I3; then B2 → B7b → I1 again after C4 (QA's blind set, sha256 into this ledger). | Builder relaunched; qa writes C4 in parallel and seals it. |
+| 2026-10-20 | **C4 pre-registration (qa): blind QA-SME set sealed.** `~/.qa-sealed/2026-10-20-buddy-always-on/blind.jsonl` (0600; path moved from `~/ProJects/.qa-sealed/…` because the app's write hook guards `~/ProJects`), 28 lines (Q01–Q20: 16 answer, 4 abstain; P01–P08: 6 refuse, 2 escalate). **sha256 `db7c9827a19911ffcdfb2b94bfac133320bec2d1c58d456d96df776cc208bad2`.** World pin: ddac `da2fb181816875b26a861dda4f73db2eec186fce`, `terms.json` blob `a9eac3a2…` sha256 `767286098f3ca633524be103c1f22c25efa5dd595f2f0c49e216e998c7ff9731`. Builder may start B7b. | ARCHITECTURE §8.4 steps 1–2. After grading, QA commits the file and its sha256 must equal this one. Note: `spec.json` at the pin still carries the "C1 DRAFT" status line (cosmetic; fixing it reseals the World, deferred). |
+| 2026-10-21 | **Build complete through Phase I.** Buddy: 40 commits on `qukaizen/buddy-always-on` (B1d, B4b, B8b/c, B9b, G13 fixes, B7a, B10+P1, B1e, B11b, B2, B7b, I1, I3, debts D29–D32); ARAIL: 6 (A8b, A5d–A5f, A9b, log). `nanobot/` changed only in P0–P2 (3 files, +9/−3). Tests: upstream 7678 passed; Buddy 1644 passed; R-BUDDY-98 100 passed/1 xfailed; ARAIL new 428 passed; ARAIL whole suite 64 failed / 7350 passed with ONE branch-only failure (`test_ollama_unload…live_daemon`, passes alone on branch, fails alone on main; overlapped the builder's live Ollama runs). I1 29/29 against real ARAIL with real pins; I2 contract sha256 equal both sides (`48481c1d…a785516`); I3 10 min airgapped, 1076 lsof samples, zero non-loopback rows (plain subprocess, no launchctl, no nettop). Nothing pushed. | BUILD_LOG.md Steps 24–26, Final state. |
+| 2026-10-21 | **Answer-quality bar not met on the builder's 32-case dev set** (bar: 16/20 + 6/8): template mode 12/20 + 9/12, structured 6–10/20 + 8–9/12. Expected: S1 ships in template mode (VISION §2.3 "if the bar fails, S1 still ships with template answers; disconfirming #2 fires") after QA's blind run in both modes (`[answer] mode` in `buddy.toml`, default `structured`). Builder decisions H1–H9 (code decides reply label / citable cards / whether the model sentence shows; refusals hold 10 min; persona no longer names `pause_research`; Addendum A C6.2 vs C8 scrub-placeholder contradiction fixed in `2364fbe0`) go to the architect's review for ratification. | Review phase started. |
+| 2026-10-21 | **Review round 1: BLOCK** (`75a63bf8`). (1) unguarded `pip install` at startup: `python-socks` missing from `buddy/requirements.lock`, nanobot installs it when building channels before the exec guard is armed → reaches PyPI even airgapped (G1/G2/G9); (2) a re-delivered or re-typed `/approve` for an already-confirmed proposal calls the lab without checking Buddy's hold (`confirm.py:156-160`), plus a typed-repeat vs tap race (G5); (3) negation-flipped sentences pass the H4 contradiction check (6/6 kept beside the chip they contradict); (4) answer path would invalidate the blind run: no-"?" messages get only refusal cards; the refusal hold survives `/new`; the model's real system prompt is `llama-ai-eng`'s own persona (76 prompt tokens vs 27). Differential: branch and main share the same 70 failures; `test_ollama_unload…live_daemon` is environmental (2/2 in isolation on both). H1, H2 (wording fix), H6, H7, H9 ratified; H3 and H4 rejected as built; H5 ratified if holds clear on `/new` and `/stop`; H8 ratified with corrections (blind run after the fixes, no system-prompt confound, ≥2 runs per mode). No gate changes. | Loops back to the builder with REVIEW.md as the spec for round 2. |
+| 2026-10-21 | **Operator steers 11–13 (RESEARCH_NOTES §1):** nanobot = gateway + loop (agreed); the hard parts ahead are device reach and "an agent that can take over a computer", preferably on Buddy's own system; each team gets its own network, and paperagents should recommend that by default; paperagents = "the swarm tech integration crew". Not S1 scope. S2 vision pass (own system, hands, devices, per-team networks) queued after S1 ships; paperagents manifest default proposed as its own session. | Operator, in chat. |
+| 2026-10-21 | **Build round 2 done** (BUILD_LOG Steps 27–37, J1–J10; ARAIL `b8114fd3`): R1-1 `32c07087` (python-socks locked, preflight S13, exec guard armed in `boot.apply()`, one named dulwich allowance), R1-2 `3ff2e336`, R1-3 `51d69cca` + R1-3b `2e6ffc77` (numbers must come from the card), R1-4a/b `15b0d8b9`/`cc64db82`, R1-4c ARAIL `70241211` (prompt tokens 76→27 trivial, 256→206 structured, 148→98 template), R1-5 `1a34ea4b`, R1-6 `b03499c8`, static G8 `dafd8401`, debts D33–D40. Tests: Buddy 1959 passed; upstream 7678; R-BUDDY-98 100/1 xfailed; ARAIL new 438; I1 29/29; I2 equal. Differential (daemon down): 70/70 both, 0 branch-only. Dev set: template 12/20 + 9/12 (5 identical runs); structured mean 10.2/20 + 6.8/12 (6 runs). Finding 7 (push the Buddy branch so ARAIL's contract stamp names a reachable commit) done by the orchestrator: `qukaizen/buddy-always-on` pushed to origin under the operator's "approval to make this work". | Review round 2 started. |
+| 2026-10-21 | **Review round 2: WEAK_PASS** (`c479750d`). All 4 BLOCK + 3 must-fix closed by the reviewer's own probes (cold start spawns only three dulwich hook probes, guard refuses a later `/usr/bin/true`, no `pip`; approvals make no lab call under either hold; none of the six inverted sentences kept; Ollama receives `[system, user]` with Buddy's persona as system). Suites reproduce; differential 70/70, 0 branch-only. J1–J10 ratified. Open as debt: D33 (contradiction without a negation word), N1 (some verbs outside the list still get a rule card), D29 (template mode decided by retrieval alone), N3 (default change does not switch an existing home's `buddy.toml`). QA must: run both modes ≥2× each, capture one request body per mode first, give each failed case one cause (only a model failure in structured mode fires disconfirming #2), check every kept sentence against its card. | Gate review→test passes. QA started. |
+| 2026-10-21 | **QA round 1: FAIL** (TEST_REPORT.md). Blind run (sha256 verified before opening, file now committed with the same hash): structured 10/20 + 0/8 and 9/20 + 0/8; template 14/20 + 2/8 twice (identical case by case). Bar (16/20, 6/8) met in neither mode. **Disconfirming #2 fires** (14 structured failures per run are the model's). Template failures are the card ranker (D29) or code's label rule, not the model. Zero fabricated chips; no kept sentence contradicts its card. Gates G1 (launchd L3: 1,200 samples, no off-machine connection) and G3–G13 proven; differential 0 branch-only; automated twin of the seven-step win run 22/22. **Must-fix Q-8:** after one failed model call Buddy stays "Brain: not available" until ARAIL restarts (strict xfail `tests/registry/test_qa_buddy_edge_brain_recovery.py`). Not proven on this Mac: socket-level airgapped flip, 10 min hybrid traffic, recovery from a blocked Telegram, the phone win run. Known-debt items Q-3 (a live code pasted in another form reaches the model) and D36. D35: launchd log holds the conversation and was world-readable (0644). | Loops back to the builder: fix Q-8; set `[answer] mode` default to `template` and record disconfirming #2 (per VISION §2.3 and BUILD_LOG "after the verdict"); tighten the launchd log to 0600 (D35, operator to confirm the content policy). Then QA round 2 (targeted). |
+| 2026-10-21 | **Build round 3 done.** Q-8 root cause was ARAIL's edge: `report_failure` marked `tier0-local` unhealthy and `brain.resolve_entry` (`src/arail/buddy_host/brain.py:64-66`) used `peek`, which never re-probes, while `brain.chat` refused with 424 before any model call. Fix: `ModelRegistry.recheck_unusable` (`src/arail/registry/core.py`) re-probes a down local entry once its verdict is 10 s old; QA's strict xfail now passes unchanged. `Settings.answer_mode` defaults to `template` (N3: existing `buddy.toml` kept; `configure`/`verify` print a Note). Launchd log files 0600 at install and at boot; content policy stays an operator debt row. Tests: Buddy 1980 passed; upstream 7678; R-BUDDY-98 102 passed/1 xfailed; ARAIL new+registry 490; I1 29/29; I2 equal. | QA round 2 (targeted) started. |
+| 2026-10-21 | **QA round 2: WEAK_PASS.** Q-8 confirmed live: Ollama killed mid-session → "Brain: not available." → answers again 9.4 s after Ollama returned, no ARAIL restart; 17 questions while down cost 4 probes in 60 s. Template default and N3 note verified; launchd logs stay 0600 after install, restart and deletion; no world-readable file holds conversation text. All suites pass; differential 0 branch-only. Blind set not re-run (answer path unchanged). New: Q-13 (medium) reinstall after uninstall fails because nanobot's installer enables the label after starting it (run `launchctl enable` before any reinstall until fixed); Q-14 (low) the first answer after recovery lacks "Built with Llama." in the persona. | Gate test→ship passes. Ship: PRs opened in both repos; merge waits on the operator's phone win run (VISION §2.3) and W5. |
+| 2026-10-20 | VISION v1 pass ran first and recommended staying in ARAIL; superseded, not deleted. | The brief changed afterwards (fork base, QA-SME, eval surface). |
+
+## Skipped phases
+
+| Phase | Reason |
+|---|---|
+
+## Preconditions before plan (VISION §5)
+
+- (a) **Done 2026-10-20:** operator chose "QuKaiZen QA practice" (the qa persona's rules, sprint gates, witness lines, xfail-strict debt, per-product QA allocations, the vault hard gate), sourced to his own files at pinned commits.
+- (b) **Done 2026-10-20:** `cdarnell/qukaizen-buddy` created private; `main` = full clone of HKUDS/nanobot at tag `v0.3.5` (`1bb712d3`), `upstream` remote kept, plus `UPSTREAM.md` (pin + patch rules) and `CLAUDE.md` (laws, G1–G12, QA allocation). Local clone: `<session>/qukaizen-buddy`.
+- (c) Operator writes P1's W5 witness line before QA.
+
+## Open items for the operator (ARCHITECTURE §12)
+
+| # | Item | Blocks |
+|---|---|---|
+| O1 | Write P1's W5 witness line (precondition c). | QA step 7 |
+| O2 | Provide Telegram accounts B (talker-only QA account) and C (no list) for the win run (§8.8). | QA |
+| O3 | **Done 2026-10-20** ("approved please go", decisions log). | — |
+| O4 | Accept the budget defaults: 300 turns and 600,000 tokens per day; 10/min and 200/day per person. | nothing (defaults apply) |
+| O5 | Accept that proposal cards go only to the confirmer who asked. | nothing |
+| O6 | Accept sha256-pinned sources for unversioned files such as `~/.claude/agents/qa.md`. | C1 |
+| O7 | **Done 2026-10-20** (operator: "Allow groups is off in BotFather"). | — |
+| O9 | S2 scope: Buddy's own system (container/VM/box) for hands (shell, browser, computer use), device reach (phone app via `qukaizen-gateway`, tailnet), per-team networks; the registry write path (Buddy proposes a tool entry with schema, source pin and policy class; the operator clears it at the desk; then it exists to the crew); the team engine (paperagents' own daemon vs nanobot vs Paperclip: the 2026-09-28 "no dependency" decision stands until the S2 vision pass rules); 3D.EVAL gains a paperagents team as a system under test. Working assumption: resident 1B lives on Buddy's own system (Ollama on Linux), QueueLLM stays on the lab Mac over a credentialed, authenticated edge. | nothing in S1 |
+| O8 | Is `qukaizen-buddy` the seed of `qukaizen-harness` (page: "five modules, zero product imports"), or does Buddy later consume a separate harness repo? Working assumption: separate repo, extracted when the TEAM crew needs the same floor. | nothing in S1 |
+
+## Notes
+
+- Frozen names: `aerollm_api`, `AERO_*`/`AEROLLM_*`, backend id `aerollm`,
+  `tier1-aerollm` (workspace CLAUDE.md naming status).
+- Cross-repo edges (nanobot, DDaC World, 3D.EVAL, paperagents formats) must
+  be pinned or hash-stamped (`INTEGRATION_AUDIT.md` §4).
+- P1's W5 witness line is still unwritten (REVIEW/TEST_REPORT of the
+  2026-09-20 sprint). Flag for the operator before the architect pass.
