@@ -11,8 +11,9 @@ Known limits, stated rather than hidden:
   ignored and every completion's ``usage`` says ``grammar_enforced: False``.
   The harness still parses and gates every proposal; it just cannot rely on
   shape-constrained decoding until the engine exposes it.
-* ``describe`` needs the parameter count in the model name (``...-9B-...``).
-  An unnamed size raises instead of guessing, so the policy band stays honest.
+* ``describe`` needs the parameter count in the model's final name component
+  (``...-9B-...``). An unnamed size, or an expert product such as ``8x7B``,
+  raises instead of guessing, so the policy band stays honest.
 * The backend is a per-process singleton keyed by model, so this adapter
   shares the portal's runtime and never loads a second copy.
 """
@@ -25,11 +26,12 @@ from typing import Any
 
 from qukaizen_harness import Completion, ModelInfo
 
-_PARAMS = re.compile(r"(?<![\d.])(\d+(?:\.\d+)?)\s*[bB](?![a-zA-Z])")
+_PARAMS = re.compile(r"(?<![\d.xX])(\d+(?:\.\d+)?)\s*[bB](?![a-zA-Z])")
 
 
 def params_from_name(name: str) -> float:
-    m = _PARAMS.search(name)
+    leaf = name.rstrip("/").rsplit("/", 1)[-1]  # a path's directories are not the model's name
+    m = _PARAMS.search(leaf)
     if m is None:
         raise ValueError(f"cannot read a parameter count from model name {name!r}")
     return float(m.group(1))

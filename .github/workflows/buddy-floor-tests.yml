@@ -1,0 +1,48 @@
+name: Buddy floor tests
+
+on:
+  pull_request:
+    paths:
+      - "src/arail/ops/**"
+      - "src/arail/runtime/**"
+      - "tests/test_buddy_floor.py"
+      - "arailctl"
+      - "pyproject.toml"
+      - ".github/workflows/buddy-floor-tests.yml"
+  push:
+    branches: [main]
+    paths:
+      - "src/arail/ops/**"
+      - "src/arail/runtime/**"
+      - "tests/test_buddy_floor.py"
+      - "arailctl"
+
+permissions:
+  contents: read
+
+jobs:
+  buddy-floor:
+    name: Buddy floor (harness pinned by commit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Only the lightweight base deps the tests import; the heavy lab stack is not needed.
+      - name: Install
+        run: |
+          python -m pip install pytest ruff mypy python-dotenv requests pyyaml psutil jsonschema numpy
+          python -m pip install "$(python - <<'PY'
+          import re, pathlib
+          m = re.search(r'"(qukaizen-harness @ [^"]+)"', pathlib.Path("pyproject.toml").read_text())
+          print(m.group(1))
+          PY
+          )"
+      - name: Lint and types
+        run: |
+          ruff check src/arail/ops src/arail/runtime tests/test_buddy_floor.py
+          PYTHONPATH=src mypy --strict src/arail/ops src/arail/runtime
+      - name: Tests
+        run: PYTHONPATH=src python -m pytest tests/test_buddy_floor.py tests/test_cli_verbs.py -q

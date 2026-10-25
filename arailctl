@@ -854,7 +854,7 @@ for line in open(path, encoding="utf-8", errors="replace"):
         ts = datetime.fromisoformat(e["ts"])
         if ts.tzinfo is None:
             ts = ts.replace(tzinfo=timezone.utc)
-        if (now - ts).total_seconds() <= win:
+        if -5 <= (now - ts).total_seconds() <= win:  # 5s of clock skew; never the future
             print(f"{e['ts'][:19].replace('T',' ')}  {str(e.get('source','?')):<12}  {e.get('message','')}")
     except (ValueError, KeyError, TypeError):
         pass

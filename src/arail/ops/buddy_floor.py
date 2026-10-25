@@ -14,7 +14,9 @@ State lives under ``$QKZ_HOME`` (default ``~/.qukaizen``): ``rulings.jsonl``,
 
 from __future__ import annotations
 
+import itertools
 import json
+import math
 import os
 import sys
 import time
@@ -71,16 +73,15 @@ COMMANDS: tuple[CommandSpec, ...] = (
         "arailctl.restart",
         "arailctl restart {flags}",
         "restart",
-        args={"flags": ["", "--debug"]},
-        approved=frozenset({"arailctl restart --debug"}),
-        description="restart the lab; --debug captures the trace",
+        args={"flags": [""]},
+        description="restart the lab; always waits for a ruling (nothing is pre-approved)",
     ),
     CommandSpec(
         "arailctl.start",
         "arailctl start {flags}",
         "restart",
-        args={"flags": ["", "--debug"]},
-        approved=frozenset({"arailctl start", "arailctl start --debug"}),
+        args={"flags": [""]},
+        approved=frozenset({"arailctl start"}),
         description="start the lab",
     ),
     CommandSpec(
@@ -101,22 +102,42 @@ COMMANDS: tuple[CommandSpec, ...] = (
 
 
 class EvalFailureTrigger(Trigger):
-    """Wakes when 3D.EVAL's latest run crosses the failure threshold, once per run_sha."""
+    """Wakes when 3D.EVAL's latest run crosses the failure threshold, once per run_sha.
+
+    Seen runs are kept in ``seen.jsonl`` beside ``last.json``, so a restart of Buddy
+    does not fire the same run twice. Anything malformed reads as "nothing to report".
+    """
 
     def __init__(self, path: Path | None = None, threshold: float = FAILURE_THRESHOLD) -> None:
         self.path = path or home() / "3deval" / "last.json"
         self.threshold = threshold
-        self._seen: set[str] = set()
+        self._seen_path = self.path.with_name("seen.jsonl")
+        self._seen: set[str] = self._load_seen()
+
+    def _load_seen(self) -> set[str]:
+        try:
+            return {x for x in self._seen_path.read_text().split() if x}
+        except OSError:
+            return set()
 
     def poll(self) -> Wake | None:
         try:
             row = json.loads(self.path.read_text())
-            rate, sha, world = float(row["failure_rate"]), str(row["run_sha"]), str(row["world"])
+            rate, sha, world = row["failure_rate"], row["run_sha"], row["world"]
         except (OSError, ValueError, KeyError, TypeError):
-            return None  # absent or malformed is "nothing to report", never a crash
-        if rate <= self.threshold or sha in self._seen:
+            return None
+        if isinstance(rate, bool) or not isinstance(rate, (int, float)) or not math.isfinite(rate):
+            return None
+        if not (isinstance(sha, str) and sha.strip() and isinstance(world, str) and world.strip()):
+            return None
+        if len(sha.split()) != 1 or rate <= self.threshold or sha in self._seen:
             return None
         self._seen.add(sha)
+        try:
+            with self._seen_path.open("a") as f:
+                f.write(sha + "\n")
+        except OSError:
+            pass  # in-memory dedupe still holds for this process
         return Wake("change", f"eval.failure_rate {rate:.2f} > {self.threshold:.2f} on {world}")
 
 
@@ -149,6 +170,14 @@ def build(
     return harness, buddy, rulings
 
 
+def ruling_count(rulings: Rulings) -> int:
+    """How many rulings a person has written (spend markers and junk lines do not count)."""
+    try:
+        return sum(1 for r in rulings._rows() if "ruling" in r)
+    except OSError:
+        return 0
+
+
 def episode(harness: Harness, resident: Resident, wake: Wake, max_steps: int = 6) -> list[Tick]:
     """One wake is one decision; a failure takes several. Keep ticking on the same
     wake until the resident idles, is flagged (waits for a person), errors, or
@@ -162,6 +191,18 @@ def episode(harness: Harness, resident: Resident, wake: Wake, max_steps: int = 6
     return ticks
 
 
+def rulable() -> frozenset[str]:
+    """Every rendered command a person may rule on: all non-read renderings."""
+    out: set[str] = set()
+    for spec in COMMANDS:
+        if spec.cls == "read":
+            continue
+        names = list(spec.args)
+        for combo in itertools.product(*(spec.args[n] for n in names)):
+            out.add(spec.render(**dict(zip(names, combo, strict=True))))
+    return frozenset(out)
+
+
 def rule(command: str, ruling: str, state: Path | None = None) -> None:
     """The ``y`` a person presses in their own pane."""
     Rulings(( state or home()) / "rulings.jsonl").record(command, ruling)
@@ -173,13 +214,13 @@ def _run(poll_s: float = 5.0) -> None:  # pragma: no cover - needs the real engi
     model = os.environ.get("AEROLLM_MODEL", "")
     harness, buddy, rulings = build(QueueLLMRuntime(), ModelPolicy(model))
     pending: Wake | None = None
-    seen = rulings.path.stat().st_mtime_ns
+    seen = ruling_count(rulings)
     while True:
         wake = next((w for t in buddy.triggers if (w := t.poll())), None)
-        changed = rulings.path.stat().st_mtime_ns != seen
-        if wake is None and pending is not None and changed:
+        count = ruling_count(rulings)
+        if wake is None and pending is not None and count > seen:
             wake = pending  # a person ruled: resume the episode that was waiting
-        seen = rulings.path.stat().st_mtime_ns
+        seen = count
         if wake is not None:
             ticks = episode(harness, buddy, wake)
             for t in ticks:
@@ -190,6 +231,10 @@ def _run(poll_s: float = 5.0) -> None:  # pragma: no cover - needs the real engi
 
 def main(argv: list[str]) -> int:
     if len(argv) == 4 and argv[1] == "rule" and argv[3] in ("allow", "deny"):
+        if argv[2] not in rulable():
+            print(f"not a command Buddy can propose for a ruling: {argv[2]!r}", file=sys.stderr)
+            print("rulable: " + ", ".join(sorted(rulable())), file=sys.stderr)
+            return 2
         rule(argv[2], argv[3])
         print(f"ruled: {argv[3]} {argv[2]!r}")
         return 0

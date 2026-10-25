@@ -579,6 +579,21 @@ Tail `lab/data/activity.jsonl`, optionally filtered by component
 (`browser`\|`system`\|`researcher`\|`goal`\|`wiki`\|`pkb`\|`chat`\|`consent`).
 Unchanged.
 
+`logs --since 2m|10m|1h` prints the events from that window and exits (no
+tail). It is the form Buddy uses. Any other window is refused.
+
+### `drift`
+
+Alias of `db drift`. CI gate: `0` in sync, `3` on drift.
+
+### `rule "<rendered command>" allow|deny`
+
+Appends a ruling to `~/.qukaizen/rulings.jsonl` (`$QKZ_HOME` overrides). This
+is the `y` a person presses in their own pane for a command Buddy may not run
+unattended (for example `pactl apply teams.toml`). A ruling allows that exact
+invocation once. Only commands Buddy can propose for a ruling are accepted.
+Needs `.venv` with the `buddy` extra (`pip install -e '.[buddy]'`).
+
 ### `db <op>`
 
 Declarative persistence. The spec tree in `spec/` is the source of truth;

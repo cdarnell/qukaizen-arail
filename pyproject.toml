@@ -63,7 +63,7 @@ dependencies = [
 minimalist = []
 # Buddy on the floor (src/arail/ops/buddy_floor.py). The harness is a separate
 # repository with zero product imports; this edge is pinned by commit.
-buddy = ["qukaizen-harness @ git+https://github.com/cdarnell/qukaizen-harness@ad1354e230f5d48b25e24c8f178d301372894775"]
+buddy = ["qukaizen-harness @ git+https://github.com/cdarnell/qukaizen-harness@91b15e82c20e284e674e91f77b0406c83ca10e33"]
 maximus = [
     "jupyterlab>=4.0.0",
     "anthropic>=0.34.0",
