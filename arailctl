@@ -263,6 +263,7 @@ EOF
     world <op>      DaC WorldBundle: list | mount <dir> [--apply-face] | verify <dir> | verify-shipped [--examples] | swap <dir> | unmount
     nucleus <verb>  Model Forge (local domain distillation): plan | stage | build | spike |
                     eval | certify | verify | status | list — see docs/nucleus.md
+    auth <verb>     Portal credentials: token [--rotate] | reset | logout-all  (each takes --world SLUG)
     buddy <verb>    Buddy on your phone (loopback edge): link --buddy-home PATH [--rotate] [--yes] |
                     unlink [--buddy-home PATH] | status [--json] — see docs/buddy-edge.md
     pkb <op>        ARAIL lab content: ingest | compile | browse | prune | bootstrap
@@ -1332,6 +1333,29 @@ TEMPLATE
         # shellcheck disable=SC1091
         source .venv/bin/activate
         exec python -m arail.world_mount "$@"
+        ;;
+    auth)
+        # Portal credentials (ARCHITECTURE.md C7). `--world SLUG` is resolved here, from the
+        # instance registry, so the Python side only ever sees ARAIL_DATA_DIR/ARAIL_INSTANCE.
+        [[ -d .venv ]] || die "missing .venv — run ./arailctl setup"
+        _auth_args=()
+        _auth_world=""
+        while [[ $# -gt 0 ]]; do
+            if [[ "$1" == "--world" ]]; then
+                [[ -n "${2:-}" ]] || die "auth: --world needs a slug"
+                _auth_world="$2"; shift 2
+            else
+                _auth_args+=("$1"); shift
+            fi
+        done
+        if [[ -n "$_auth_world" ]]; then
+            [[ -d "$(inst_instance_dir "$_auth_world")" ]] || die "auth: no World instance '$_auth_world'"
+            export ARAIL_INSTANCE="$_auth_world"
+            export ARAIL_DATA_DIR="$(inst_data_dir "$_auth_world")"
+        fi
+        # shellcheck disable=SC1091
+        source .venv/bin/activate
+        exec python -m arail.portal.auth_cli ${_auth_args[@]+"${_auth_args[@]}"}
         ;;
     buddy)
         # Buddy on your phone — see docs/buddy-edge.md. `python -m arail.buddy_host`

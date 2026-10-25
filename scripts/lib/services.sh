@@ -172,3 +172,16 @@ svc_identity_root() {
     [[ -n "$checkout" && "$checkout" == "$expect_checkout" ]] || return 1
     return 0
 }
+
+# svc_portal_curl <data_dir> <curl args...> — curl a portal route with the lab's bearer token.
+# (S4 portal auth, ARCHITECTURE.md C7/F3.) The token never appears in any process's argv, which
+# `ps` shows to every user: the header goes in through a process substitution that only bash
+# builtins (printf, $(<file)) write to, and curl reads it with `-H @file` (curl >= 7.55).
+# Returns 77 without calling curl when the token file is missing or unreadable, so the caller can
+# print "needs arailctl as the lab owner" instead of a bare failure.
+svc_portal_curl() {
+    local data_dir="$1"; shift
+    local tok_file="$data_dir/portal.token"
+    [[ -r "$tok_file" ]] || return 77
+    curl -H @<(printf 'Authorization: Bearer %s\n' "$(<"$tok_file")") "$@"
+}
