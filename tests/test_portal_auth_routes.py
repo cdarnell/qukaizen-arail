@@ -156,3 +156,10 @@ def test_not_onboarded_lab_keeps_todays_behaviour_and_mints_no_token(tmp_path, m
     assert c.get("/api/jobs/state").json()["error"] == "lab_not_onboarded"
     assert c.get("/research", headers={"Accept": "text/html"}).headers["location"] == "/welcome"
     assert not (tmp_path / "data" / "portal.token").exists()
+
+
+def test_welcome_is_closed_once_a_passphrase_exists(client):
+    """Addendum A.4: /welcome is open only before onboarding; afterwards it is a re-onboarding surface."""
+    r = client.get("/welcome", headers={"Accept": "text/html"})
+    assert r.status_code == 302 and r.headers["location"].startswith("/login")
+    assert client.post("/api/welcome/setup", json={"passphrase": "x" * 9, "confirm": "x" * 9}).status_code == 401
