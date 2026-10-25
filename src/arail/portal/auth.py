@@ -421,3 +421,16 @@ async def authenticate(request, call_next, *, onboarded: bool):
     from urllib.parse import quote
     from fastapi.responses import RedirectResponse
     return RedirectResponse(url="/login?next=" + quote(path, safe="/"), status_code=302)
+
+
+def set_session_cookie(response, request, sid: str) -> None:
+    """HttpOnly, SameSite=Strict, Path=/; Secure only when this request came in over https."""
+    response.set_cookie(
+        cookie_name(), sid, max_age=COOKIE_MAX_AGE_S, path="/", httponly=True, samesite="strict",
+        secure=request.url.scheme == "https",
+    )
+
+
+def clear_session_cookie(response, request) -> None:
+    response.delete_cookie(cookie_name(), path="/", httponly=True, samesite="strict",
+                           secure=request.url.scheme == "https")

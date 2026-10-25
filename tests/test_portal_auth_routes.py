@@ -81,7 +81,7 @@ def test_no_unlisted_route_answers_without_a_credential(client, variant):
 def test_exempt_routes_are_routes_that_exist():
     paths = {e.path for e in flatten(portal_app.app) if e.kind == "route"}
     for p in auth.EXEMPT_EXACT:
-        assert p in paths or p in ("/login", "/favicon.ico"), p   # favicon is served outside the table
+        assert p in paths or p == "/favicon.ico", p   # favicon is served outside the table
 
 
 def test_bearer_opens_the_same_routes(client, lab):

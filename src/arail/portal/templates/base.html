@@ -32,6 +32,40 @@
     {% block title %} keeps working unmodified; the suffix rides along. -#}
 <title>{% block title %}{{ brand.name }}{% endblock %} · :{{ portal_port }}</title>
 <link rel="stylesheet" href="/static/style.css">
+<script>
+/* Session recovery (portal auth): a 401 that names /login sends the user to log in again instead of
+   leaving a page silently stale. fetch(): the JSON body carries "login". EventSource: a stream that
+   errors asks /api/auth/whoami once; a 401 there means the session ended. */
+(function(){
+  function goLogin(){
+    if(location.pathname==='/login') return;
+    location.assign('/login?next='+encodeURIComponent(location.pathname));
+  }
+  var _fetch=window.fetch;
+  window.fetch=function(){
+    return _fetch.apply(this,arguments).then(function(r){
+      if(r.status===401){ r.clone().json().then(function(b){ if(b&&b.login) goLogin(); }).catch(function(){}); }
+      return r;
+    });
+  };
+  var _ES=window.EventSource;
+  if(_ES){
+    var checking=false;
+    window.EventSource=function(url,cfg){
+      var es=new _ES(url,cfg);
+      es.addEventListener('error',function(){
+        if(checking) return; checking=true;
+        _fetch('/api/auth/whoami',{credentials:'same-origin'}).then(function(r){
+          if(r.status===401) goLogin();
+        }).catch(function(){}).then(function(){ setTimeout(function(){checking=false;},30000); });
+      });
+      return es;
+    };
+    window.EventSource.prototype=_ES.prototype;
+    ['CONNECTING','OPEN','CLOSED'].forEach(function(k){ window.EventSource[k]=_ES[k]; });
+  }
+})();
+</script>
 {% block head %}{% endblock %}
 </head>
 <body>

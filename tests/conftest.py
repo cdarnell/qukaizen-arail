@@ -286,13 +286,20 @@ def _portal_bearer_for_tests(request, monkeypatch, tmp_path):
     Debt TD4: patching ``TestClient.send`` is clever; if it ever bites, the fallback is an
     explicit ``portal_client`` fixture and a mechanical rewrite of the 136 files.
     """
-    if request.node.get_closest_marker("real_auth"):
-        yield
-        return
+    from arail import config as arail_config
     from arail.portal import auth as portal_auth
 
+    # No test may write session or token state into the real lab/data, or leak a login lockout
+    # or a cached session store into the next test.
+    monkeypatch.setattr(portal_auth, "_stores", {})
+    monkeypatch.setattr(portal_auth, "limiter", portal_auth.LoginLimiter())
+    if request.node.get_closest_marker("real_auth"):
+        monkeypatch.setattr(arail_config, "DATA_DIR", tmp_path / "portal_data")
+        yield
+        return
     token_file = _write_0600(tmp_path / "portal.token", PORTAL_TEST_TOKEN)
     monkeypatch.setattr(portal_auth, "token_path", lambda: token_file)
+    monkeypatch.setattr(portal_auth, "sessions_path", lambda: tmp_path / "portal_sessions.json")
     _patch_testclient_send_once()
     _bearer_active["on"] = True
     try:
