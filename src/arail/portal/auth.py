@@ -137,35 +137,39 @@ def read_token_id() -> Optional[str]:
 
 
 _tok_lock = threading.Lock()
-_tok_cache: dict = {"key": None, "digest": None, "warned": None}
+_tok_cache: dict = {}   # path -> {"key": ..., "digest": ..., "warned": ...}
 
 
-def _current_token_digest() -> Optional[bytes]:
-    """sha256 of the token in the file; re-read only when (path, inode, mtime) changes."""
-    path = token_path()
+def _current_digest(path: Path, regex) -> Optional[bytes]:
+    """sha256 of the token in ``path``; re-read only when (path, inode, mtime, mode, owner) changes."""
     try:
         st = os.lstat(path)
     except OSError:
         return None
     key = (str(path), st.st_ino, st.st_mtime_ns, st.st_mode, st.st_uid)
     with _tok_lock:
-        if _tok_cache["key"] == key:
-            return _tok_cache["digest"]
+        ent = _tok_cache.setdefault(str(path), {"key": None, "digest": None, "warned": None})
+        if ent["key"] == key:
+            return ent["digest"]
         why = _token_file_unsafe(path)
         digest: Optional[bytes] = None
         if why is None:
             try:
                 tok = path.read_text(encoding="ascii").strip()
-                if _TOKEN_RE.match(tok):
+                if regex.match(tok):
                     digest = _sha(tok)
             except (OSError, UnicodeDecodeError):
                 digest = None
-        elif _tok_cache["warned"] != key:
-            _log.warning("portal.token is %s; bearer auth refused. Fix with: chmod 600 %s", why, path)
-            _tok_cache["warned"] = key
-        _tok_cache["key"] = key
-        _tok_cache["digest"] = digest
+        elif ent["warned"] != key:
+            _log.warning("%s is %s; bearer auth refused. Fix with: chmod 600 %s", path.name, why, path)
+            ent["warned"] = key
+        ent["key"] = key
+        ent["digest"] = digest
         return digest
+
+
+def _current_token_digest() -> Optional[bytes]:
+    return _current_digest(token_path(), _TOKEN_RE)
 
 
 def token_file_state() -> str:
@@ -188,6 +192,55 @@ def check_bearer(header: str) -> bool:
     if current is None:
         return False
     return hmac.compare_digest(_sha(presented), current)
+
+
+# --------------------------------------------------------------------------- shim-scoped token
+# ``arl1s_`` is for the OpenCode child process, whose model drives a shell that can read its own
+# env and config. It is accepted ONLY under SHIM_ALLOWED_PREFIXES; the portal bearer must never be
+# placed where that shell can read it (Addendum A.2).
+SHIM_PREFIX = "arl1s_"
+_SHIM_RE = re.compile(r"^arl1s_[A-Za-z0-9_-]{43}$")
+SHIM_ALLOWED_PREFIXES = (OPENAI_PREFIX,)
+
+
+def shim_token_path() -> Path:
+    return token_path().parent / "portal.shim-token"
+
+
+def ensure_shim_token() -> None:
+    path = shim_token_path()
+    if os.path.lexists(path):
+        return
+    _files.ensure_private_dir(path.parent)
+    tok = SHIM_PREFIX + base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode("ascii")
+    _files.write_private(path, (tok + "\n").encode("ascii"))
+
+
+def read_shim_token() -> Optional[str]:
+    """The shim token for OpenCode's env/config, or None when missing or unsafe."""
+    ensure_shim_token()
+    path = shim_token_path()
+    if _token_file_unsafe(path) is not None:
+        return None
+    try:
+        tok = path.read_text(encoding="ascii").strip()
+    except (OSError, UnicodeDecodeError):
+        return None
+    return tok if _SHIM_RE.match(tok) else None
+
+
+def check_shim_bearer(header: str) -> bool:
+    if not isinstance(header, str) or not header.startswith("Bearer "):
+        return False
+    presented = header[len("Bearer "):]
+    if not _SHIM_RE.match(presented):
+        return False
+    current = _current_digest(shim_token_path(), _SHIM_RE)
+    return current is not None and hmac.compare_digest(_sha(presented), current)
+
+
+def shim_path_allowed(path: str) -> bool:
+    return any(path.startswith(p) for p in SHIM_ALLOWED_PREFIXES)
 
 
 # --------------------------------------------------------------------------- passphrase
@@ -400,6 +453,13 @@ async def authenticate(request, call_next, *, onboarded: bool):
         if check_bearer(header):
             request.state.principal = "bearer"
             return await call_next(request)
+        if header.startswith("Bearer " + SHIM_PREFIX):
+            if check_shim_bearer(header):
+                if shim_path_allowed(path):
+                    request.state.principal = "shim"
+                    return await call_next(request)
+                return _json_401("token_scope")      # valid, but not for this route
+            return _json_401("auth_invalid")
         if token_file_state() == "unsafe":
             return _json_401("token_file_unsafe")
         return _json_401("auth_invalid")

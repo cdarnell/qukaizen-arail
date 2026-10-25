@@ -349,7 +349,7 @@ class TestComputeSourceEnvEdges:
                             type(sys)("broken"))  # bare module, no attrs
         env = oc._compute_source_env()
         # Falls back to my_machine
-        assert env["OPENCODE_API_KEY"] == "not-needed"
+        assert env["OPENCODE_API_KEY"].startswith("arl1s_")
 
     def test_compute_source_env_returns_only_three_keys(self, monkeypatch):
         """Hunt: env dict must contain exactly the documented keys (no extras

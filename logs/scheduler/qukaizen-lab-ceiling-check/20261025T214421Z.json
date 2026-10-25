@@ -1,0 +1,14 @@
+{
+ "job_id": "qukaizen-lab-ceiling-check",
+ "name": "Ceiling check",
+ "started_at": "2026-10-25T21:44:21.673030+00:00",
+ "cmd": [
+  "python3",
+  "lab/ceiling_check.py"
+ ],
+ "cwd": "/Users/netsushi/ProJects/qukaizen-team/worlds/qukaizen-lab",
+ "finished_at": "2026-10-25T21:44:21.696644+00:00",
+ "exit_code": 0,
+ "status": "ok",
+ "output_tail": "==============================================================================\n  CEILING CHECK -- every answering-role citizen, against the 8B ceiling,\n  read both ways: total parameters, and active parameters\n==============================================================================\n  worlds root /Users/netsushi/ProJects/qukaizen-team/worlds - 5 sibling worlds found\n\n  SKIPPED (no world.json): charlottes-world\n  CHECKED (0)\n\n  UNMEASURED (4) -- declared answering, no param count on record. Not neutral:\n  a model this world has never measured is not assumed safe.\n    debt-and-finance docent     (undeclared)\n    ip-intelligence  docent     (undeclared)\n    queuellm-internals docent     (undeclared)\n    qukaizen         docent     (undeclared)\n\n  POSTURE QUESTIONS FOR CHARLIE (candidates, not verdicts)\n    - 4 answering-role citizen(s) have never had a trial run -- they were\n      declared, not measured. That's this world's real backlog, not the ceiling question.\n\n  COVERAGE -- what this scan cannot see\n    - Any world not living under this worlds_root.\n    - Actual runtime memory or tokens/sec -- those come from a real trial, entered by hand\n      into KNOWN_MODELS or a future views/cost_ledger.json, not measured live by this script.\n    - Whether an 'adopted' verdict here has actually been written back into ARAIL's own spec\n      file -- that gap is spec_drift, an unbuilt view.\n\n  wrote /Users/netsushi/ProJects/qukaizen-team/worlds/qukaizen-lab/views/ceiling_check.json\n"
+}

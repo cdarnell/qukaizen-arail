@@ -551,6 +551,14 @@ def _maybe_rotate_log(log_file: Path) -> None:
             pass
 
 
+def _shim_api_key() -> str:
+    try:
+        from arail.portal import auth as _auth
+        return _auth.read_shim_token() or "not-needed"
+    except Exception:  # noqa: BLE001 - OpenCode still starts; the shim will just 401
+        return "not-needed"
+
+
 def _compute_source_env() -> dict[str, str]:
     """[UPDATED Sprint 2] Translate active Compute Source into opencode env vars.
 
@@ -593,7 +601,9 @@ def _compute_source_env() -> dict[str, str]:
         return {
             "OPENCODE_API_BASE": shim_base,
             "OPENCODE_MODEL": active_model,
-            "OPENCODE_API_KEY": "not-needed",
+            # Shim-scoped token (arl1s_): valid only under /api/openai/v1/. NEVER the portal bearer:
+            # this env is readable by the shell the model drives.
+            "OPENCODE_API_KEY": _shim_api_key(),
         }
 
     # Cloud provider — set BOTH the canonical env name AND OPENCODE_API_KEY
@@ -736,6 +746,7 @@ def _render_opencode_config(
                 "name": "ARAIL Lab",
                 "options": {
                     "baseURL": base_url,
+                    "apiKey": _shim_api_key(),
                 },
                 "models": _build_models_map(model, models_list),
             }
@@ -1058,7 +1069,7 @@ def _regenerate_config_unlocked() -> dict:
             _os.fsync(fh.fileno())
         tmp.replace(cfg_file)
         try:
-            cfg_file.chmod(0o644)
+            cfg_file.chmod(0o600)   # holds the shim-scoped token (arl1s_)
         except OSError:
             pass
 

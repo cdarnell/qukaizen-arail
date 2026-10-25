@@ -930,6 +930,7 @@ async def _startup():
         try:
             from arail.portal import auth as _portal_auth
             _portal_auth.ensure_token()
+            _portal_auth.ensure_shim_token()
             _log.info("The dashboard now asks for your lab passphrase once per browser.")
         except OSError as _tok_err:
             activity_log.emit("security",
@@ -1614,6 +1615,7 @@ async def api_welcome_setup(request: Request):
     from fastapi.responses import JSONResponse
     from arail.portal import auth as _auth
     _auth.ensure_token()
+    _auth.ensure_shim_token()
     resp = JSONResponse({"ok": True, "ide_written": ide_written})
     _auth.set_session_cookie(resp, request, _auth.get_store().create())
     return resp
