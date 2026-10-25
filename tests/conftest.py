@@ -230,6 +230,57 @@ def _allow_testclient_host(monkeypatch):
     monkeypatch.setenv("ARAIL_ALLOWED_HOSTS", "testserver")
 
 
+PORTAL_TEST_TOKEN = "arl1_" + "A" * 43  # fixed and obviously fake; never a real token
+
+
+def _write_0600(path, text):
+    """Write ``text`` to ``path`` with mode 0600 and return the path."""
+    path.write_text(text + "\n")
+    path.chmod(0o600)
+    return path
+
+
+@pytest.fixture
+def portal_bearer():
+    """Headers carrying the test bearer, for clients that are not a Starlette TestClient
+    (``httpx.ASGITransport`` callers pass ``headers=portal_bearer``)."""
+    return {"Authorization": f"Bearer {PORTAL_TEST_TOKEN}"}
+
+
+@pytest.fixture(autouse=True)
+def _portal_bearer_for_tests(request, monkeypatch, tmp_path):
+    """Give every ``TestClient`` the portal bearer, so ~7k tests keep working unedited.
+
+    Portal auth (ARAIL D3, sprint 2026-10-25-buddy-s4-gateway-in-box) requires a credential on
+    every route. Rather than a test-mode switch (an env flag that disables auth is one ``.env``
+    line from shipping), this fixture points ``auth.token_path`` at a real 0600 file holding a
+    fixed fake token and patches ``TestClient.__init__`` to default an ``Authorization`` header.
+    Existing tests therefore pass through the REAL bearer check, not a bypass. A test that sends
+    its own ``Authorization`` keeps it (``setdefault``); a test of auth itself opts out with
+    ``@pytest.mark.real_auth`` and uses ``logged_in_client`` or its own headers.
+
+    Debt TD4: patching ``TestClient.__init__`` is clever; if it ever bites, the fallback is an
+    explicit ``portal_client`` fixture and a mechanical rewrite of the 136 files.
+    """
+    if request.node.get_closest_marker("real_auth"):
+        return
+    from starlette.testclient import TestClient
+
+    from arail.portal import auth as portal_auth
+
+    token_file = _write_0600(tmp_path / "portal.token", PORTAL_TEST_TOKEN)
+    monkeypatch.setattr(portal_auth, "token_path", lambda: token_file)
+    orig = TestClient.__init__
+
+    def init(self, *a, headers=None, **kw):
+        h = dict(headers or {})
+        if not any(k.lower() == "authorization" for k in h):
+            h["Authorization"] = f"Bearer {PORTAL_TEST_TOKEN}"
+        orig(self, *a, headers=h, **kw)
+
+    monkeypatch.setattr(TestClient, "__init__", init)
+
+
 @pytest.fixture(autouse=True)
 def _no_ambient_window_override(monkeypatch, tmp_path_factory):
     """Isolate the persisted work-window override per test.
