@@ -235,3 +235,62 @@ def test_token_never_appears_in_logs_or_activity(lab, caplog):
     server_side = "\n".join(r.getMessage() for r in caplog.records if r.name != "httpx")
     assert tok not in server_side
     assert tok not in str(portal_app.activity_log.recent(200))
+
+
+# --- review ASK (b): no local process may lock the owner out ----------------------------------------
+def test_a_hostile_process_cannot_lock_out_a_browser_that_has_logged_in_before(lab):
+    owner = mk()
+    assert login(owner).status_code == 303
+    assert owner.cookies.get("arail_dev_8080")
+    owner.cookies.delete("arail_sid_8080")                      # the session expired / was ended
+    attacker = mk()                                             # no cookies at all, like curl
+    for _ in range(5):
+        assert login(attacker, "guess-guess-1").status_code == 401
+    assert login(attacker, "guess-guess-1").status_code == 429  # the global lock holds the unknown client
+    assert login(attacker, PASS).status_code == 429             # ...even with the right passphrase
+    assert login(owner).status_code == 303                      # the owner's trusted browser walks in
+
+
+def test_the_trusted_device_lane_has_its_own_bucket_and_does_not_lock_the_global_lane(lab):
+    owner = mk()
+    login(owner)
+    owner.cookies.delete("arail_sid_8080")
+    for _ in range(5):
+        assert login(owner, "guess-guess-1").status_code == 401
+    assert login(owner, PASS).status_code == 429               # a stolen device cookie only buys its own backoff
+    fresh = mk()
+    assert login(fresh, "guess-guess-1").status_code == 401    # the global lane is untouched (401, not 429)
+
+
+def test_an_unknown_device_cookie_gets_no_lane(lab):
+    c = mk()
+    c.cookies.set("arail_dev_8080", "D" * 43)
+    for _ in range(5):
+        login(c, "guess-guess-1")
+    assert login(c, "guess-guess-1").status_code == 429
+
+
+def test_the_lock_is_a_file_so_the_cli_can_clear_it_in_a_running_portal(lab):
+    from arail.portal import auth as a
+    portal_side = a.LoginLimiter(a.lock_path)
+    for _ in range(5):
+        portal_side.failure()
+    assert portal_side.wait_s() > 0
+    a.LoginLimiter(a.lock_path).success()                       # what `arailctl auth unlock` does, another process
+    assert portal_side.wait_s() == 0
+
+
+def test_unlock_verb_clears_the_running_portals_lock(lab, monkeypatch):
+    import io
+
+    from arail.portal import auth as a
+    from arail.portal import auth_cli
+    monkeypatch.setattr(a, "limiter", a.LoginLimiter(a.lock_path))
+    attacker = mk()
+    for _ in range(5):
+        login(attacker, "guess-guess-1")
+    assert login(attacker, PASS).status_code == 429
+    peer = a.LoginLimiter(a.lock_path)                          # the CLI process's own object
+    assert peer.wait_s() > 0
+    assert auth_cli.main(["unlock"], out=io.StringIO()) == 0
+    assert login(mk(), PASS).status_code == 303

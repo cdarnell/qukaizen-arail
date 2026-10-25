@@ -402,37 +402,136 @@ def get_store() -> SessionStore:
 
 
 # --------------------------------------------------------------------------- login rate limit
+# Design (review ASK b). Every local client arrives as 127.0.0.1, so the server cannot tell a hostile
+# local process from the owner by address, and any one global limit that bounds a hostile process's
+# guesses also bounds the owner's. Three parts keep brute-force protection AND stop a local process
+# from locking the owner out:
+#   1. A global lock for UNKNOWN clients (5 free failures, then 10 s doubling to 300 s). Unknown means
+#      "no trusted-device cookie", which is every curl, script and box. This is the brute-force
+#      protection; it is the same arithmetic as before (about 288 guesses a day at the cap).
+#   2. A trusted-device lane. A browser that has logged in successfully is given a second cookie
+#      (arail_dev_<port>, server-side, 90 days). Its login attempts are counted in a bucket of its own
+#      and are NOT blocked by the global lock, so a returning owner whose session expired is never
+#      locked out by someone else's failures. A process without that cookie cannot use the lane, and a
+#      stolen cookie only buys one bucket of 5 free guesses and then the same backoff.
+#   3. A local way out. The lock is a file (portal_login_lock.json), so `arailctl auth unlock` (and
+#      `auth reset`) clears it in the running portal at once. The first login from a brand-new
+#      browser during an attack needs that command, which needs the machine: the same trust as reset.
+# Rejected: per-client buckets keyed only by something the client sends (drop the cookie, get a fresh
+# bucket: no brute-force protection), and exempting loopback (every attacker is loopback).
 class LoginLimiter:
-    """After 5 consecutive failures, one attempt per 10 s doubling to a cap of 300 s. Process-global."""
+    """After 5 consecutive failures, one attempt per 10 s doubling to a cap of 300 s."""
 
     FREE = 5
     BASE_S = 10.0
     CAP_S = 300.0
 
-    def __init__(self) -> None:
+    def __init__(self, path_fn=None) -> None:
         self._lock = threading.Lock()
+        self._path_fn = path_fn
+        self._seen_key: Optional[tuple] = None
         self.fails = 0
-        self.not_before = 0.0
+        self.not_before = 0.0   # epoch seconds
+
+    def _file(self) -> Optional[Path]:
+        return Path(self._path_fn()) if self._path_fn else None
+
+    def _sync(self) -> None:
+        p = self._file()
+        if p is None:
+            return
+        try:
+            st = os.lstat(p)
+        except OSError:
+            if self._seen_key is not None:           # file removed: unlocked
+                self.fails, self.not_before, self._seen_key = 0, 0.0, None
+            return
+        key = (st.st_ino, st.st_mtime_ns, st.st_size)
+        if key == self._seen_key:
+            return
+        try:
+            d = json.loads(p.read_text(encoding="utf-8"))
+            self.fails, self.not_before = int(d["fails"]), float(d["not_before"])
+        except Exception:  # noqa: BLE001 - unreadable lock state: do not lock anyone out on a bad file
+            self.fails, self.not_before = 0, 0.0
+        self._seen_key = key
+
+    def _save(self) -> None:
+        p = self._file()
+        if p is None:
+            return
+        try:
+            _files.ensure_private_dir(p.parent)
+            _files.write_private(p, json.dumps({"fails": self.fails, "not_before": self.not_before}).encode())
+            st = os.lstat(p)
+            self._seen_key = (st.st_ino, st.st_mtime_ns, st.st_size)
+        except OSError as exc:
+            _log.warning("login lock state not written (%s)", type(exc).__name__)
 
     def wait_s(self) -> float:
         with self._lock:
-            return max(0.0, self.not_before - time.monotonic())
+            self._sync()
+            return max(0.0, self.not_before - time.time())
 
     def failure(self) -> int:
         with self._lock:
+            self._sync()
             self.fails += 1
             if self.fails >= self.FREE:
                 delay = min(self.CAP_S, self.BASE_S * (2 ** (self.fails - self.FREE)))
-                self.not_before = time.monotonic() + delay
+                self.not_before = time.time() + delay
+            self._save()
             return self.fails
 
     def success(self) -> None:
         with self._lock:
-            self.fails = 0
-            self.not_before = 0.0
+            self._sync()
+            if self.fails or self.not_before:
+                self.fails, self.not_before = 0, 0.0
+                self._save()
 
 
-limiter = LoginLimiter()
+def lock_path() -> Path:
+    return Path(config.DATA_DIR) / "portal_login_lock.json"
+
+
+def devices_path() -> Path:
+    return Path(config.DATA_DIR) / "portal_devices.json"
+
+
+def device_cookie_name() -> str:
+    return "arail_dev_" + (os.getenv("PORTAL_PORT", "") or "8080").strip()
+
+
+limiter = LoginLimiter(lock_path)         # the global lock for unknown clients; file-backed
+device_limiters: dict[str, LoginLimiter] = {}   # per trusted device, in memory
+
+
+def get_devices() -> SessionStore:
+    """Trusted browsers (same store type as sessions, its own file)."""
+    path = devices_path()
+    with _store_lock:
+        st = _stores.get("dev:" + str(path))
+        if st is None:
+            st = _stores["dev:" + str(path)] = SessionStore(path)
+        return st
+
+
+def device_limiter(dev_sid: str) -> LoginLimiter:
+    key = hashlib.sha256(dev_sid.encode("utf-8")).hexdigest()
+    with _store_lock:
+        return device_limiters.setdefault(key, LoginLimiter())
+
+
+def unlock_logins() -> None:
+    """Clear the global lock (the running portal notices the file change)."""
+    limiter.success()
+    p = lock_path()
+    if os.path.lexists(p):
+        try:
+            os.unlink(p)
+        except OSError:
+            pass
 
 
 # --------------------------------------------------------------------------- request decisions
@@ -525,6 +624,13 @@ def set_session_cookie(response, request, sid: str) -> None:
     """HttpOnly, SameSite=Strict, Path=/; Secure only when this request came in over https."""
     response.set_cookie(
         cookie_name(), sid, max_age=COOKIE_MAX_AGE_S, path="/", httponly=True, samesite="strict",
+        secure=request.url.scheme == "https",
+    )
+
+
+def set_device_cookie(response, request, dev_sid: str) -> None:
+    response.set_cookie(
+        device_cookie_name(), dev_sid, max_age=ABSOLUTE_EXPIRY_S, path="/", httponly=True, samesite="strict",
         secure=request.url.scheme == "https",
     )
 

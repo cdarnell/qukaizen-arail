@@ -3,6 +3,7 @@
     arailctl auth token [--rotate] [--world SLUG]   print the token's id and path, never its value
     arailctl auth reset [--world SLUG]              new lab passphrase (asked twice), sessions revoked
     arailctl auth logout-all [--world SLUG]         revoke every browser session
+    arailctl auth unlock [--world SLUG]             clear a login lockout (wrong guesses from any local process)
 
 Exit codes: 0 ok, 2 usage, 3 refused (not onboarded, unsafe file, or not the lab's owner).
 ``--world`` is resolved by the shell wrapper (it exports ARAIL_INSTANCE and ARAIL_DATA_DIR from the
@@ -100,6 +101,7 @@ def cmd_reset(out) -> int:
     except OSError:
         print("Note: the code-server config could not be written; re-run setup to unlock the IDE.", file=out)
     auth.get_store().revoke_all()
+    auth.unlock_logins()
     print("Passphrase changed. Every browser session was ended and the running portal takes the new passphrase at its next login; restart the lab so the IDE and notebooks pick it up too.", file=out)
     return 0
 
@@ -110,6 +112,12 @@ def cmd_logout_all(out) -> int:
     return 0
 
 
+def cmd_unlock(out) -> int:
+    auth.unlock_logins()
+    print("Login attempts unlocked.", file=out)
+    return 0
+
+
 def main(argv: Optional[Sequence[str]] = None, out=None) -> int:
     out = out or sys.stdout
     ap = argparse.ArgumentParser(prog="arailctl auth", add_help=True)
@@ -117,7 +125,7 @@ def main(argv: Optional[Sequence[str]] = None, out=None) -> int:
     t = sub.add_parser("token")
     t.add_argument("--rotate", action="store_true")
     t.add_argument("--world", default=None)
-    for name in ("reset", "logout-all"):
+    for name in ("reset", "logout-all", "unlock"):
         p = sub.add_parser(name)
         p.add_argument("--world", default=None)
     try:
@@ -135,6 +143,8 @@ def main(argv: Optional[Sequence[str]] = None, out=None) -> int:
         return cmd_token(ns.rotate, out)
     if ns.verb == "reset":
         return cmd_reset(out)
+    if ns.verb == "unlock":
+        return cmd_unlock(out)
     return cmd_logout_all(out)
 
 

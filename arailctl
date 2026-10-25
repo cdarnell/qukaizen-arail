@@ -263,7 +263,7 @@ EOF
     world <op>      DaC WorldBundle: list | mount <dir> [--apply-face] | verify <dir> | verify-shipped [--examples] | swap <dir> | unmount
     nucleus <verb>  Model Forge (local domain distillation): plan | stage | build | spike |
                     eval | certify | verify | status | list — see docs/nucleus.md
-    auth <verb>     Portal credentials: token [--rotate] | reset | logout-all  (each takes --world SLUG)
+    auth <verb>     Portal credentials: token [--rotate] | reset | logout-all | unlock  (each takes --world SLUG)
     buddy <verb>    Buddy on your phone (loopback edge): link --buddy-home PATH [--rotate] [--yes] |
                     unlink [--buddy-home PATH] | status [--json] — see docs/buddy-edge.md
     pkb <op>        ARAIL lab content: ingest | compile | browse | prune | bootstrap

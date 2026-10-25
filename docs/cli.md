@@ -800,7 +800,8 @@ refused: not onboarded, unsafe token file, or not the lab's owner). Every verb t
 | `token` | Make sure `<DATA_DIR>/portal.token` exists (`0600`); print its **id** and path, never the value. Programs send it as `Authorization: Bearer <token>`. |
 | `token --rotate` | New token; the old one stops working on the next request. |
 | `reset` | New lab passphrase (asked twice); every browser session is ended. Use it when you forget the passphrase. |
-| `logout-all` | End every browser session. |
+| `logout-all` | End every browser session, including in a portal that is already running. |
+| `unlock` | Clear a login lockout. After 5 wrong passphrases in a row (from any local process) new logins wait 10 s, doubling to 5 min; a browser that has logged in before is not held by that. |
 
 ### `buddy <verb>`
 

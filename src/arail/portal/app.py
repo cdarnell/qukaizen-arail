@@ -1525,7 +1525,13 @@ async def login_submit(request: Request):
     candidate = candidate if isinstance(candidate, str) else ""
     nxt = _auth.safe_next(body.get("next") if isinstance(body.get("next"), str) else None)
 
-    wait = _auth.limiter.wait_s()
+    # Trusted-device lane (see arail.portal.auth, "Design"): a browser that has logged in before has
+    # a bucket of its own and is not held by the global lock that guards unknown clients.
+    dev_sid = request.cookies.get(_auth.device_cookie_name(), "")
+    known_device = bool(dev_sid) and _auth.get_devices().touch(dev_sid)
+    lim = _auth.device_limiter(dev_sid) if known_device else _auth.limiter
+
+    wait = lim.wait_s()
     if wait > 0:   # over the limit: the attempt is NOT evaluated, even a correct passphrase
         retry = {"Retry-After": str(max(1, math.ceil(wait)))}
         if wants_json:
@@ -1536,19 +1542,22 @@ async def login_submit(request: Request):
 
     _refresh_passphrase_from_file()
     if not _auth.check_password(candidate):
-        n = _auth.limiter.failure()
+        n = lim.failure()
         activity_log.emit("security", f"Failed portal login ({n} in a row).", "warn",
-                          {"security_event": {"kind": "login_failed", "consecutive": n}})
+                          {"security_event": {"kind": "login_failed", "consecutive": n,
+                                              "trusted_device": known_device}})
         if wants_json:
             return JSONResponse({"error": "login_failed"}, status_code=401)
         return _login_page(request, next_url=nxt, status=401, error="That passphrase did not match.")
 
-    _auth.limiter.success()
+    lim.success()
     _auth.ensure_token()
     sid = _auth.get_store().create()
     resp = (JSONResponse({"ok": True, "next": nxt}) if wants_json
             else RedirectResponse(url=nxt, status_code=303))
     _auth.set_session_cookie(resp, request, sid)
+    if not known_device:     # remember this browser: its next login is never held by someone else's failures
+        _auth.set_device_cookie(resp, request, _auth.get_devices().create())
     return resp
 
 

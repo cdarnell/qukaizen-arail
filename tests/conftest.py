@@ -296,6 +296,7 @@ def _portal_bearer_for_tests(request, monkeypatch, tmp_path):
     # or a cached session store into the next test.
     monkeypatch.setattr(portal_auth, "_stores", {})
     monkeypatch.setattr(portal_auth, "limiter", portal_auth.LoginLimiter())
+    monkeypatch.setattr(portal_auth, "device_limiters", {})
     # A test that enters a TestClient context runs the portal's startup hook; that must never bind
     # the real Buddy edge port. Edge tests choose their own free port.
     monkeypatch.setenv("ARAIL_EDGE_PORT", "0")
