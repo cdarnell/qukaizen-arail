@@ -2260,3 +2260,19 @@ Fourteen deliberate deferrals the design accepted knowingly. Each row names the 
 | D35 | **The launchd log holds phone text, Telegram ids and usernames** (Buddy's `~/.nanobot/logs/`). The operator decides before S2 adds people. | See Buddy's DEBT.md. |
 | D36 | **Buddy's exec guard misses `_posixsubprocess.fork_exec`; `ctypes` bypasses its socket guard.** Not ARAIL's, but it is the layer under G1/G9 on the Mac. | Buddy's container sprint (D1). |
 | D41 | **The vendored contract's `PROVENANCE.json` names a Buddy commit that exists only on the builder's Mac** until `qukaizen/buddy-always-on` is pushed (review finding 7). Re-run `scripts/sync-buddy-contract.py --check` against the pushed ref. | **Before the ARAIL PR merges:** push the Buddy branch (or merge it) and re-check. Not done in build round 2: the instruction was to push nothing. |
+
+---
+
+## D-S4-1: the model's shell can read the portal credentials
+
+**Filed by:** `sprints/2026-10-25-buddy-s4-gateway-in-box/REVIEW.md` (ASK), after portal auth landed.
+
+opencode's model drives a shell that runs as the lab user. `lab/data/portal.token`, `portal.shim-token`
+and `.env` are 0600, which stops other users, not that shell. So Addendum A's "no portal credential in the
+model's reach" is true of what the lab *hands* opencode (only the `arl1s_` shim token), not of what the
+shell can *read*. Not a regression (the shell could always read `ARAIL_PASSWORD`).
+
+**Pay it by:** an OS-level boundary for the model shell: a separate user or a container with only the
+files it needs, the pattern Buddy's box uses (Buddy S3/S5).
+**Trigger:** opencode enabled on a shared or family machine outside the owner's own account, or any
+change that widens the shell's reach (new tools, network). Documented for users in `docs/PRIVACY.md`.
