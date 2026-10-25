@@ -157,7 +157,8 @@ def test_real_sse_route_streams_live():
             "raw_path": b"/api/activity/stream",
             "query_string": b"",
             "root_path": "",
-            "headers": [(b"host", b"testserver")],
+            "headers": [(b"host", b"testserver"),
+                        (b"authorization", b"Bearer arl1_" + b"A" * 43)],   # the conftest bearer: raw ASGI bypasses TestClient
             "client": ("testclient", 50000),
             "server": ("testserver", 80),
         }
