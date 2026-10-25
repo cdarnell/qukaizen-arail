@@ -175,7 +175,27 @@ def _loopback_host() -> str:
     return _LOOPBACK_HOSTS.get(raw, "127.0.0.1")
 
 
+DEFAULT_EDGE_PORT = 8089   # outside every World instance block [8090, 9100)
+
+
+def edge_port() -> int:
+    """``ARAIL_EDGE_PORT`` (default 8089); 0 turns the edge app off. Garbage means the default."""
+    raw = (os.getenv("ARAIL_EDGE_PORT", "") or "").strip()
+    if not raw:
+        return DEFAULT_EDGE_PORT
+    try:
+        port = int(raw)
+    except ValueError:
+        return DEFAULT_EDGE_PORT
+    return port if 0 <= port <= 65535 else DEFAULT_EDGE_PORT
+
+
 def edge_base_url() -> str:
+    """Where Buddy should dial. The edge-only app on 127.0.0.1:$ARAIL_EDGE_PORT when it is enabled;
+    otherwise (ARAIL_EDGE_PORT=0) the portal's own mount, as before S4."""
+    ep = edge_port()
+    if ep:
+        return f"http://127.0.0.1:{ep}/api/host/v1"
     port = (os.getenv("PORTAL_PORT", "") or "8080").strip() or "8080"
     return f"http://{_loopback_host()}:{port}/api/host/v1"
 

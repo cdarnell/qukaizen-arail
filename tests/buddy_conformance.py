@@ -134,8 +134,8 @@ def _entry(kind: str) -> Any:
 class World:
     """One case's world. Built from ``setup``; everything is undone by pytest's monkeypatch."""
 
-    def __init__(self, setup: dict, method: str, tmp_path: pathlib.Path, monkeypatch) -> None:
-        self.setup, self.method, self.mp = setup, method, monkeypatch
+    def __init__(self, setup: dict, method: str, tmp_path: pathlib.Path, monkeypatch, mount: str = "portal") -> None:
+        self.setup, self.method, self.mp, self.mount = setup, method, monkeypatch, mount
         data = tmp_path / "lab-data"
         data.mkdir()
         monkeypatch.setattr(config, "DATA_DIR", data)
@@ -205,7 +205,8 @@ class World:
             if hasattr(host_edge_routes, name):
                 monkeypatch.setattr(host_edge_routes, name, boom)
 
-        self.client = TestClient(host_edge_routes_app(), client=(s.get("peer", "127.0.0.1"), 50000))
+        self.client = TestClient(host_edge_routes_app(self.mount), client=(s.get("peer", "127.0.0.1"), 50000),
+                                 base_url="http://127.0.0.1")
 
     def _link(self) -> None:
         sha = link.credential_sha256(CONTRACT["conformance"]["fake_credential"])
@@ -327,6 +328,10 @@ class World:
         return problems
 
 
-def host_edge_routes_app():
+def host_edge_routes_app(mount: str = "portal"):
+    """The app under test: the portal's own ``/api/host/v1`` mount, or the box-only edge app."""
+    if mount == "edge":
+        from arail.portal.edge_app import edge_app
+        return edge_app
     from arail.portal.app import app
     return app

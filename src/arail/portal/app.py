@@ -937,6 +937,18 @@ async def _startup():
                 f"portal.token could not be created ({type(_tok_err).__name__}); "
                 "programs cannot authenticate until it exists.", "warn")
 
+    # Buddy's edge-only listener (127.0.0.1:$ARAIL_EDGE_PORT, root lab only). A failure here is a
+    # state to report, never a reason for the portal not to start.
+    try:
+        from arail.portal import edge_app as _edge_app
+        _edge_state = _edge_app.listener.start()
+        activity_log.emit("system",
+            f"Buddy edge: {_edge_state}"
+            + (f" on {_edge_app.EDGE_HOST}:{_edge_app.listener.port}" if _edge_state == "listening" else ""),
+            "info")
+    except Exception as _edge_err:  # noqa: BLE001
+        _log.warning("Buddy edge listener not started: %s", type(_edge_err).__name__)
+
     _boot_ident = effective_identity()
     intent_name = _boot_ident.intent_name
     activity_log.emit("system",
@@ -1387,6 +1399,11 @@ def _register_canvas_goal_listener(store: Any) -> None:
 @app.on_event("shutdown")
 async def _shutdown():
     global _knowledge_canvas_store
+    try:
+        from arail.portal import edge_app as _edge_app
+        await _edge_app.listener.stop()
+    except Exception:  # noqa: BLE001 - shutting down; nothing useful to do with it
+        pass
     if _knowledge_canvas_store is not None:
         try:
             await _knowledge_canvas_store.close()

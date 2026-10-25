@@ -20,8 +20,10 @@ def test_the_vendored_suite_is_the_one_in_the_contract():
     assert {c["method"] for c in CASES} == set(CONTRACT["methods"])
 
 
+@pytest.mark.parametrize("mount", ["portal", "edge"])
 @pytest.mark.parametrize("case", [c for c in CASES if c["method"] in IMPLEMENTED], ids=lambda c: c["name"])
-def test_conformance_case(case, tmp_path, monkeypatch):
-    world = World(case["setup"], case["method"], tmp_path, monkeypatch)
+def test_conformance_case(case, mount, tmp_path, monkeypatch):
+    """Each shared case runs against the portal's mount AND the box-only edge app: identical results."""
+    world = World(case["setup"], case["method"], tmp_path, monkeypatch, mount=mount)
     problems = world.run(case)
     assert not problems, "\n".join(problems)

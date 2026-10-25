@@ -263,7 +263,10 @@ def _patch_testclient_send_once():
     orig_send = httpx.Client.send
 
     def send(self, request, **kw):
-        if _bearer_active["on"] and "authorization" not in request.headers:
+        # /api/host/v1/* has its own bhc1_ credential; a portal bearer there would turn
+        # "credential_missing" into "credential_invalid".
+        if (_bearer_active["on"] and "authorization" not in request.headers
+                and not request.url.path.startswith("/api/host/v1/")):
             request.headers["Authorization"] = f"Bearer {PORTAL_TEST_TOKEN}"
         return orig_send(self, request, **kw)
 
@@ -293,6 +296,9 @@ def _portal_bearer_for_tests(request, monkeypatch, tmp_path):
     # or a cached session store into the next test.
     monkeypatch.setattr(portal_auth, "_stores", {})
     monkeypatch.setattr(portal_auth, "limiter", portal_auth.LoginLimiter())
+    # A test that enters a TestClient context runs the portal's startup hook; that must never bind
+    # the real Buddy edge port. Edge tests choose their own free port.
+    monkeypatch.setenv("ARAIL_EDGE_PORT", "0")
     if request.node.get_closest_marker("real_auth"):
         monkeypatch.setattr(arail_config, "DATA_DIR", tmp_path / "portal_data")
         yield
