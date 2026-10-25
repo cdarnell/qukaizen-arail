@@ -100,7 +100,7 @@ def cmd_reset(out) -> int:
     except OSError:
         print("Note: the code-server config could not be written; re-run setup to unlock the IDE.", file=out)
     auth.get_store().revoke_all()
-    print("Passphrase changed. Every browser session was ended; restart the lab to apply it everywhere.", file=out)
+    print("Passphrase changed. Every browser session was ended and the running portal takes the new passphrase at its next login; restart the lab so the IDE and notebooks pick it up too.", file=out)
     return 0
 
 

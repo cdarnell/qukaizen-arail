@@ -1466,6 +1466,25 @@ async def welcome_page(request: Request):
 
 # ── Portal login (ARAIL D3; ARCHITECTURE.md C4/C5) ───────────────────────
 
+def _refresh_passphrase_from_file() -> None:
+    """Adopt the passphrase on disk if another process changed it (``arailctl auth reset``).
+
+    The running portal otherwise keeps the value it cached into ``os.environ``, so the OLD passphrase
+    would keep working until a restart. Only a real (non-placeholder) value is adopted. Login
+    attempts are rare, so reading the small env file each time costs nothing that matters.
+    """
+    try:
+        text = _env_file_path().read_text()
+    except OSError:
+        return
+    for line in text.splitlines():
+        if line.startswith("ARAIL_PASSWORD="):
+            val = line.split("=", 1)[1].strip()
+            if val and val not in _PASSWORD_PLACEHOLDERS:
+                os.environ["ARAIL_PASSWORD"] = val
+            return
+
+
 def _login_page(request: Request, *, next_url: str, error: str = "", status: int = 200, headers=None):
     return templates.TemplateResponse(request, "login.html", {
         **_identity_ctx(), "next": next_url, "error": error,
@@ -1515,6 +1534,7 @@ async def login_submit(request: Request):
         return _login_page(request, next_url=nxt, status=429, headers=retry,
                            error=f"Too many attempts. Try again in {retry['Retry-After']} seconds.")
 
+    _refresh_passphrase_from_file()
     if not _auth.check_password(candidate):
         n = _auth.limiter.failure()
         activity_log.emit("security", f"Failed portal login ({n} in a row).", "warn",

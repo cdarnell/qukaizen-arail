@@ -150,3 +150,20 @@ def test_svc_portal_curl_returns_77_without_a_readable_token(tmp_path):
 def test_shell_files_parse():
     for f in ("arailctl", "scripts/status.sh", "scripts/lib/services.sh"):
         assert subprocess.run(["bash", "-n", str(REPO / f)]).returncode == 0
+
+
+def test_after_reset_the_running_portal_stops_accepting_the_old_passphrase(lab, monkeypatch):
+    """Review ASK (a): the portal is another process, with the old passphrase still in its environment."""
+    from fastapi.testclient import TestClient
+
+    from arail.portal import app as portal_app
+    monkeypatch.setattr(portal_app, "_patch_lab_conf_password", lambda p: None)
+    monkeypatch.setattr(portal_app, "_write_code_server_password", lambda p: None)
+    portal_app._write_env_kv("ARAIL_PASSWORD", PASS)                  # what onboarding wrote to disk
+    answers = iter(["a-brand-new-pass", "a-brand-new-pass"])
+    monkeypatch.setattr(auth_cli, "_read_pass", lambda prompt: next(answers))
+    assert run("reset")[0] == 0
+    monkeypatch.setenv("ARAIL_PASSWORD", PASS)                        # the portal process never saw the change
+    c = TestClient(portal_app.app, follow_redirects=False)
+    assert c.post("/login", data={"passphrase": PASS}).status_code == 401
+    assert c.post("/login", data={"passphrase": "a-brand-new-pass"}).status_code == 303
