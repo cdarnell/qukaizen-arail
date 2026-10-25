@@ -858,11 +858,11 @@ def _render_opencode_config(
                 ),
             },
             "kb-search": {
-                "description": "Search the lab knowledge base for a query (LanceDB).",
+                "description": "Text search over the lab knowledge base files (no ranking).",
                 "agent": "build",
                 "template": (
-                    "Search the LanceDB-backed KB for: $ARGUMENTS. "
-                    "Curl `http://127.0.0.1:8080/api/wiki/search?q=...` "
+                    "Search the KB files for: $ARGUMENTS. "
+                    "Run `rg -n -i -- \"$ARGUMENTS\" $REPO_ROOT/lab/pkb` "
                     "and summarize the top 5 hits with file paths."
                 ),
             },
