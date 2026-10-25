@@ -260,39 +260,73 @@ class SessionStore:
         self._lock = threading.Lock()
         self._rows: dict[str, dict] = {}
         self._persisted_seen: dict[str, float] = {}
+        self._seen_key: Optional[tuple] = None
         self.writes = 0
-        self._load()
+        self.reloads = 0
+        with self._lock:
+            self._sync()
 
     @staticmethod
     def _key(sid: str) -> str:
         return hashlib.sha256(sid.encode("utf-8")).hexdigest()
 
-    def _load(self) -> None:
+    def _file_key(self) -> Optional[tuple]:
+        try:
+            st = os.lstat(self.path)
+        except OSError:
+            return None
+        return (st.st_ino, st.st_mtime_ns, st.st_size, st.st_mode, st.st_uid)
+
+    def _read_file(self) -> dict[str, dict]:
+        """The sessions in the file; {} (everyone logs in again) if it is absent, unsafe or corrupt."""
         try:
             if not os.path.lexists(self.path):
-                return
+                return {}
             st = os.lstat(self.path)
             if (stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode)
                     or (hasattr(os, "getuid") and st.st_uid != os.getuid())
                     or stat.S_IMODE(st.st_mode) & 0o077):
                 raise ValueError("unsafe session file")
             data = json.loads(self.path.read_text(encoding="utf-8"))
-            rows = data["sessions"]
-            for k, v in rows.items():
+            out: dict[str, dict] = {}
+            for k, v in data["sessions"].items():
                 if re.fullmatch(r"[0-9a-f]{64}", k) and float(v["created"]) > 0 and float(v["last_seen"]) > 0:
-                    self._rows[k] = {"created": float(v["created"]), "last_seen": float(v["last_seen"])}
-            self._persisted_seen = {k: v["last_seen"] for k, v in self._rows.items()}
+                    out[k] = {"created": float(v["created"]), "last_seen": float(v["last_seen"])}
+            return out
         except Exception as exc:  # noqa: BLE001 - never crash the portal; everyone logs in again
-            self._rows = {}
-            self._persisted_seen = {}
             _log.warning("portal sessions file ignored (%s); everyone logs in again", type(exc).__name__)
+            return {}
+
+    def _sync(self) -> None:
+        """Adopt the file whenever it changed under us (a second process revoked or created sessions).
+
+        The file is the authority: a session that is in memory but no longer in the file was revoked
+        elsewhere and is dropped; one only in the file was created elsewhere and is adopted. Every
+        change this process makes is written through immediately, so nothing live exists only in
+        memory (``last_seen`` is the one exception and the newer value is kept).
+        """
+        k = self._file_key()
+        if k == self._seen_key and self._seen_key is not None:
+            return
+        if k is None and self._seen_key is None and not self._rows:
+            return
+        fresh = self._read_file()
+        for sk, row in fresh.items():
+            mine = self._rows.get(sk)
+            if mine is not None:
+                row["last_seen"] = max(row["last_seen"], mine["last_seen"])
+        self._rows = fresh
+        self._persisted_seen = {sk: r["last_seen"] for sk, r in fresh.items()}
+        self._seen_key = k
+        self.reloads += 1
 
     def _save(self) -> None:
         try:
-            _files.ensure_private_dir(self.path.parent)
+            _files.ensure_private_dir(self.path.parent)   # callers ran _sync() first, under the same lock
             payload = json.dumps({"v": 1, "sessions": self._rows}, sort_keys=True).encode("utf-8")
             _files.write_private(self.path, payload)
             self._persisted_seen = {k: v["last_seen"] for k, v in self._rows.items()}
+            self._seen_key = self._file_key()
             self.writes += 1
         except OSError as exc:
             _log.warning("portal sessions file not written (%s)", type(exc).__name__)
@@ -304,6 +338,7 @@ class SessionStore:
         sid = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode("ascii")
         now = time.time()
         with self._lock:
+            self._sync()
             for k in [k for k, r in self._rows.items() if self._expired(r, now)]:
                 del self._rows[k]
             while len(self._rows) >= MAX_SESSIONS:
@@ -319,6 +354,7 @@ class SessionStore:
         now = time.time()
         k = self._key(sid)
         with self._lock:
+            self._sync()
             row = self._rows.get(k)
             if row is None:
                 return False
@@ -333,11 +369,13 @@ class SessionStore:
 
     def revoke(self, sid: str) -> None:
         with self._lock:
+            self._sync()
             if self._rows.pop(self._key(sid), None) is not None:
                 self._save()
 
     def revoke_all(self) -> None:
         with self._lock:
+            self._sync()
             self._rows.clear()
             self._save()
 

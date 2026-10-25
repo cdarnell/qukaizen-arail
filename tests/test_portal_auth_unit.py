@@ -242,3 +242,56 @@ def test_exempt_set_is_exactly_the_specified_list():
     assert not auth.is_exempt("/api/system/health/stream", "GET")
     assert not auth.is_exempt("/api/instances", "GET")
     assert not auth.is_exempt("/metrics", "GET")
+
+
+# --- review BLOCK: a revoke from a second process must reach the running portal -----------------
+def test_revoke_all_in_a_second_store_ends_sessions_in_the_first(data_dir):
+    """The portal holds its store in memory; `arailctl auth logout-all` is a different process."""
+    portal = auth.SessionStore(data_dir / "portal_sessions.json")
+    sid = portal.create()
+    assert portal.touch(sid)
+    cli = auth.SessionStore(data_dir / "portal_sessions.json")
+    cli.revoke_all()
+    assert not portal.touch(sid)
+
+
+def test_single_revoke_in_a_second_store_reaches_the_first_and_spares_the_rest(data_dir):
+    portal = auth.SessionStore(data_dir / "portal_sessions.json")
+    keep, drop = portal.create(), portal.create()
+    other = auth.SessionStore(data_dir / "portal_sessions.json")
+    other.revoke(drop)
+    assert not portal.touch(drop) and portal.touch(keep)
+
+
+def test_the_hourly_save_does_not_resurrect_revoked_sessions(data_dir):
+    portal = auth.SessionStore(data_dir / "portal_sessions.json")
+    keep, drop = portal.create(), portal.create()
+    auth.SessionStore(data_dir / "portal_sessions.json").revoke(drop)
+    portal._persisted_seen[portal._key(keep)] = 0.0           # the hourly write is now due
+    assert portal.touch(keep) and not portal.touch(drop)      # touch(keep) saves
+    assert drop not in (data_dir / "portal_sessions.json").read_text()
+    fresh = auth.SessionStore(data_dir / "portal_sessions.json")
+    assert fresh.touch(keep) and not fresh.touch(drop)
+
+
+def test_a_session_created_in_a_second_store_is_adopted(data_dir):
+    portal = auth.SessionStore(data_dir / "portal_sessions.json")
+    portal.create()
+    sid2 = auth.SessionStore(data_dir / "portal_sessions.json").create()
+    assert portal.touch(sid2)
+
+
+def test_a_deleted_sessions_file_ends_every_session(data_dir):
+    portal = auth.SessionStore(data_dir / "portal_sessions.json")
+    sid = portal.create()
+    (data_dir / "portal_sessions.json").unlink()
+    assert not portal.touch(sid)
+
+
+def test_unchanged_file_is_not_reread_per_request(data_dir):
+    s = auth.SessionStore(data_dir / "portal_sessions.json")
+    sid = s.create()
+    before = s.reloads
+    for _ in range(200):
+        s.touch(sid)
+    assert s.reloads == before
