@@ -302,6 +302,7 @@ markers = [
     "requires_mlx: tests needing a real mlx/mlx-lm install and Apple Silicon; skipped in CI",
     "requires_aerollm: tests needing a real aerollm_api extension build; skipped in CI",
     "requires_kernel: tests needing a real Linux kernel + vulns clone (item 10 only); skipped in CI",
+    "real_auth: opt out of conftest's autouse portal bearer (tests of the portal auth itself)",
     "requires_qkz_bin: tests needing the real Nucleus Rust qkz binary (NUCLEUS_QKZ_BIN); skipped in CI",
 ]
 
