@@ -205,8 +205,11 @@ class World:
             if hasattr(host_edge_routes, name):
                 monkeypatch.setattr(host_edge_routes, name, boom)
 
-        self.client = TestClient(host_edge_routes_app(self.mount), client=(s.get("peer", "127.0.0.1"), 50000),
-                                 base_url="http://127.0.0.1")
+        if self.mount == "edge-socket":
+            self.client = socket_edge_client()
+        else:
+            self.client = TestClient(host_edge_routes_app(self.mount), client=(s.get("peer", "127.0.0.1"), 50000),
+                                     base_url="http://127.0.0.1")
 
     def _link(self) -> None:
         sha = link.credential_sha256(CONTRACT["conformance"]["fake_credential"])
@@ -326,6 +329,46 @@ class World:
         for i, step in enumerate(case.get("followups", []), 1):
             problems += [f"[step {i}] {p}" for p in self.check(self.send(step["request"], now), step["expect"], now)]
         return problems
+
+
+_socket_edge: dict = {}
+
+
+def socket_edge_client():
+    """An httpx client talking over a REAL TCP connection to the real edge app, bound once per process on
+    127.0.0.1:$ARAIL_CONFORMANCE_EDGE_PORT (default 8089, the port the box will dial). State is the same
+    process's, so the cases' monkeypatched worlds are what the server sees."""
+    import socket
+    import threading
+    import time
+
+    import httpx
+    import pytest
+
+    port = int(os.getenv("ARAIL_CONFORMANCE_EDGE_PORT", "8089"))
+    if "server" not in _socket_edge:
+        import asyncio
+
+        import uvicorn
+
+        from arail.portal.edge_app import EDGE_HOST, EdgeServer, edge_app
+
+        sock = socket.socket()
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind((EDGE_HOST, port))
+        except OSError:
+            sock.close()
+            pytest.skip(f"127.0.0.1:{port} is in use; set ARAIL_CONFORMANCE_EDGE_PORT")
+        sock.listen(128)
+        server = EdgeServer(uvicorn.Config(edge_app, lifespan="off", access_log=False, log_level="warning", log_config=None))
+        threading.Thread(target=lambda: asyncio.run(server.serve(sockets=[sock])), daemon=True).start()
+        for _ in range(100):
+            if server.started:
+                break
+            time.sleep(0.05)
+        _socket_edge["server"] = server
+    return httpx.Client(base_url=f"http://127.0.0.1:{port}", timeout=30)
 
 
 def host_edge_routes_app(mount: str = "portal"):
