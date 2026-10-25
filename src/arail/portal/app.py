@@ -687,6 +687,18 @@ def _host_is_trusted(hostname: str) -> bool:
 
 
 @app.middleware("http")
+async def portal_auth(request, call_next):
+    """Credential check for every route (ARAIL D3; ARCHITECTURE.md C2/C3).
+
+    Registered immediately BEFORE ``local_trust_boundary`` so that, with Starlette's reverse
+    registration order, the Host allowlist and CSRF checks (403) run first, then this (401/302),
+    then everything else. The decision logic lives in ``arail.portal.auth``.
+    """
+    from arail.portal import auth as _portal_auth
+    return await _portal_auth.authenticate(request, call_next, onboarded=_lab_password_set())
+
+
+@app.middleware("http")
 async def local_trust_boundary(request, call_next):
     from fastapi.responses import JSONResponse
 

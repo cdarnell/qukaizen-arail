@@ -372,3 +372,52 @@ def session_mutation_ok(headers) -> bool:
         from urllib.parse import urlparse
         return urlparse(origin).netloc == headers.get("host", "") != ""
     return False
+
+
+# --------------------------------------------------------------------------- the middleware decision
+def _json_401(error: str, **extra):
+    from fastapi.responses import JSONResponse
+    body = {"error": error, "login": "/login", **extra}
+    return JSONResponse(body, status_code=401, headers={"WWW-Authenticate": 'Bearer realm="arail"'})
+
+
+async def authenticate(request, call_next, *, onboarded: bool):
+    """C2, first match wins. ``onboarded`` is False until the lab has a real passphrase.
+
+    Host allowlist and CSRF run in the outer ``local_trust_boundary`` first (403), so a rebinding
+    request is rejected before it costs a session lookup or a login attempt.
+    """
+    if not onboarded:                                              # 1. nothing to log in with yet
+        return await call_next(request)
+    path = request.url.path
+    if is_exempt(path, request.method):                            # 2. the short anonymous list
+        return await call_next(request)
+    if path.startswith(EDGE_PREFIX):                               # 3. the edge's own bhc1_ admission
+        return await call_next(request)
+
+    header = request.headers.get("authorization")
+    if header is not None:                                         # 4. a wrong bearer never falls back to the cookie
+        if check_bearer(header):
+            request.state.principal = "bearer"
+            return await call_next(request)
+        if token_file_state() == "unsafe":
+            return _json_401("token_file_unsafe")
+        return _json_401("auth_invalid")
+
+    if path.startswith(OPENAI_PREFIX):                             # 5. OpenAI clients are bearer-only
+        return _json_401("auth_required")
+
+    sid = request.cookies.get(cookie_name(), "")                   # 6. browser session
+    if sid and get_store().touch(sid):
+        if request.method in ("POST", "PUT", "PATCH", "DELETE") and not session_mutation_ok(request.headers):
+            from fastapi.responses import JSONResponse
+            return JSONResponse({"error": "cross_origin_session"}, status_code=403)
+        request.state.principal = "session"
+        return await call_next(request)
+
+    if (path.startswith("/api/") or path == "/metrics"                                       # 7. (/metrics: a scraper,
+            or "application/json" in request.headers.get("accept", "")):                    #    not a person: 401, not 302)
+        return _json_401("auth_required")
+    from urllib.parse import quote
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/login?next=" + quote(path, safe="/"), status_code=302)
