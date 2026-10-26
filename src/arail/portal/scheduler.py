@@ -68,13 +68,6 @@ FAST_PATH_PREFIXES: tuple[str, ...] = (
     "/api/admin/cleanup",
     "/api/admin/security",
     "/api/admin/agent-lanes",
-    # Buddy edge (sprint 2026-10-20-buddy-always-on). Metrics only: these four
-    # are short. /api/host/v1/brain/ is deliberately NOT here -- brain.chat is
-    # a long-lived SSE call and would inflate fast_path_ms p95.
-    "/api/host/v1/handshake",
-    "/api/host/v1/trace/",
-    "/api/host/v1/hold_all",
-    "/api/host/v1/pause_research",
     "/api/pkb/",
     "/api/research/",
     "/static/",
