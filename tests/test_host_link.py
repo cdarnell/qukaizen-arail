@@ -48,6 +48,7 @@ def lab(tmp_path, monkeypatch):
     monkeypatch.delenv("ARAIL_INSTANCE", raising=False)
     monkeypatch.setenv("BIND_ADDR", "127.0.0.1")
     monkeypatch.setenv("PORTAL_PORT", "8080")
+    monkeypatch.setenv("ARAIL_EDGE_PORT", "8089")              # S5: link refuses with the edge app off; no listener is started by these tests
     home = tmp_path / "buddy-home"
     home.mkdir(mode=0o700)
     os.chmod(home, 0o700)
@@ -122,7 +123,7 @@ def test_link_records_consent_and_writes_both_sides(lab):
     assert rec["schema"] == "arail.buddy-link/v1"
     assert rec["credential_sha256"] == sha and rec["credential_id"] == sha[:8]
     assert rec["buddy_home"] == str(lab.home.resolve())
-    assert rec["edge_base_url"] == "http://127.0.0.1:8080/api/host/v1"
+    assert rec["edge_base_url"] == "http://127.0.0.1:8089/api/host/v1"
     assert rec["contract_sha256"] == CONTRACT_SHA256
     assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?Z", rec["linked_at"])
     assert "credential" not in rec and cred not in lab.link_json.read_text()
@@ -193,16 +194,12 @@ def test_an_existing_secrets_file_keeps_its_other_lines(lab):
     assert _mode(sec) == 0o600
 
 
-def test_the_port_comes_from_portal_port(lab, monkeypatch):
+def test_the_portal_port_and_bind_address_no_longer_decide_the_url(lab, monkeypatch):
+    """Until S5 the URL could name the portal's own port (PORTAL_PORT) or a bracketed IPv6 host; the portal serves no edge now, so it is always the edge app on 127.0.0.1."""
     monkeypatch.setenv("PORTAL_PORT", "9123")
-    assert lab.run("link", "--buddy-home", str(lab.home))[0] == 0
-    assert json.loads(lab.link_json.read_text())["edge_base_url"] == "http://127.0.0.1:9123/api/host/v1"
-
-
-def test_ipv6_loopback_bind_is_written_as_a_bracketed_host(lab, monkeypatch):
     monkeypatch.setenv("BIND_ADDR", "::1")
     assert lab.run("link", "--buddy-home", str(lab.home))[0] == 0
-    assert json.loads(lab.link_json.read_text())["edge_base_url"] == "http://[::1]:8080/api/host/v1"
+    assert json.loads(lab.link_json.read_text())["edge_base_url"] == "http://127.0.0.1:8089/api/host/v1"
 
 
 def test_verify_credential_accepts_only_the_minted_one(lab):
@@ -548,13 +545,22 @@ def test_link_writes_the_edge_app_url_on_8089(lab, monkeypatch):
     assert json.loads((lab.home / "link.json").read_text())["edge_base_url"] == "http://127.0.0.1:8089/api/host/v1"
 
 
-def test_rotate_moves_an_old_8080_link_to_the_edge_app_and_the_old_link_worked_until_then(lab, monkeypatch):
-    monkeypatch.setenv("ARAIL_EDGE_PORT", "0")                  # pre-S4 behaviour: the portal mount
+def test_link_refuses_with_the_edge_app_off_and_writes_nothing(lab, monkeypatch):
+    """S5 (C5.2): ARAIL_EDGE_PORT=0 used to fall back to the portal port. The portal serves no edge now, so there is nowhere to point Buddy: exit 3 before a byte is
+    written or a consent is recorded."""
+    monkeypatch.setenv("ARAIL_EDGE_PORT", "0")
+    code, out, err = lab.link()
+    assert code == 3 and "Buddy needs the edge app; set ARAIL_EDGE_PORT" in err
+    assert not lab.link_json.exists() and not (lab.home / "link.json").exists() and not (lab.home / "secrets.env").exists()
+    assert "Type yes" not in out                                  # refused before the consent text and the confirmation
+    code, _, err = lab.run("link", "--rotate", "--buddy-home", str(lab.home))
+    assert code == 3 and "Buddy needs the edge app" in err
+
+
+def test_rotate_keeps_a_working_8089_link_and_kills_the_old_credential(lab, monkeypatch):
     assert lab.link()[0] == 0
     old_cred = _cred(lab)
-    assert json.loads(lab.link_json.read_text())["edge_base_url"] == "http://127.0.0.1:8080/api/host/v1"
-    assert link.verify_credential(old_cred) is not None         # an :8080 link keeps working
-    monkeypatch.delenv("ARAIL_EDGE_PORT")
+    assert link.verify_credential(old_cred) is not None
     assert lab.run("link", "--rotate", "--buddy-home", str(lab.home))[0] == 0
     assert json.loads(lab.link_json.read_text())["edge_base_url"] == "http://127.0.0.1:8089/api/host/v1"
     assert link.verify_credential(old_cred) is None             # rotation still kills the old credential

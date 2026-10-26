@@ -63,7 +63,6 @@ CONSENT_TEXT = (
 
 _CRED_RE = re.compile(r"^bhc1_[A-Za-z0-9_-]{43}$")
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
-_LOOPBACK_HOSTS = {"127.0.0.1": "127.0.0.1", "localhost": "127.0.0.1", "::1": "[::1]"}
 
 
 class PolicyRefusal(Exception):
@@ -169,12 +168,6 @@ def check_placement() -> None:
         )
 
 
-def _loopback_host() -> str:
-    from arail import config
-    raw = (config.get("BIND_ADDR", "127.0.0.1") or "127.0.0.1").strip().lower()
-    return _LOOPBACK_HOSTS.get(raw, "127.0.0.1")
-
-
 DEFAULT_EDGE_PORT = 8089   # outside every World instance block [8090, 9100)
 
 
@@ -190,14 +183,16 @@ def edge_port() -> int:
     return port if 0 <= port <= 65535 else DEFAULT_EDGE_PORT
 
 
+EDGE_OFF_MESSAGE = "Buddy needs the edge app; set ARAIL_EDGE_PORT (the portal no longer serves /api/host/v1 itself)."
+
+
 def edge_base_url() -> str:
-    """Where Buddy should dial. The edge-only app on 127.0.0.1:$ARAIL_EDGE_PORT when it is enabled;
-    otherwise (ARAIL_EDGE_PORT=0) the portal's own mount, as before S4."""
+    """Where Buddy should dial: the edge-only app on 127.0.0.1:$ARAIL_EDGE_PORT. Since S5 the portal's own port serves no edge, so with
+    ARAIL_EDGE_PORT=0 there is nowhere to point Buddy and this refuses (exit 3) instead of falling back to the portal port."""
     ep = edge_port()
-    if ep:
-        return f"http://127.0.0.1:{ep}/api/host/v1"
-    port = (os.getenv("PORTAL_PORT", "") or "8080").strip() or "8080"
-    return f"http://{_loopback_host()}:{port}/api/host/v1"
+    if not ep:
+        raise PolicyRefusal(EDGE_OFF_MESSAGE)
+    return f"http://127.0.0.1:{ep}/api/host/v1"
 
 
 def check_buddy_home(path_arg: str) -> Path:
@@ -297,6 +292,7 @@ def _confirm(stdin: TextIO, stdout: TextIO, assume_yes: bool) -> None:
 
 def do_link(buddy_home: str, *, rotate: bool, assume_yes: bool, stdin: TextIO, stdout: TextIO, consent_store=None) -> int:
     check_placement()
+    edge_base_url()                                   # S5: refuses before a byte is written or a consent is recorded when the edge app is off
     home = check_buddy_home(buddy_home)
     _check_private_file(home / "secrets.env", "secrets.env")
     _check_private_file(home / "link.json", "link.json")

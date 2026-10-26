@@ -99,7 +99,8 @@ def test_link_url_follows_the_edge_port(monkeypatch):
     assert link.edge_base_url() == "http://127.0.0.1:9071/api/host/v1"
     monkeypatch.setenv("ARAIL_EDGE_PORT", "0")
     monkeypatch.setenv("PORTAL_PORT", "8080")
-    assert link.edge_base_url() == "http://127.0.0.1:8080/api/host/v1"
+    with pytest.raises(link.PolicyRefusal, match="Buddy needs the edge app"):            # S5: no fallback to the portal's port
+        link.edge_base_url()
 
 
 # --- the listener itself (real sockets) --------------------------------------------------------
