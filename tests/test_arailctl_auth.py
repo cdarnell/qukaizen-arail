@@ -167,3 +167,22 @@ def test_after_reset_the_running_portal_stops_accepting_the_old_passphrase(lab, 
     c = TestClient(portal_app.app, follow_redirects=False)
     assert c.post("/login", data={"passphrase": PASS}).status_code == 401
     assert c.post("/login", data={"passphrase": "a-brand-new-pass"}).status_code == 303
+
+
+def test_reset_also_replaces_both_tokens_and_forgets_remembered_browsers(lab, monkeypatch):
+    """QA-S4-4: reset is what an owner presses after 'I think someone got in'."""
+    from arail.portal import app as portal_app
+    monkeypatch.setattr(portal_app, "_patch_lab_conf_password", lambda p: None)
+    monkeypatch.setattr(portal_app, "_write_code_server_password", lambda p: None)
+    run("token")
+    old_tok = auth.token_path().read_text().strip()
+    old_shim = auth.shim_token_path().read_text().strip()
+    dev = auth.get_devices().create()
+    answers = iter(["a-brand-new-pass", "a-brand-new-pass"])
+    monkeypatch.setattr(auth_cli, "_read_pass", lambda prompt: next(answers))
+    rc, out = run("reset")
+    assert rc == 0
+    assert not auth.check_bearer(f"Bearer {old_tok}") and not auth.check_shim_bearer(f"Bearer {old_shim}")
+    assert auth.check_bearer(f"Bearer {auth.token_path().read_text().strip()}")
+    assert not auth.get_devices().touch(dev)
+    assert old_tok not in out and str(auth.token_path()) in out and "new id" in out

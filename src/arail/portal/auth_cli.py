@@ -100,9 +100,19 @@ def cmd_reset(out) -> int:
         portal_app._write_code_server_password(first)
     except OSError:
         print("Note: the code-server config could not be written; re-run setup to unlock the IDE.", file=out)
+    # Reset is the button an owner reaches for after "I think someone got in", so it ends every credential
+    # the old passphrase's holder could be using, not just the passphrase.
     auth.get_store().revoke_all()
+    auth.get_devices().revoke_all()
     auth.unlock_logins()
-    print("Passphrase changed. Every browser session was ended and the running portal takes the new passphrase at its next login; restart the lab so the IDE and notebooks pick it up too.", file=out)
+    tid = auth.rotate_token()
+    shim_id = auth.rotate_shim_token()
+    print("Passphrase changed. The running portal takes the new passphrase at its next login; restart the lab so "
+          "the IDE and notebooks pick it up too.", file=out)
+    print("Also ended or replaced:", file=out)
+    print("  - every browser session, and every remembered browser (each logs in again)", file=out)
+    print(f"  - the portal token (new id {tid}) in {auth.token_path()}; scripts and arailctl read it from there", file=out)
+    print(f"  - the OpenCode shim token (new id {shim_id}); restart OpenCode to give it the new one", file=out)
     return 0
 
 

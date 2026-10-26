@@ -216,6 +216,15 @@ def ensure_shim_token() -> None:
     _files.write_private(path, (tok + "\n").encode("ascii"))
 
 
+def rotate_shim_token() -> str:
+    """Write a new shim token and return its 8-char id."""
+    path = shim_token_path()
+    _files.ensure_private_dir(path.parent)
+    tok = SHIM_PREFIX + base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode("ascii")
+    _files.write_private(path, (tok + "\n").encode("ascii"))
+    return token_id(tok)
+
+
 def read_shim_token() -> Optional[str]:
     """The shim token for OpenCode's env/config, or None when missing or unsafe."""
     ensure_shim_token()
