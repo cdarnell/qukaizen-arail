@@ -124,7 +124,7 @@ def test_two_identical_requests_at_once_pause_the_researcher_once(tmp_path, monk
 
     async def go():
         transport = httpx.ASGITransport(app=w.client.app, client=("127.0.0.1", 5))
-        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as c:
+        async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as c:
             return await asyncio.gather(*[c.post(BASE + "/pause_research", content=json.dumps(body), headers=H())
                                           for _ in range(5)])
 

@@ -132,12 +132,15 @@ def test_wrong_bearer_is_401_auth_invalid_and_does_not_fall_back(client, lab):
 
 
 def test_edge_prefix_defers_to_edge_admission_not_portal_credentials(client, lab):
-    """A portal bearer on /api/host/v1/* does NOT admit: admission still needs bhc1_."""
+    """A portal bearer on /api/host/v1/* does NOT admit: admission still needs bhc1_. Since S5 the portal does not serve the prefix at all (a plain 404, never the
+    portal's own 401), and on the edge app the same bearer meets the edge's own refusal."""
     r = client.post("/api/host/v1/handshake", headers=lab["bearer"], json={})
-    # The TestClient peer is not loopback, so admission refuses at placement (403); either way the
-    # refusal is the edge's own code, never the portal's, and nothing is admitted.
-    assert r.status_code in (401, 403)
-    assert r.json().get("error") not in ("auth_required", "auth_invalid")
+    assert r.status_code == 404 and r.json().get("error") not in ("auth_required", "auth_invalid")
+    from fastapi.testclient import TestClient
+    from arail.portal.edge_app import edge_app
+    edge = TestClient(edge_app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
+    r = edge.post("/api/host/v1/handshake", headers=lab["bearer"], json={})
+    assert r.status_code in (401, 403) and r.json()["error"]["type"] == "buddy_host_error"
 
 
 def test_openai_shim_is_bearer_only(client, lab):

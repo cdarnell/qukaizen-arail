@@ -164,8 +164,9 @@ def test_the_timeout_argument_is_keyword_only():
 def test_edge_traffic_is_not_operator_presence(monkeypatch):
     """F22: a 20-second handshake would otherwise pin the lab in the interactive
     profile for ever and starve background deep work."""
+    from arail.portal.edge_app import edge_app
     runtime_profile._last_presence_ts = 0.0
-    client = TestClient(app)
+    client = TestClient(edge_app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))      # since S5 the edge is served only by its own app, which has no presence meter
     client.get("/api/host/v1/handshake")
     client.post("/api/host/v1/handshake", json={})
     client.get("/api/host/v1/brain/models")

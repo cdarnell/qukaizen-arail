@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 
 from arail.portal.app import app
+from arail.portal.edge_app import edge_app
 
 CONTRACT = Path(__file__).resolve().parents[1] / "src" / "arail" / "buddy_host" / "contract" / "buddy.host.v1.json"
 
@@ -36,8 +37,12 @@ def _contract_routes() -> set:
     return out
 
 
-def test_the_edge_routes_are_mounted_and_are_exactly_the_contracts():
-    host = {(p, m) for p, m in _walk(app.routes) if p.startswith("/api/host")}
+def test_the_portal_mounts_no_edge_route_since_s5():
+    assert [(p, m) for p, m in _walk(app.routes) if p.startswith("/api/host")] == []
+
+
+def test_the_edge_routes_are_mounted_on_the_edge_app_and_are_exactly_the_contracts():
+    host = {(p, m) for p, m in _walk(edge_app.routes) if p.startswith("/api/host")}
     want = _contract_routes()
     assert {p for p, _ in host} == {p for p, _ in want}
     assert all(p.startswith("/api/host/v1/") for p, _ in host)

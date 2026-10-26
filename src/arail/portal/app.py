@@ -495,10 +495,6 @@ _PRESENCE_SKIP_PREFIXES = (
     "/metrics",
     "/health",
     "/api/system/health",
-    # Buddy edge (sprint 2026-10-20-buddy-always-on): a 20-second handshake from
-    # a machine is not the operator at the desk. Counted as presence, it would
-    # hold the lab in the interactive profile for ever and starve deep work.
-    "/api/host/v1/",
 )
 
 
@@ -1419,17 +1415,10 @@ from arail.portal.openai_compat import register_routes as _register_openai_compa
 _register_openai_compat(app)
 
 
-# ── Buddy host edge — /api/host/v1/* (sprint 2026-10-20-buddy-always-on) ──
-# Loopback-only, capability-credentialed, contract-hashed. If the vendored
-# contract does not match its stamp (arail.buddy_host raises ContractStampError)
-# the portal boots without the edge: Buddy then gets a 404 and fails closed.
-# A broken edge must never stop the lab from starting.
-try:
-    from arail.portal.host_edge_routes import register_routes as _register_host_edge
-    _register_host_edge(app)
-except Exception as _host_edge_exc:  # noqa: BLE001
-    logging.getLogger(__name__).warning(
-        "buddy.host/v1 edge not mounted: %s", type(_host_edge_exc).__name__)
+# ── Buddy host edge — NOT mounted here since S5 (sprint 2026-10-26-buddy-s5-gateway-in-box) ──
+# `/api/host/v1/*` is served only by the edge-only app on 127.0.0.1:$ARAIL_EDGE_PORT (arail.portal.edge_app), which has no portal route behind it. The
+# portal no longer answers that prefix, so a request for it on :8080 is a plain 404. `auth.EDGE_PREFIX` still defers to the edge's own bhc1_ credential, which
+# keeps this harmless if a later sprint re-mounts it.
 
 
 # ── First-run welcome / passphrase setup ─────────────────────────────────
