@@ -253,8 +253,10 @@ posture differs from the rest of the lab:
   only, not accessible from the network.
 - The lab generates `lab/.opencode/opencode.json` (in a git-ignored
   directory, mode 0700) at each start. The file contains model and
-  provider configuration; it **never embeds API keys or tokens in
-  plaintext**. Cloud API keys reach opencode via subprocess environment
+  provider configuration; it **never embeds cloud API keys**. The one
+  credential it does carry is the lab-local shim token (`arl1s_`), which
+  the portal accepts only under `/api/openai/v1/` (model completions) and
+  nowhere else; the file is written mode 0600. Cloud API keys reach opencode via subprocess environment
   variables only (the same approach the Chat tab uses).
 - `OPENCODE_DISABLE_AUTOUPDATE=true` is set so opencode does not phone
   home to check for updates.
@@ -271,6 +273,20 @@ the lab sets `OPENCODE_DISABLE_AUTOUPDATE=true` and
 `OPENCODE_DISABLE_MODELS_FETCH=true` is available as an env override
 if you want to additionally block model-list fetches from opencode's
 configured providers.
+
+**What the portal login does not protect you from (debt D-S4-1):**
+
+opencode's model drives a shell that runs as **you**, the lab's user. The
+portal token (`lab/data/portal.token`) and `.env` are mode 0600, which
+keeps other users out but not that shell, so a model with shell access
+can read them and then call any portal route. This is not new (that shell
+could always read `ARAIL_PASSWORD` in `.env`), and the lab hands opencode
+only the narrow shim token, but the login does not make opencode's shell
+safe. The fix is an OS-level boundary for the model's shell (a separate
+user or a container, the pattern Buddy's box uses). Until then, only run
+opencode on a lab whose portal you would trust that shell to drive.
+Trigger to pay it: opencode used outside the maximus tier on a shared
+machine, or any change that gives the shell more reach.
 
 Read the [opencode source](https://github.com/sst/opencode) and its
 docs for its own privacy posture. The binary is open source and

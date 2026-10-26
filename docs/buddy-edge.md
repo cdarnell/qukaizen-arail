@@ -12,8 +12,17 @@ Status: sprint `2026-10-20-buddy-always-on` (S1). Design record:
 
 ## What the edge is
 
-Six routes under `/api/host/v1/` on the portal's existing port (default 8080). No new
-socket, no new process.
+Six routes under `/api/host/v1/`. Since S4 they are served twice, by the same code:
+
+- by a **box-only edge app** on `127.0.0.1:$ARAIL_EDGE_PORT` (default **8089**; `0` turns it off). It
+  is a second app inside the portal process, bound to the literal loopback address (never
+  `BIND_ADDR`), with no portal routes behind it: every other path is 404, and portal cookies and
+  tokens mean nothing there. `./arailctl buddy link` writes this URL into both link files.
+  A World instance never starts it.
+- by the portal's own port (default 8080) for links made before S4. S5 removes this mount.
+
+The portal itself now requires a login (`./arailctl auth` for programs); the edge keeps its own
+`bhc1_` credential and is the one thing the portal's auth defers to.
 
 | Route | What it does |
 |---|---|

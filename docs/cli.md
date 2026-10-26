@@ -789,6 +789,20 @@ another `pkb reembed` already running against this root) · `2` the given
 DaC WorldBundle ops — passthrough to `python -m arail.world_mount`.
 Unchanged.
 
+### `auth <verb>`
+
+Portal credentials, run from the machine's own shell (exit codes: `0` ok · `2` usage · `3`
+refused: not onboarded, unsafe token file, or not the lab's owner). Every verb takes
+`--world <slug>` to act on a World instance's own token, sessions and passphrase.
+
+| Verb | Effect |
+|---|---|
+| `token` | Make sure `<DATA_DIR>/portal.token` exists (`0600`); print its **id** and path, never the value. Programs send it as `Authorization: Bearer <token>`. |
+| `token --rotate` | New token; the old one stops working on the next request. |
+| `reset` | New lab passphrase (asked twice). It also ends every browser session and remembered browser, replaces the portal token and the OpenCode shim token (it prints the new token id and where the token lives), and clears a login lockout. Use it when you forget the passphrase, or when you think someone got in. |
+| `logout-all` | End every browser session, including in a portal that is already running. |
+| `unlock` | Clear a login lockout. After 5 wrong passphrases in a row (from any local process) new logins wait 10 s, doubling to 5 min; a browser that has logged in before is not held by that. |
+
 ### `buddy <verb>`
 
 Link a Buddy (the always-on QA expert you reach from your phone) to this lab through the

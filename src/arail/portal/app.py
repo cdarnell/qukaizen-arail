@@ -687,6 +687,18 @@ def _host_is_trusted(hostname: str) -> bool:
 
 
 @app.middleware("http")
+async def portal_auth(request, call_next):
+    """Credential check for every route (ARAIL D3; ARCHITECTURE.md C2/C3).
+
+    Registered immediately BEFORE ``local_trust_boundary`` so that, with Starlette's reverse
+    registration order, the Host allowlist and CSRF checks (403) run first, then this (401/302),
+    then everything else. The decision logic lives in ``arail.portal.auth``.
+    """
+    from arail.portal import auth as _portal_auth
+    return await _portal_auth.authenticate(request, call_next, onboarded=_lab_password_set())
+
+
+@app.middleware("http")
 async def local_trust_boundary(request, call_next):
     from fastapi.responses import JSONResponse
 
@@ -900,20 +912,42 @@ async def _startup():
     from arail import autochecks
     _autochecks_on = autochecks.enabled()
 
-    # Loud warning when the portal is bound off loopback: the dashboard has no
-    # login, so a non-loopback bind exposes an unauthenticated, code-execution-
-    # capable surface to the LAN (a wildcard bind also disables the Host
-    # allowlist). This is a deliberate operator choice — surface it clearly.
+    # Non-loopback bind: auth now applies to every route, but exposure is still the operator's
+    # choice (a wildcard bind also disables the Host allowlist) - say so clearly.
     if not _toggle_bind_is_loopback():
         _bind = os.getenv("BIND_ADDR", "127.0.0.1")
-        _msg = (f"Portal is bound to {_bind} (not loopback). The dashboard has "
-                "NO login — anyone who can reach this address can run code, flip "
-                "egress, and read tokens. Bind to 127.0.0.1 unless you intend LAN "
-                "exposure.")
+        _msg = (f"Portal is bound to {_bind} (not loopback). Login is required, but anyone who "
+                "can reach this address can try the passphrase and, once in, run code, flip "
+                "egress, and read tokens. Bind to 127.0.0.1 unless you intend LAN exposure.")
         _log.warning(_msg)
         activity_log.emit("security", _msg, "warn",
                           {"security_event": {"kind": "non_loopback_bind",
                                               "bind": _bind}})
+
+    # Portal auth: an onboarded lab always has a bearer token. Upgrades mint it here; the first
+    # dashboard visit then asks for the passphrase once per browser.
+    if _lab_password_set():
+        try:
+            from arail.portal import auth as _portal_auth
+            _portal_auth.ensure_token()
+            _portal_auth.ensure_shim_token()
+            _log.info("The dashboard now asks for your lab passphrase once per browser.")
+        except OSError as _tok_err:
+            activity_log.emit("security",
+                f"portal.token could not be created ({type(_tok_err).__name__}); "
+                "programs cannot authenticate until it exists.", "warn")
+
+    # Buddy's edge-only listener (127.0.0.1:$ARAIL_EDGE_PORT, root lab only). A failure here is a
+    # state to report, never a reason for the portal not to start.
+    try:
+        from arail.portal import edge_app as _edge_app
+        _edge_state = _edge_app.listener.start()
+        activity_log.emit("system",
+            f"Buddy edge: {_edge_state}"
+            + (f" on {_edge_app.EDGE_HOST}:{_edge_app.listener.port}" if _edge_state == "listening" else ""),
+            "info")
+    except Exception as _edge_err:  # noqa: BLE001
+        _log.warning("Buddy edge listener not started: %s", type(_edge_err).__name__)
 
     _boot_ident = effective_identity()
     intent_name = _boot_ident.intent_name
@@ -1365,6 +1399,11 @@ def _register_canvas_goal_listener(store: Any) -> None:
 @app.on_event("shutdown")
 async def _shutdown():
     global _knowledge_canvas_store
+    try:
+        from arail.portal import edge_app as _edge_app
+        await _edge_app.listener.stop()
+    except Exception:  # noqa: BLE001 - shutting down; nothing useful to do with it
+        pass
     if _knowledge_canvas_store is not None:
         try:
             await _knowledge_canvas_store.close()
@@ -1425,6 +1464,123 @@ async def welcome_page(request: Request):
     })
 
 
+# ── Portal login (ARAIL D3; ARCHITECTURE.md C4/C5) ───────────────────────
+
+def _refresh_passphrase_from_file() -> None:
+    """Adopt the passphrase on disk if another process changed it (``arailctl auth reset``).
+
+    The running portal otherwise keeps the value it cached into ``os.environ``, so the OLD passphrase
+    would keep working until a restart. Only a real (non-placeholder) value is adopted. Login
+    attempts are rare, so reading the small env file each time costs nothing that matters.
+    """
+    try:
+        text = _env_file_path().read_text()
+    except OSError:
+        return
+    for line in text.splitlines():
+        if line.startswith("ARAIL_PASSWORD="):
+            val = line.split("=", 1)[1].strip()
+            if val and val not in _PASSWORD_PLACEHOLDERS:
+                os.environ["ARAIL_PASSWORD"] = val
+            return
+
+
+def _login_page(request: Request, *, next_url: str, error: str = "", status: int = 200, headers=None):
+    return templates.TemplateResponse(request, "login.html", {
+        **_identity_ctx(), "next": next_url, "error": error,
+    }, status_code=status, headers=headers)
+
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    from arail.portal import auth as _auth
+    from fastapi.responses import RedirectResponse
+    if not _lab_password_set():
+        return RedirectResponse(url="/welcome", status_code=302)
+    nxt = _auth.safe_next(request.query_params.get("next"))
+    if _auth.get_store().touch(request.cookies.get(_auth.cookie_name(), "")):
+        return RedirectResponse(url=nxt, status_code=302)
+    return _login_page(request, next_url=nxt)
+
+
+@app.post("/login")
+async def login_submit(request: Request):
+    """Passphrase -> a fresh session. The incoming cookie is ignored (no session fixation), the
+    candidate is never logged, and after 5 consecutive failures attempts are rate limited."""
+    import math
+    from fastapi.responses import JSONResponse, RedirectResponse
+    from arail.portal import auth as _auth
+    if not _lab_password_set():
+        return RedirectResponse(url="/welcome", status_code=302)
+    wants_json = "application/json" in request.headers.get("content-type", "")
+    try:
+        if wants_json:
+            body = await request.json()
+            body = body if isinstance(body, dict) else {}
+        else:
+            body = dict(await request.form())
+    except Exception:  # noqa: BLE001
+        body = {}
+    candidate = body.get("passphrase")
+    candidate = candidate if isinstance(candidate, str) else ""
+    nxt = _auth.safe_next(body.get("next") if isinstance(body.get("next"), str) else None)
+
+    # Trusted-device lane (see arail.portal.auth, "Design"): a browser that has logged in before has
+    # a bucket of its own and is not held by the global lock that guards unknown clients.
+    dev_sid = request.cookies.get(_auth.device_cookie_name(), "")
+    known_device = bool(dev_sid) and _auth.get_devices().touch(dev_sid)
+    lim = _auth.device_limiter(dev_sid) if known_device else _auth.limiter
+
+    wait = lim.wait_s()
+    if wait > 0:   # over the limit: the attempt is NOT evaluated, even a correct passphrase
+        retry = {"Retry-After": str(max(1, math.ceil(wait)))}
+        if wants_json:
+            return JSONResponse({"error": "rate_limited", "retry_after": retry["Retry-After"]},
+                                status_code=429, headers=retry)
+        return _login_page(request, next_url=nxt, status=429, headers=retry,
+                           error=(f"There were too many wrong tries, so logging in is paused for {retry['Retry-After']} seconds. "
+                                 "Wait, then try again. If you cannot wait, run ./arailctl auth unlock in a terminal on "
+                                 "the computer that runs this lab."))
+
+    _refresh_passphrase_from_file()
+    if not _auth.check_password(candidate):
+        n = lim.failure()
+        activity_log.emit("security", f"Failed portal login ({n} in a row).", "warn",
+                          {"security_event": {"kind": "login_failed", "consecutive": n,
+                                              "trusted_device": known_device}})
+        if wants_json:
+            return JSONResponse({"error": "login_failed"}, status_code=401)
+        return _login_page(request, next_url=nxt, status=401, error="That passphrase is not right. Check for typing mistakes and try again.")
+
+    lim.success()
+    _auth.ensure_token()
+    sid = _auth.get_store().create()
+    resp = (JSONResponse({"ok": True, "next": nxt}) if wants_json
+            else RedirectResponse(url=nxt, status_code=303))
+    _auth.set_session_cookie(resp, request, sid)
+    if not known_device:     # remember this browser: its next login is never held by someone else's failures
+        _auth.set_device_cookie(resp, request, _auth.get_devices().create())
+    return resp
+
+
+@app.post("/logout")
+async def logout(request: Request):
+    from fastapi.responses import RedirectResponse
+    from arail.portal import auth as _auth
+    sid = request.cookies.get(_auth.cookie_name(), "")
+    if sid:
+        _auth.get_store().revoke(sid)
+    resp = RedirectResponse(url="/login", status_code=303)
+    _auth.clear_session_cookie(resp, request)
+    return resp
+
+
+@app.get("/api/auth/whoami")
+async def auth_whoami(request: Request):
+    """Who the portal thinks you are (the base-page SSE recovery hook calls this; 401 if no one)."""
+    return {"principal": getattr(request.state, "principal", "none")}
+
+
 @app.post("/api/welcome/setup")
 async def api_welcome_setup(request: Request):
     """Accept the first-run passphrase, write it everywhere it's needed.
@@ -1440,6 +1596,17 @@ async def api_welcome_setup(request: Request):
             {"ok": False,
              "error": "lab is already onboarded; rotate via .env or dashboard settings"},
             status_code=409,
+        )
+
+    # A LAN-bound portal must not let a LAN host claim an unonboarded lab: the first passphrase
+    # is set from this machine.
+    _peer = request.client.host if request.client else ""
+    if not _toggle_bind_is_loopback() and _peer not in ("127.0.0.1", "::1"):
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            {"ok": False, "error": "setup_local_only",
+             "detail": "Finish /welcome on the computer that runs the lab."},
+            status_code=403,
         )
 
     body = await request.json()
@@ -1492,7 +1659,14 @@ async def api_welcome_setup(request: Request):
         f"{' and lab renamed to ' + lab_name if lab_name else ''}.",
         "success")
 
-    return {"ok": True, "ide_written": ide_written}
+    # Log this browser in: closes the window where a freshly onboarded lab had no door at all.
+    from fastapi.responses import JSONResponse
+    from arail.portal import auth as _auth
+    _auth.ensure_token()
+    _auth.ensure_shim_token()
+    resp = JSONResponse({"ok": True, "ide_written": ide_written})
+    _auth.set_session_cookie(resp, request, _auth.get_store().create())
+    return resp
 
 
 def _chmod_600(p: Path) -> None:

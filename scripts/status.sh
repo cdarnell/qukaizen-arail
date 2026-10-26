@@ -1071,14 +1071,20 @@ if [[ "$MODE" == "human" ]]; then
     # BIND_ADDR=0.0.0.0 it silently never fired, since probing
     # http://0.0.0.0:<port> is unreliable on macOS. Display still uses
     # $BIND (the configured address); only the probe target changes.
-    if command -v curl >/dev/null && curl -sf "http://${PROBE_HOST}:${PORTAL_PORT_EFF}/api/jobs/state" >/dev/null 2>&1; then
+    # /api/jobs/state is behind portal auth: the helper hands curl the lab's bearer token without
+    # putting it in argv. Without a readable token (another user, or not onboarded) say so.
+    _jobs_data_dir="${ARAIL_DATA_DIR:-${LAB_ROOT:-lab}/data}"
+    if command -v curl >/dev/null && state_json="$(svc_portal_curl "$_jobs_data_dir" -sf "http://${PROBE_HOST}:${PORTAL_PORT_EFF}/api/jobs/state" 2>/dev/null)"; then
         echo ""
-        state_json="$(curl -sf "http://${PROBE_HOST}:${PORTAL_PORT_EFF}/api/jobs/state")"
         window=$(echo "$state_json"  | python3 -c "import sys,json;print(json.load(sys.stdin).get('label','?'))" 2>/dev/null || echo "?")
         halted=$(echo "$state_json"  | python3 -c "import sys,json;print(json.load(sys.stdin).get('halted','?'))" 2>/dev/null || echo "?")
         echo -e "  ${BOLD}Scheduler${RESET}"
         dim "window: ${window}"
         dim "halted: ${halted}"
+    elif command -v curl >/dev/null && [[ ! -r "$_jobs_data_dir/portal.token" ]] && curl -sf "http://${PROBE_HOST}:${PORTAL_PORT_EFF}/api/system/health" >/dev/null 2>&1; then
+        echo ""
+        echo -e "  ${BOLD}Scheduler${RESET}"
+        dim "jobs: needs \`arailctl\` as the lab owner"
     fi
 
     # ── lab/ state (skipped under --no-sizes or --quiet — T34/A: a `du`

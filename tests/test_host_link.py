@@ -537,3 +537,30 @@ def test_the_module_runs_as_a_script_and_exits_zero_on_status(tmp_path):
                        env=env, cwd=tmp_path, timeout=60)
     assert r.returncode == 0, r.stderr
     assert json.loads(r.stdout)["linked"] is False
+
+
+# --- S4: the link names the box-only edge app --------------------------------------------------
+def test_link_writes_the_edge_app_url_on_8089(lab, monkeypatch):
+    monkeypatch.delenv("ARAIL_EDGE_PORT", raising=False)
+    code, _, _ = lab.link()
+    assert code == 0
+    assert json.loads(lab.link_json.read_text())["edge_base_url"] == "http://127.0.0.1:8089/api/host/v1"
+    assert json.loads((lab.home / "link.json").read_text())["edge_base_url"] == "http://127.0.0.1:8089/api/host/v1"
+
+
+def test_rotate_moves_an_old_8080_link_to_the_edge_app_and_the_old_link_worked_until_then(lab, monkeypatch):
+    monkeypatch.setenv("ARAIL_EDGE_PORT", "0")                  # pre-S4 behaviour: the portal mount
+    assert lab.link()[0] == 0
+    old_cred = _cred(lab)
+    assert json.loads(lab.link_json.read_text())["edge_base_url"] == "http://127.0.0.1:8080/api/host/v1"
+    assert link.verify_credential(old_cred) is not None         # an :8080 link keeps working
+    monkeypatch.delenv("ARAIL_EDGE_PORT")
+    assert lab.run("link", "--rotate", "--buddy-home", str(lab.home))[0] == 0
+    assert json.loads(lab.link_json.read_text())["edge_base_url"] == "http://127.0.0.1:8089/api/host/v1"
+    assert link.verify_credential(old_cred) is None             # rotation still kills the old credential
+
+
+def test_arail_edge_port_override_is_followed(lab, monkeypatch):
+    monkeypatch.setenv("ARAIL_EDGE_PORT", "9071")
+    lab.link()
+    assert json.loads(lab.link_json.read_text())["edge_base_url"] == "http://127.0.0.1:9071/api/host/v1"

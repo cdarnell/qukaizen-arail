@@ -168,3 +168,6 @@ htmlcov/
 # record of evolution passes, not a cache.
 lab/worlds/*/librarian-scout.json
 examples/worlds/*/librarian-scout.json
+
+# scheduler run artifacts written by any portal start (QA-S4-5)
+logs/scheduler/

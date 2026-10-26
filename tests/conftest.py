@@ -230,6 +230,91 @@ def _allow_testclient_host(monkeypatch):
     monkeypatch.setenv("ARAIL_ALLOWED_HOSTS", "testserver")
 
 
+PORTAL_TEST_TOKEN = "arl1_" + "A" * 43  # fixed and obviously fake; never a real token
+
+
+def _write_0600(path, text):
+    """Write ``text`` to ``path`` with mode 0600 and return the path."""
+    path.write_text(text + "\n")
+    path.chmod(0o600)
+    return path
+
+
+@pytest.fixture
+def portal_bearer():
+    """Headers carrying the test bearer, for clients that are not a Starlette TestClient
+    (``httpx.ASGITransport`` callers pass ``headers=portal_bearer``)."""
+    return {"Authorization": f"Bearer {PORTAL_TEST_TOKEN}"}
+
+
+_bearer_active = {"on": False}
+_send_patched = {"done": False}
+
+
+def _patch_testclient_send_once():
+    """Wrap ``TestClient.send`` once per process; the wrapper is a no-op unless a test has the
+    bearer switched on. Patching ``send`` (not ``__init__``) also covers module- and
+    session-scoped clients, which are built before any function-scoped fixture runs."""
+    if _send_patched["done"]:
+        return
+    import httpx
+    from starlette.testclient import TestClient
+
+    orig_send = httpx.Client.send
+
+    def send(self, request, **kw):
+        # /api/host/v1/* has its own bhc1_ credential; a portal bearer there would turn
+        # "credential_missing" into "credential_invalid".
+        if (_bearer_active["on"] and "authorization" not in request.headers
+                and not request.url.path.startswith("/api/host/v1/")):
+            request.headers["Authorization"] = f"Bearer {PORTAL_TEST_TOKEN}"
+        return orig_send(self, request, **kw)
+
+    TestClient.send = send
+    _send_patched["done"] = True
+
+
+@pytest.fixture(autouse=True)
+def _portal_bearer_for_tests(request, monkeypatch, tmp_path):
+    """Give every ``TestClient`` request the portal bearer, so ~7k tests keep working unedited.
+
+    Portal auth (ARAIL D3, sprint 2026-10-25-buddy-s4-gateway-in-box) requires a credential on
+    every route. Rather than a test-mode switch (an env flag that disables auth is one ``.env``
+    line from shipping), this fixture points ``auth.token_path`` at a real 0600 file holding a
+    fixed fake token and makes ``TestClient`` add an ``Authorization`` header to any request
+    that has none. Existing tests therefore pass through the REAL bearer check, not a bypass. A
+    test that sends its own ``Authorization`` keeps it; a test of auth itself opts out with
+    ``@pytest.mark.real_auth`` and uses ``logged_in_client`` or its own headers.
+
+    Debt TD4: patching ``TestClient.send`` is clever; if it ever bites, the fallback is an
+    explicit ``portal_client`` fixture and a mechanical rewrite of the 136 files.
+    """
+    from arail import config as arail_config
+    from arail.portal import auth as portal_auth
+
+    # No test may write session or token state into the real lab/data, or leak a login lockout
+    # or a cached session store into the next test.
+    monkeypatch.setattr(portal_auth, "_stores", {})
+    monkeypatch.setattr(portal_auth, "limiter", portal_auth.LoginLimiter())
+    monkeypatch.setattr(portal_auth, "device_limiters", {})
+    # A test that enters a TestClient context runs the portal's startup hook; that must never bind
+    # the real Buddy edge port. Edge tests choose their own free port.
+    monkeypatch.setenv("ARAIL_EDGE_PORT", "0")
+    if request.node.get_closest_marker("real_auth"):
+        monkeypatch.setattr(arail_config, "DATA_DIR", tmp_path / "portal_data")
+        yield
+        return
+    token_file = _write_0600(tmp_path / "portal.token", PORTAL_TEST_TOKEN)
+    monkeypatch.setattr(portal_auth, "token_path", lambda: token_file)
+    monkeypatch.setattr(portal_auth, "sessions_path", lambda: tmp_path / "portal_sessions.json")
+    _patch_testclient_send_once()
+    _bearer_active["on"] = True
+    try:
+        yield
+    finally:
+        _bearer_active["on"] = False
+
+
 @pytest.fixture(autouse=True)
 def _no_ambient_window_override(monkeypatch, tmp_path_factory):
     """Isolate the persisted work-window override per test.

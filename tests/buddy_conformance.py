@@ -134,8 +134,8 @@ def _entry(kind: str) -> Any:
 class World:
     """One case's world. Built from ``setup``; everything is undone by pytest's monkeypatch."""
 
-    def __init__(self, setup: dict, method: str, tmp_path: pathlib.Path, monkeypatch) -> None:
-        self.setup, self.method, self.mp = setup, method, monkeypatch
+    def __init__(self, setup: dict, method: str, tmp_path: pathlib.Path, monkeypatch, mount: str = "portal") -> None:
+        self.setup, self.method, self.mp, self.mount = setup, method, monkeypatch, mount
         data = tmp_path / "lab-data"
         data.mkdir()
         monkeypatch.setattr(config, "DATA_DIR", data)
@@ -205,7 +205,11 @@ class World:
             if hasattr(host_edge_routes, name):
                 monkeypatch.setattr(host_edge_routes, name, boom)
 
-        self.client = TestClient(host_edge_routes_app(), client=(s.get("peer", "127.0.0.1"), 50000))
+        if self.mount == "edge-socket":
+            self.client = socket_edge_client()
+        else:
+            self.client = TestClient(host_edge_routes_app(self.mount), client=(s.get("peer", "127.0.0.1"), 50000),
+                                     base_url="http://127.0.0.1")
 
     def _link(self) -> None:
         sha = link.credential_sha256(CONTRACT["conformance"]["fake_credential"])
@@ -327,6 +331,50 @@ class World:
         return problems
 
 
-def host_edge_routes_app():
+_socket_edge: dict = {}
+
+
+def socket_edge_client():
+    """An httpx client talking over a REAL TCP connection to the real edge app, bound once per process on
+    127.0.0.1:$ARAIL_CONFORMANCE_EDGE_PORT (default 8089, the port the box will dial). State is the same
+    process's, so the cases' monkeypatched worlds are what the server sees."""
+    import socket
+    import threading
+    import time
+
+    import httpx
+    import pytest
+
+    port = int(os.getenv("ARAIL_CONFORMANCE_EDGE_PORT", "8089"))
+    if "server" not in _socket_edge:
+        import asyncio
+
+        import uvicorn
+
+        from arail.portal.edge_app import EDGE_HOST, EdgeServer, edge_app
+
+        sock = socket.socket()
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind((EDGE_HOST, port))
+        except OSError:
+            sock.close()
+            pytest.skip(f"127.0.0.1:{port} is in use; set ARAIL_CONFORMANCE_EDGE_PORT")
+        sock.listen(128)
+        server = EdgeServer(uvicorn.Config(edge_app, lifespan="off", access_log=False, log_level="warning", log_config=None))
+        threading.Thread(target=lambda: asyncio.run(server.serve(sockets=[sock])), daemon=True).start()
+        for _ in range(100):
+            if server.started:
+                break
+            time.sleep(0.05)
+        _socket_edge["server"] = server
+    return httpx.Client(base_url=f"http://127.0.0.1:{port}", timeout=30)
+
+
+def host_edge_routes_app(mount: str = "portal"):
+    """The app under test: the portal's own ``/api/host/v1`` mount, or the box-only edge app."""
+    if mount == "edge":
+        from arail.portal.edge_app import edge_app
+        return edge_app
     from arail.portal.app import app
     return app
