@@ -172,8 +172,6 @@ def test_edge_reports_port_in_use_when_another_process_holds_the_wildcard():
         occ.close()
 
 
-@pytest.mark.xfail(strict=True, reason="QA-S4-3: the edge's uvicorn.Config re-levels the process-global uvicorn "
-                                       "loggers and strips uvicorn.access handlers, silencing the portal's logs")
 def test_starting_the_edge_leaves_the_portals_uvicorn_loggers_alone():
     from arail.portal.edge_app import EdgeListener
     err, acc = logging.getLogger("uvicorn.error"), logging.getLogger("uvicorn.access")

@@ -97,8 +97,16 @@ class EdgeListener:
         sock.setblocking(False)
         self._sock = sock
         self.port = sock.getsockname()[1]
+        # uvicorn.Config re-levels the PROCESS-GLOBAL uvicorn loggers and strips the access handlers;
+        # that would silence the portal's own log lines (QA-S4-3). Build it, then put them back.
+        saved = [(lg, lg.level, list(lg.handlers), lg.propagate)
+                 for lg in (logging.getLogger("uvicorn.error"), logging.getLogger("uvicorn.access"))]
         cfg = uvicorn.Config(edge_app, lifespan="off", access_log=False, log_level="warning",
                              log_config=None, server_header=False)
+        for lg, level, handlers, propagate in saved:
+            lg.setLevel(level)
+            lg.handlers[:] = handlers
+            lg.propagate = propagate
         self._server = EdgeServer(cfg)
         self._task = asyncio.get_running_loop().create_task(self._server.serve(sockets=[sock]))
         self._task.add_done_callback(self._finished)
