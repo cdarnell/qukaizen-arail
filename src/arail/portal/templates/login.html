@@ -35,7 +35,7 @@
 <body>
 <div class="lg-card" role="main">
   <h1>{{ brand.name }}</h1>
-  <p>Enter your lab passphrase to continue.</p>
+  <p>Type the passphrase you chose when you set up this lab.</p>
   {% if error %}<p class="lg-err" role="alert">{{ error }}</p>{% endif %}
   <form method="post" action="/login" autocomplete="off">
     <input type="hidden" name="next" value="{{ next }}">
@@ -45,7 +45,9 @@
     </div>
     <button type="submit" class="lg-btn">Log in</button>
   </form>
-  <p class="lg-foot">Forgot it? On this computer run <code>./arailctl auth reset</code>.</p>
+  <p class="lg-foot">Forgot it? On the computer that runs this lab, open a terminal in the lab folder and run
+    <code>./arailctl auth reset</code> to choose a new one. If the page says logging in is paused and you are sure of
+    your passphrase, run <code>./arailctl auth unlock</code> instead.</p>
 </div>
 </body>
 </html>

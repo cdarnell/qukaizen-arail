@@ -1538,7 +1538,9 @@ async def login_submit(request: Request):
             return JSONResponse({"error": "rate_limited", "retry_after": retry["Retry-After"]},
                                 status_code=429, headers=retry)
         return _login_page(request, next_url=nxt, status=429, headers=retry,
-                           error=f"Too many attempts. Try again in {retry['Retry-After']} seconds.")
+                           error=(f"There were too many wrong tries, so logging in is paused for {retry['Retry-After']} seconds. "
+                                 "Wait, then try again. If you cannot wait, run ./arailctl auth unlock in a terminal on "
+                                 "the computer that runs this lab."))
 
     _refresh_passphrase_from_file()
     if not _auth.check_password(candidate):
@@ -1548,7 +1550,7 @@ async def login_submit(request: Request):
                                               "trusted_device": known_device}})
         if wants_json:
             return JSONResponse({"error": "login_failed"}, status_code=401)
-        return _login_page(request, next_url=nxt, status=401, error="That passphrase did not match.")
+        return _login_page(request, next_url=nxt, status=401, error="That passphrase is not right. Check for typing mistakes and try again.")
 
     lim.success()
     _auth.ensure_token()

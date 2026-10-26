@@ -66,7 +66,7 @@ def test_wrong_passphrase_is_401_with_one_fixed_message_and_no_cookie(lab, caplo
     c = mk()
     with caplog.at_level(logging.DEBUG):
         r = login(c, "not-the-one-123")
-    assert r.status_code == 401 and "did not match" in r.text and "set-cookie" not in r.headers
+    assert r.status_code == 401 and "is not right" in r.text and "set-cookie" not in r.headers
     assert "not-the-one-123" not in r.text + caplog.text
     ev = [e for e in portal_app.activity_log.recent(20) if e.get("source") == "security"]
     assert ev and "not-the-one-123" not in str(ev)
@@ -294,3 +294,15 @@ def test_unlock_verb_clears_the_running_portals_lock(lab, monkeypatch):
     assert peer.wait_s() > 0
     assert auth_cli.main(["unlock"], out=io.StringIO()) == 0
     assert login(mk(), PASS).status_code == 303
+
+
+def test_login_copy_is_plain_sentences_that_say_what_to_do(lab):
+    c = mk()
+    page = c.get("/login").text
+    assert "Type the passphrase you chose when you set up this lab." in page
+    assert "./arailctl auth reset" in page and "./arailctl auth unlock" in page
+    for _ in range(5):
+        login(c, "guess-guess-1")
+    locked = login(c, PASS)
+    assert locked.status_code == 429
+    assert "paused for" in locked.text and "Wait, then try again" in locked.text and "./arailctl auth unlock" in locked.text
