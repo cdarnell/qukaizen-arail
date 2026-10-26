@@ -295,3 +295,72 @@ def test_unchanged_file_is_not_reread_per_request(data_dir):
     for _ in range(200):
         s.touch(sid)
     assert s.reloads == before
+
+
+# --- QA-S4-1: open streams end when their credential is revoked ----------------------------------
+def _run(coro):
+    import asyncio
+    return asyncio.run(coro)
+
+
+def test_guard_stream_ends_with_one_auth_event_and_nothing_after(monkeypatch):
+    import asyncio
+    monkeypatch.setattr(auth, "STREAM_TICK_S", 0.05)
+    valid = {"ok": True}
+    closed = {"v": False}
+
+    async def source():
+        try:
+            yield b"data: 1\n\n"
+            while True:
+                await asyncio.sleep(10)          # an idle activity feed
+                yield b"data: never\n\n"
+        finally:
+            closed["v"] = True
+
+    async def go():
+        out = []
+        async for chunk in auth.guard_stream(source(), lambda: valid["ok"]):
+            out.append(chunk)
+            if len(out) == 1:
+                valid["ok"] = False              # revoked while the source is idle
+        return out
+
+    out = _run(asyncio.wait_for(go(), 3))
+    assert out == [b"data: 1\n\n", auth.AUTH_EVENT]
+    assert closed["v"]
+
+
+def test_guard_stream_passes_events_through_while_valid_and_ends_when_the_source_ends(monkeypatch):
+    monkeypatch.setattr(auth, "STREAM_TICK_S", 0.05)
+
+    async def source():
+        for i in range(3):
+            yield f"data: {i}\n\n".encode()
+
+    async def go():
+        return [c async for c in auth.guard_stream(source(), lambda: True)]
+
+    assert _run(go()) == [b"data: 0\n\n", b"data: 1\n\n", b"data: 2\n\n"]
+
+
+def test_a_revoked_session_stops_a_stream_even_if_events_keep_coming(monkeypatch):
+    import asyncio
+    monkeypatch.setattr(auth, "STREAM_TICK_S", 0.05)
+    valid = {"ok": True}
+
+    async def chatty():
+        while True:
+            yield b"data: x\n\n"
+            await asyncio.sleep(0.01)
+
+    async def go():
+        out = []
+        async for chunk in auth.guard_stream(chatty(), lambda: valid["ok"]):
+            out.append(chunk)
+            if len(out) == 3:
+                valid["ok"] = False
+        return out
+
+    out = _run(asyncio.wait_for(go(), 3))
+    assert out[-1] == auth.AUTH_EVENT and out.count(auth.AUTH_EVENT) == 1

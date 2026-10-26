@@ -53,6 +53,7 @@
     var checking=false;
     window.EventSource=function(url,cfg){
       var es=new _ES(url,cfg);
+      es.addEventListener('auth',function(){ es.close(); goLogin(); });
       es.addEventListener('error',function(){
         if(checking) return; checking=true;
         _fetch('/api/auth/whoami',{credentials:'same-origin'}).then(function(r){

@@ -564,6 +564,57 @@ def session_mutation_ok(headers) -> bool:
     return False
 
 
+# --------------------------------------------------------------------------- open streams
+STREAM_TICK_S = 1.0
+AUTH_EVENT = b'event: auth\ndata: {"login": "/login"}\n\n'
+
+
+async def guard_stream(source, still_valid):
+    """Re-validate the credential while a long-lived response is open (QA-S4-1).
+
+    The middleware checks a credential once, at connect, so an SSE stream opened before a logout,
+    ``auth logout-all``, ``auth reset`` or a token rotation would otherwise keep delivering events to
+    a revoked session. Every ``STREAM_TICK_S`` (and on every event) ``still_valid()`` is asked again;
+    when it says no, the source is cancelled and the stream ends with one final ``event: auth`` that
+    the page's recovery hook turns into a trip to /login. Nothing else is sent after the revoke.
+    """
+    import asyncio
+    it = source.__aiter__()
+    pending = None
+    try:
+        while True:
+            if pending is None:
+                pending = asyncio.ensure_future(it.__anext__())
+            done, _ = await asyncio.wait({pending}, timeout=STREAM_TICK_S)
+            if not still_valid():
+                yield AUTH_EVENT
+                return
+            if not done:
+                continue
+            task, pending = pending, None
+            try:
+                chunk = task.result()
+            except StopAsyncIteration:
+                return
+            yield chunk
+    finally:
+        if pending is not None:
+            pending.cancel()
+        aclose = getattr(source, "aclose", None)
+        if aclose is not None:
+            try:
+                await asyncio.shield(aclose())
+            except Exception:  # noqa: BLE001 - the stream is over either way
+                pass
+
+
+async def _guarded(request, call_next, still_valid):
+    resp = await call_next(request)
+    if (resp.headers.get("content-type", "") or "").startswith("text/event-stream") and hasattr(resp, "body_iterator"):
+        resp.body_iterator = guard_stream(resp.body_iterator, still_valid)
+    return resp
+
+
 # --------------------------------------------------------------------------- the middleware decision
 def _json_401(error: str, **extra):
     from fastapi.responses import JSONResponse
@@ -589,12 +640,12 @@ async def authenticate(request, call_next, *, onboarded: bool):
     if header is not None:                                         # 4. a wrong bearer never falls back to the cookie
         if check_bearer(header):
             request.state.principal = "bearer"
-            return await call_next(request)
+            return await _guarded(request, call_next, lambda: check_bearer(header))
         if header.startswith("Bearer " + SHIM_PREFIX):
             if check_shim_bearer(header):
                 if shim_path_allowed(path):
                     request.state.principal = "shim"
-                    return await call_next(request)
+                    return await _guarded(request, call_next, lambda: check_shim_bearer(header))
                 return _json_401("token_scope")      # valid, but not for this route
             return _json_401("auth_invalid")
         if token_file_state() == "unsafe":
@@ -610,7 +661,7 @@ async def authenticate(request, call_next, *, onboarded: bool):
             from fastapi.responses import JSONResponse
             return JSONResponse({"error": "cross_origin_session"}, status_code=403)
         request.state.principal = "session"
-        return await call_next(request)
+        return await _guarded(request, call_next, lambda: get_store().touch(sid))
 
     if (path.startswith("/api/") or path == "/metrics"                                       # 7. (/metrics: a scraper,
             or "application/json" in request.headers.get("accept", "")):                    #    not a person: 401, not 302)

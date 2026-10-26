@@ -203,8 +203,6 @@ def _free_port() -> int:
 
 
 # ----------------------------------------------------------------- revocation vs open streams (live)
-@pytest.mark.xfail(strict=True, reason="QA-S4-1: an SSE stream opened before logout-all/reset keeps delivering "
-                                       "activity events to the revoked session; the F8 hook never fires")
 def test_an_open_activity_stream_stops_after_logout_all(tmp_path):
     port, edge = _free_port(), 0
     lab = tmp_path / "lab"
