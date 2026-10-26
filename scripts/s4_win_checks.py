@@ -119,7 +119,8 @@ out = r.stdout + r.stderr
 check("401" not in out and "Traceback" not in out, "arailctl status output mentions 401", "no" if "401" not in out else "yes",
       "must be no", "status uses only anonymous probes plus the token helper for the jobs line", "scripts/status.sh")
 check("Scheduler" in out, "status shows the Scheduler (jobs) line", "Scheduler" in out, "must be shown",
-      "svc_portal_curl handed curl the token; without it status prints 'needs arailctl as the lab owner'")
+      "svc_portal_curl handed curl the token; without it status prints 'needs arailctl as the lab owner'",
+      "scripts/status.sh; its output follows\n" + out[-1500:])
 r = subprocess.run(["bash", str(REPO / "arailctl"), "auth", "token"], capture_output=True, text=True, env=env, cwd=REPO)
 check(r.returncode == 0 and token not in r.stdout and "token id:" in r.stdout, "arailctl auth token", f"exit {r.returncode}",
       "must exit 0 and print an id, not the token", "The value never reaches a terminal or a log", r.stdout + r.stderr)
