@@ -2276,3 +2276,25 @@ shell can *read*. Not a regression (the shell could always read `ARAIL_PASSWORD`
 files it needs, the pattern Buddy's box uses (Buddy S3/S5).
 **Trigger:** opencode enabled on a shared or family machine outside the owner's own account, or any
 change that widens the shell's reach (new tools, network). Documented for users in `docs/PRIVACY.md`.
+
+---
+
+## QA-S4-2: the edge can co-bind next to a wildcard listener on its port
+
+**Filed by:** `sprints/2026-10-25-buddy-s4-gateway-in-box/TEST_REPORT.md` (low).
+
+`EdgeListener.start` sets `SO_REUSEADDR`. On macOS/BSD that lets it bind `127.0.0.1:P` while another process holds
+`0.0.0.0:P`, and it reports `listening`, not `port_in_use`. Loopback traffic goes to the edge, so Buddy is not misrouted
+today; the LAN address of the Mac reaches the other process. **Not a one-line fix:** dropping `SO_REUSEADDR` makes a
+launchd restart fail to rebind for about 60 s (TIME_WAIT), which would turn a normal restart into "edge off".
+**Pay it by:** a pre-flight `connect()` to `127.0.0.1:P` before binding (a listener that answers means port in use) or
+binding without REUSEADDR and retrying for 5 s. **Trigger:** S5 (the box dials this port, so a squatter matters), or any
+report of a second service on 8089. Pinned by a strict xfail in `tests/test_s4_qa_paranoid.py`.
+
+## S5: the edge has no server identity
+
+**Filed by:** TEST_REPORT.md (Network I/O row). A same-user process that pre-binds `127.0.0.1:8089` before ARAIL starts
+would receive Buddy's `bhc1_` credential; ARAIL logs `port_in_use` but Buddy does not authenticate the server.
+**Pay it by:** a server proof in the handshake (for example the lab signs a nonce with a key only ARAIL holds, pinned in
+`link.json`). **Trigger:** S5 start, because the box then routes to this port through a proxy.
+
