@@ -67,8 +67,8 @@ def post(lab, body):
 def sdk(lab, **client_kw):
     """The OpenAI SDK, the client nanobot uses, pointed at the real app over ASGI."""
     transport = httpx.ASGITransport(app=lab.client.app, client=("127.0.0.1", 9))
-    http = httpx.AsyncClient(transport=transport, base_url="http://testserver")
-    return openai.AsyncOpenAI(api_key=CRED, base_url="http://testserver" + BASE + "/brain", http_client=http,
+    http = httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1")
+    return openai.AsyncOpenAI(api_key=CRED, base_url="http://127.0.0.1" + BASE + "/brain", http_client=http,
                               default_headers={"X-Buddy-Contract": "sha256:" + CONTRACT_SHA256}, max_retries=0,
                               **client_kw)
 
@@ -229,7 +229,7 @@ def test_a_second_question_hears_busy_after_the_wait_and_the_first_still_finishe
 
     async def go():
         transport = httpx.ASGITransport(app=w.client.app, client=("127.0.0.1", 9))
-        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as c:
+        async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as c:
             first = asyncio.create_task(c.post(BASE + "/brain/chat/completions", content=json.dumps(chat()), headers=H()))
             await asyncio.get_running_loop().run_in_executor(None, gate.entered.wait, 5)
             t0 = time.perf_counter()
@@ -463,7 +463,7 @@ def test_i_edge_14_two_calls_at_299_turns_give_one_answer_and_one_budget_exhaust
 
     async def go():
         transport = httpx.ASGITransport(app=w.client.app, client=("127.0.0.1", 9))
-        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as c:
+        async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as c:
             async with inference.inference_slot("test-holder"):         # the slot is busy while both calls arrive
                 a = asyncio.create_task(c.post(BASE + "/brain/chat/completions", content=json.dumps(chat()), headers=H()))
                 b = asyncio.create_task(c.post(BASE + "/brain/chat/completions", content=json.dumps(other), headers=H()))
@@ -496,7 +496,7 @@ def test_lab_mode_is_read_again_after_the_wait_for_the_slot(tmp_path, monkeypatc
 
     async def go():
         transport = httpx.ASGITransport(app=w.client.app, client=("127.0.0.1", 9))
-        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as c:
+        async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as c:
             first = asyncio.create_task(c.post(BASE + "/brain/chat/completions", content=json.dumps(chat()), headers=H()))
             await asyncio.get_running_loop().run_in_executor(None, gate.entered.wait, 5)
             second = asyncio.create_task(c.post(BASE + "/brain/chat/completions", content=json.dumps(other), headers=H()))

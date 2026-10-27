@@ -164,8 +164,9 @@ def test_the_timeout_argument_is_keyword_only():
 def test_edge_traffic_is_not_operator_presence(monkeypatch):
     """F22: a 20-second handshake would otherwise pin the lab in the interactive
     profile for ever and starve background deep work."""
+    from arail.portal.edge_app import edge_app
     runtime_profile._last_presence_ts = 0.0
-    client = TestClient(app)
+    client = TestClient(edge_app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))      # since S5 the edge is served only by its own app, which has no presence meter
     client.get("/api/host/v1/handshake")
     client.post("/api/host/v1/handshake", json={})
     client.get("/api/host/v1/brain/models")
@@ -179,12 +180,9 @@ def test_other_traffic_still_counts_as_presence():
     assert runtime_profile._last_presence_ts > 0.0
 
 
-def test_fast_path_prefixes_name_the_four_non_brain_edge_paths_and_not_brain():
-    prefixes = inference.FAST_PATH_PREFIXES
-    for p in ("/api/host/v1/handshake", "/api/host/v1/trace/", "/api/host/v1/hold_all", "/api/host/v1/pause_research"):
-        assert p in prefixes
-    assert not any("/api/host/v1/brain" in p for p in prefixes)
-    assert "/api/host/v1/" not in prefixes  # brain.chat is long-lived and must not be timed
+def test_fast_path_prefixes_no_longer_name_the_edge_paths_the_portal_does_not_serve():
+    """S4 moved the Buddy edge to its own port; the portal serves nothing under /api/host/v1/, so the S1 fast-path entries were dead (S5 review)."""
+    assert not any(p.startswith("/api/host/v1") for p in inference.FAST_PATH_PREFIXES)
 
 
 def test_is_cloud_entry_is_public_and_is_the_same_function():

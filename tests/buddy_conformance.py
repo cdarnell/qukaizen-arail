@@ -134,7 +134,7 @@ def _entry(kind: str) -> Any:
 class World:
     """One case's world. Built from ``setup``; everything is undone by pytest's monkeypatch."""
 
-    def __init__(self, setup: dict, method: str, tmp_path: pathlib.Path, monkeypatch, mount: str = "portal") -> None:
+    def __init__(self, setup: dict, method: str, tmp_path: pathlib.Path, monkeypatch, mount: str = "edge") -> None:
         self.setup, self.method, self.mp, self.mount = setup, method, monkeypatch, mount
         data = tmp_path / "lab-data"
         data.mkdir()
@@ -156,6 +156,7 @@ class World:
         monkeypatch.setenv("LAB_MODE", s.get("lab_mode", "hybrid"))
         monkeypatch.setenv("LAB_TIER", s.get("tier", "maximus"))
         monkeypatch.setenv("PORTAL_PORT", "8080")
+        monkeypatch.setenv("ARAIL_EDGE_PORT", "8089")      # link refuses without an edge port (S5); no listener is started by these tests
 
         if s.get("linked", True):
             self._link()
@@ -371,10 +372,9 @@ def socket_edge_client():
     return httpx.Client(base_url=f"http://127.0.0.1:{port}", timeout=30)
 
 
-def host_edge_routes_app(mount: str = "portal"):
-    """The app under test: the portal's own ``/api/host/v1`` mount, or the box-only edge app."""
-    if mount == "edge":
-        from arail.portal.edge_app import edge_app
-        return edge_app
-    from arail.portal.app import app
-    return app
+def host_edge_routes_app(mount: str = "edge"):
+    """The app under test: the box-only edge app. (Until S5 the portal also served ``/api/host/v1`` on its own port; it no longer does.)"""
+    if mount != "edge":
+        raise ValueError("the portal serves no edge since S5; the mounts are 'edge' and 'edge-socket'")
+    from arail.portal.edge_app import edge_app
+    return edge_app

@@ -1,8 +1,9 @@
 """QA pass (sprint 2026-10-25-buddy-s4-gateway-in-box): cases the build's own tests did not cover.
 
-Passing tests here are regression guards. The three ``xfail(strict=True)`` tests are QA defects
-filed in TEST_REPORT.md (QA-S4-1..3); each flips to XPASS (and fails the run, so the marker gets
-removed) when the builder fixes it.
+Passing tests here are regression guards. An ``xfail(strict=True)`` test is a QA defect filed in
+TEST_REPORT.md (QA-S4-1..3); it flips to XPASS (and fails the run, so the marker gets removed) when
+the builder fixes it. QA-S4-2 (the edge co-binding beside another process's wildcard listener) was
+fixed in S5: the edge connects to its port before it binds, and its marker is gone.
 """
 from __future__ import annotations
 
@@ -152,8 +153,6 @@ def test_edge_rejects_a_wellformed_wrong_credential_and_the_portal_bearer():
         assert r.status_code in (401, 403) and bearer not in r.text
 
 
-@pytest.mark.xfail(strict=True, reason="QA-S4-2: SO_REUSEADDR lets the edge co-bind 127.0.0.1 under another "
-                                       "process's 0.0.0.0 listener on the same port; state says 'listening'")
 def test_edge_reports_port_in_use_when_another_process_holds_the_wildcard():
     from arail.portal.edge_app import EdgeListener
     occ = socket.socket()

@@ -99,7 +99,8 @@ def test_link_url_follows_the_edge_port(monkeypatch):
     assert link.edge_base_url() == "http://127.0.0.1:9071/api/host/v1"
     monkeypatch.setenv("ARAIL_EDGE_PORT", "0")
     monkeypatch.setenv("PORTAL_PORT", "8080")
-    assert link.edge_base_url() == "http://127.0.0.1:8080/api/host/v1"
+    with pytest.raises(link.PolicyRefusal, match="Buddy needs the edge app"):            # S5: no fallback to the portal's port
+        link.edge_base_url()
 
 
 # --- the listener itself (real sockets) --------------------------------------------------------
@@ -226,3 +227,44 @@ def test_a_serving_failure_is_recorded_not_raised():
         return lis.state
 
     assert _run(go()).startswith("stopped")
+
+
+# --- S5 / QA-S4-2: the edge asks before it binds, and still rebinds after a restart ---------------
+def test_a_loopback_only_holder_is_also_port_in_use():
+    holder = socket.socket()
+    holder.bind(("127.0.0.1", 0))
+    holder.listen(1)
+    port = holder.getsockname()[1]
+
+    async def go():
+        lst = ea.EdgeListener()
+        state = lst.start(port, instance=False)
+        await lst.stop()
+        return state
+    try:
+        assert asyncio.run(go()) == "port_in_use"
+    finally:
+        holder.close()
+
+
+def test_a_restart_rebinds_through_time_wait_because_so_reuseaddr_stays():
+    """The reason QA-S4-2 was not a one-line fix: a launchd restart must bind a port whose last connection is still in TIME_WAIT."""
+    probe = socket.socket()
+    probe.bind(("127.0.0.1", 0))
+    port = probe.getsockname()[1]
+    probe.close()
+
+    async def go():
+        first = ea.EdgeListener()
+        assert first.start(port, instance=False) == "listening"
+        reader, writer = await asyncio.open_connection("127.0.0.1", port)
+        writer.write(b"GET /nothing HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+        await writer.drain()
+        await reader.read(200)
+        writer.close()
+        await first.stop()                                              # the server side closes first: its socket sits in TIME_WAIT
+        second = ea.EdgeListener()
+        state = second.start(port, instance=False)
+        await second.stop()
+        return state
+    assert asyncio.run(go()) == "listening"

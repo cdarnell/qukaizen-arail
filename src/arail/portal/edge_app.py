@@ -63,6 +63,21 @@ class EdgeServer(uvicorn.Server):
         yield
 
 
+def _port_answers(port: int) -> bool:
+    """True if something already accepts connections on 127.0.0.1:port. QA-S4-2: ``SO_REUSEADDR`` lets a bind to 127.0.0.1 succeed beside another process's
+    0.0.0.0 listener on the same port, and the state then said "listening" while that process got the connections. A wildcard holder also answers on
+    loopback, so a connect catches it; ``SO_REUSEADDR`` stays so a restart still rebinds through TIME_WAIT (nothing answers there)."""
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    probe.settimeout(0.2)
+    try:
+        probe.connect((EDGE_HOST, port))
+        return True
+    except OSError:
+        return False
+    finally:
+        probe.close()
+
+
 class EdgeListener:
     """Owns the pre-bound socket and the serving task. ``state`` is what the operator is told."""
 
@@ -82,6 +97,11 @@ class EdgeListener:
             return self.state
         if port == 0:
             self.state = "off (ARAIL_EDGE_PORT=0)"
+            return self.state
+        if _port_answers(port):
+            self.state = "port_in_use"
+            _log.warning("Buddy edge not started: 127.0.0.1:%s is in use. "
+                         "Set ARAIL_EDGE_PORT to another port (0 turns the edge app off).", port)
             return self.state
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:

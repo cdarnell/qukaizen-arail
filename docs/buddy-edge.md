@@ -12,14 +12,26 @@ Status: sprint `2026-10-20-buddy-always-on` (S1). Design record:
 
 ## What the edge is
 
-Six routes under `/api/host/v1/`. Since S4 they are served twice, by the same code:
+Six routes under `/api/host/v1/`, served by exactly one thing: the **box-only edge app** on
+`127.0.0.1:$ARAIL_EDGE_PORT` (default **8089**). It is a second app inside the portal process, bound to
+the literal loopback address (never `BIND_ADDR`), with no portal routes behind it: every other path is
+404, and portal cookies and tokens mean nothing there. `./arailctl buddy link` writes this URL into both
+link files. A World instance never starts it.
 
-- by a **box-only edge app** on `127.0.0.1:$ARAIL_EDGE_PORT` (default **8089**; `0` turns it off). It
-  is a second app inside the portal process, bound to the literal loopback address (never
-  `BIND_ADDR`), with no portal routes behind it: every other path is 404, and portal cookies and
-  tokens mean nothing there. `./arailctl buddy link` writes this URL into both link files.
-  A World instance never starts it.
-- by the portal's own port (default 8080) for links made before S4. S5 removes this mount.
+**Since S5 the portal's own port (8080) serves no edge.** `/api/host/v1/*` there is a plain 404. Two
+consequences:
+
+- With `ARAIL_EDGE_PORT=0` (the edge app off) there is nowhere to point Buddy, so `buddy link` (and
+  `link --rotate`) refuse with exit 3 before anything is written or any consent is recorded:
+  "Buddy needs the edge app; set ARAIL_EDGE_PORT".
+- A link made before S4 still names `http://127.0.0.1:8080/api/host/v1` and stops working. Check
+  `./arailctl buddy status` for the `edge:` URL; if it ends in `:8080`, run
+  `./arailctl buddy link --rotate --buddy-home PATH` (it also kills the old credential) and restart
+  Buddy. A link made on S4 or later already names the edge app and needs nothing.
+
+If the edge app finds something already answering on its port (another process, including one bound
+to every address) it does not start and says `port_in_use`; the check is a connect before the bind, so a
+launchd restart still rebinds through TIME_WAIT.
 
 The portal itself now requires a login (`./arailctl auth` for programs); the edge keeps its own
 `bhc1_` credential and is the one thing the portal's auth defers to.

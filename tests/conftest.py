@@ -257,8 +257,13 @@ def _patch_testclient_send_once():
     session-scoped clients, which are built before any function-scoped fixture runs."""
     if _send_patched["done"]:
         return
-    import httpx
-    from starlette.testclient import TestClient
+    try:
+        import httpx
+        from starlette.testclient import TestClient
+    except ImportError:
+        # A minimal CI job (no httpx/starlette) builds no TestClient, so there is
+        # nothing to wrap and no portal test can run there.
+        return
 
     orig_send = httpx.Client.send
 
