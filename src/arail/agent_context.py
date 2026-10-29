@@ -24,6 +24,7 @@ context, and why three" for the full design story.
 from __future__ import annotations
 
 import contextvars
+import dataclasses
 import re
 import secrets
 import sys
@@ -236,6 +237,31 @@ def agent_call(
         identity=call_identity,
         origin=call_origin,
     )
+    token = _CALL.set(call)
+    try:
+        yield call
+    finally:
+        _CALL.reset(token)
+
+
+@contextmanager
+def with_deep_reason(
+    code: Optional[str],
+    detail: Optional[str],
+) -> Iterator[Optional[AgentCall]]:
+    """Stamp the enclosed call's trace with why it ran on the fast model.
+
+    Re-sets the current record with only ``deep_reason_code`` and
+    ``deep_reason_detail`` replaced (``dataclasses.replace``), so the trace id,
+    brain, effort and foreground flag stay exactly as the caller set them.
+    Does nothing when there is no active context: an unattributed call has no
+    record to stamp, and none is invented. Additive; no existing caller uses it.
+    """
+    cur = current()
+    if cur is None:
+        yield None
+        return
+    call = dataclasses.replace(cur, deep_reason_code=code, deep_reason_detail=detail)
     token = _CALL.set(call)
     try:
         yield call

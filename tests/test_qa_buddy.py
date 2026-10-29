@@ -160,7 +160,7 @@ def buddy_env(monkeypatch, tmp_path):
     # test_dream_once_idempotence_reads_the_unisolated_real_pkb_root.
     monkeypatch.setattr(config, "PKB_ROOT", host.get_pkb_root())
     # Never prefer deep: the deep router would be a real registry lookup.
-    monkeypatch.setattr(deep_policy, "prefer_deep", lambda **kw: False)
+    monkeypatch.setattr(deep_policy, "explain", lambda **kw: (False, "disabled", "test: deep off"))
     deep_policy._reset_for_tests()
     return agent, host, backend, buddy_mod
 
@@ -268,7 +268,9 @@ def test_buddy_deep_to_fast_fallback_keeps_buddys_attribution(
             raise RuntimeError("deep backend OOM")
 
     deep_router = ModelRouter.from_backend(_DeadDeep(), "fake-deep")
-    monkeypatch.setattr(deep_policy, "prefer_deep", lambda **kw: True)
+    # complete_preferring_deep() takes its decision from explain() (one walk, one
+    # code), so that is the seam to stub; prefer_deep() is its boolean projection.
+    monkeypatch.setattr(deep_policy, "explain", lambda **kw: (True, "ok", "test: deep on"))
     monkeypatch.setattr(deep_policy, "get_deep_router", lambda: deep_router)
 
     with agent_context.agent_call("buddy"):

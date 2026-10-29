@@ -13,17 +13,23 @@ Policy, in order:
     only when it is *non-intrusive*: not halted, outside the active window, no
     operator presence, the runtime profile allows it, and Metal memory
     pressure is below a gentle background ceiling.
-  • Any deep failure (including OOM) transparently falls back to fast.
+  • Any deep failure (including OOM) falls back to fast, and the fall-back is
+    no longer silent: the failure is recorded per binary in
+    ``arail.deep_verdict``, ``explain()`` says ``deep_failing`` until a
+    ``./arailctl deep probe`` passes 5/5, and the fast call's trace carries
+    that reason (sprint 2026-10-29-arail-deep-honest).
 
 Kept dependency-light and side-effect-free so it unit-tests without loading
 real model weights. All heavy imports are lazy and inside functions.
 """
 from __future__ import annotations
 
+import contextlib
 import os
 import threading
 from typing import Any, Optional
 
+from arail import agent_context
 from arail.agent_context import AgentHeldError
 
 # Gentle background pressure ceiling — well under the 0.75 hard chat guard in
@@ -35,6 +41,15 @@ _FAILED = object()  # sentinel: construction attempted and failed
 _lock = threading.Lock()
 _deep_router: Any = None   # cached ModelRouter, or _FAILED
 _fast_router: Any = None   # cached fast ModelRouter, or _FAILED
+
+# In-process counters. They explain nothing and clear nothing; they let a test
+# (and a curious operator in a shell) see how often the fast model stood in.
+_COUNTERS = {"fast_instead_of_deep": 0}
+
+
+def counters() -> "dict[str, int]":
+    """Copy of the in-process counters."""
+    return dict(_COUNTERS)
 
 
 def _enabled() -> bool:
@@ -135,12 +150,30 @@ def boot_warm_safe() -> bool:
     return boot_warm_gate()[0]
 
 
+def _deep_failing_detail() -> "Optional[str]":
+    """The verdict's one-sentence detail while deep generation is failing on the
+    binary this process loaded, else None. Never imports the wheel (the caller
+    has just done that) and never raises."""
+    try:
+        from arail import deep_verdict
+        v = deep_verdict.current(import_if_needed=False)
+        return v.detail if v.state == "failing" else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def explain(*, foreground: bool) -> "tuple[bool, str, str]":
     """``prefer_deep`` with its reason: ``(ok, reason_code, detail)``.
 
     reason_code ∈ {"ok", "disabled", "tier_locked", "wheel_missing",
-    "deferred_now"}. prefer_deep() is a boolean projection of this walk,
-    so the UI's explanation and the agents' decision can never drift.
+    "deep_failing", "deferred_now"}. prefer_deep() is a boolean projection of
+    this walk, so the UI's explanation and the agents' decision can never
+    drift.
+
+    ``deep_failing`` (additive) means a probe, a deep call or a load failed on
+    the binary this process loaded and no ``deep probe`` has passed 5/5 since.
+    It applies to foreground and background alike and is distinct from
+    ``deferred_now``, which says "not now"; this says "not working".
     """
     from arail.tier import is_maximus
     if not _enabled():
@@ -153,6 +186,9 @@ def explain(*, foreground: bool) -> "tuple[bool, str, str]":
     if not _aerollm_importable():
         return (False, "wheel_missing",
                 "aerollm_api is not installed — run ./arailctl deep install")
+    failing = _deep_failing_detail()
+    if failing is not None:
+        return False, "deep_failing", failing
     if foreground:
         return True, "ok", "deep inference available"
     ok, code, detail = _background_gate()
@@ -272,12 +308,24 @@ def complete_preferring_deep(
 ) -> Optional[str]:
     """Complete on the deep backend when policy allows, else fast.
 
-    Any deep failure (including OOM) silently falls back to fast — we never
-    crash an agent or risk OOMing the box for a background nicety. ``None`` is
-    returned only when both paths fail. Callers may pass an existing
-    ``fast_router`` to avoid constructing a second one.
+    Any deep failure (including OOM) falls back to fast — we never crash an
+    agent or risk OOMing the box for a background nicety. ``None`` is returned
+    only when both paths fail. Callers may pass an existing ``fast_router`` to
+    avoid constructing a second one.
+
+    The fall-back is not silent (sprint 2026-10-29-arail-deep-honest). The
+    backend has already recorded the failure per binary, ``explain()`` now
+    says ``deep_failing`` until a probe passes, and every fast call made
+    because of it runs inside ``agent_context.with_deep_reason``, so its trace
+    carries ``deep_reason_code="deep_failing"`` and the detail.
     """
-    if prefer_deep(foreground=foreground):
+    ok, code, detail = explain(foreground=foreground)
+    stamp: "Optional[tuple[str, str]]" = None
+    if code == "deep_failing":
+        # Known broken: no deep attempt at all. Calling it again could only fail again.
+        _COUNTERS["fast_instead_of_deep"] += 1
+        stamp = (code, detail)
+    elif ok:
         router = get_deep_router()
         if router is not None:
             try:
@@ -286,6 +334,7 @@ def complete_preferring_deep(
                 text = (resp.text or "").strip() if resp else ""
                 if text:
                     return text
+                stamp = ("deep_failing", _failed_detail("the deep model returned no text"))
             except AgentHeldError:
                 # F8 (ARCHITECTURE.md): agents are held -- do not also try
                 # fast, which would hit the chokepoint a second time and
@@ -300,6 +349,29 @@ def complete_preferring_deep(
                     get_registry().report_failure(TIER1_ID, exc)
                 except Exception:  # noqa: BLE001
                     pass
+                stamp = ("deep_failing", _failed_detail(f"{type(exc).__name__}: {exc}"))
+    reason = (agent_context.with_deep_reason(*stamp) if stamp is not None
+              else contextlib.nullcontext())
+    with reason:
+        return _complete_on_fast(prompt, fast_router=fast_router, max_tokens=max_tokens,
+                                 temperature=temperature, system=system)
+
+
+def _failed_detail(what: str) -> str:
+    """Detail for a fast call made because this call's deep attempt just failed:
+    the verdict's own sentence if it is failing now, else a plain one."""
+    return _deep_failing_detail() or f"deep generation failed: {what[:160]}"
+
+
+def _complete_on_fast(
+    prompt: str,
+    *,
+    fast_router: Any,
+    max_tokens: int,
+    temperature: float,
+    system: Optional[str],
+) -> Optional[str]:
+    """The fast half of ``complete_preferring_deep`` (unchanged behaviour)."""
     fr = fast_router or _get_fast_router()
     if fr is None:
         return None
@@ -324,8 +396,9 @@ def complete_preferring_deep(
 
 
 def _reset_for_tests() -> None:
-    """Test-only: drop the cached routers."""
+    """Test-only: drop the cached routers and the counters."""
     global _deep_router, _fast_router
     with _lock:
         _deep_router = None
         _fast_router = None
+    _COUNTERS["fast_instead_of_deep"] = 0
