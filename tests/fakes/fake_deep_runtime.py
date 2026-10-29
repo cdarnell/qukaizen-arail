@@ -100,8 +100,13 @@ class FakeDeep:
         return AeroLLMBackend()
 
 
-def install(tmp_path: Path, monkeypatch, mode: str = "pass") -> FakeDeep:
-    """Install the fake and reset caches. Returns the handle."""
+def install(tmp_path: Path, monkeypatch, mode: str = "pass", model: str = MODEL_NAME) -> FakeDeep:
+    """Install the fake and reset caches. Returns the handle.
+
+    ``model`` names the model dir the fake serves. The default is not in ARAIL's
+    catalog; the Chat path refuses an unknown parameter count, so a Chat test
+    passes a catalog name such as ``Qwen2.5-7B-Instruct-4bit``.
+    """
     root = tmp_path / "fakedeep"
     pkg_dir = root / "fakepkg"
     package = pkg_dir / "aerollm_api"
@@ -111,10 +116,10 @@ def install(tmp_path: Path, monkeypatch, mode: str = "pass") -> FakeDeep:
     native.write_bytes(_NATIVE_BYTES)
 
     models_dir = root / "models"
-    model = models_dir / MODEL_NAME
-    model.mkdir(parents=True)
-    (model / "config.json").write_text('{"fake": true}\n', encoding="utf-8")
-    (model / "weights.bin").write_bytes(b"\0" * 2048)
+    model_dir = models_dir / model
+    model_dir.mkdir(parents=True)
+    (model_dir / "config.json").write_text('{"fake": true}\n', encoding="utf-8")
+    (model_dir / "weights.bin").write_bytes(b"\0" * 2048)
 
     count_file = root / "calls.jsonl"
 
@@ -123,7 +128,7 @@ def install(tmp_path: Path, monkeypatch, mode: str = "pass") -> FakeDeep:
         monkeypatch.delitem(sys.modules, name, raising=False)
     monkeypatch.syspath_prepend(str(pkg_dir))
 
-    monkeypatch.setenv("AEROLLM_MODEL", MODEL_NAME)
+    monkeypatch.setenv("AEROLLM_MODEL", model)
     monkeypatch.setenv("ARAIL_MODELS_DIR", str(models_dir))
     monkeypatch.setenv("ARAIL_FAKE_DEEP_MODE", mode)
     monkeypatch.setenv("ARAIL_FAKE_DEEP_COUNT_FILE", str(count_file))
@@ -132,7 +137,7 @@ def install(tmp_path: Path, monkeypatch, mode: str = "pass") -> FakeDeep:
     monkeypatch.delenv("ARAIL_DEEP_PROBE_CHILD", raising=False)
 
     fd = FakeDeep(root=root, pkg_dir=pkg_dir, package=package, native_path=native,
-                  count_file=count_file, models_dir=models_dir, _mp=monkeypatch)
+                  count_file=count_file, models_dir=models_dir, model_name=model, _mp=monkeypatch)
     _reset_caches(monkeypatch)
     return fd
 
@@ -168,11 +173,11 @@ def fake_deep(tmp_path, monkeypatch):
     """Factory fixture: ``fd = fake_deep("fail2")``."""
     made: list[FakeDeep] = []
 
-    def _make(mode: str = "pass") -> FakeDeep:
+    def _make(mode: str = "pass", model: str = MODEL_NAME) -> FakeDeep:
         if made:                      # one install per test; a second call switches the mode
             made[0].set_mode(mode)
             return made[0]
-        fd = install(tmp_path, monkeypatch, mode)
+        fd = install(tmp_path, monkeypatch, mode, model)
         made.append(fd)
         return fd
 
