@@ -15,7 +15,7 @@ Modes:
   hang2         call 2 never returns
   loadfail      Runtime.start() raises
   slow:<s>      every call sleeps <s> seconds, then answers
-  stdout-noise  writes to fd 1 at start and during calls, like native code
+  stdout-noise  writes to fd 1 at import, at start and during calls, like native code
 
 A real SIGABRT makes macOS write a crash report into the user's
 DiagnosticReports folder, so the default crash signal is SIGKILL. Set
@@ -47,6 +47,10 @@ BUG = (
 
 def _mode():
     return os.environ.get("ARAIL_FAKE_DEEP_MODE", "pass")
+
+
+if _mode() == "stdout-noise":
+    os.write(1, b"native import banner on stdout\n")
 
 
 def _log(event):

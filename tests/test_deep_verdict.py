@@ -328,6 +328,7 @@ def test_u8_unwritable_store_is_failing_in_process_with_store_error(fake_deep, t
     dv.note_call(False, error="boom")
     v = dv.current()
     assert v.state == "failing" and v.store_error
+    assert v.source == "call", "a state dir that cannot exist is a missing file, not an unreadable one"
     ok, err = dv.record_probe(probe_result(b, "pass", passed=5, started_ts=dv._now()))
     assert ok is False and err
 

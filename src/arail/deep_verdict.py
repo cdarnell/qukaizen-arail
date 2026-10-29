@@ -433,7 +433,7 @@ def _read_store(*, use_cache: bool = True) -> tuple[Optional[dict], Optional[str
     path = _store_file()
     try:
         lst = os.lstat(path)
-    except FileNotFoundError:
+    except (FileNotFoundError, NotADirectoryError):   # no file, or a parent that is not a directory
         _P.read_cache = None
         return None, None
     except OSError as e:
@@ -933,3 +933,293 @@ def health_detail(v: Verdict) -> str:
         since = f" — since {_utc_minute(f.get('since'))}" if f.get("since") else ""
     return (f"{HEALTH_PREFIX}{sha}: {what}{since}. "
             "Check re-reads this; only ./arailctl deep probe can clear it.")
+
+
+# ---------------------------------------------------------------------------
+# Provenance and status text (C7). Used by ``python -m arail.deep_verdict`` and
+# by ``scripts/build-aerollm.sh status``. Everything here is read only.
+# ---------------------------------------------------------------------------
+def teach_line(key: str, value: str, table: Optional[dict] = None) -> str:
+    """One line that carries all four parts for one number: meaning, bar and why,
+    what out of range means, where the failure lives."""
+    t = (table or TEACHING)[key]
+    return (f"{value}: {t['meaning']}. Bar: {t['threshold']}. "
+            f"Out of range: {t['out_of_range']}. Fault lives in: {t['failure_lives_in']}.")
+
+
+def shadowed(native_path: Optional[str]) -> list[dict]:
+    """Other native files for the frozen import that sit on ``sys.path`` and lose to the loaded one.
+
+    ``[{"path", "sha256", "mtime"}]``. A top-level extension next to a package of
+    the same name is the live case: the package wins and the extension is never loaded.
+    """
+    out: list[dict] = []
+    try:
+        loaded = os.path.realpath(native_path) if native_path else None
+        seen: set[str] = set()
+        for entry in list(sys.path):
+            d = entry or os.getcwd()
+            try:
+                names = sorted(os.listdir(d))
+            except OSError:
+                continue
+            for n in names:
+                if n.split(".", 1)[0] not in NATIVE_MODULE_NAMES:
+                    continue
+                p = os.path.join(d, n)
+                cands: list[str] = []
+                if n.endswith(_EXT_SUFFIXES) and os.path.isfile(p):
+                    cands.append(p)
+                elif n in NATIVE_MODULE_NAMES and os.path.isdir(p):
+                    try:
+                        cands += [os.path.join(p, m) for m in sorted(os.listdir(p)) if m.endswith(_EXT_SUFFIXES)]
+                    except OSError:
+                        pass
+                for c in cands:
+                    rp = os.path.realpath(c)
+                    if rp == loaded or rp in seen:
+                        continue
+                    seen.add(rp)
+                    out.append({"path": c, "sha256": _sha256_file(c), "mtime": _iso(os.stat(c).st_mtime)})
+    except Exception:  # noqa: BLE001
+        pass
+    return out
+
+
+def _read_json(path: Path) -> Optional[dict]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+def _record_hash_hex(b64: str) -> str:
+    import base64
+    return base64.urlsafe_b64decode(b64 + "=" * (-len(b64) % 4)).hex()
+
+
+def _pip_record(native_path: str, site_dir: Path) -> Optional[dict]:
+    """The pip dist that claims the native file, if any: name, version, editable url,
+    RECORD hash (hex) of that file, or None when no dist is installed."""
+    try:
+        from importlib import metadata
+        dist = None
+        for name in ("aerollm-api", "aerollm_api"):
+            found = list(metadata.Distribution.discover(name=name, path=[str(site_dir)]))
+            if found:
+                dist = found[0]
+                break
+        if dist is None:
+            return None
+        info: dict = {"name": "aerollm-api", "version": dist.version, "editable_url": None, "record_sha256": None}
+        raw = dist.read_text("direct_url.json")
+        if raw:
+            try:
+                du = json.loads(raw)
+                if (du.get("dir_info") or {}).get("editable"):
+                    info["editable_url"] = du.get("url")
+            except ValueError:
+                pass
+        rel = os.path.relpath(os.path.realpath(native_path), os.path.realpath(str(site_dir)))
+        for f in dist.files or []:
+            if str(f) == rel and f.hash is not None and f.hash.mode == "sha256":
+                info["record_sha256"] = _record_hash_hex(f.hash.value)
+                break
+        return info
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def channel(b: Binary, site_dir: Path) -> str:
+    """How this binary got here, only when it can be proven; else ``unknown — <reason>``.
+
+    bundled: the bundle marker's sha256 equals the loaded file's.
+    source build: ``aerollm_api.build.json``'s artifact_sha256 equals it.
+    pip: the dist's RECORD hash for the file equals it.
+    """
+    reasons: list[str] = []
+    bundle = _read_json(site_dir / "aerollm_api.bundle.json")
+    if bundle is not None:
+        if bundle.get("sha256") == b.sha256:
+            sha7 = str(bundle.get("aerollm_commit") or "?")[:7]
+            return (f"bundled — QueueLLM {bundle.get('aerollm_version', 'unknown')} "
+                    f"({sha7}, built {bundle.get('built_at', 'unknown')})")
+        reasons.append(f"a bundle marker is present but names a different binary "
+                       f"(marker {str(bundle.get('sha256'))[:12]}…, file {b.sha256[:12]}…)")
+    build = _read_json(site_dir / "aerollm_api.build.json")
+    if build is not None:
+        if build.get("artifact_sha256") == b.sha256:
+            dirty = ", dirty tree" if build.get("queuellm_dirty") else ""
+            return (f"source build — QueueLLM commit {str(build.get('queuellm_commit') or '?')[:7]}{dirty}, "
+                    f"built {build.get('built_at', 'unknown')}")
+        reasons.append(f"a source-build marker is present but names a different binary "
+                       f"(marker {str(build.get('artifact_sha256'))[:12]}…, file {b.sha256[:12]}…)")
+    pip = _pip_record(b.native_path, site_dir)
+    if pip is not None:
+        where = f"editable, {pip['editable_url']}" if pip["editable_url"] else "regular install"
+        if pip["record_sha256"] == b.sha256:
+            return f"pip ({pip['name']} {pip['version']}, {where})"
+        if pip["record_sha256"] is None:
+            reasons.append(f"pip package {pip['name']} {pip['version']} ({where}) does not list this file")
+        else:
+            reasons.append(f"pip package {pip['name']} {pip['version']} ({where}), but its binary was "
+                           f"replaced outside pip (RECORD {pip['record_sha256'][:12]}…, file {b.sha256[:12]}…)")
+    if not reasons:
+        reasons.append("no install record")
+    return "unknown — " + "; ".join(reasons)
+
+
+def _generation_lines(v: Verdict) -> list[str]:
+    """The ``generation:`` text. Every number in it is followed by a line that teaches it."""
+    f = v.failure or {}
+    lp = v.last_probe or {}
+    lines: list[str] = []
+    if v.state == "untested":
+        lines.append("never tested on this binary — run ./arailctl deep probe (an import is not a generation test)")
+    elif v.state == "passing":
+        med = lp.get("median_ok_s")
+        med_txt = f", median {float(med):.1f} s" if isinstance(med, (int, float)) else ""
+        lines.append(f"passing — {lp.get('passed')}/{lp.get('total')} at the last probe "
+                     f"({_utc_minute(lp.get('at'))}){med_txt}")
+        lines.append(teach_line("passed", f"{lp.get('passed')}/{lp.get('total')}"))
+        if med_txt:
+            lines.append(teach_line("median_ok_s", f"{float(med):.1f} s"))
+    else:
+        if v.source == "probe" and lp.get("outcome") == "fail":
+            fe = lp.get("first_error") or {}
+            at_call = f"; first error at call {fe['call']}" if fe.get("call") else ""
+            lines.append(f"FAILING — {lp.get('passed')}/{lp.get('total')} at the last probe "
+                         f"({_utc_minute(lp.get('at'))}){at_call}: {_clip(fe.get('error') or f.get('error'), 160)}")
+            lines.append(teach_line("passed", f"{lp.get('passed')}/{lp.get('total')}"))
+        elif v.source == "store_unreadable":
+            lines.append(f"FAILING — the verdict file is unreadable ({v.store_error}); deep stays marked failing "
+                         "until ./arailctl deep probe writes a fresh one")
+        elif v.source == "load":
+            lines.append(f"FAILING — the deep model failed to load in lab '{f.get('lab')}' ({f.get('consumer')}) "
+                         f"at {_utc_minute(f.get('since'))}: {_clip(f.get('last_error') or f.get('error'), 160)}")
+        else:
+            lines.append(f"FAILING — a deep call failed in lab '{f.get('lab')}' ({f.get('consumer')}) "
+                         f"at {_utc_minute(f.get('since'))}: {_clip(f.get('last_error') or f.get('error'), 160)}")
+        if f.get("count") is not None:
+            lines.append(teach_line("failures", str(f.get("count"))))
+        lines.append("Only a ./arailctl deep probe that passes 5/5 on this binary clears this.")
+    if v.store_error and v.source != "store_unreadable":
+        lines.append(f"NOT SAVED ({v.store_error}): other labs and the next process will not see this result")
+    if v.binary_changed_on_disk:
+        lines.append("The binary on disk changed after this process loaded it: restart the lab to load the new build.")
+    return lines
+
+
+def status_lines(*, site_dir: Optional[Path] = None, quiet_import: bool = True) -> list[str]:
+    """The ``import / binary / sha256 / shadowed / channel / generation`` block of ``deep status``.
+
+    Four-space indent and a 14-column label, to sit under the build script's own lines.
+    Imports the frozen module (a status check always did), with stdout parked on stderr.
+    """
+    def row(label: str, text: str) -> str:
+        return f"    {label + ':':<14}{text}"
+
+    cont = " " * 18
+    out: list[str] = []
+    py = sys.executable or "python"
+    if FROZEN_MODULE not in sys.modules and _find_spec_safe() is None:
+        out.append(row("import", f"{FROZEN_MODULE} is not importable by {py} — run: ./arailctl deep install "
+                                 "(or: deep rebuild / deep update)"))
+        out.append(row("channel", "none"))
+        out.append(row("generation", "not applicable — nothing is installed"))
+        return out
+    with _stdout_to_stderr(quiet_import):
+        b = identity(import_if_needed=True)
+    if b is None:
+        out.append(row("import", f"{FROZEN_MODULE} -> {_P.ident_reason or 'could not be identified'}"))
+        out.append(row("channel", "unknown — the loaded binary could not be identified"))
+        out.append(row("generation", "unknown — the loaded binary could not be identified; "
+                                     "run ./arailctl deep probe"))
+        return out
+    kind = ("package" if b.resolves_to.endswith("__init__.py")
+            else "extension" if b.resolves_to == b.native_path else "module")
+    out.append(row("import", f"{FROZEN_MODULE} -> {b.resolves_to} ({kind})"))
+    out.append(row("binary", b.native_path))
+    out.append(row("sha256", f"{b.sha256[:12]}… · {b.bytes} bytes · modified {b.mtime[:10]} · version {b.version}"))
+    sh = shadowed(b.native_path)
+    if not sh:
+        out.append(row("shadowed", "none"))
+    for i, s in enumerate(sh):
+        out.append(row("shadowed" if i == 0 else "",
+                       f"{s['path']} · sha256 {s['sha256'][:12]}… · modified {s['mtime'][:10]} · "
+                       "on the path, never loaded"))
+    site = site_dir if site_dir is not None else Path(_platlib())
+    out.append(row("channel", channel(b, site)))
+    gen = _generation_lines(current(import_if_needed=False))
+    out.append(row("generation", gen[0]))
+    out.extend(cont + line for line in gen[1:])
+    return out
+
+
+def _platlib() -> str:
+    import sysconfig
+    return sysconfig.get_path("platlib")
+
+
+class _stdout_to_stderr:
+    """Park fd 1 on fd 2 so native code that prints on import cannot corrupt stdout."""
+
+    def __init__(self, active: bool = True) -> None:
+        self.active = active
+        self.saved: Optional[int] = None
+
+    def __enter__(self) -> "_stdout_to_stderr":
+        if self.active:
+            try:
+                sys.stdout.flush()
+                self.saved = os.dup(1)
+                os.dup2(2, 1)
+            except OSError:
+                self.saved = None
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        if self.saved is not None:
+            try:
+                sys.stdout.flush()
+                os.dup2(self.saved, 1)
+            finally:
+                os.close(self.saved)
+
+
+_USAGE = """usage: python -m arail.deep_verdict status
+       python -m arail.deep_verdict identity --json
+
+status    the import / binary / sha256 / shadowed / channel / generation lines of `deep status`
+identity  the binary this interpreter loads for `import aerollm_api`, as JSON (exit 1 if none)
+"""
+
+
+def main(argv: Optional[list[str]] = None) -> int:
+    args = list(sys.argv[1:] if argv is None else argv)
+    if not args:
+        sys.stderr.write(_USAGE)
+        return 2
+    if args[0] in ("-h", "--help"):
+        sys.stdout.write(_USAGE)
+        return 0
+    if args[0] == "status" and len(args) == 1:
+        for line in status_lines():
+            print(line)
+        return 0
+    if args[0] == "identity" and args[1:] == ["--json"]:
+        with _stdout_to_stderr():
+            b = identity(import_if_needed=True)
+        if b is None:
+            print(json.dumps({"error": _P.ident_reason or "the loaded binary could not be identified"}))
+            return 1
+        print(json.dumps({"module": b.module, "resolves_to": b.resolves_to, "native_path": b.native_path,
+                          "sha256": b.sha256, "bytes": b.bytes, "mtime": b.mtime, "version": b.version}))
+        return 0
+    sys.stderr.write(_USAGE)
+    return 2
+
+
+if __name__ == "__main__":  # pragma: no cover - exercised through subprocess tests
+    raise SystemExit(main())
