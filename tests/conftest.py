@@ -566,3 +566,47 @@ def _stub_embedding_provider(request, monkeypatch):
     monkeypatch.setattr(embed_mod, "embed_query", _fake_embed_query)
     monkeypatch.setattr(embed_mod, "embed", _fake_embed)
     yield
+
+
+# ---------------------------------------------------------------------------
+# Deep verdict isolation (sprint 2026-10-29-arail-deep-honest, F23).
+#
+# ``arail.deep_verdict`` keeps one checkout-wide file, <checkout>/lab/data/
+# deep/verdict.json, that every surface reads. A test must never write the
+# operator's real one, and must never read it either (a real "failing" would
+# turn unrelated tests red). Each test gets its own store dir and clean caches.
+# A session-level guard below fails the run if the real file changed.
+# ---------------------------------------------------------------------------
+_CHECKOUT_VERDICT = os.path.join(_REPO_ROOT, "lab", "data", "deep", "verdict.json")
+
+
+def _verdict_signature():
+    try:
+        st = os.stat(_CHECKOUT_VERDICT)
+    except OSError:
+        return None
+    return (st.st_mtime_ns, st.st_size)
+
+
+_VERDICT_SIGNATURE_AT_START = _verdict_signature()
+
+
+@pytest.fixture(autouse=True)
+def _isolated_deep_verdict(monkeypatch, tmp_path):
+    """Per-test deep verdict store and clean caches (see the block comment above)."""
+    from arail import deep_verdict
+
+    monkeypatch.setenv("ARAIL_DEEP_STATE_DIR", str(tmp_path / "deep"))
+    monkeypatch.delenv("ARAIL_DEEP_PROBE_CHILD", raising=False)
+    deep_verdict._reset_for_tests()
+    yield
+    deep_verdict._reset_for_tests()
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """F23: fail the session if any test changed the checkout's real verdict file."""
+    if _verdict_signature() != _VERDICT_SIGNATURE_AT_START:
+        sys.stderr.write(
+            f"\nFAIL: the test session changed {_CHECKOUT_VERDICT}. "
+            "A test wrote the real deep verdict; it must use ARAIL_DEEP_STATE_DIR.\n")
+        session.exitstatus = 1

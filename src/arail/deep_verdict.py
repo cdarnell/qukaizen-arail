@@ -1,0 +1,935 @@
+"""The deep verdict: does QueueLLM generate on the binary this process loaded?
+
+This module owns one question and nothing else. It never generates. It never
+constructs ``AeroLLMBackend``. It never raises to a caller. It uses no network.
+It imports only the standard library at module level, so ``python -m
+arail.deep_verdict`` runs under any interpreter the build script is given.
+
+Why it exists (sprints/2026-10-29-arail-deep-honest): every QueueLLM build on
+this Mac answers the first deep call in a process and fails the second. ARAIL's
+status surfaces tested import, policy and residency, never generation, and the
+one that recorded a real failure was erased by the next re-probe. So a failure
+is now stored once, per binary, in one checkout-wide file, and only a passing
+``./arailctl deep probe`` of the same binary clears it.
+
+State is keyed by the sha256 of the *native* file the process loaded:
+
+* ``verdict.json`` (schema ``arail.deep-verdict/v1``) lives in ``state_dir()``.
+* A failure (a probe, a deep call, a load) sets "failing" for that binary.
+* A later successful call clears nothing. Only ``record_probe`` with a 5/5
+  pass clears a failure, and only one last seen before that probe started.
+* A new binary has its own key. It starts "never tested", not "passing".
+
+Writes take ``verdict.lock`` (flock, retried for up to 2 s), then write a
+temp file and ``os.replace`` it. Reads are cached by the file's stat and never
+take the lock. A corrupt or wrong-schema file fails closed: "failing", with
+the path and the error in the detail. The next writer moves it aside.
+
+The names below that mention the old product name are the frozen import
+surface, kept in one place on purpose (the pattern of
+``arail.nucleus.runtime_names``).
+"""
+from __future__ import annotations
+
+import copy
+import errno
+import hashlib
+import importlib
+import importlib.machinery
+import importlib.util
+import json
+import os
+import random
+import stat
+import sys
+import threading
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Callable, Optional
+
+# frozen surface: never rename. `aerollm_api` is what ARAIL imports.
+FROZEN_MODULE = "aerollm_api"
+NATIVE_MODULE_NAMES = ("aerollm_api", "queuellm_api")   # names a native module may load under
+
+SCHEMA = "arail.deep-verdict/v1"
+MAX_BINARIES = 32
+LOCK_TIMEOUT_S = 2.0
+HEALTH_PREFIX = "generation failing on this build"
+UNIDENTIFIED = "unidentified"
+
+_EXT_SUFFIXES = tuple(importlib.machinery.EXTENSION_SUFFIXES)
+
+# ---------------------------------------------------------------------------
+# Teaching. Every number this module prints carries its meaning, its bar and
+# why, what out of range means, and where the failure lives (DAY1.json is the
+# model). The probe, the Curator and the win script keep their own tables.
+# ---------------------------------------------------------------------------
+TEACHING: dict[str, dict[str, str]] = {
+    "passed": {
+        "meaning": "how many of the 5 sequential deep calls answered with non-empty text at the last probe, "
+                   "in one fresh process",
+        "threshold": "5 of 5, because every consumer makes more than one deep call per process and call 2 "
+                     "is where every known broken build fails",
+        "out_of_range": "1 of 5 means the runtime answers once per process (the call-2 bug); 0 of 5 means "
+                        "it cannot answer at all; 2 to 4 is intermittent and counts as failing",
+        "failure_lives_in": "the QueueLLM binary on the binary line, not ARAIL settings; read the first error",
+    },
+    "median_ok_s": {
+        "meaning": "the middle wall time of the probe calls that answered: prefill plus up to 384 new tokens",
+        "threshold": "none for the probe; an interactive deep answer should stay under 120 s",
+        "out_of_range": "over 120 s means memory pressure or a slow build; no value means nothing answered",
+        "failure_lives_in": "runtime decode speed, or memory on this Mac",
+    },
+    "failures": {
+        "meaning": "failure events recorded for this binary since its last pass: a failed probe is one, "
+                   "each failed deep call in any lab is one",
+        "threshold": "0, because any failure keeps deep marked failing until a probe passes 5 of 5",
+        "out_of_range": "1 or more means deep is failing; a high count means consumers kept calling it "
+                        "before the failure was noticed",
+        "failure_lives_in": "the consumer named in the record (agent, system label or probe) found it; "
+                            "the fault is in the QueueLLM binary",
+    },
+}
+
+
+# ---------------------------------------------------------------------------
+# Value types (C1)
+# ---------------------------------------------------------------------------
+@dataclass(frozen=True)
+class Binary:
+    module: str          # "aerollm_api", the frozen name ARAIL imports
+    resolves_to: str     # spec.origin: a package __init__.py or the extension itself
+    native_path: str     # the one native extension the import loads
+    sha256: str          # 64 hex
+    bytes: int
+    mtime: str           # ISO UTC
+    version: str         # the module's __version__, or "unknown"
+    pinned: bool         # True once this process has loaded it
+
+
+@dataclass(frozen=True)
+class Verdict:
+    state: str                     # "failing" | "passing" | "untested"
+    binary: Optional[Binary]
+    detail: str                    # one sentence, user-facing
+    since: Optional[str]           # ISO UTC
+    source: Optional[str]          # "probe" | "call" | "load" | "process" | "store_unreadable"
+    failure: Optional[dict]        # the C2 failure object
+    last_probe: Optional[dict]     # the C2 last_probe object
+    binary_changed_on_disk: bool
+    store_error: Optional[str]
+
+
+@dataclass
+class _Pin:
+    binary: Binary
+    sig: tuple                      # (size, mtime_ns, inode) when it was loaded
+
+
+class _Proc:
+    """Everything this process remembers. Reset by ``_reset_for_tests``."""
+
+    def __init__(self) -> None:
+        self.pin: Optional[_Pin] = None
+        self.ident_reason: str = ""
+        self.mem: dict[str, dict] = {}        # key -> failure object kept in this process only
+        self.mem_version = 0
+        self.write_error: Optional[str] = None
+        self.ok = 0
+        self.failed = 0
+        self.read_cache: Optional[tuple] = None   # (path, sig, doc, err)
+        self.hash_cache: dict[tuple, str] = {}
+        self.verdict_cache: Optional[tuple] = None
+
+
+_lock = threading.RLock()
+_P = _Proc()
+
+
+def _reset_for_tests() -> None:
+    """Test-only: forget the pinned identity, the caches and in-memory failures."""
+    global _P
+    with _lock:
+        _P = _Proc()
+
+
+# ---------------------------------------------------------------------------
+# Small helpers
+# ---------------------------------------------------------------------------
+def _now() -> float:
+    return time.time()
+
+
+def _iso(ts: float) -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ts))
+
+
+def _utc_minute(iso: Optional[str]) -> str:
+    """'2026-10-29T13:35:02Z' -> '2026-10-29 13:35 UTC'."""
+    if not iso or len(iso) < 16:
+        return "an unknown time"
+    return f"{iso[:10]} {iso[11:16]} UTC"
+
+
+def _clip(text: Any, limit: int) -> str:
+    s = " ".join(str(text if text is not None else "").split())
+    if len(s) <= limit:
+        return s
+    return s[: max(limit - 1, 0)] + "…"
+
+
+def _err_text(error: Any) -> str:
+    if error is None:
+        return "unknown error"
+    if isinstance(error, BaseException):
+        msg = str(error).strip()
+        return f"{type(error).__name__}: {msg}" if msg else type(error).__name__
+    return str(error)
+
+
+def _file_sig(path: str) -> tuple:
+    st = os.stat(path)
+    return (st.st_size, st.st_mtime_ns, st.st_ino)
+
+
+def _sha256_file(path: str) -> str:
+    st = os.stat(path)
+    key = (path, st.st_size, st.st_mtime_ns, st.st_ino)
+    cached = _P.hash_cache.get(key)
+    if cached:
+        return cached
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    digest = h.hexdigest()
+    _P.hash_cache[key] = digest
+    return digest
+
+
+def _lab() -> str:
+    return os.environ.get("ARAIL_INSTANCE", "").strip() or "root"
+
+
+def _is_probe_child() -> bool:
+    return os.environ.get("ARAIL_DEEP_PROBE_CHILD", "") == "1"
+
+
+def _default_consumer() -> str:
+    """Who is calling: deep-probe | agent:<id> | system:<label> | unattributed."""
+    if _is_probe_child():
+        return "deep-probe"
+    try:
+        from arail import agent_context
+        src = agent_context.billing_source(agent_context.current())
+    except Exception:  # noqa: BLE001
+        return "unattributed"
+    if src.startswith("sys:"):
+        return "system:" + src[4:]
+    return src
+
+
+def _emit(level: str, message: str) -> None:
+    """One activity line. Never raises, never recurses into this module."""
+    try:
+        from arail.activity import activity_log
+        activity_log.emit("deep", message, level)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Identity (C1)
+# ---------------------------------------------------------------------------
+def _scan_loaded() -> tuple[list[str], str]:
+    """Native modules in ``sys.modules`` under the known names. ``([paths], reason)``."""
+    seen: dict[str, str] = {}
+    for name, mod in list(sys.modules.items()):
+        if name.split(".", 1)[0] not in NATIVE_MODULE_NAMES:
+            continue
+        f = getattr(mod, "__file__", None)
+        if isinstance(f, str) and f.endswith(_EXT_SUFFIXES):
+            seen.setdefault(os.path.realpath(f), f)
+    paths = sorted(seen.values())
+    if len(paths) == 1:
+        return paths, ""
+    if not paths:
+        return [], "no native QueueLLM module is loaded"
+    return paths, f"{len(paths)} native modules are loaded ({', '.join(paths)})"
+
+
+def _module_version(native_path: str) -> str:
+    top = sys.modules.get(FROZEN_MODULE)
+    v = getattr(top, "__version__", None) if top is not None else None
+    if not v:
+        for name, mod in list(sys.modules.items()):
+            if name.split(".", 1)[0] in NATIVE_MODULE_NAMES and getattr(mod, "__file__", None) == native_path:
+                v = getattr(mod, "__version__", None)
+                if v:
+                    break
+    return str(v) if v else "unknown"
+
+
+def _make_binary(native_path: str, resolves_to: Optional[str], version: str, pinned: bool) -> Binary:
+    st = os.stat(native_path)
+    return Binary(
+        module=FROZEN_MODULE,
+        resolves_to=resolves_to or native_path,
+        native_path=native_path,
+        sha256=_sha256_file(native_path),
+        bytes=st.st_size,
+        mtime=_iso(st.st_mtime),
+        version=version,
+        pinned=pinned,
+    )
+
+
+def _find_spec_safe(name: str = FROZEN_MODULE):
+    try:
+        return importlib.util.find_spec(name)
+    except Exception:  # noqa: BLE001 - ValueError, ImportError, a broken finder
+        return None
+
+
+def static_native(spec: Any = None) -> tuple[Optional[str], str]:
+    """The native file ``find_spec`` says the frozen import resolves to, without importing.
+
+    ``(path, reason)``. An extension origin is the file. In a package dir, the
+    single extension file there is the file. Anything else gives ``(None, why)``.
+    """
+    spec = spec if spec is not None else _find_spec_safe()
+    if spec is None or not getattr(spec, "origin", None):
+        return None, f"{FROZEN_MODULE} is not importable by this interpreter"
+    origin = spec.origin
+    if origin.endswith(_EXT_SUFFIXES):
+        return origin, ""
+    locs = list(getattr(spec, "submodule_search_locations", None) or [])
+    if not locs:
+        return None, f"{origin} is not a package or an extension"
+    try:
+        exts = sorted(n for n in os.listdir(locs[0]) if n.endswith(_EXT_SUFFIXES))
+    except OSError as e:
+        return None, f"{locs[0]}: {e.strerror or e}"
+    if len(exts) == 1:
+        return os.path.join(locs[0], exts[0]), ""
+    if not exts:
+        return None, f"no native extension in {locs[0]}"
+    return None, f"{len(exts)} native extensions in {locs[0]}"
+
+
+def _static_identity() -> Optional[Binary]:
+    spec = _find_spec_safe()
+    native, reason = static_native(spec)
+    if native is None:
+        _P.ident_reason = reason
+        return None
+    _P.ident_reason = ""
+    return _make_binary(native, spec.origin, "unknown", pinned=False)
+
+
+def identity(*, import_if_needed: bool = True) -> Optional[Binary]:
+    """The binary this process loaded, or None.
+
+    Loaded: the one native module in ``sys.modules`` under a known name. The
+    first loaded identity is pinned for the process. With
+    ``import_if_needed=False`` and nothing loaded, the answer comes from
+    ``find_spec`` alone (a static answer, never pinned, nothing imported).
+    """
+    try:
+        with _lock:
+            return _identity(import_if_needed)
+    except Exception as e:  # noqa: BLE001
+        _P.ident_reason = f"identity failed: {type(e).__name__}: {e}"
+        return None
+
+
+def _identity(import_if_needed: bool) -> Optional[Binary]:
+    if _P.pin is not None:
+        return _P.pin.binary
+    natives, reason = _scan_loaded()
+    if not natives and import_if_needed and _find_spec_safe() is not None:
+        try:
+            importlib.import_module(FROZEN_MODULE)
+        except Exception:  # noqa: BLE001 - a failed import is "not identified", not an error here
+            pass
+        natives, reason = _scan_loaded()
+    if len(natives) == 1:
+        native = natives[0]
+        top = sys.modules.get(FROZEN_MODULE)
+        resolves = getattr(top, "__file__", None) if top is not None else None
+        b = _make_binary(native, resolves if isinstance(resolves, str) else None,
+                         _module_version(native), pinned=True)
+        _P.pin = _Pin(b, _file_sig(native))
+        _P.ident_reason = ""
+        return b
+    _P.ident_reason = reason
+    if natives or import_if_needed:
+        return None
+    return _static_identity()
+
+
+def _changed_on_disk() -> bool:
+    pin = _P.pin
+    if pin is None:
+        return False
+    try:
+        return _file_sig(pin.binary.native_path) != pin.sig
+    except OSError:
+        return True
+
+
+# ---------------------------------------------------------------------------
+# Where the store lives, and how it is read and written (C1, C2)
+# ---------------------------------------------------------------------------
+def _checkout_root() -> Optional[Path]:
+    """The checkout this module runs from, or None (a pip install, a venv)."""
+    try:
+        root = Path(__file__).resolve().parents[2]
+    except IndexError:
+        return None
+    if "site-packages" in root.parts or "dist-packages" in root.parts:
+        return None
+    return root if (root / "arailctl").is_file() else None
+
+
+def state_dir() -> Path:
+    """``ARAIL_DEEP_STATE_DIR``, else ``<checkout>/lab/data/deep``, else ``DATA_DIR/deep``."""
+    env = os.environ.get("ARAIL_DEEP_STATE_DIR", "").strip()
+    if env:
+        return Path(env).expanduser()
+    root = _checkout_root()
+    if root is not None:
+        return root / "lab" / "data" / "deep"
+    from arail import config
+    return Path(config.DATA_DIR).expanduser().absolute() / "deep"
+
+
+def _store_file() -> Path:
+    return state_dir() / "verdict.json"
+
+
+def _empty_doc() -> dict:
+    return {"schema": SCHEMA, "updated_at": _iso(_now()), "binaries": {}}
+
+
+def _validate_doc(doc: Any) -> Optional[str]:
+    if not isinstance(doc, dict):
+        return "not a JSON object"
+    if doc.get("schema") != SCHEMA:
+        return f"unknown schema {doc.get('schema')!r} (expected {SCHEMA})"
+    bins = doc.get("binaries")
+    if not isinstance(bins, dict) or any(not isinstance(v, dict) for v in bins.values()):
+        return "'binaries' is not an object of objects"
+    return None
+
+
+def _read_store(*, use_cache: bool = True) -> tuple[Optional[dict], Optional[str]]:
+    """``(doc, error)``. Missing is ``(None, None)``. Cached by stat; never locks.
+
+    ``use_cache=False`` always reads the file. A writer holding the lock uses
+    it, so a stale cache can never cost an update.
+    """
+    path = _store_file()
+    try:
+        lst = os.lstat(path)
+    except FileNotFoundError:
+        _P.read_cache = None
+        return None, None
+    except OSError as e:
+        _P.read_cache = None
+        return None, f"{path}: {e.strerror or e}"
+    if stat.S_ISLNK(lst.st_mode):
+        _P.read_cache = None
+        return None, f"{path}: is a symbolic link; the verdict file is never followed through one"
+    sig = (lst.st_mtime_ns, lst.st_size, lst.st_ino)
+    cached = _P.read_cache
+    if use_cache and cached is not None and cached[0] == str(path) and cached[1] == sig:
+        return cached[2], cached[3]
+    doc: Optional[dict] = None
+    err: Optional[str] = None
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        with os.fdopen(fd, "rb") as fh:
+            raw = fh.read()
+        parsed = json.loads(raw.decode("utf-8"))
+        bad = _validate_doc(parsed)
+        if bad:
+            err = f"{path}: {bad}"
+        else:
+            doc = parsed
+    except (OSError, ValueError, UnicodeDecodeError) as e:
+        err = f"{path}: {type(e).__name__}: {e}"
+    _P.read_cache = (str(path), sig, doc, err)
+    return doc, err
+
+
+def _flock_acquire(fd: int) -> Optional[str]:
+    import fcntl  # POSIX only; ARAIL runs on macOS, Linux and WSL
+    deadline = time.monotonic() + LOCK_TIMEOUT_S
+    while True:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return None
+        except OSError as e:
+            if e.errno not in (errno.EAGAIN, errno.EACCES, errno.EWOULDBLOCK):
+                return f"flock: {e.strerror or e}"
+        if time.monotonic() >= deadline:
+            return f"the verdict lock was busy for more than {LOCK_TIMEOUT_S:.0f} s"
+        time.sleep(0.002 + random.random() * 0.006)
+
+
+def _write_atomic(path: Path, doc: dict) -> None:
+    tmp = path.with_name(f"{path.name}.tmp-{os.getpid()}-{threading.get_ident()}")
+    data = (json.dumps(doc, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    try:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    except FileExistsError:           # a stale temp from a crashed writer with the same pid
+        os.unlink(tmp)
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _move_aside(path: Path) -> None:
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(_now()))
+    dest = path.with_name(f"{path.name}.corrupt-{stamp}")
+    n = 1
+    while dest.exists() or dest.is_symlink():
+        n += 1
+        dest = path.with_name(f"{path.name}.corrupt-{stamp}-{n}")
+    os.rename(path, dest)
+
+
+def _locked_update(mutate: Callable[[dict], None]) -> Optional[str]:
+    """Read, mutate and atomically replace ``verdict.json`` under the lock.
+
+    Returns None on success, else a one-line error. The caller keeps the
+    failure in memory when this returns an error.
+    """
+    d = state_dir()
+    try:
+        os.makedirs(d, mode=0o700, exist_ok=True)
+        try:
+            os.chmod(d, 0o700)
+        except OSError:
+            pass
+        lock_fd = os.open(d / "verdict.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    except OSError as e:
+        return f"{d}: {e.strerror or e}"
+    try:
+        try:
+            os.fchmod(lock_fd, 0o600)
+        except OSError:
+            pass
+        err = _flock_acquire(lock_fd)
+        if err:
+            return err
+        try:
+            path = d / "verdict.json"
+            doc, read_err = _read_store(use_cache=False)
+            if read_err is not None:
+                try:
+                    _move_aside(path)
+                except OSError as e:
+                    return f"{path}: could not move the unreadable file aside ({e.strerror or e})"
+                doc = None
+            if doc is None:
+                doc = _empty_doc()
+            mutate(doc)
+            doc["updated_at"] = _iso(_now())
+            _write_atomic(path, doc)
+            try:
+                lst = os.lstat(path)
+                _P.read_cache = (str(path), (lst.st_mtime_ns, lst.st_size, lst.st_ino), doc, None)
+            except OSError:
+                _P.read_cache = None
+            return None
+        except OSError as e:
+            return f"{d}: {e.strerror or e}"
+        finally:
+            try:
+                import fcntl
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            except Exception:  # noqa: BLE001
+                pass
+    finally:
+        os.close(lock_fd)
+
+
+def _entry_for(doc: dict, info: dict) -> dict:
+    """The record for one binary, created if absent, identity fields refreshed."""
+    sha = info["sha256"]
+    e = doc["binaries"].get(sha)
+    if not isinstance(e, dict):
+        e = {"last_probe": None, "failure": None, "last_pass_at": None}
+        doc["binaries"][sha] = e
+    e["module"] = info.get("module") or FROZEN_MODULE
+    e["native_path"] = info.get("native_path")
+    e["bytes"] = info.get("bytes")
+    e["version"] = info.get("version") or "unknown"
+    e.setdefault("last_probe", None)
+    e.setdefault("failure", None)
+    e.setdefault("last_pass_at", None)
+    return e
+
+
+def _activity_key(entry: dict) -> str:
+    lp = entry.get("last_probe") or {}
+    f = entry.get("failure") or {}
+    return max(str(lp.get("at") or ""), str(f.get("last_at") or ""), str(entry.get("last_pass_at") or ""))
+
+
+def _evict(doc: dict, keep: str) -> None:
+    bins = doc["binaries"]
+    while len(bins) > MAX_BINARIES:
+        victims = sorted((k for k in bins if k != keep), key=lambda k: _activity_key(bins[k]))
+        if not victims:
+            return
+        del bins[victims[0]]
+
+
+def _new_failure(source: str, consumer: str, lab: str, err: str, now: float) -> dict:
+    iso = _iso(now)
+    return {"since": iso, "since_ts": now, "last_at": iso, "last_ts": now, "source": source,
+            "consumer": consumer, "lab": lab, "error": err, "last_error": err, "count": 1}
+
+
+def _bump_failure(f: dict, err: str, now: float) -> None:
+    f["last_at"] = _iso(now)
+    f["last_ts"] = now
+    f["last_error"] = err
+    f["count"] = int(f.get("count") or 0) + 1
+
+
+# ---------------------------------------------------------------------------
+# Writers (C1): note_call, note_load_failure, record_probe
+# ---------------------------------------------------------------------------
+def counters() -> dict[str, int]:
+    """In-process call counters. They explain nothing and clear nothing."""
+    return {"ok": _P.ok, "failed": _P.failed}
+
+
+def _mem_note(key: str, source: str, consumer: str, lab: str, err: str, now: float) -> bool:
+    """Record a process-local failure. True when it is a new transition."""
+    f = _P.mem.get(key)
+    _P.mem_version += 1
+    if f is None:
+        _P.mem[key] = _new_failure(source, consumer, lab, err, now)
+        return True
+    _bump_failure(f, err, now)
+    return False
+
+
+def _binary_info(b: Binary) -> dict:
+    return {"sha256": b.sha256, "module": b.module, "native_path": b.native_path,
+            "bytes": b.bytes, "version": b.version}
+
+
+def _note_failure(source: str, error: Any, consumer: Optional[str], persist: bool) -> None:
+    b = identity(import_if_needed=False)
+    key = b.sha256 if b is not None else UNIDENTIFIED
+    err = _clip(_err_text(error), 300)
+    consumer = _clip(consumer, 80) if consumer else _default_consumer()
+    lab = _lab()
+    now = _now()
+    child = _is_probe_child()
+    transition = False
+    persisted = False
+    with _lock:
+        if persist and not child and b is not None:
+            flag = {"transition": False}
+
+            def mutate(doc: dict) -> None:
+                entry = _entry_for(doc, _binary_info(b))
+                f = entry.get("failure")
+                if f is None:
+                    entry["failure"] = _new_failure(source, consumer, lab, err, now)
+                    flag["transition"] = True
+                else:
+                    _bump_failure(f, err, now)
+                _evict(doc, keep=b.sha256)
+
+            problem = _locked_update(mutate)
+            if problem is None:
+                persisted = True
+                transition = flag["transition"]
+                _P.write_error = None
+                _P.mem.pop(key, None)
+            else:
+                _P.write_error = problem
+        if not persisted:
+            is_new = _mem_note(key, source, consumer, lab, err, now)
+            # A failure already persisted for this binary is not a new transition.
+            transition = is_new and not _persisted_failure(key)
+        _P.verdict_cache = None
+    if transition and not child:
+        _emit_transition(source, persist and not (b is None), consumer, lab, err, b)
+
+
+def _persisted_failure(key: str) -> Optional[dict]:
+    doc, _err = _read_store()
+    if not doc:
+        return None
+    e = doc["binaries"].get(key)
+    return e.get("failure") if isinstance(e, dict) else None
+
+
+def _emit_transition(source: str, persisted: bool, consumer: str, lab: str, err: str,
+                     b: Optional[Binary]) -> None:
+    sha = f" (sha256 {b.sha256[:12]})" if b is not None else ""
+    err160 = _clip(err, 160)
+    if source == "load" and not persisted:
+        msg = (f"Deep model failed to load in {consumer} ({lab}): {err160}. "
+               "Deep generation is marked failing in this process only; fix the cause and restart the lab.")
+    else:
+        what = "failed to load" if source == "load" else "failed"
+        msg = (f"Deep model {what} in {consumer} ({lab}): {err160}. "
+               f"Deep generation is now marked failing for this build{sha}; agents and the Curator use "
+               "the fast model until ./arailctl deep probe passes 5 of 5.")
+    _emit("warn", msg)
+
+
+def note_call(ok: bool, *, error: object = None, consumer: Optional[str] = None) -> None:
+    """Record the outcome of one deep call. Never raises.
+
+    A success updates counters and clears nothing. A failure marks the binary
+    failing (persisted), unless this is the probe child, which keeps it in
+    memory because the supervisor is the only writer.
+    """
+    try:
+        if ok:
+            _P.ok += 1
+            return
+        _P.failed += 1
+        _note_failure("call", error, consumer, persist=True)
+    except Exception:  # noqa: BLE001 - the verdict must never break a deep call
+        pass
+
+
+def note_load_failure(error: object, *, persist: bool, consumer: Optional[str] = None) -> None:
+    """Record that the runtime would not load. ``persist=False`` keeps it in this process (a model-dir
+    fault says nothing about the binary). Never raises."""
+    try:
+        _P.failed += 1
+        _note_failure("load", error, consumer, persist=persist)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def record_probe(result: dict) -> tuple[bool, Optional[str]]:
+    """Store one probe result. Returns ``(written, error)``. Never raises.
+
+    ``result`` keys: ``binary`` {sha256, module, native_path, bytes, version};
+    ``outcome`` ("pass" | "fail"); ``passed``; ``total``; ``median_ok_s``;
+    ``first_error`` {call, kind, error} or None; ``started_ts`` (float);
+    ``started_at``; optional ``at``; ``model``; ``ring_depth``;
+    ``ring_depth_source``; ``max_tokens``; ``prompt_set_sha256``; ``python``;
+    ``lab``. A pass clears the binary's failure only if that failure was last
+    seen before ``started_ts``.
+    """
+    try:
+        if not isinstance(result, dict):
+            return False, "the probe result is not a mapping"
+        info = result.get("binary")
+        if not isinstance(info, dict) or len(str(info.get("sha256") or "")) != 64:
+            return False, "the probe result names no binary sha256"
+        outcome = result.get("outcome")
+        if outcome not in ("pass", "fail"):
+            return False, f"unknown probe outcome {outcome!r}"
+        now = _now()
+        at = str(result.get("at") or _iso(now))
+        started_ts = float(result.get("started_ts") or now)
+        fe = result.get("first_error")
+        if isinstance(fe, dict):
+            fe = {"call": fe.get("call"), "kind": fe.get("kind"), "error": _clip(fe.get("error"), 300)}
+        else:
+            fe = None
+        lp = {
+            "started_at": str(result.get("started_at") or _iso(started_ts)),
+            "started_ts": started_ts, "at": at, "outcome": outcome,
+            "passed": result.get("passed"), "total": result.get("total"),
+            "median_ok_s": result.get("median_ok_s"), "first_error": fe,
+            "model": result.get("model"), "ring_depth": result.get("ring_depth"),
+            "ring_depth_source": result.get("ring_depth_source"),
+            "max_tokens": result.get("max_tokens"),
+            "prompt_set_sha256": result.get("prompt_set_sha256"),
+            "python": result.get("python"), "lab": result.get("lab") or _lab(),
+        }
+        sha = info["sha256"]
+
+        def mutate(doc: dict) -> None:
+            entry = _entry_for(doc, info)
+            entry["last_probe"] = lp
+            f = entry.get("failure")
+            if outcome == "pass":
+                if f is None:
+                    entry["last_pass_at"] = at
+                elif float(f.get("last_ts") or 0.0) < started_ts:
+                    entry["failure"] = None
+                    entry["last_pass_at"] = at
+                # else: a failure landed while the probe ran; it survives the pass
+            else:
+                err = (fe or {}).get("error") or "the probe failed"
+                if f is None:
+                    entry["failure"] = _new_failure("probe", "deep-probe", lp["lab"], err, now)
+                else:
+                    _bump_failure(f, err, now)
+            _evict(doc, keep=sha)
+
+        with _lock:
+            problem = _locked_update(mutate)
+            _P.verdict_cache = None
+        if problem is not None:
+            _P.write_error = problem
+            return False, problem
+        _P.write_error = None
+        return True, None
+    except Exception as e:  # noqa: BLE001
+        return False, f"{type(e).__name__}: {e}"
+
+
+def record_for(sha256: str) -> Optional[dict]:
+    """The stored record of one binary (a copy), or None. Read only. Never raises."""
+    try:
+        doc, _err = _read_store()
+        e = (doc or {}).get("binaries", {}).get(sha256)
+        return json.loads(json.dumps(e)) if isinstance(e, dict) else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Readers (C1): current, is_failing, and the user-facing text (C8)
+# ---------------------------------------------------------------------------
+def _what_failed(f: dict, lp: Optional[dict]) -> str:
+    source = f.get("source")
+    lab, consumer = f.get("lab") or "root", f.get("consumer") or "unattributed"
+    err = _clip(f.get("last_error") or f.get("error"), 120)
+    if source == "probe":
+        fe = (lp or {}).get("first_error") or {}
+        if lp and lp.get("outcome") == "fail":
+            where = f", first error at call {fe['call']}" if fe.get("call") else ""
+            return (f"last probe {lp.get('passed')}/{lp.get('total')}{where}: "
+                    f"{_clip(fe.get('error') or err, 120)}")
+        return f"the last probe failed: {err}"
+    if source == "load":
+        return f"the deep model failed to load in {lab} ({consumer}): {err}"
+    return f"a deep call failed in {lab} ({consumer}): {err}"
+
+
+def _failing_detail(b: Optional[Binary], f: dict, lp: Optional[dict], changed: bool) -> str:
+    who = (f"QueueLLM {b.version}, sha256 {b.sha256[:12]}" if b is not None else "binary not identified")
+    since = f" — since {_utc_minute(f.get('since'))}" if f.get("since") else ""
+    text = (f"deep generation is failing on this build ({who}): {_what_failed(f, lp)}{since}. "
+            "Agents and the Curator use the fast model. "
+            "Re-test with ./arailctl deep probe after installing a new build.")
+    if changed:
+        text += " The binary on disk changed after this process loaded it: restart the lab to load the new build."
+    return text
+
+
+def _assemble(b: Optional[Binary], doc: Optional[dict], store_err: Optional[str], changed: bool) -> Verdict:
+    write_err = _P.write_error
+    if store_err is not None:
+        detail = (f"deep generation is failing on this build"
+                  f"{f' (QueueLLM {b.version}, sha256 {b.sha256[:12]})' if b is not None else ''}: "
+                  f"the verdict file is unreadable ({store_err}). "
+                  "Agents and the Curator use the fast model. "
+                  "Re-test with ./arailctl deep probe after installing a new build.")
+        if changed:
+            detail += " The binary on disk changed after this process loaded it: restart the lab to load the new build."
+        return Verdict("failing", b, detail, None, "store_unreadable", None, None, changed, store_err)
+
+    key = b.sha256 if b is not None else UNIDENTIFIED
+    entry = ((doc or {}).get("binaries") or {}).get(key) if b is not None else None
+    persisted_f = entry.get("failure") if isinstance(entry, dict) else None
+    mem_f = _P.mem.get(key)
+    lp = copy.deepcopy(entry.get("last_probe")) if isinstance(entry, dict) else None
+    f = copy.deepcopy(persisted_f) if persisted_f else None
+    f = f or mem_f
+    if persisted_f and mem_f and float(mem_f.get("last_ts") or 0) > float(persisted_f.get("last_ts") or 0):
+        f = mem_f
+    if f is not None:
+        detail = _failing_detail(b, f, lp, changed)
+        return Verdict("failing", b, detail, f.get("since"), f.get("source"), copy.deepcopy(f), lp, changed, write_err)
+    if b is None:
+        why = _P.ident_reason or "no native QueueLLM module is loaded"
+        return Verdict("untested", None,
+                       f"deep generation has not been tested: the loaded QueueLLM binary could not be "
+                       f"identified ({why}) — run ./arailctl deep probe.",
+                       None, None, None, None, changed, write_err)
+    if isinstance(lp, dict) and lp.get("outcome") == "pass":
+        med = lp.get("median_ok_s")
+        med_txt = f", median {float(med):.1f} s" if isinstance(med, (int, float)) else ""
+        detail = (f"deep generation passed {lp.get('passed')} of {lp.get('total')} sequential calls on this "
+                  f"build (QueueLLM {b.version}, sha256 {b.sha256[:12]}) at {_utc_minute(lp.get('at'))}{med_txt}.")
+        if changed:
+            detail += " The binary on disk changed after this process loaded it: restart the lab to load the new build."
+        return Verdict("passing", b, detail, lp.get("at"), "probe", None, lp, changed, write_err)
+    detail = (f"deep generation has not been tested on this build (QueueLLM {b.version}, sha256 "
+              f"{b.sha256[:12]}); an import is not a generation test — run ./arailctl deep probe.")
+    if changed:
+        detail += " The binary on disk changed after this process loaded it: restart the lab to load the new build."
+    return Verdict("untested", b, detail, None, None, None, lp if isinstance(lp, dict) else None, changed, write_err)
+
+
+def current(*, import_if_needed: bool = True) -> Verdict:
+    """The verdict for the binary this process loaded. Never generates, never raises."""
+    try:
+        with _lock:
+            b = identity(import_if_needed=import_if_needed)
+            doc, store_err = _read_store()
+            changed = _changed_on_disk()
+            sig = _P.read_cache[1] if _P.read_cache else None
+            ck = (b.sha256 if b else None, str(_store_file()), sig, store_err, _P.mem_version,
+                  _P.write_error, changed, _P.ident_reason if b is None else "")
+            cached = _P.verdict_cache
+            if cached is not None and cached[0] == ck:
+                return cached[1]
+            v = _assemble(b, doc, store_err, changed)
+            _P.verdict_cache = (ck, v)
+            return v
+    except Exception as e:  # noqa: BLE001
+        return Verdict("untested", None,
+                       f"deep generation has not been tested: the verdict could not be read "
+                       f"({type(e).__name__}: {e}) — run ./arailctl deep probe.",
+                       None, None, None, None, False, f"{type(e).__name__}: {e}")
+
+
+def is_failing() -> bool:
+    """True when ``current(import_if_needed=False)`` says failing. Cheap, never raises."""
+    try:
+        return current(import_if_needed=False).state == "failing"
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def health_detail(v: Verdict) -> str:
+    """The tier-1 health text while failing (C5). Empty when not failing.
+
+    It starts with ``HEALTH_PREFIX`` so a stored copy can be recognised later.
+    """
+    if v.state != "failing":
+        return ""
+    sha = f" (sha256 {v.binary.sha256[:12]})" if v.binary is not None else ""
+    f = v.failure or {}
+    if v.source == "store_unreadable":
+        what = f"the verdict file is unreadable ({_clip(v.store_error, 120)})"
+        since = ""
+    else:
+        fe = ((v.last_probe or {}).get("first_error") or {}) if v.source == "probe" else {}
+        what = _clip(fe.get("error") or f.get("last_error") or f.get("error") or "generation failed", 120)
+        since = f" — since {_utc_minute(f.get('since'))}" if f.get("since") else ""
+    return (f"{HEALTH_PREFIX}{sha}: {what}{since}. "
+            "Check re-reads this; only ./arailctl deep probe can clear it.")
