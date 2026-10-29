@@ -1506,6 +1506,29 @@ def _resolve_kv_budget() -> dict[str, Any]:
 _AEROLLM_SYSTEM_PROMPT = "You are a concise, helpful assistant."
 
 
+def _note_deep(ok: bool, error: object = None) -> None:
+    """Tell the deep verdict how one deep call ended (sprint 2026-10-29-arail-deep-honest).
+
+    ``arail.deep_verdict`` never raises, but a deep call must not depend on that:
+    this guard keeps a broken verdict module from breaking generation.
+    """
+    try:
+        from arail import deep_verdict
+        deep_verdict.note_call(ok, error=error)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _note_deep_load(error: object, *, persist: bool) -> None:
+    """Same guard for a runtime that would not load. ``persist=False`` is a fault of
+    this lab (the model dir), not of the binary, so it is kept in this process only."""
+    try:
+        from arail import deep_verdict
+        deep_verdict.note_load_failure(error, persist=persist)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 class AeroLLMBackend(BaseBackend):
     """Drive the AeroLLM Rust runtime through its `aerollm_api` PyO3 wheel.
 
@@ -1577,6 +1600,13 @@ class AeroLLMBackend(BaseBackend):
             ) from e
         # Surface the wheel version for `deep status` / health (best-effort).
         self.api_version = getattr(_aero_mod, "__version__", "unknown")
+        # Pin which native binary this process loaded before anything below can
+        # fail, so every outcome is filed under the right sha256.
+        try:
+            from arail import deep_verdict as _dv
+            _dv.identity()
+        except Exception:  # noqa: BLE001
+            pass
 
         # Default model picks the 4-bit MLX quant — ~4 GB resident, fits a
         # 16 GB Apple Silicon Mac with ~6 GB headroom for portal + browser.
@@ -1601,12 +1631,15 @@ class AeroLLMBackend(BaseBackend):
             # default the operator landed on. The mlx-community/...-4bit
             # repo IDs are the canonical 4-bit MLX conversions.
             hf_repo = "mlx-community/" + self.model_name
-            raise RuntimeError(
+            missing = RuntimeError(
                 f"QueueLLM model dir not found: {model_path}. "
                 f"Set AEROLLM_MODEL and/or ARAIL_MODELS_DIR, or "
                 f"download the checkpoint with `huggingface-cli download "
                 f"{hf_repo} --local-dir {model_path}`."
             )
+            _note_deep_load(f"model dir not found: {model_path} (check AEROLLM_MODEL and ARAIL_MODELS_DIR)",
+                            persist=False)
+            raise missing
 
         # Optional speculative-decoding draft. When AEROLLM_DRAFT_MODEL
         # is set and points at a directory under ARAIL_MODELS_DIR, the
@@ -1696,7 +1729,11 @@ class AeroLLMBackend(BaseBackend):
         )
         self._runtime: Any = None  # populated on the worker thread
         self._closed = False
-        self._executor.submit(self._init_runtime, Runtime, model_path, rt_kwargs).result()
+        try:
+            self._executor.submit(self._init_runtime, Runtime, model_path, rt_kwargs).result()
+        except Exception as exc:
+            _note_deep_load(exc, persist=True)
+            raise
         # Drop the Runtime on the worker thread at process exit. Without
         # this, Python's GC can drop the unsendable handle from the main
         # thread and PyO3 raises RuntimeError during shutdown.
@@ -1863,15 +1900,27 @@ class AeroLLMBackend(BaseBackend):
 
         # Hop to the dedicated runtime thread; .result() blocks until
         # it returns. If the worker raises, .result() re-raises here.
-        text = self._executor.submit(
-            self._generate_on_worker, wrapped, gen_kwargs
-        ).result()
+        try:
+            text = self._executor.submit(
+                self._generate_on_worker, wrapped, gen_kwargs
+            ).result()
+        except Exception as exc:
+            _note_deep(False, exc)     # filed for every surface; the caller still sees the error
+            raise
 
         # The runtime returns just the decoded continuation, but it may
         # carry trailing turn markers; strip them using the model's own
         # special tokens. Older shim paths sometimes echo the prompt —
         # strip that defensively too.
         text = self._strip_special(text, wrapped)
+
+        # One definition of a working deep call: no exception, and non-empty
+        # text after _strip_special. An empty answer is a failed call, but it is
+        # returned as it always was; the callers decide what to do with it.
+        if text:
+            _note_deep(True)
+        else:
+            _note_deep(False, "the runtime returned no text")
 
         # aerollm_api doesn't surface output-token count yet (planned in
         # a follow-up via generate_with_stats). Approximate with a
@@ -1890,7 +1939,15 @@ class AeroLLMBackend(BaseBackend):
         )
 
     def health_check(self) -> bool:
-        return getattr(self, "_runtime", None) is not None
+        """Resident and not failing: weights in memory say nothing about whether
+        the runtime generates, so a recorded failure makes this False too."""
+        if getattr(self, "_runtime", None) is None:
+            return False
+        try:
+            from arail import deep_verdict
+            return not deep_verdict.is_failing()
+        except Exception:  # noqa: BLE001
+            return True
 
 
 # ---------------------------------------------------------------------------
