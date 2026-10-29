@@ -1,0 +1,112 @@
+{
+ "date": "2026-10-29",
+ "sprint": "2026-10-29-arail-deep-honest",
+ "gate": "VISION day-1 check: a QueueLLM build after main must answer 5 of 5 sequential deep calls through ARAIL's own AeroLLMBackend in one fresh process; a main build must first pass QueueLLM's preamble check (downloadComponent count 0)",
+ "verdict": "Item 2 OUT: main e730d5fe builds and passes the preamble check but answers 1 of 5; the 2026-10-11 build and bundle v1.1.0 also answer 1 of 5",
+ "pins": {
+  "arail": "62d5ebdf",
+  "queuellm_main": "e730d5fe3f6b1d4ff4c93e9eade4bc7afcc64715",
+  "bundle_commit": "2ae56afb3f8807c5df29daccf37ffb2413966f51",
+  "gptoss_branch": "qukaizen/queuellm-gpt-oss-fix, head 25dc9aab (2026-10-11 21:42); the artifact was built 2026-10-11 11:13, so from an earlier commit that is not recorded"
+ },
+ "d1_metal": {
+  "command": "xcrun -sdk macosx metal --version",
+  "exit": 0,
+  "version": "Apple metal version 32023.921 (metalfe-32023.921.6)",
+  "note": "failed on 2026-10-27; no reboot since (booted 2026-10-21); cause not verified"
+ },
+ "method": {
+  "python": "~/ProJects/qukaizen-arail/.venv/bin/python, read only, env -i, PYTHONDONTWRITEBYTECODE=1",
+  "arail_code": "branch qukaizen/arail-deep-honest src on PYTHONPATH, so ARAIL's own AeroLLMBackend",
+  "shadowing": "a scratch dir first on PYTHONPATH for D2, D3, D4; none for the live wheel",
+  "state": "ARAIL_DATA_DIR, LAB_ROOT, LAB_PKB, ARAIL_ENV_FILE, ARAIL_MODEL_DEFAULTS_FILE in scratch; no portal",
+  "env": "AEROLLM_MODEL=Qwen2.5-7B-Instruct-4bit, ARAIL_MODELS_DIR=/Users/Shared/models, AEROLLM_KV_BUDGET_PCT=0.60, LAB_TIER=maximus, HF_HUB_OFFLINE=1, TRANSFORMERS_OFFLINE=1",
+  "calls": "5 sequential AeroLLMBackend.complete calls: short, long, the short repeated verbatim, long with the same lab-context prefix, a second short; max_tokens 384; temperature 0.2",
+  "prompt_set_sha256": "b5bcb562d908f5d8c843cfe0b0461bfdeb39933339b45e332e91120f7918641e",
+  "ring_depth": "2 (profile:balanced) in every run",
+  "s6_comparison": "S6 asked the same question 5 times; this check mixes short and long prompts; both give 1 of 5 on the live wheel"
+ },
+ "runs": {
+  "live_venv_wheel": {
+   "resolves_to": "site-packages/aerollm_api/__init__.py (package)",
+   "native": "site-packages/aerollm_api/aerollm_api.abi3.so",
+   "native_sha256": "d62e1e16e93c264b79eae35e5766a84f56091ed8e4cc66a89e18791effc7579e",
+   "bytes": 21894128,
+   "version": "0.1.0-rc.2",
+   "pip_record_sha256": "80bfe0f033fa6341c8e951af81924c2cfb2539e2fc5945e8b4f2debac54c4465",
+   "pip_direct_url": "file:///Users/netsushi/ProJects/aerollm/crates/aerollm-api (editable)",
+   "shadowed": "site-packages/aerollm_api.abi3.so, 17411888 bytes, 2026-05-02, sha256 b780d7240e7383586a7860349ad9aa02435870cd70f47a05ee6a3c494e9500a3",
+   "load_s": 2.21,
+   "calls_ok": 1,
+   "calls_total": 5,
+   "ok_seconds": [9.65],
+   "failed_seconds": [0.0, 0.01, 0.01, 0.01],
+   "prompt_tokens": [33, 1933, 33, 1933, 34],
+   "first_error_call": 2,
+   "first_error": "RuntimeError: backend `mlx-native` failed: apply_pre_block: Qwen2Model::forward (prefill head): \"[rms_norm] (*weight) must have the same size as the last dimension of x but has 1 elements."
+  },
+  "d2_build_2026_10_11": {
+   "source": "~/ProJects/queuellm-gptoss-fix-wt/target/release/libqueuellm_api.dylib, copied to scratch as queuellm_api.abi3.so under an aerollm_api shim",
+   "native_sha256": "f92a4cdd1af06a8f90287295131a3588fe3896dca90a851a1fdd8705ac719fc4",
+   "bytes": 19499344,
+   "version": "1.1.0",
+   "preamble_downloadComponent": 0,
+   "load_s": 1.86,
+   "calls_ok": 1,
+   "calls_total": 5,
+   "ok_seconds": [17.61],
+   "failed_seconds": [0.0, 0.02, 0.02, 0.02],
+   "first_error_call": 2,
+   "first_error": "RuntimeError: backend `mlx-native` failed: apply_pre_block: Qwen2 layer (chunked prefill head): \"[rms_norm] (*weight) must have the same size as the last dimension of x but has 1 elements."
+  },
+  "d3_bundle_v1_1_0": {
+   "source": "~/ProJects/qukaizen-arail/dist/aerollm-bundle/aerollm-api-v1.1.0-macos-arm64.tar.gz, extracted to its own scratch dir; no download",
+   "tarball_sha256": "57f30364738580d4a7808f9165ddfdf692eb52afaa435e491b4eda39afb63e93",
+   "tarball_matches_pin": "pyproject.toml:282",
+   "native_sha256": "7c77aa8511d019a320374f539608ca073a4d5e019ae1e58b0102b922cb360ce7",
+   "bytes": 22188336,
+   "version": "1.0.0",
+   "load_s": 1.3,
+   "calls_ok": 1,
+   "calls_total": 5,
+   "ok_seconds": [17.53],
+   "failed_seconds": [0.0, 0.01, 0.01, 0.01],
+   "first_error_call": 2,
+   "first_error": "RuntimeError: backend `mlx-native` failed: apply_pre_block: Qwen2 layer (chunked prefill head): \"[rms_norm] (*weight) must have the same size as the last dimension of x but has 1 elements."
+  },
+  "d4_main_e730d5fe": {
+   "build": {
+    "commands": [
+     "git -C ~/ProJects/qukaizen-queuellm archive e730d5fe3f6b1d4ff4c93e9eade4bc7afcc64715 | tar -x -C <scratch>/d4/qsrc",
+     "cd <scratch>/d4/qsrc && CARGO_TARGET_DIR=<scratch>/d4/qtarget cargo build --release --offline -p queuellm-api --features extension-module"
+    ],
+    "exit": 0,
+    "wall": "1 min 57 s",
+    "offline": true,
+    "preamble_downloadComponent": 0,
+    "artifact": "libqueuellm_api.dylib",
+    "artifact_sha256": "d7e5aa57929d23fea49f6297f53bead3df3b74a6414a22f55ef46159bd074fd8",
+    "bytes": 22919408
+   },
+   "version": "1.1.0",
+   "load_s": 1.52,
+   "calls_ok": 1,
+   "calls_total": 5,
+   "ok_seconds": [20.65],
+   "failed_seconds": [0.0, 0.02, 0.02, 0.02],
+   "first_error_call": 2,
+   "first_error": "RuntimeError: backend `mlx-native` failed: apply_pre_block: Qwen2 layer (chunked prefill head): \"[rms_norm] (*weight) must have the same size as the last dimension of x but has 1 elements."
+  }
+ },
+ "untouched": "after the runs no file in the live site-packages was newer than the probe script; aerollm_api/__pycache__ still dated 2026-06-21; qukaizen-queuellm git status empty before and after; the arail worktree clean",
+ "decision": "VISION cut table, row 3 (main fails call 2): item 2 out; only the honest refusal ships; wedge rows 1-5 ship; the live venv is not touched",
+ "teaching": {
+  "calls_ok": "Meaning: deep answers that came back non-empty, out of 5 in a row in one process. Threshold: 5 of 5, because every ARAIL consumer makes more than one deep call per process and call 2 is where every known broken build fails. Out of range: 1 of 5 means the runtime answers once per process; a lab using it gets one deep answer per restart and silent fall-backs after. Failure lives in: the QueueLLM binary (mlx-native Qwen2 prefill, rms_norm weight of 1 element), not in ARAIL.",
+  "ok_seconds": "Meaning: wall time of the one call that answered (prefill plus up to 384 tokens; 38 to 44 words here). Threshold: none for this check; /deep would need a median of at most 120 s. Out of range: not decidable, because only one call per build answered. Failure lives in: not applicable.",
+  "failed_seconds": "Meaning: time until a failing call raised. Threshold: none. Out of range: 0.00 to 0.02 s means it failed at the first prefill step, before any decoding, for 33 and for 1,933 prompt tokens, and even when it repeated call 1 exactly. Failure lives in: state the runtime carries from call 1 to call 2 inside one process (QueueLLM).",
+  "prompt_tokens": "Meaning: prompt length after ARAIL's chat wrap, counted by the model's tokenizer. Threshold: short about 33; long about 1,933, the size of a chat turn with lab context. Out of range: not applicable. Failure lives in: not applicable.",
+  "load_s": "Meaning: weights load plus runtime start. Threshold: none here (the shipped probe allows 300 s). Out of range: not applicable. Failure lives in: not applicable.",
+  "preamble_downloadComponent": "Meaning: count of the Metal toolchain error marker in a built binary. Threshold: 0, because a build made while the toolchain is down exits 0 and then fails at runtime. Out of range: above 0 means throw the build away unprobed. Failure lives in: the Metal toolchain at build time.",
+  "build_wall": "Meaning: time for the offline release build of queuellm-api from a clean scratch target. Threshold: the vision's 3-hour box for build plus probe. Out of range: not applicable. Failure lives in: not applicable."
+ }
+}
