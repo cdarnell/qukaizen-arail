@@ -35,7 +35,8 @@ renumbered or reused for a different meaning (`sprints/2026-07-29-elite-cli/ARCH
 | `2` | Usage error — bad flag, missing flag value, invalid slug, ambiguous non-interactive target, unknown `--json` value, `install daemon` (typo) | every verb with flags |
 | `3` | **Degraded** — partially up, a phase refused/failed but the lab is still usable, `--check` pending changes | `status`, `doctor`, `install`, `update` |
 | `4` | **Nothing running** | `status` only |
-| `130` / `143` | Killed by SIGINT / SIGTERM | `start --world <slug>` (foreground instance/root path) |
+| `5` | **Not run** — the operation could not start, and nothing was recorded (`deep probe`: `aerollm_api` is not importable by that interpreter, the model dir is missing, another probe is running, there is not enough available memory for a second copy and `--force` was not given, or the binary could not be identified; also a bug in the probe itself) | `deep probe` only |
+| `130` / `143` | Killed by SIGINT / SIGTERM | `start --world <slug>` (foreground instance/root path); `deep probe` exits `130` on SIGINT, stops its child and records nothing |
 
 `stop` deliberately always exits `0` when there was nothing to stop — a
 stop verb's contract is the post-condition ("it is down now"), and
@@ -393,7 +394,8 @@ active).
 ### `deep <op>`
 
 QueueLLM 2nd-inference control: `install` (bundled prebuilt binary) |
-`rebuild` (from source) | `update` (published wheel) | `status`.
+`rebuild` (from source) | `update` (published wheel) | `status` |
+`probe` (does it generate? see below).
 
 Three install channels, dispatched by `scripts/build-aerollm.sh auto`
 (what `setup.sh` and a bare `./arailctl deep install` with no forced
@@ -456,6 +458,74 @@ TLS + repo access control, one hop. Treat the bundled channel accordingly.
 See `sprints/2026-08-05-arail-bundled-aerollm/ARCHITECTURE.md` for the
 full design and `docs/releasing.md` for the maintainer-side bundle
 refresh checklist.
+
+#### `deep probe [--json] [--force]`
+
+Makes **5 sequential deep calls** through ARAIL's own deep backend
+(`AeroLLMBackend`), in a **fresh child process**, never inside the portal.
+Token-free and local: no network (the child runs with `HF_HUB_OFFLINE=1`).
+**Explicit only**: nothing runs it at boot or on a timer.
+
+Why it exists: an import, a policy check and "the weights are in memory" all
+pass on a runtime that answers the first call in a process and fails the
+second. Every QueueLLM build tested on the maintainer's Mac does exactly that
+(`sprints/2026-10-29-arail-deep-honest/DAY1.json`). The probe is the one test
+that generates, and its result is stored so every other surface can read it.
+
+In order: take `probe.lock` (a second probe exits `5`), check that
+`aerollm_api` is importable and the model dir exists, check available memory
+against the weights on disk plus headroom (a second copy of the model can
+push a 16 GB Mac into swap; `--force` skips this check only), list any copy
+of the module that is shadowed on the path and any process that already has
+the binary loaded, then run the 5 calls in a child process group with a
+per-call deadline and a load deadline. The 5 calls mix a short question with
+a prompt as long as a chat turn with lab context, because the known failures
+are in chunked prefill. The prompt set is pinned by hash.
+
+| Flag | Effect |
+|---|---|
+| `--json` | One JSON object on stdout and nothing else (schema `arail.deep-probe/v1`), with a `teaching` object that explains every number in it |
+| `--force` | Skips the memory refusal only. Never the lock |
+
+| Env | Default | Meaning |
+|---|---|---|
+| `ARAIL_DEEP_STATE_DIR` | `<checkout>/lab/data/deep` | Where `verdict.json` and the locks live. One folder per checkout, shared by every World instance (they share the venv, so they share the binary) |
+| `ARAIL_DEEP_PROBE_CALL_TIMEOUT_S` | `300` | Per-call deadline. A call cannot be cancelled in-process, so a timeout kills the child's process group |
+| `ARAIL_DEEP_PROBE_LOAD_TIMEOUT_S` | `300` | Deadline for loading the weights and starting the runtime |
+
+Exit codes (additive to the contract above):
+
+| Code | Meaning |
+|---|---|
+| `0` | 5 of 5 answered, and the record now says `passing` |
+| `1` | The probe ran and fewer than 5 answered (a load failure, a crash and a timeout all count). Recorded `failing`. Also `1` when 5 of 5 answered but a deep call failed in another lab while the probe ran: that failure survives, so deep is still failing |
+| `2` | Usage error |
+| `5` | Not run, nothing recorded: see the exit-code table above |
+| `130` | Interrupted (SIGINT). The child is stopped and nothing is recorded |
+
+**What it records.** One record per binary, keyed by the sha256 of the native
+file the process loaded (`<state dir>/verdict.json`, schema
+`arail.deep-verdict/v1`). A failure from the probe, from any deep call in any
+lab of this checkout, or from a load keeps deep marked **failing** until a
+probe of *the same binary* passes 5 of 5. A later successful call does not
+clear it: call 1 works on every build tested, so one answer proves nothing. A
+new build starts "never tested", not "passing". The record is written under a
+lock with an atomic replace; a corrupt file reads as failing and is moved
+aside by the next writer.
+
+**Who reads it.** The research truth strip (`reason_code: deep_failing`), the
+tier-1 health of the model registry (status bar dot, degradation banner,
+switcher), the background agents and the World Curator (they use the fast
+model while deep is failing, and say why), the "deep model loaded" lines at
+boot, and `deep status`.
+
+**What the Models "Check" button does.** It re-reads this record and whether
+the weights are resident. It never generates, and it never clears a failure.
+Only `./arailctl deep probe` can.
+
+**Numbers.** Every number the probe prints carries what it means, the bar and
+why, what out of range means and where the failure lives: in a legend at the end
+of the text, and in the `teaching` object of the JSON.
 
 ### `reset [mode]`
 

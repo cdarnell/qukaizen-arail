@@ -253,7 +253,8 @@ EOF
     tier [<tier>]   switch (or print) the feature-set tier — minimalist | maximus
                     ('upgrade' is a permanent alias — see docs/cli.md)
     deep <op>       QueueLLM 2nd inference: install (bundled binary) | rebuild (source) |
-                    update (wheel) | status
+                    update (wheel) | status | probe [--json] [--force] (5 deep calls in
+                    a fresh process; the only test that deep actually generates)
     version         show installed component versions
     status [--json[=full|instances]] [--probe|--no-probe] [--quiet]  show what's
                     running (World instances + root lab); exits 0/3/4 — see docs/cli.md
@@ -783,7 +784,9 @@ case "$cmd" in
         ;;
     deep)
         # AeroLLM 2nd-inference: install (bundled binary) | rebuild (source) |
-        # update (published wheel) | status. `install` is the route an
+        # update (published wheel) | status | probe. `probe` is a generation
+        # test, not an install step: see docs/cli.md and
+        # sprints/2026-10-29-arail-deep-honest. `install` is the route an
         # outside user (no sibling repo, no private-index creds) actually
         # needs — see ARCHITECTURE.md (sprints/2026-08-05-arail-bundled-aerollm).
         #
@@ -804,7 +807,8 @@ case "$cmd" in
             rebuild) exec bash "$REPO_ROOT/scripts/build-aerollm.sh" build ;;
             update)  exec bash "$REPO_ROOT/scripts/build-aerollm.sh" update ;;
             status)  exec bash "$REPO_ROOT/scripts/build-aerollm.sh" status ;;
-            *) die "deep op must be one of: install | rebuild | update | status" ;;
+            probe)   exec "$PYTHON" -m arail.deep_probe "$@" ;;
+            *) die "deep op must be one of: install | rebuild | update | status | probe" ;;
         esac
         ;;
     install)
