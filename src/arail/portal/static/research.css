@@ -1828,6 +1828,7 @@
 .rx-truth-text strong { color: var(--text-strong); font-weight: 600; }
 .rx-truth-dim { color: var(--text-muted); }
 .rx-truth-ok { color: var(--accent); font-weight: 550; }
+.rx-truth-danger { color: var(--danger); font-weight: 550; }
 .rx-truth-sep { color: var(--border); margin: 0 0.15rem; }
 .rx-truth-controls {
   flex: 0 0 auto;

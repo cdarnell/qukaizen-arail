@@ -4520,7 +4520,10 @@ def _research_models_block() -> dict | None:
     ``fast`` is the model the experiment engine and most planning calls
     use (a dry-run of the same resolve the researcher does); ``deep`` is
     the aeroLLM slot with a reason code the truth strip can render:
-    tier_locked | wheel_missing | disabled | deferred_now | ok.
+    tier_locked | wheel_missing | disabled | deep_failing | deferred_now | ok.
+    ``deep.generation`` (additive) says what is known about generation on the
+    binary this process loaded: state untested | passing | failing, and when
+    failing since when, from which consumer, and how many failure events.
     Availability (tier/wheel) outranks the operator's toggle so a
     minimalist user sees a locked control, not a dead one. Never raises —
     returns None and the strip hides.
@@ -4563,6 +4566,25 @@ def _research_models_block() -> dict | None:
             detail = ("deep passes are switched off — flip the toggle to use "
                       "the QueueLLM deep model for planning and interpretation")
 
+        generation = None
+        try:
+            from arail import deep_verdict
+            v = deep_verdict.current(import_if_needed=False)   # explain() has just imported the wheel
+            lp = v.last_probe or {}
+            generation = {
+                "state": v.state,
+                "since": v.since,
+                "source": v.source,
+                "consumer": (v.failure or {}).get("consumer"),
+                "lab": (v.failure or {}).get("lab"),
+                "failures": (v.failure or {}).get("count"),
+                "last_probe": ({"at": lp.get("at"), "passed": lp.get("passed"), "total": lp.get("total")}
+                               if lp else None),
+                "sha256_12": v.binary.sha256[:12] if v.binary is not None else None,
+            }
+        except Exception:  # noqa: BLE001 - the strip must render without it
+            generation = None
+
         return {
             "tier": get_current_tier(),
             "fast": fast,
@@ -4574,6 +4596,7 @@ def _research_models_block() -> dict | None:
                 "eligible_now": eligible,
                 "reason_code": code,
                 "reason": detail,
+                "generation": generation,
             },
         }
     except Exception as e:  # noqa: BLE001 — status must never break on this
