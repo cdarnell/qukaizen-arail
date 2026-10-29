@@ -78,6 +78,25 @@ class FakeDeep:
         env.update(extra)
         return env
 
+    # -- an optional stub tokenizer -------------------------------------
+    def with_tokenizer(self) -> None:
+        """Put a stub ``transformers`` next to the fake so ARAIL's backend loads a
+        tokenizer. ``encode`` counts words, so prompt token counts are real numbers
+        in the probe's output. Real ``transformers`` is not needed or touched."""
+        tf = self.pkg_dir / "transformers"
+        tf.mkdir(exist_ok=True)
+        (tf / "__init__.py").write_text(
+            "class _Tok:\n"
+            "    all_special_tokens = []\n"
+            "    def encode(self, text):\n"
+            "        return text.split()\n"
+            "    def apply_chat_template(self, messages, tokenize=False, add_generation_prompt=True):\n"
+            "        raise ValueError('no chat template')\n"
+            "class AutoTokenizer:\n"
+            "    @staticmethod\n"
+            "    def from_pretrained(path):\n"
+            "        return _Tok()\n", encoding="utf-8")
+
     # -- what the fake saw ---------------------------------------------
     def events(self) -> list[dict]:
         if not self.count_file.exists():

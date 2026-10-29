@@ -95,6 +95,7 @@ class Runtime:
         if mode == "empty2" and n >= 2:
             return ""
         if mode == "crash3" and n == 3:
+            os.write(2, b"native runtime: fatal error in layer 3 (test double)\n")
             name = os.environ.get("ARAIL_FAKE_DEEP_CRASH_SIGNAL", "KILL")
             os.kill(os.getpid(), getattr(signal, "SIG" + name))
             time.sleep(60)
