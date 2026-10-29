@@ -828,6 +828,17 @@ def _what_failed(f: dict, lp: Optional[dict]) -> str:
     return f"a deep call failed in {lab} ({consumer}): {err}"
 
 
+def what_failed(v: Verdict) -> str:
+    """The short phrase for *why* deep is failing, without the surrounding sentence:
+    ``last probe 1/5, first error at call 2: ...``, ``a deep call failed in ai
+    (agent:buddy): ...``, or ``the verdict file is unreadable (...)``. Empty when not failing."""
+    if v.state != "failing":
+        return ""
+    if v.source == "store_unreadable":
+        return f"the verdict file is unreadable ({v.store_error})"
+    return _what_failed(v.failure or {}, v.last_probe)
+
+
 def _failing_detail(b: Optional[Binary], f: dict, lp: Optional[dict], changed: bool) -> str:
     who = (f"QueueLLM {b.version}, sha256 {b.sha256[:12]}" if b is not None else "binary not identified")
     since = f" — since {_utc_minute(f.get('since'))}" if f.get("since") else ""
