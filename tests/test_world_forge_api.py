@@ -199,7 +199,11 @@ def test_forge_brain_reaches_forge_router(lab, monkeypatch):
         s = _wait_state(c, "done")
         assert s.get("brain") == "claude"
     assert seen["brain"] == "claude"
-    assert isinstance(seen["router"], _Router)
+    # forge_world is handed ARAIL's counting wrapper (it counts failed calls: dac_world skips them),
+    # and the wrapper fronts the router the brain resolved to.
+    assert isinstance(seen["router"], wr._CountedRouter)
+    assert isinstance(seen["router"]._inner, _Router)
+    assert seen["router"].backend_name == "claude", "attributes pass through the wrapper"
 
 
 def test_forge_defaults_to_local_brain(lab, fake_forge):
@@ -359,11 +363,21 @@ def test_last_term_cannot_be_deleted(mounted):
 def test_review_writes_flags_sidecar(mounted, monkeypatch):
     _tmp, worlds, _d, _p = mounted
 
+    class _Judge:
+        backend_name = "stub-judge"
+
+        def complete(self, prompt, **kw):
+            return type("Resp", (), {"text": '{"correct": true}', "model": "stub-judge"})()
+
     def _fake_reconcile(spec, terms, *, router, limit, cancel=None):
+        # The real reconcile_terms judges each term with one router call; a review is "done" only
+        # when those calls returned, so the stand-in makes them too.
+        for t in terms[:limit]:
+            router.complete(f"judge {t['slug']}")
         return [wf.ReviewFlag(slug="snake-plant", verdict="correct",
                               better_category="care", note="not a plant? kidding")]
     monkeypatch.setattr(wr.wf, "reconcile_terms", _fake_reconcile)
-    monkeypatch.setattr(wr, "_review_router", lambda: object())
+    monkeypatch.setattr(wr, "_review_router", lambda: _Judge())
 
     with _client() as c:
         r = c.post("/api/worlds/review", headers=CSRF_HEADERS)

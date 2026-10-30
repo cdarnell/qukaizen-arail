@@ -137,6 +137,201 @@ def _review_router() -> Any:
     return ModelRouter(billing_source="agent")
 
 
+def _deep_skip() -> "Optional[tuple[str, str]]":
+    """``(code, detail)`` when the deep model was not used for this pass because it is known
+    to be failing, else None. A report names the fast model that stood in and says why, so a
+    pass is never mistaken for a deep one (sprint 2026-10-29-arail-deep-honest)."""
+    try:
+        from arail.agents import deep_policy
+        _ok, code, detail = deep_policy.explain(foreground=True)
+        return (code, detail) if code == "deep_failing" else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+class _CountedRouter:
+    """Counts the calls a Curator pass or a forge makes through ``router.complete``.
+
+    ``dac_world`` (vendored, ADR-0004, not edited here) skips a call that raised and carries
+    on, so on its own a pass cannot tell "the model said nothing is wrong" from "the model never
+    answered". This wrapper sits at ARAIL's call site: one exception raised by ``complete`` is
+    one failed call, a response with no text is one failed call, and anything else is a call
+    that returned (a reply that does not parse still counts as judged: TD9). The exception is
+    re-raised unchanged, so ``dac_world`` skips the call exactly as before.
+    """
+
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+        self._lock = threading.Lock()
+        self.attempted = 0
+        self.failed = 0
+        self.first_error: Optional[str] = None
+
+    def _note_failure(self, text: str) -> None:
+        with self._lock:
+            self.failed += 1
+            if self.first_error is None:
+                self.first_error = text
+
+    def complete(self, *args: Any, **kwargs: Any) -> Any:
+        with self._lock:
+            self.attempted += 1
+        try:
+            resp = self._inner.complete(*args, **kwargs)
+        except Exception as e:  # noqa: BLE001 - counted here, then re-raised unchanged
+            self._note_failure(f"{type(e).__name__}: {str(e)[:160]}")
+            raise
+        if not str(getattr(resp, "text", "") or "").strip():
+            self._note_failure("the model returned no text")
+        return resp
+
+    def __getattr__(self, name: str) -> Any:     # backend_name, stream_complete, ...
+        return getattr(self._inner, name)
+
+    @property
+    def judged(self) -> int:
+        return self.attempted - self.failed
+
+
+def _judge_label(router: Any) -> str:
+    """The model's name as a person reads it: the frozen id ``aerollm`` is QueueLLM."""
+    name = str(getattr(router, "backend_name", None) or "local")
+    return "QueueLLM" if name == "aerollm" else name
+
+
+def _is_deep(router: Any) -> bool:
+    return str(getattr(router, "backend_name", None) or "") == "aerollm"
+
+
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
+def _skip_note(skip: "Optional[tuple[str, str]]", label: str) -> str:
+    if not skip:
+        return ""
+    detail = " ".join(str(skip[1]).split())
+    return f" Judged by {label}; deep failing: {detail[:120]}."
+
+
+# What each number a Curator pass prints means, why its bar is what it is, what out of range
+# means and where the fault lives. Keys are the JSON paths of the numeric fields.
+_CURATOR_TEACHING: dict = {
+    "planned": {
+        "meaning": "terms the review meant to judge: the smaller of 16 and the number of terms in the World",
+        "threshold": "none; it is the size of a full review",
+        "out_of_range": "0: the World has no terms to judge",
+        "failure_lives_in": "the World's term list (terms.json)",
+    },
+    "judged": {
+        "meaning": "judge calls that returned, one per term; a reply that does not parse still counts",
+        "threshold": "equal to planned: a review that judged fewer terms is partial, never complete",
+        "out_of_range": "below planned: the unjudged terms have no flags and their silence means nothing; "
+                        "0 means the review failed",
+        "failure_lives_in": "the model that judged (the deep runtime when QueueLLM judged); read failed and the error",
+    },
+    "failed": {
+        "meaning": "judge calls that raised an error or returned no text",
+        "threshold": "0, because every failed call is a term nobody judged",
+        "out_of_range": "above 0: the review is partial or failed, and an old 'All clear' would have been false",
+        "failure_lives_in": "the model that judged, not the World; for QueueLLM run ./arailctl deep probe",
+    },
+    "reviewed_count": {
+        "meaning": "terms the review actually judged; equal to judged, kept for older readers",
+        "threshold": "equal to planned",
+        "out_of_range": "below planned: partial. Older builds wrote the smaller of 16 and the term count here "
+                        "whatever happened, which is why it is now judged",
+        "failure_lives_in": "the model that judged; compare with failed",
+    },
+    "calls.attempted": {
+        "meaning": "model calls a growth pass or a forge made: judging, proposing, mapping, seeding, "
+                   "defining and linking",
+        "threshold": "none; more terms mean more calls",
+        "out_of_range": "0: nothing ran",
+        "failure_lives_in": "the pass or forge itself",
+    },
+    "calls.failed": {
+        "meaning": "model calls of a growth pass or a forge that raised an error or returned no text",
+        "threshold": "0, because a growth pass is applied only when every call answers, and a forge draft "
+                     "is complete only when every call answers",
+        "out_of_range": "above 0: a growth pass is not applied (the World is unchanged: no reseal, no swap, "
+                        "no evolution entry); a forge draft is still shown but is incomplete",
+        "failure_lives_in": "the model that ran it (the deep runtime when QueueLLM ran it), not the World",
+    },
+    "added": {
+        "meaning": "new terms the last applied growth pass added",
+        "threshold": "none; 0 is normal when nothing was missing",
+        "out_of_range": "0 after a pass that was not applied means nothing changed, not that nothing was missing",
+        "failure_lives_in": "the model's proposals and the closed-graph gate",
+    },
+    "corrected": {
+        "meaning": "corrections (recategorizations and unlinks) the last applied growth pass made",
+        "threshold": "none; 0 is normal when the terms were fine",
+        "out_of_range": "0 after a pass that was not applied means nothing changed, not that nothing was wrong",
+        "failure_lives_in": "the model's judgments and the declared categories",
+    },
+}
+
+
+def _numeric_paths(obj: Any, path: str = "") -> list:
+    out: list = []
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if k == "teaching":
+                continue
+            out += _numeric_paths(v, f"{path}.{k}" if path else k)
+    elif isinstance(obj, list):
+        for v in obj:
+            out += _numeric_paths(v, path + "[]")
+    elif isinstance(obj, (int, float)) and not isinstance(obj, bool):
+        out.append(path)
+    return out
+
+
+def _with_teaching(doc: dict) -> dict:
+    """Add ``teaching``: a four-part entry for every numeric field that has one. A numeric field
+    with no entry is a build failure (the Curator tests walk every response and fail on it), but
+    the server does not 500 over missing explanatory text."""
+    doc["teaching"] = {p: dict(_CURATOR_TEACHING[p]) for p in _numeric_paths(doc) if p in _CURATOR_TEACHING}
+    return doc
+
+
+def _review_report(display: str, *, planned: int, judged: int, failed: int, flags: int, label: str,
+                   deep: bool, error: "Optional[str]", cancelled: bool,
+                   skip: "Optional[tuple[str, str]]") -> "tuple[str, str, str]":
+    """``(outcome, level, message)`` for one review. The wording is the architecture's C8."""
+    complete = failed == 0 and judged == planned and not cancelled
+    if complete:
+        n_flags = _plural(flags, "flag")
+        full = (f"({planned} of {planned} is a full review; fewer is reported as partial. "
+                "A flag is a term the judge wants changed: Knowledge → World Terms.)")
+        head = (f"Curator reviewed all {planned} of {planned} terms in '{display}' with {label} — "
+                + (f"{n_flags}." if flags else "no flags. All clear."))
+        return "complete", ("warn" if flags else "success"), f"{head} {full}" + _skip_note(skip, label)
+    outcome = "partial" if judged >= 1 else "failed"
+    unjudged = planned - judged
+    verb = "is partial" if outcome == "partial" else "failed"
+    parts = [f"Curator review of '{display}' {verb}: {judged} of {planned} terms judged.",
+             f"A full review judges all {planned}; the {unjudged} unjudged "
+             f"term{'' if unjudged == 1 else 's'} have no flags, so their silence means nothing."]
+    if failed:
+        parts.append(f"{label} failed on {_plural(failed, 'call')}: {(error or 'no error text')[:160]}.")
+        parts.append("The fault is in the deep runtime, not the World: run ./arailctl deep probe."
+                     if deep else "The fault is in the model that judged, not the World.")
+    if cancelled:
+        parts.append("The review was stopped before it finished.")
+    return outcome, "warn", " ".join(parts) + _skip_note(skip, label)
+
+
+def _grow_report_not_applied(display: str, *, attempted: int, failed: int, label: str, deep: bool,
+                             error: "Optional[str]", skip: "Optional[tuple[str, str]]") -> str:
+    return (f"Growth pass on '{display}' not applied: {label} failed on {failed} of {attempted} calls "
+            f"({(error or 'no error text')[:160]}). A pass is applied only when every call answers, so the "
+            "World is unchanged: no reseal, no swap, no evolution entry. "
+            + ("Run ./arailctl deep probe." if deep else "Check the model and run it again.")
+            + _skip_note(skip, label))
+
+
 # ═══════════════════════════ FORGE ════════════════════════════════════════
 
 # Brains that reach a cloud gateway. An explicit operator choice of one of
@@ -168,8 +363,15 @@ def _forge_progress(stage: str, done: int, total: int, note: str) -> None:
 
 async def _run_forge(params: wf.ForgeParams, brain: str = "local") -> None:
     global _forge_state, _forge_result
+    counted: Optional[_CountedRouter] = None
     try:
         router_ = _curation_router(brain)
+        # The forge counts its failed calls and says so. dac_world skips each failed call
+        # (dac_world/forge.py), so a forge that lost calls would otherwise look like a smaller,
+        # successful draft. The draft is still shown: it is a preview the operator inspects.
+        counted = _CountedRouter(router_)
+        label = _judge_label(router_)
+        skip = _deep_skip() if brain in ("", "auto", "deep") else None
         # L3 (ARCHITECTURE.md): world_routes is not an agent -- system_call
         # under the same label already used for the inference_slot, so
         # attribution and slot metrics agree on what this work is called.
@@ -180,31 +382,50 @@ async def _run_forge(params: wf.ForgeParams, brain: str = "local") -> None:
                 # Frontier API forge — no local model residency, so no
                 # inference_slot: the cloud calls run beside chat's GPU work.
                 result = await asyncio.to_thread(
-                    wf.forge_world, params, router=router_,
+                    wf.forge_world, params, router=counted,
                     progress_cb=_forge_progress, cancel=_forge_cancel,
                 )
             else:
                 async with scheduler.inference_slot("world-forge"):
                     result = await asyncio.to_thread(
-                        wf.forge_world, params, router=router_,
+                        wf.forge_world, params, router=counted,
                         progress_cb=_forge_progress, cancel=_forge_cancel,
                     )
+        result.stats["failed_calls"] = counted.failed
         _forge_result = result
-        _forge_state = {**_forge_state, "state": "done",
-                        "terms_found": len(result.terms),
-                        "message": f"{len(result.terms)} terms · tier {result.tier}"}
-        activity_log.emit("forge", f"Forged '{params.subject}' — {len(result.terms)} terms, "
-                                   f"tier {result.tier}. Preview it on the Worlds page.",
-                          "success")
+        message = f"{len(result.terms)} terms · tier {result.tier}"
+        if counted.failed:
+            message += (f" · {counted.failed} of {counted.attempted} model calls failed "
+                        f"({(counted.first_error or '')[:160]}); the draft is incomplete")
+        _forge_state = {**_forge_state, "state": "done", "terms_found": len(result.terms),
+                        "message": message, "calls": {"attempted": counted.attempted, "failed": counted.failed}}
+        if counted.failed:
+            activity_log.emit(
+                "forge",
+                f"Forge of '{params.subject}' finished with {counted.failed} of {counted.attempted} model calls "
+                f"failed ({(counted.first_error or '')[:160]}); the draft is incomplete. Review it before mounting."
+                + _skip_note(skip, label), "warn")
+        else:
+            activity_log.emit("forge", f"Forged '{params.subject}' — {len(result.terms)} terms, "
+                                       f"tier {result.tier}. Preview it on the Worlds page.",
+                              "success")
     except wf.ForgeCancelled:
         _forge_state = {**_forge_state, "state": "cancelled", "message": "cancelled"}
         activity_log.emit("forge", f"Forge of '{params.subject}' cancelled.", "info")
     except wf.GateRefused as e:
-        _forge_state = {**_forge_state, "state": "error",
-                        "message": "nothing usable produced — try a richer model or a clearer subject"}
-        activity_log.emit("forge", f"Forge of '{params.subject}' produced nothing usable "
-                                   f"({len(e.gate.unsourced)} unsourced, "
-                                   f"{len(e.gate.dangling_edges)} dangling).", "warn")
+        if counted is not None and counted.failed:
+            note = (f"{counted.failed} of {counted.attempted} model calls failed "
+                    f"({(counted.first_error or '')[:160]})")
+            _forge_state = {**_forge_state, "state": "error",
+                            "message": f"nothing usable produced: {note}",
+                            "calls": {"attempted": counted.attempted, "failed": counted.failed}}
+            activity_log.emit("forge", f"Forge of '{params.subject}' produced nothing usable: {note}.", "warn")
+        else:
+            _forge_state = {**_forge_state, "state": "error",
+                            "message": "nothing usable produced — try a richer model or a clearer subject"}
+            activity_log.emit("forge", f"Forge of '{params.subject}' produced nothing usable "
+                                       f"({len(e.gate.unsourced)} unsourced, "
+                                       f"{len(e.gate.dangling_edges)} dangling).", "warn")
     except Exception as e:  # noqa: BLE001
         _log.warning("world forge failed: %s", e)
         _forge_state = {**_forge_state, "state": "error", "message": str(e)[:200]}
@@ -365,7 +586,7 @@ async def api_forge_status():
     s = {k: v for k, v in _forge_state.items() if not k.startswith("_")}
     if _forge_state.get("state") == "running" and "_t0" in _forge_state:
         s["elapsed_s"] = round(time.monotonic() - _forge_state["_t0"], 1)
-    return s
+    return _with_teaching(s)           # teaches calls.attempted / calls.failed when a forge has them
 
 
 @router.post("/api/worlds/forge/cancel")
@@ -389,6 +610,11 @@ async def api_forge_preview():
     warnings = []
     if len(r.terms) > wf.MAX_TERMS_SOFT or r.stats.get("skill_chars", 0) > wf.SKILL_CHAR_BUDGET:
         warnings.append("Large world: agent context (SKILL.md) may be truncated beyond ~150 terms.")
+    failed_calls = int(r.stats.get("failed_calls") or 0)
+    if failed_calls:
+        warnings.append(f"{failed_calls} model call{'' if failed_calls == 1 else 's'} failed while this World was "
+                        "forged, so some terms may lack definitions or links. A forge needs every call to "
+                        "answer: review the draft before mounting it.")
     shorts = sum(1 for t in r.terms if len(str(t.get("short", "")).strip()) < 12)
     if shorts:
         warnings.append(f"{shorts} terms have very short definitions — the model was terse; "
@@ -401,6 +627,7 @@ async def api_forge_preview():
         "counts": r.counts,
         "avg_edges": r.stats.get("avg_edges"),
         "skill_chars": r.stats.get("skill_chars"),
+        "failed_calls": failed_calls,
         "categories": [
             {"id": c["id"], "label": c["label"], "term_count": count_by_cat.get(c["id"], 0)}
             for c in r.spec.get("categories", [])
@@ -904,28 +1131,43 @@ async def _run_review(bundle_dir: Path, spec: dict, terms: list[dict]) -> None:
     world = str(spec.get("slug", ""))
     display = str(spec.get("display_name", world))
     try:
+        skip = _deep_skip()
         router_ = _review_router()
+        counted = _CountedRouter(router_)
         with agent_context.system_call("world-review"):
             async with scheduler.inference_slot("world-review"):
                 flags = await asyncio.to_thread(
                     wf.reconcile_terms, spec, terms,
-                    router=router_, limit=REVIEW_BATCH, cancel=_review_cancel)
+                    router=counted, limit=REVIEW_BATCH, cancel=_review_cancel)
+        planned = min(REVIEW_BATCH, len(terms))
+        judged = counted.judged
+        label = _judge_label(router_)
+        outcome, level, message = _review_report(
+            display, planned=planned, judged=judged, failed=counted.failed, flags=len(flags), label=label,
+            deep=_is_deep(router_), error=counted.first_error, cancelled=_review_cancel.is_set(),
+            skip=skip)
         doc = {
             "schema": REVIEW_SCHEMA,
             "world": world,
             "reviewed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "model": getattr(router_, "backend_name", None) or "local",
-            "reviewed_count": min(REVIEW_BATCH, len(terms)),
+            # What the judge answered, not what it was asked: never min(16, len(terms)) again.
+            "reviewed_count": judged,
             "flags": [f.to_dict() for f in flags],
+            "outcome": outcome,
+            "planned": planned,
+            "judged": judged,
+            "failed": counted.failed,
+            "judge_model": getattr(router_, "backend_name", None) or "local",
+            "deep_skip": skip[0] if skip else None,
+            "deep_error": (counted.first_error or "")[:160] or None,
+            "message": message,
         }
+        _with_teaching(doc)
         _review_path(bundle_dir).write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
-        _review_state = {"state": "done", "flags": len(flags)}
-        activity_log.emit(
-            "curator",
-            f"Curator reviewed {doc['reviewed_count']} terms in '{display}' — "
-            f"{len(flags)} flag{'s' if len(flags) != 1 else ''}"
-            + (". See Knowledge → World Terms." if flags else ". All clear."),
-            "success" if not flags else "warn")
+        state = {"complete": "done", "partial": "partial", "failed": "failed"}[outcome]
+        _review_state = {"state": state, "flags": len(flags), "outcome": outcome, "message": message}
+        activity_log.emit("curator", message, level)
     except Exception as e:  # noqa: BLE001
         _log.warning("world review failed: %s", e)
         _review_state = {"state": "error", "message": str(e)[:200]}
@@ -952,6 +1194,31 @@ async def api_review_start(request: Request):
 
 
 @router.get("/api/worlds/review")
+async def api_review_get():
+    bundle_dir = _mounted_catalog_dir()
+    flags: list = []
+    doc: dict = {}
+    if bundle_dir is not None and _review_path(bundle_dir).exists():
+        try:
+            doc = json.loads(_review_path(bundle_dir).read_bytes())
+            if doc.get("schema") == REVIEW_SCHEMA:
+                flags = doc.get("flags", [])
+            else:
+                doc = {}
+        except Exception:  # noqa: BLE001
+            doc = {}
+    out = {"state": _review_state.get("state", "idle"),
+           "message": _review_state.get("message", "") or doc.get("message") or "",
+           "reviewed_at": doc.get("reviewed_at"),
+           "reviewed_count": doc.get("reviewed_count"),
+           "flags": flags,
+           # additive: old review.json files read as null
+           "outcome": doc.get("outcome"), "planned": doc.get("planned"), "judged": doc.get("judged"),
+           "failed": doc.get("failed"), "judge_model": doc.get("judge_model"),
+           "deep_skip": doc.get("deep_skip"), "deep_error": doc.get("deep_error")}
+    return _with_teaching(out)
+
+
 async def api_review_get():
     bundle_dir = _mounted_catalog_dir()
     flags: list = []
@@ -1014,14 +1281,23 @@ def _curation_router(brain: str) -> Any:
 
 
 async def _run_grow(bundle_dir: Path, spec: dict, terms: list[dict], brain: str) -> None:
-    """One growth pass: correct existing terms + add new ones, reversibly."""
+    """One growth pass: correct existing terms + add new ones, reversibly.
+
+    A pass is applied only when every model call answered. If any call failed the pass stops
+    before the gate, the reseal, the swap and the evolution log: the World is unchanged and the
+    report says so (sprint 2026-10-29-arail-deep-honest). The silent version of this resealed the
+    bundle and logged "evolved via <model>" after twenty passes whose calls all failed.
+    """
     global _grow_state
     world = str(spec.get("slug", ""))
     display = str(spec.get("display_name", world))
     declared = {str(c.get("id", "")) for c in spec.get("categories", [])}
     try:
+        skip = _deep_skip() if (brain or "auto").strip().lower() in ("", "auto", "deep") else None
         router_ = _curation_router(brain)
+        counted = _CountedRouter(router_)
         model_name = getattr(router_, "backend_name", None) or "local"
+        label = _judge_label(router_)
 
         def _prog(stage, done, total, note=""):
             global _grow_state
@@ -1031,13 +1307,22 @@ async def _run_grow(bundle_dir: Path, spec: dict, terms: list[dict], brain: str)
             async with scheduler.inference_slot("world-grow"):
                 _grow_state = {**_grow_state, "stage": "reviewing"}
                 flags = await asyncio.to_thread(
-                    wf.reconcile_terms, spec, terms, router=router_,
+                    wf.reconcile_terms, spec, terms, router=counted,
                     limit=GROW_REVIEW_BATCH, cancel=_grow_cancel)
                 _corrected, changes = wf.apply_corrections(terms, flags, declared)
                 _grow_state = {**_grow_state, "stage": "growing"}
                 new_terms = await asyncio.to_thread(
-                    wf.propose_new_terms, spec, terms, router=router_,
+                    wf.propose_new_terms, spec, terms, router=counted,
                     limit=GROW_NEW_BATCH, cancel=_grow_cancel)
+
+        calls = {"attempted": counted.attempted, "failed": counted.failed}
+        if counted.failed:
+            message = _grow_report_not_applied(
+                display, attempted=counted.attempted, failed=counted.failed, label=label,
+                deep=_is_deep(router_), error=counted.first_error, skip=skip)
+            _grow_state = {"state": "not_applied", "message": message, "calls": calls}
+            activity_log.emit("curator", message, "warn")
+            return
 
         merged = terms + new_terms
         # Re-gate + reseal + swap (auto-applied; fully reversible via the log).
@@ -1068,12 +1353,13 @@ async def _run_grow(bundle_dir: Path, spec: dict, terms: list[dict], brain: str)
         doc.setdefault("passes", []).append(entry)
         _evolution_path(bundle_dir).write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
 
-        _grow_state = {"state": "done", "added": len(new_terms), "corrected": len(changes)}
+        _grow_state = {"state": "done", "added": len(new_terms), "corrected": len(changes), "calls": calls}
         activity_log.emit(
             "curator",
-            f"World '{display}' evolved via {model_name}: +{len(new_terms)} new term"
+            f"World '{display}' evolved via {label}: +{len(new_terms)} new term"
             f"{'s' if len(new_terms) != 1 else ''}, {len(changes)} correction"
-            f"{'s' if len(changes) != 1 else ''}. Reversible in the term editor.",
+            f"{'s' if len(changes) != 1 else ''}. Reversible in the term editor. "
+            f"(all {counted.attempted} model calls answered)" + _skip_note(skip, label),
             "success")
     except Exception as e:  # noqa: BLE001
         _log.warning("world grow failed: %s", e)
@@ -1103,6 +1389,26 @@ async def api_grow_start(request: Request):
 
 
 @router.get("/api/worlds/grow")
+async def api_grow_get():
+    bundle_dir = _mounted_catalog_dir()
+    passes: list = []
+    if bundle_dir is not None and _evolution_path(bundle_dir).exists():
+        try:
+            doc = json.loads(_evolution_path(bundle_dir).read_bytes())
+            if doc.get("schema") == GROW_SCHEMA:
+                passes = doc.get("passes", [])
+        except Exception:  # noqa: BLE001
+            pass
+    out = {"state": _grow_state.get("state", "idle"),
+           "stage": _grow_state.get("stage", ""),
+           "message": _grow_state.get("message", ""),
+           "added": _grow_state.get("added"),
+           "corrected": _grow_state.get("corrected"),
+           "calls": _grow_state.get("calls"),
+           "passes": passes}
+    return _with_teaching(out)
+
+
 async def api_grow_get():
     bundle_dir = _mounted_catalog_dir()
     passes: list = []
