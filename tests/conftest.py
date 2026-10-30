@@ -74,6 +74,29 @@ os.environ["ARAIL_MODEL_DEFAULTS_FILE"] = os.path.join(
 )
 
 
+@pytest.fixture(autouse=True)
+def _no_leaked_fake_native_runtime():
+    """No test starts with the deep tests' fake ``aerollm_api`` still imported.
+
+    ``tests/fakes/fake_deep_runtime.py`` cleans up after itself, but a test that also uses
+    ``monkeypatch.delitem(sys.modules, ...)`` gets the entries RESTORED when monkeypatch
+    undoes, which happens after the fake's own teardown. A leaked fake makes
+    ``import aerollm_api`` succeed in unrelated tests (it turned 7 setup errors in
+    tests/test_aerollm_defaults.py into other results). So the purge runs at the START of every
+    test, where the order of earlier teardowns cannot matter. Only the fake is touched: a real
+    ``aerollm_api`` must stay imported (a native extension cannot be initialised twice).
+    """
+    def _purge() -> None:
+        for name in [n for n in list(sys.modules) if n.split(".")[0] in ("aerollm_api", "queuellm_api")]:
+            mod = sys.modules.get(name)
+            path = str(getattr(mod, "__file__", "") or "")
+            if getattr(mod, "__version__", None) == "0.0.0-fake" or "/fakedeep/" in path:
+                sys.modules.pop(name, None)
+    _purge()
+    yield
+    _purge()
+
+
 @pytest.fixture
 def isolated_secrets(monkeypatch, tmp_path):
     """Redirect the portal's secrets file to a tmp path and restore env on teardown.

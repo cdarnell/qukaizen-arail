@@ -209,9 +209,11 @@ def test_h9_minimalist_registry_reads_never_import_aerollm_api(tmp_path, monkeyp
 
 
 def test_h9_a_maximus_registry_read_uses_static_identity_and_never_imports(env, tmp_path, monkeypatch):
-    # the fake is on the path but not yet imported by this process
+    # The fake is on the path but must not be imported by this process. Pop it directly:
+    # monkeypatch.delitem would RESTORE the entries at teardown, after fake_deep has cleaned
+    # up, and the fake would leak into every later test (found in the step 5 full run).
     for name in [n for n in sys.modules if n.split(".")[0] in ("aerollm_api", "queuellm_api")]:
-        monkeypatch.delitem(sys.modules, name)
+        sys.modules.pop(name, None)
     dv._reset_for_tests()
     reg_core.get_registry().to_state()
     assert "aerollm_api" not in sys.modules
