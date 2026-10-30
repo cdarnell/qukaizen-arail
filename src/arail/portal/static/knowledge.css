@@ -1315,6 +1315,20 @@ body.wt-mode .kb-layout { display: none; }
   padding: 0.35rem 0 0.6rem;
 }
 .wt-evo-live { color: var(--accent2); }
+/* Curator notices: a partial review, or a growth pass that was not applied */
+.wt-notice {
+  font-size: 12.5px;
+  line-height: 1.45;
+  padding: 0.5rem 0.7rem;
+  margin: 0.35rem 0 0.6rem;
+  border-radius: var(--radius-s);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+.wt-notice--warn {
+  background: var(--warn-a16);
+  border-color: var(--warn-a28);
+}
 
 /* (The sourced-edit warning banner became the hero's ⓘ provenance
    disclosure — see .kb-hero-prov.) */
