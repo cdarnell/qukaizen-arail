@@ -1081,6 +1081,53 @@ def channel(b: Binary, site_dir: Path) -> str:
     return "unknown — " + "; ".join(reasons)
 
 
+def _owner_of(path: str) -> str:
+    """Who put *path* on the import path, as far as can be proven: a pip dist whose RECORD lists it,
+    a PYTHONPATH entry, or nothing."""
+    real = os.path.realpath(path)
+    try:
+        from importlib import metadata
+        for name in ("aerollm-api", "aerollm_api"):
+            for dist in metadata.Distribution.discover(name=name):
+                for f in dist.files or []:
+                    try:
+                        hit = os.path.realpath(str(dist.locate_file(f))) == real
+                    except Exception:  # noqa: BLE001
+                        hit = False
+                    if hit:
+                        text = f"pip package {dist.metadata['Name']} {dist.version}"
+                        raw = dist.read_text("direct_url.json")
+                        try:
+                            du = json.loads(raw) if raw else {}
+                        except ValueError:
+                            du = {}
+                        if (du.get("dir_info") or {}).get("editable") and du.get("url"):
+                            text += f", editable from {du['url']}"
+                        return text
+    except Exception:  # noqa: BLE001
+        pass
+    for entry in (os.environ.get("PYTHONPATH") or "").split(os.pathsep):
+        if entry and (real + os.sep).startswith(os.path.realpath(entry) + os.sep):
+            return "a PYTHONPATH entry"
+    return "no install record"
+
+
+def import_target(dest: str) -> dict:
+    """Would a file copied to *dest* be the one ``import aerollm_api`` loads? Nothing is imported.
+
+    ``{"free": True}`` when the import finds nothing yet, or already resolves to *dest*;
+    otherwise ``{"free": False, "winner": <path>, "owner": <who put it there>}``: a package
+    directory or another path entry wins, and a copy at *dest* would never load.
+    """
+    spec = _find_spec_safe()
+    origin = getattr(spec, "origin", None) if spec is not None else None
+    if not origin:
+        return {"free": True, "winner": None, "owner": ""}
+    if os.path.realpath(origin) == os.path.realpath(dest):
+        return {"free": True, "winner": origin, "owner": ""}
+    return {"free": False, "winner": origin, "owner": _owner_of(origin)}
+
+
 def _generation_lines(v: Verdict) -> list[str]:
     """The ``generation:`` text. Every number in it is followed by a line that teaches it."""
     f = v.failure or {}
@@ -1201,9 +1248,13 @@ class _stdout_to_stderr:
 
 _USAGE = """usage: python -m arail.deep_verdict status
        python -m arail.deep_verdict identity --json
+       python -m arail.deep_verdict target <dest>
+       python -m arail.deep_verdict channel
 
 status    the import / binary / sha256 / shadowed / channel / generation lines of `deep status`
 identity  the binary this interpreter loads for `import aerollm_api`, as JSON (exit 1 if none)
+target    would a file copied to <dest> be the one `import aerollm_api` loads? JSON; imports nothing
+channel   how the loaded binary got here, only when it can be proven (else `unknown - <reason>`)
 """
 
 
@@ -1218,6 +1269,14 @@ def main(argv: Optional[list[str]] = None) -> int:
     if args[0] == "status" and len(args) == 1:
         for line in status_lines():
             print(line)
+        return 0
+    if args[0] == "target" and len(args) == 2:
+        print(json.dumps(import_target(args[1])))
+        return 0
+    if args[0] == "channel" and len(args) == 1:
+        with _stdout_to_stderr():
+            b = identity(import_if_needed=True)
+        print(channel(b, Path(_platlib())) if b is not None else "unknown — the loaded binary could not be identified")
         return 0
     if args[0] == "identity" and args[1:] == ["--json"]:
         with _stdout_to_stderr():

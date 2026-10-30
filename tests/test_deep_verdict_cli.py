@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import types
@@ -306,3 +307,73 @@ def test_cli_usage_errors_exit_2(args, tmp_path):
            "ARAIL_DEEP_STATE_DIR": str(tmp_path / "deep")}
     r = _cli(env, *args)
     assert r.returncode == 2 and "usage:" in r.stderr
+
+
+# ── import_target and the `target` / `channel` subcommands (used by build-aerollm.sh) ──────────────
+
+def _site_with(tmp_path, *, package: bool, toplevel: bool, dist: bool):
+    site = tmp_path / "tsite"
+    site.mkdir()
+    if package:
+        (site / "aerollm_api").mkdir()
+        (site / "aerollm_api" / "__init__.py").write_text("")
+    if toplevel:
+        (site / "aerollm_api.abi3.so").write_bytes(b"top-level" * 50)
+    if dist:
+        di = site / "aerollm_api-0.1.0.dist-info"
+        di.mkdir()
+        (di / "METADATA").write_text("Metadata-Version: 2.1\nName: aerollm-api\nVersion: 0.1.0\n")
+        (di / "RECORD").write_text("aerollm_api/__init__.py,,\naerollm_api-0.1.0.dist-info/RECORD,,\n")
+        (di / "direct_url.json").write_text(json.dumps(
+            {"dir_info": {"editable": True}, "url": "file:///Users/someone/src/aerollm/crates/aerollm-api"}))
+    return site
+
+
+def test_import_target_is_free_when_nothing_is_found_or_the_dest_already_wins(tmp_path, monkeypatch):
+    assert dv.import_target(str(tmp_path / "x" / "aerollm_api.abi3.so")) == {"free": True, "winner": None, "owner": ""}
+    site = _site_with(tmp_path, package=False, toplevel=True, dist=False)
+    monkeypatch.syspath_prepend(str(site))
+    got = dv.import_target(str(site / "aerollm_api.abi3.so"))
+    assert got["free"] is True and got["winner"] == str(site / "aerollm_api.abi3.so")
+
+
+def test_import_target_names_the_owner_of_a_package_that_wins(tmp_path, monkeypatch):
+    site = _site_with(tmp_path, package=True, toplevel=False, dist=True)
+    monkeypatch.syspath_prepend(str(site))
+    got = dv.import_target(str(site / "aerollm_api.abi3.so"))
+    assert got["free"] is False and got["winner"] == str(site / "aerollm_api" / "__init__.py")
+    assert got["owner"] == ("pip package aerollm-api 0.1.0, editable from "
+                            "file:///Users/someone/src/aerollm/crates/aerollm-api")
+
+
+def test_import_target_says_no_install_record_when_it_cannot_prove_an_owner(tmp_path, monkeypatch):
+    site = _site_with(tmp_path, package=True, toplevel=False, dist=False)
+    monkeypatch.syspath_prepend(str(site))
+    got = dv.import_target(str(site / "aerollm_api.abi3.so"))
+    assert got["free"] is False and got["owner"] == "no install record"
+
+
+def test_import_target_names_a_pythonpath_entry(tmp_path, monkeypatch):
+    site = _site_with(tmp_path, package=True, toplevel=False, dist=False)
+    monkeypatch.syspath_prepend(str(site))
+    monkeypatch.setenv("PYTHONPATH", str(site))
+    got = dv.import_target(str(tmp_path / "elsewhere" / "aerollm_api.abi3.so"))
+    assert got["free"] is False and got["owner"] == "a PYTHONPATH entry"
+
+
+def test_cli_target_prints_json_and_imports_nothing(tmp_path):
+    site = _site_with(tmp_path, package=True, toplevel=False, dist=False)
+    (site / "aerollm_api" / "__init__.py").write_text("raise RuntimeError('target must not import')\n")
+    env = {"PATH": "/usr/bin:/bin", "PYTHONPATH": f"{site}{os.pathsep}{SRC}", "PYTHONDONTWRITEBYTECODE": "1",
+           "ARAIL_DEEP_STATE_DIR": str(tmp_path / "deep")}
+    r = _cli(env, "target", str(site / "aerollm_api.abi3.so"))
+    assert r.returncode == 0, r.stderr
+    doc = json.loads(r.stdout)
+    assert doc["free"] is False and doc["winner"].endswith("aerollm_api/__init__.py")
+
+
+def test_cli_channel_prints_one_line(fake_deep):
+    fd = fake_deep()
+    r = _cli(fd.env(), "channel")
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip() == "unknown — no install record"

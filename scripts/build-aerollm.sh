@@ -14,14 +14,23 @@
 #     install it directly — the channel an outside user actually gets.
 #
 # Modes:
-#   auto    (default)  sibling present → cargo build; AEROLLM_CHANNEL=release
-#                       or index creds configured → pip; else → bundle
+#   auto    (default)  a pre-rename sibling checkout → cargo build; a renamed or
+#                       unrecognised checkout → refuse (it never switches channel on
+#                       its own); no checkout → AEROLLM_CHANNEL=release or index creds
+#                       configured → pip; else → bundle
 #   build              force a local cargo build from $ARAIL_AEROLLM_REPO
 #   update             pip install --upgrade from the index (release channel)
 #   bundle             force the BUNDLED channel (see bundle_install() below)
-#   status             report importability, version, resolved paths, channel
+#   status             report what import aerollm_api loads, where it came from (only
+#                       when that can be proven) and what the last deep probe found
 #
 # AEROLLM_CHANNEL=dev|release|bundle forces a channel from any mode.
+#
+# This script never says QueueLLM is "ready". An import is not a generation test;
+# every install ends with "Generation is not tested yet: run ./arailctl deep probe"
+# (sprints/2026-10-29-arail-deep-honest). Every install is verified by the sha256 of
+# the file `import aerollm_api` actually loads, and a copy the import would never
+# load (a package directory or a PYTHONPATH entry wins) is refused before it is made.
 #
 # IMPORTANT: the source build uses `cargo build`, NOT `maturin develop`. maturin
 # perturbs the cargo fingerprint (PYO3_ENVIRONMENT_SIGNATURE /
@@ -43,8 +52,10 @@ warn() { printf '%s\n' "${YLW}!${RST} $*" >&2; }
 err()  { printf '%s\n' "${RED}✗${RST} $*" >&2; }
 
 AEROLLM_REPO="${ARAIL_AEROLLM_REPO:-$HOME/ProJects/qukaizen-queuellm}"
-CRATE_DIR="$AEROLLM_REPO/crates/aerollm-api"
+CRATE_DIR="$AEROLLM_REPO/crates/aerollm-api"          # the pre-rename crate: the only one this script builds
+NEW_CRATE_DIR="$AEROLLM_REPO/crates/queuellm-api"     # the renamed crate: detected, refused, never built
 PY="${PYTHON:-python3}"
+SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Release channel — setup.sh overrides these from pyproject
 # [tool.arail.package-sources] (aerollm = pin, aerollm_index = URL).
 AEROLLM_INDEX_URL="${AEROLLM_INDEX_URL:-https://pypi.qukaizen.com/simple/}"
@@ -120,7 +131,7 @@ aerollm_version() {
 }
 
 clone_hint() {
-    err "No QueueLLM sibling repo at ${BOLD}${AEROLLM_REPO}${RST}."
+    err "No QueueLLM checkout at ${BOLD}${AEROLLM_REPO}${RST}."
     warn "For a source (dev) build, either:"
     warn "  1) clone it next to arail:"
     warn "       git clone https://github.com/cdarnell/qukaizen-queuellm \"${AEROLLM_REPO}\""
@@ -128,12 +139,102 @@ clone_hint() {
     warn "Or install the published wheel instead: ./arailctl deep update"
 }
 
+# arail.deep_verdict is stdlib only; PYTHONPATH makes it importable under any $PY.
+verdict_py() {  # $* = arguments for `python -m arail.deep_verdict`
+    PYTHONPATH="$SCRIPT_ROOT/src${PYTHONPATH:+:$PYTHONPATH}" "$PY" -m arail.deep_verdict "$@"
+}
+
+# What is at $ARAIL_AEROLLM_REPO: no-repo | old (builds here) | new (renamed crate) | none
+repo_state() {
+    if [[ ! -d "$AEROLLM_REPO" ]]; then printf 'no-repo\n'
+    elif [[ -f "$CRATE_DIR/Cargo.toml" ]]; then printf 'old\n'
+    elif [[ -f "$NEW_CRATE_DIR/Cargo.toml" ]]; then printf 'new\n'
+    else printf 'none\n'
+    fi
+}
+
+# The true reason a checkout cannot be built here. Prints nothing and builds nothing.
+refuse_repo() {  # $1 = state (no-repo | new | none)
+    case "$1" in
+        no-repo) clone_hint ;;
+        new)
+            err "${AEROLLM_REPO} has the renamed crate crates/queuellm-api (module queuellm_api). This ARAIL can build only the pre-rename crate crates/aerollm-api, so deep rebuild stops here. Nothing was built or installed."
+            warn "For the prebuilt QueueLLM: ./arailctl deep install."
+            ;;
+        none)
+            err "${AEROLLM_REPO} has neither crates/aerollm-api nor crates/queuellm-api, so it is not a QueueLLM checkout this ARAIL can build. Nothing was built or installed."
+            ;;
+    esac
+}
+
+sha256_of() {  # $1 = file
+    if command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" | awk '{print $1}'
+    else
+        "$PY" -c "import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" "$1"
+    fi
+}
+
+# Refuse before any copy if `import aerollm_api` would not load a file at $1.
+check_import_target() {  # $1 = destination <site>/aerollm_api.abi3.so
+    local verdict fields free winner owner
+    verdict="$(verdict_py target "$1" 2>/dev/null)" || verdict=""
+    if [[ -z "$verdict" ]]; then
+        err "Could not tell what \`import aerollm_api\` loads in ${PY}. Nothing was installed."
+        exit 1
+    fi
+    # one JSON object in, three tab-separated fields out
+    fields="$("$PY" -c 'import json,sys; d=json.loads(sys.argv[1]); print("\t".join([str(d.get("free")), str(d.get("winner")), str(d.get("owner"))]))' "$verdict")"
+    IFS=$'\t' read -r free winner owner <<<"$fields"
+    if [[ "$free" != "True" ]]; then
+        err "import aerollm_api in ${PY} loads ${winner} (${owner}). A copy at ${1} would never load. Nothing was installed."
+        warn "To use this build, remove that first, for example: ${PY} -m pip uninstall aerollm-api (this changes your venv)."
+        exit 1
+    fi
+}
+
+# After an install: the file `import aerollm_api` loads must be the file we put there.
+# $1 = dest, $2 = expected sha256, $3 = backup of the previous file (may be empty/missing),
+# $4 = the install-record marker we wrote (may be empty), $5 = backup of the previous marker.
+# On a mismatch the previous state is put back and the temp backups are removed.
+verify_loaded() {
+    local ident loaded_sha loaded_path
+    ident="$(verdict_py identity --json 2>/dev/null)" || ident=""
+    [[ -n "$ident" ]] || ident='{}'
+    loaded_sha="$("$PY" -c 'import json,sys; print(json.loads(sys.argv[1]).get("sha256",""))' "$ident" 2>/dev/null || true)"
+    loaded_path="$("$PY" -c 'import json,sys; print(json.loads(sys.argv[1]).get("native_path",""))' "$ident" 2>/dev/null || true)"
+    if [[ "$loaded_sha" != "$2" ]]; then
+        rm -f -- "$1"
+        if [[ -n "${3:-}" && -f "$3" ]]; then cp -f -- "$3" "$1"; fi
+        if [[ -n "${4:-}" ]]; then
+            rm -f -- "$4"
+            if [[ -n "${5:-}" && -f "$5" ]]; then cp -f -- "$5" "$4"; fi
+        fi
+        if [[ -z "$loaded_sha" ]]; then
+            err "Installed ${1}, but \`import aerollm_api\` fails in ${PY}. Removed the copy."
+        else
+            err "Installed ${1}, but import aerollm_api loads ${loaded_path} (sha256 ${loaded_sha:0:12}…). Removed the copy."
+        fi
+        [[ -n "${3:-}" && -f "$3" ]] && warn "The file that was there before was put back."
+        rm -f -- "${3:-}" "${5:-}"
+        exit 1
+    fi
+}
+
+GENERATION_HINT="Generation is not tested yet: run ./arailctl deep probe."
+
 cargo_build() {
-    if [[ ! -d "$CRATE_DIR" ]]; then clone_hint; exit 1; fi
+    local state; state="$(repo_state)"
+    if [[ "$state" != "old" ]]; then refuse_repo "$state"; exit 1; fi
     if ! command -v cargo >/dev/null 2>&1; then
         err "cargo not found — install the Rust toolchain (https://rustup.rs) and retry."
         exit 1
     fi
+    local dest; dest="$(site_dir)"
+    require_writable_site_dir "$dest"
+    dest="$dest/aerollm_api.abi3.so"
+    # Fail before the (minutes-long) build if a copy at dest could never be loaded.
+    check_import_target "$dest"
     info "Building aerollm_api from ${BOLD}${AEROLLM_REPO}${RST} (cargo --release)…"
     ( cd "$AEROLLM_REPO" && cargo build --release -p aerollm-api --features extension-module )
     local built=""
@@ -146,13 +247,38 @@ cargo_build() {
         err "cargo build succeeded but no libaerollm_api.{dylib,so} under target/release."
         exit 1
     fi
-    local dest; dest="$(site_dir)"
-    require_writable_site_dir "$dest"
-    dest="$dest/aerollm_api.abi3.so"
+    # QueueLLM's own preamble check: a build made while the Metal toolchain was down can exit 0
+    # and still fail at runtime. The marker string must not be in the artifact.
+    local poison; poison="$(LC_ALL=C grep -a -c downloadComponent "$built" || true)"
+    if [[ "${poison:-0}" != "0" ]]; then
+        err "The build carries the Metal toolchain error marker (downloadComponent). It would fail at runtime. Not installed. See QueueLLM docs/self-hosted-runner-setup.md."
+        exit 1
+    fi
+    local sha; sha="$(sha256_of "$built")"
+    local backup=""
+    if [[ -f "$dest" ]]; then backup="$(mktemp "${TMPDIR:-/tmp}/arail-aerollm-prev.XXXXXX")"; cp -f -- "$dest" "$backup"; fi
     info "Installing → ${dest}"
     cp -f "$built" "$dest"
-    verify_or_die
-    info "${GRN}QueueLLM ready${RST} (source build) — the deep-mode 2nd inference."
+    verify_loaded "$dest" "$sha" "$backup"
+    rm -f -- "$backup"
+    write_build_marker "$(dirname "$dest")" "$sha" "$built"
+    info "QueueLLM installed (source build, sha256 ${sha:0:12}…). ${GENERATION_HINT}"
+}
+
+# The same role as THIRD-PARTY-LICENSES/aerollm/BUNDLE.json: where this binary came from.
+write_build_marker() {  # $1 = site dir, $2 = artifact sha256, $3 = artifact path
+    local commit dirty
+    commit="$(git -C "$AEROLLM_REPO" rev-parse HEAD 2>/dev/null || echo unknown)"
+    if [[ -n "$(git -C "$AEROLLM_REPO" status --porcelain 2>/dev/null)" ]]; then dirty=true; else dirty=false; fi
+    "$PY" - "$1/aerollm_api.build.json" "$commit" "$dirty" "$2" "$(wc -c < "$3" | tr -d ' ')" <<'PYMARK'
+import json, sys, time
+path, commit, dirty, sha, size = sys.argv[1:6]
+json.dump({
+    "schema": "arail.aerollm-build/v1", "queuellm_commit": commit, "queuellm_dirty": dirty == "true",
+    "crate": "crates/aerollm-api", "artifact_sha256": sha, "artifact_bytes": int(size),
+    "built_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "built_by": "scripts/build-aerollm.sh",
+}, open(path, "w"), indent=2)
+PYMARK
 }
 
 pip_install() {  # $* = extra pip args (e.g. --upgrade)
@@ -168,7 +294,20 @@ pip_install() {  # $* = extra pip args (e.g. --upgrade)
         exit 1
     fi
     verify_or_die
-    info "${GRN}QueueLLM ready${RST} (release wheel $(aerollm_version)) — the 2nd inference."
+    # The file that loads must be the one pip's RECORD lists, not a different copy that wins the import.
+    local ch; ch="$(verdict_py channel 2>/dev/null || true)"
+    case "$ch" in
+        "pip ("*) : ;;
+        *)
+            err "pip installed ${AEROLLM_PIP_SPEC}, but import aerollm_api does not load the file pip installed: ${ch:-unknown}."
+            warn "Nothing here is a QueueLLM you can rely on yet. See ./arailctl deep status."
+            exit 1
+            ;;
+    esac
+    local ident sha
+    ident="$(verdict_py identity --json 2>/dev/null || echo '{}')"
+    sha="$("$PY" -c 'import json,sys; print(json.loads(sys.argv[1]).get("sha256",""))' "$ident")"
+    info "QueueLLM installed (release wheel $(aerollm_version), sha256 ${sha:0:12}…). ${GENERATION_HINT}"
 }
 
 verify_or_die() {
@@ -207,13 +346,16 @@ bundle_install() {
     dest_so="$dest_dir/aerollm_api.abi3.so"
     dest_marker="$dest_dir/aerollm_api.bundle.json"
 
+    # A copy that `import aerollm_api` would never load is not an install. This comes first and
+    # --force does not skip it: a package directory or a PYTHONPATH entry already wins.
+    check_import_target "$dest_so"
+
     # F7: never shadow a maintainer's DEV/RELEASE install that got there by
     # some other channel — only a channel that left the provenance marker
     # (i.e. a previous bundled install) is safe to silently overwrite.
     if [[ -f "$dest_so" && ! -f "$dest_marker" && "$FORCE" != "1" ]]; then
-        err "aerollm_api.abi3.so is already installed at ${BOLD}${dest_so}${RST} without a"
-        err "bundle provenance marker — looks like a DEV or RELEASE install owns it."
-        warn "Refusing to overwrite. Re-run with --force to install the bundled channel anyway."
+        err "an aerollm_api.abi3.so with no install record is already at ${BOLD}${dest_so}${RST}."
+        warn "Refusing to overwrite it. Re-run with --force to install the bundled channel anyway."
         exit 1
     fi
 
@@ -351,6 +493,9 @@ bundle_install() {
     warn "aerollm_api.abi3.so is prebuilt native code, downloaded and executed on"
     warn "import. It is integrity-checked against the release manifest (same-origin"
     warn "trust), NOT signature-verified or sandboxed — see docs/cli.md."
+    local backup="" mbackup=""
+    if [[ -f "$dest_so" ]]; then backup="$(mktemp "${TMPDIR:-/tmp}/arail-aerollm-prev.XXXXXX")"; cp -f -- "$dest_so" "$backup"; fi
+    if [[ -f "$dest_marker" ]]; then mbackup="$(mktemp "${TMPDIR:-/tmp}/arail-aerollm-prevm.XXXXXX")"; cp -f -- "$dest_marker" "$mbackup"; fi
     cp -f "$extract_dir/aerollm_api.abi3.so" "$dest_so"
     cp -f "$extract_dir/MANIFEST.json" "$dest_marker"
 
@@ -362,11 +507,14 @@ bundle_install() {
         warn "If this was a browser download, quarantine may be the cause (F5) — retry via setup."
         exit 1
     fi
+    # The file that loads must be the file we verified against MANIFEST.json.
+    verify_loaded "$dest_so" "$so_sha_actual" "$backup" "$dest_marker" "$mbackup"
+    rm -f -- "$backup" "$mbackup"
     local ver; ver="$("$PY" -c "import json; print(json.load(open('$dest_marker')).get('aerollm_version','unknown'))" 2>/dev/null || echo unknown)"
-    info "${GRN}QueueLLM ready${RST} (bundled ${ver}) — the deep-mode 2nd inference."
+    info "QueueLLM installed (bundled ${ver}, sha256 ${so_sha_actual:0:12}…). ${GENERATION_HINT}"
 }
 
-# ── channel detection (for status + auto's rule 2) ──────────────────────────
+# ── channel detection (for auto's rule 2) ──────────────────────────────────
 _release_creds_configured() {
     [[ -n "${PIP_INDEX_URL:-}" || -n "${PIP_EXTRA_INDEX_URL:-}" ]] && return 0
     [[ "$AEROLLM_INDEX_URL" != "https://pypi.qukaizen.com/simple/" ]] && return 0
@@ -374,57 +522,31 @@ _release_creds_configured() {
     return 1
 }
 
-bundle_marker_path() { printf '%s\n' "$(site_dir 2>/dev/null)/aerollm_api.bundle.json"; }
-
-installed_channel() {
-    if ! import_ok; then
-        printf 'none\n'
-        return
-    fi
-    local marker; marker="$(bundle_marker_path)"
-    if [[ -f "$marker" ]]; then
-        printf 'bundled\n'
-    elif [[ -d "$CRATE_DIR" ]]; then
-        # Ambiguous without a marker; a sibling repo being present is the
-        # closest signal we have that this was a source (dev) build.
-        printf 'dev\n'
-    else
-        printf 'release\n'
-    fi
+# The refusal an `auto` run prints for a checkout it cannot build: no silent switch of channel.
+auto_refuse() {  # $1 = state (new | none)
+    refuse_repo "$1"
+    warn "Not switching to another channel on my own. Prebuilt instead: ./arailctl deep install (or AEROLLM_CHANNEL=bundle)."
+    exit 1
 }
 
 case "$MODE" in
     status)
+        state="$(repo_state)"
         info "QueueLLM (2nd inference) status"
         printf '    repo:         %s\n' "$AEROLLM_REPO"
-        if [[ -d "$CRATE_DIR" ]]; then
-            printf '    crate:        %s (found → source/dev channel)\n' "$CRATE_DIR"
-        else
-            printf '    crate:        %s %s(missing → release/bundled channel)%s\n' "$CRATE_DIR" "$YLW" "$RST"
-        fi
+        case "$state" in
+            old)     printf '    crate:        crates/aerollm-api, the pre-rename crate; deep rebuild can build it\n' ;;
+            new)     printf '    crate:        crates/queuellm-api, the renamed crate; deep rebuild cannot build it yet\n' ;;
+            none)    printf '    crate:        neither crates/aerollm-api nor crates/queuellm-api; deep rebuild cannot build this checkout\n' ;;
+            no-repo) printf '    crate:        no checkout at that path\n' ;;
+        esac
         printf '    index:        %s\n' "$AEROLLM_INDEX_URL"
-        printf '    site-packages:%s\n' " $(site_dir 2>/dev/null || echo '?')"
-        if import_ok; then
-            printf '    aerollm_api:  %simportable ✓%s (version %s)\n' "$GRN" "$RST" "$(aerollm_version)"
-        else
-            printf '    aerollm_api:  %snot installed — run: ./arailctl deep install (or: deep rebuild / deep update)%s\n' "$YLW" "$RST"
-        fi
-        printf '    channel:      %s\n' "$(installed_channel)"
-        marker="$(bundle_marker_path)"
-        if [[ -f "$marker" ]]; then
-            "$PY" -c "
-import json
-try:
-    m = json.load(open('$marker'))
-    ver = m.get('aerollm_version', 'unknown')
-    sha = m.get('aerollm_commit', '?')[:7]
-    built = m.get('built_at', 'unknown')
-    print(f'    bundle:       QueueLLM {ver} ({sha}, built {built})')
-except Exception:
-    print('    bundle:       channel: unknown (installed, provenance not recorded)')
-" 2>/dev/null || printf '    bundle:       %sunknown (installed, provenance not recorded)%s\n' "$YLW" "$RST"
-        fi
-        printf '    bg pressure:  %s\n' "${ARAIL_AEROLLM_BG_PRESSURE_PCT:-0.60 (default)}"
+        printf '    python:       %s\n' "$PY"
+        verdict_py status || printf '    import:       could not run arail.deep_verdict under %s\n' "$PY"
+        pressure="${ARAIL_AEROLLM_BG_PRESSURE_PCT:-0.60 (default)}"
+        printf '    bg pressure:  %s\n' "$pressure"
+        # the number is taught: what it is, its bar and why, what out of range means, where the fault lives
+        printf '                  %s: the Metal memory-pressure ceiling above which background deep work waits. Bar: below it background deep may run; ARAIL_AEROLLM_BG_PRESSURE_PCT changes it (clamped 0.30 to 0.75, because the hard chat guard sits at 0.75). Out of range: above it agents use the fast model (reason deferred_now). Fault lives in: memory pressure on this Mac, not QueueLLM.\n' "$pressure"
         exit 0
         ;;
     build)
@@ -442,16 +564,25 @@ except Exception:
             release) pip_install ;;
             bundle)  bundle_install ;;
             "")
-                if [[ -d "$CRATE_DIR" ]]; then
-                    info "Local sibling repo found → building from source (dev channel)."
-                    cargo_build
-                elif _release_creds_configured; then
-                    info "Release-index credentials configured → installing the published wheel (release channel)."
-                    pip_install
-                else
-                    info "No sibling repo, no release credentials → installing the bundled binary (bundled channel)."
-                    bundle_install
-                fi
+                state="$(repo_state)"
+                case "$state" in
+                    old)
+                        info "Local sibling repo found → building from source (dev channel)."
+                        cargo_build
+                        ;;
+                    new|none)
+                        auto_refuse "$state"
+                        ;;
+                    *)
+                        if _release_creds_configured; then
+                            info "Release-index credentials configured → installing the published wheel (release channel)."
+                            pip_install
+                        else
+                            info "No QueueLLM checkout, no release credentials → installing the bundled binary (bundled channel)."
+                            bundle_install
+                        fi
+                        ;;
+                esac
                 ;;
             *)
                 err "AEROLLM_CHANNEL must be one of: dev | release | bundle"
