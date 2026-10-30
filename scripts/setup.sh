@@ -675,14 +675,14 @@ install_accel_deps() {
         info "Skipping QueueLLM build (ARAIL_SKIP_AEROLLM_PROBE=1)."
     elif [[ "$(uname -s)" == "Darwin" ]] && [[ "$(uname -m)" == "arm64" ]]; then
         if python3 -c "import aerollm_api" 2>/dev/null; then
-            info "aerollm_api already present — QueueLLM is the deep-mode 2nd inference."
+            info "aerollm_api already present — generation not tested here; run ./arailctl deep probe."
         else
             info "Installing QueueLLM (source → release → bundled, first that applies)…"
             if AEROLLM_INDEX_URL="$AEROLLM_INDEX_URL" AEROLLM_PIP_SPEC="$AEROLLM_PIP_SPEC" \
                AEROLLM_BUNDLE_TAG="$AEROLLM_BUNDLE_TAG" \
                AEROLLM_BUNDLE_SHA256="$AEROLLM_BUNDLE_SHA256" \
                bash "${REPO_ROOT:-$PWD}/scripts/build-aerollm.sh" auto; then
-                info "QueueLLM ready — the deep-mode 2nd inference on Apple Silicon."
+                info "QueueLLM installed — run ./arailctl deep probe to test generation."
             else
                 warn "QueueLLM not installed (see above). The lab runs without the"
                 warn "2nd inference until you run: ./arailctl deep install (bundled binary,"
