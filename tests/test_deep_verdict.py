@@ -536,6 +536,87 @@ def test_qa4_a_folder_swapped_for_a_link_in_the_middle_of_an_update_still_gets_t
     assert stat.S_IMODE(moved.stat().st_mode) == 0o700
 
 
+# ── QA-5 (fix pass 3): error text reaches a terminal without its control characters ─────────────────
+
+NASTY = "\x1b[2K\x1b[1A\x9b2K\x07\x7f"          # erase line, cursor up, a one-character CSI, BEL, DEL
+ESC_ERROR = "RuntimeError: \x1b[2K\x1b[1Ainjected\x1b[0m\x07 rms_norm"
+
+
+def controls_in(text: str, allowed: str = "") -> list[str]:
+    """The characters of ``text`` a terminal would act on: C0 controls, DEL and the C1 range."""
+    return sorted({hex(ord(c)) for c in text if (ord(c) < 0x20 or 0x7F <= ord(c) <= 0x9F) and c not in allowed})
+
+
+def test_qa5_clip_replaces_what_a_terminal_acts_on_and_keeps_the_words():
+    raw = ("RuntimeError: \x1b[2K\x1b[1Ainjected\x1b[0m\x07 rms_norm\nsecond line\t\x00nul \x7fdel \x80c1 "
+           "\x9b31m csi \x9f")
+    assert dv._clip(raw, 300) == "RuntimeError: ?[2K?[1Ainjected?[0m? rms_norm second line ?nul ?del ?c1 ?31m csi ?"
+
+
+def test_qa5_exactly_the_c0_del_and_c1_controls_are_replaced_and_whitespace_still_collapses():
+    """Every code point to U+02FF, one at a time: the replaced set is the spec's and nothing else moves."""
+    for i in range(0x300):
+        ch = chr(i)
+        got = dv._clip("a" + ch + "b", 9)
+        if ch.isspace():
+            want = "a b"                       # newline, tab, U+001C-U+001F, U+0085, U+00A0 ... are spaces, not "?"
+        elif i < 0x20 or 0x7F <= i <= 0x9F:
+            want = "a?b"
+        else:
+            want = "a" + ch + "b"
+        assert got == want, f"U+{i:04X} came out as {got!r}, wanted {want!r}"
+
+
+def test_qa5_clip_leaves_ordinary_text_alone_and_the_limit_counts_what_is_shown():
+    ok = "RuntimeError: échec — 失败 · 😀 [rms_norm] has 1 elements…"
+    assert dv._clip(ok, 300) == ok
+    cut = dv._clip("x" * 400, 300)
+    assert len(cut) == 300 and cut.endswith("…")
+    assert dv._clip("\x1b" * 400, 300) == "?" * 299 + "…"
+
+
+def test_qa5_printable_makes_exactly_one_line_without_collapsing_or_cutting():
+    assert dv._printable("a\nb\rc\x1b[0m  d\te") == "a?b?c?[0m  d?e"
+    assert dv._printable(None) == "" and dv._printable("x" * 500) == "x" * 500
+
+
+def test_qa5_the_stored_error_text_is_clean_in_the_file_too(fake_deep):
+    fake_deep()
+    b = dv.identity()
+    dv.note_call(False, error=ESC_ERROR, consumer="agent:\x1b[2Kbuddy")
+    f = read_store()["binaries"][b.sha256]["failure"]
+    assert f["error"] == f["last_error"] == "RuntimeError: ?[2K?[1Ainjected?[0m? rms_norm"
+    assert f["consumer"] == "agent:?[2Kbuddy"
+    raw = store_path().read_text(encoding="utf-8")
+    assert "\\u001b" not in raw and "\\u0007" not in raw, "no control character is stored, escaped or not"
+
+
+@pytest.mark.parametrize("which", ["a stored call failure", "a stored failing probe"])
+def test_qa5_a_hand_edited_store_cannot_write_control_characters_to_the_terminal(fake_deep, which):
+    """Error text is cleaned when it is stored, but the file is editable and some of what `deep status` prints
+    is not error text at all: the lab and consumer names, the timestamps, the probe's call number. The block
+    is made printable where it leaves the module. A newline in a name cannot forge a second row either."""
+    fake_deep()
+    b = dv.identity()
+    forged = "\n    generation:   passing - 5/5 at the last probe"
+    if which == "a stored call failure":
+        entry = {"failure": _good_failure(since="2026-10-31" + NASTY + "T13:35:02Z", lab="lab" + NASTY + forged,
+                                           consumer="agent:" + NASTY, error="boom" + NASTY, last_error="boom" + NASTY)}
+    else:
+        entry = {"failure": _good_failure(source="probe", lab="lab" + NASTY),
+                 "last_probe": {"outcome": "fail", "started_ts": 1.0, "started_at": "x", "passed": 1, "total": 5,
+                                "at": "2026-10-31" + NASTY + "T13:35:02Z",
+                                "first_error": {"call": "2" + NASTY + forged, "kind": "long", "error": "boom" + NASTY}}}
+    store_path().parent.mkdir(parents=True, exist_ok=True)
+    store_path().write_text(json.dumps(_entry_doc(b.sha256, **entry)), encoding="utf-8")
+    lines = dv.status_lines()
+    text = "\n".join(lines)
+    assert "FAILING" in text and "boom" in text, text
+    assert controls_in(text, allowed="\n") == [], "no row carries a control character"
+    assert all("\n" not in ln for ln in lines)
+    assert sum(1 for ln in lines if ln.lstrip().startswith("generation:")) == 1, "a name cannot forge a row"
+
+
 # ── U5: a failure persists, other processes see it, a later success does not clear ──
 
 def test_u5_a_failure_persists_and_another_process_sees_it(fake_deep):

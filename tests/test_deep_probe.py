@@ -507,6 +507,41 @@ def test_qa4_a_state_folder_another_user_owns_is_not_run_in_json_too(fake_deep, 
     assert list(shared.iterdir()) == []
 
 
+# ── QA-5 (fix pass 3): nothing the probe prints carries a control character ────────────────────────
+
+def _controls(text: str) -> list[str]:
+    return sorted({hex(ord(c)) for c in text if (ord(c) < 0x20 and c != "\n") or 0x7F <= ord(c) <= 0x9F})
+
+
+def test_qa5_a_probe_line_that_is_not_error_text_is_made_printable_too(fake_deep):
+    """Call rows and error text are clipped; the other lines carry paths and names from the environment.
+    `say` makes every line printable, so none of them can steer the terminal."""
+    fd = fake_deep("pass")
+    r = run_probe(fd, AEROLLM_MODEL="no-such\x1b[2K\x9b31mmodel")
+    assert r.returncode == 5
+    assert "not run   model dir missing:" in r.stdout and "no-such?[2K?31mmodel" in r.stdout
+    assert _controls(r.stdout) == [], r.stdout
+
+
+def test_qa5_json_keeps_the_data_and_writes_del_and_c1_as_escapes():
+    """The probe's --json keeps its dashes readable (ensure_ascii=False), which would write DEL and C1 raw."""
+    data = {"reason": "a\x7fb\x80c\x9bd\x9fe\x1b[2K — é 😀", "n": [1, 2.5, None]}
+    text = dp._json_text(data, ensure_ascii=False, indent=2)
+    assert json.loads(text) == data, "a program gets the same characters back"
+    assert _controls(text) == []
+    assert "—" in text and "é" in text, "the readable characters stay readable"
+    assert "\\u007f" in text and "\\u009b" in text and "\\u001b" in text
+
+
+def test_qa5_probe_json_keeps_the_data_and_has_no_raw_del_or_c1(fake_deep):
+    fd = fake_deep("pass")
+    hostile = "no-such\x1b[2K\x7f\x9b31mmodel"
+    r = run_probe(fd, "--json", AEROLLM_MODEL=hostile)
+    assert r.returncode == 5
+    assert hostile in json.loads(r.stdout)["not_run_reason"], "the data is the same"
+    assert _controls(r.stdout) == []
+
+
 def test_w3_the_child_stops_at_the_next_call_when_its_supervisor_is_gone_and_the_pipe_stays_open(fake_deep):
     """The getppid check, alone. Q19 passes without it, because a killed supervisor closes the pipe and the
     child's next write fails with EPIPE. Here this test holds the pipe's read end open, so EPIPE cannot

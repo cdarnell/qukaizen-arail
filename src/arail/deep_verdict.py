@@ -176,8 +176,28 @@ def _utc_minute(iso: Optional[str]) -> str:
     return f"{iso[:10]} {iso[11:16]} UTC"
 
 
+# What a terminal acts on: the C0 controls (NUL, BEL, BS, ESC ...), DEL, and the C1 range U+0080-U+009F
+# (U+009B is a one-character CSI). Error text can come from the native runtime, from a stored verdict
+# anyone with write access can edit, or from a package's metadata; none of it may move the cursor or erase
+# the FAILING line (CWE-150).
+_CONTROLS = {c: "?" for c in (*range(0x00, 0x20), 0x7F, *range(0x80, 0xA0))}
+
+
+def _printable(text: Any) -> str:
+    """``text`` as one line a terminal shows without acting on it.
+
+    Every C0 control (a newline or a bare CR too, because the caller prints exactly one line), DEL and every
+    C1 control becomes ``?``. Nothing else changes: spaces, accents, symbols and punctuation pass through,
+    whitespace is not collapsed and nothing is cut off (``_clip`` does both, before this)."""
+    return str(text if text is not None else "").translate(_CONTROLS)
+
+
 def _clip(text: Any, limit: int) -> str:
-    s = " ".join(str(text if text is not None else "").split())
+    """Error or label text, as one printable line of at most ``limit`` characters.
+
+    Whitespace (newlines and tabs included) collapses to single spaces first, so a multi-line error keeps
+    its words; the control characters that are left (ESC, BEL, DEL, C1 ...) become ``?``."""
+    s = _printable(" ".join(str(text if text is not None else "").split()))
     if len(s) <= limit:
         return s
     return s[: max(limit - 1, 0)] + "…"
@@ -1338,7 +1358,15 @@ def status_lines(*, site_dir: Optional[Path] = None, quiet_import: bool = True) 
 
     Four-space indent and a 14-column label, to sit under the build script's own lines.
     Imports the frozen module (a status check always did), with stdout parked on stderr.
+
+    Every line is run through ``_printable`` here, at the one place the block leaves this module: besides
+    error text it carries fields no ``_clip`` touches (the lab and consumer names, timestamps, paths, the
+    version and channel text), and a verdict file anyone with write access can edit supplies all of them.
     """
+    return [_printable(line) for line in _status_lines(site_dir=site_dir, quiet_import=quiet_import)]
+
+
+def _status_lines(*, site_dir: Optional[Path], quiet_import: bool) -> list[str]:
     def row(label: str, text: str) -> str:
         return f"    {label + ':':<14}{text}"
 
@@ -1441,7 +1469,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     if args[0] == "channel" and len(args) == 1:
         with _stdout_to_stderr():
             b = identity(import_if_needed=True)
-        print(channel(b, Path(_platlib())) if b is not None else "unknown — the loaded binary could not be identified")
+        print(_printable(channel(b, Path(_platlib())) if b is not None
+                         else "unknown — the loaded binary could not be identified"))
         return 0
     if args[0] == "identity" and args[1:] == ["--json"]:
         with _stdout_to_stderr():

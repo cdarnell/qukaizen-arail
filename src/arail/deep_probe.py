@@ -637,6 +637,21 @@ def _rows_from_result(res: dict, loaded: Optional[dict], tokens: list, call_time
     return rows
 
 
+# ── JSON text ───────────────────────────────────────────────────────────────
+_JSON_ESCAPES = {c: "\\u%04x" % c for c in (0x7F, *range(0x80, 0xA0))}
+
+
+def _json_text(obj: Any, **kw: Any) -> str:
+    """``json.dumps(obj, **kw)`` that never writes DEL or a C1 control raw.
+
+    json escapes the C0 controls itself, and the default ``ensure_ascii=True`` escapes everything outside
+    space..``~`` (DEL and C1 included). With ``ensure_ascii=False``, which the probe uses to keep its dashes
+    and dots readable, DEL and U+0080-U+009F go out as they are. They can only sit inside a JSON string,
+    where ``\\u00XX`` is exact: a program reads back the same characters, a terminal gets nothing to act on.
+    Data stays data; nothing is replaced with ``?``."""
+    return json.dumps(obj, **kw).translate(_JSON_ESCAPES)
+
+
 # ── JSON teaching ───────────────────────────────────────────────────────────
 def _numeric_leaves(obj: Any, path: str = "") -> list[tuple[str, Any]]:
     out: list[tuple[str, Any]] = []
@@ -690,6 +705,7 @@ def execute(opts: dict, *, memory_reader: Optional[Callable[[], Optional[float]]
     started_at = dv._iso(started_ts)
 
     def say(text: str) -> None:
+        text = dv._printable(text)       # QA-5: the one place a probe line reaches the terminal
         lines.append(text)
         nums.mark(len(lines) - 1)
         if not json_mode:
@@ -1014,7 +1030,7 @@ def run(argv: list[str], *, memory_reader: Optional[Callable[[], Optional[float]
         return EXIT_INTERRUPTED
     if opts["json"]:
         attach_teaching(pr.doc)
-        out.write(json.dumps(pr.doc, ensure_ascii=False, indent=2) + "\n")
+        out.write(_json_text(pr.doc, ensure_ascii=False, indent=2) + "\n")
     else:
         for ln in legend_lines(pr.nums.used):
             out.write(ln + "\n")

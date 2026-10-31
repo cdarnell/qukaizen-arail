@@ -548,6 +548,14 @@ link, or belongs to another user, nothing is written there (the failure is kept
 in memory and `deep status` says `NOT SAVED` and why; the probe exits `5`). A
 symbolic link above it, such as a lab kept on another disk, is fine.
 
+**What it prints.** Error text is one line: runs of whitespace become one
+space, and a control character in it (an escape sequence, a bell, a stray
+carriage return) becomes `?`, in the text, in the stored record and in `--json`
+alike. A runtime's error message, or a hand-edited `verdict.json`, cannot move
+the cursor or erase the `FAILING` line. The other strings in `--json` (paths,
+names) are kept exactly; the characters a terminal could act on in them are
+written as `\uXXXX` escapes, which a program reads back as the same characters.
+
 **Who reads it.** The research truth strip (`reason_code: deep_failing`), the
 tier-1 health of the model registry (status bar dot, degradation banner,
 switcher), the background agents and the World Curator (they use the fast

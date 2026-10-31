@@ -444,3 +444,23 @@ def test_cli_channel_prints_one_line(fake_deep):
     r = _cli(fd.env(), "channel")
     assert r.returncode == 0, r.stderr
     assert r.stdout.strip() == "unknown — no install record"
+
+
+# ── QA-5 (fix pass 3): nothing the CLI prints carries a control character ──────────────────────────
+
+def _controls(text: str) -> list[str]:
+    return sorted({hex(ord(c)) for c in text if (ord(c) < 0x20 and c != "\n") or 0x7F <= ord(c) <= 0x9F})
+
+
+def test_qa5_the_channel_text_is_made_printable_in_status_and_in_the_channel_command(live_site, monkeypatch, capsys):
+    """The marker is a file in site-packages; its text is not error text, so `_clip` never saw it."""
+    marker = live_site.site / "aerollm_api.build.json"
+    marker.write_text(json.dumps({"artifact_sha256": _sha(LIVE_BYTES), "queuellm_commit": "e730d5fe" + "0" * 32,
+                                  "queuellm_dirty": False, "built_at": "2026-10-29\x1b[2K\x9b31mT14:00:00Z"}))
+    lines = _lines(live_site.site)
+    assert "source build — QueueLLM commit e730d5f, built 2026-10-29?[2K?31mT14:00:00Z" in _find(lines, "channel")
+    assert _controls("\n".join(lines)) == []
+    monkeypatch.setattr(dv, "_platlib", lambda: str(live_site.site))
+    assert dv.main(["channel"]) == 0
+    printed = capsys.readouterr().out
+    assert "built 2026-10-29?[2K?31mT14:00:00Z" in printed and _controls(printed) == []
