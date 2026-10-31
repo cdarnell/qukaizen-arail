@@ -13,6 +13,7 @@ import threading
 import time
 import uuid
 from abc import ABC, abstractmethod
+from concurrent.futures import CancelledError as _FuturesCancelledError
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any, Iterator, Optional
@@ -1519,6 +1520,27 @@ def _note_deep(ok: bool, error: object = None) -> None:
         pass
 
 
+class _DeepBackendClosed(RuntimeError):
+    """ARAIL closed this backend (Eject, a deep-model switch, process exit) before or while a call ran.
+
+    That is ARAIL's own teardown, not a fault of the binary, so the deep verdict is never told about
+    it: a recorded failure is sticky and checkout-wide, and this one would put a false claim about the
+    binary on every surface (review B1 of sprint 2026-10-29-arail-deep-honest). A RuntimeError, so a
+    caller that handled the old "cannot schedule new futures" error handles this one too."""
+
+
+_CLOSED_MESSAGE = ("the deep model was closed (ejected from Chat, switched, or the lab is shutting "
+                   "down), so this call was not made. Load it again to use it.")
+
+# What ends a deep call without saying anything about the binary: the caller was interrupted, ARAIL
+# closed the backend, or `_close()` cancelled a queued call. concurrent.futures.CancelledError is an
+# Exception on 3.11, which is why a cancelled call used to be filed as a failure. Everything else a
+# call raises, BaseException subclasses included (PyO3's PanicException derives from BaseException),
+# is the runtime failing and is filed.
+_NOT_A_RUNTIME_FAULT = (KeyboardInterrupt, SystemExit, GeneratorExit, _FuturesCancelledError,
+                        _DeepBackendClosed)
+
+
 def _note_deep_load(error: object, *, persist: bool) -> None:
     """Same guard for a runtime that would not load. ``persist=False`` is a fault of
     this lab (the model dir), not of the binary, so it is kept in this process only."""
@@ -1880,14 +1902,27 @@ class AeroLLMBackend(BaseBackend):
 
     def _generate_on_worker(self, wrapped: str,
                             gen_kwargs: dict[str, Any]) -> str:
-        """Run on the executor worker. Holds the unsendable invariant."""
-        return self._runtime.generate(wrapped, **gen_kwargs)
+        """Run on the executor worker. Holds the unsendable invariant.
+
+        An empty runtime means two different things, and ``_closed`` tells them apart: a call that
+        was already queued when ``_close()`` dropped the Runtime is ARAIL's teardown (not filed); a
+        Runtime that is absent while the backend is open is a fault of this deep path (filed)."""
+        rt = self._runtime
+        if rt is None:
+            if self._closed:
+                raise _DeepBackendClosed(_CLOSED_MESSAGE)
+            raise RuntimeError("the deep runtime is not running (it never started on this backend)")
+        return rt.generate(wrapped, **gen_kwargs)
 
     def complete(self, prompt: str, max_tokens: int = 512,
                  temperature: float = 0.7,
                  top_p: Optional[float] = None,
                  *, system: Optional[str] = None,
                  messages: Optional[list] = None) -> ModelResponse:
+        if self._closed:
+            # Eject or a model switch closed this backend; a router that still holds it gets this,
+            # not a verdict about the binary.
+            raise _DeepBackendClosed(_CLOSED_MESSAGE)
         if system:
             prompt = f"{system}\n\n{prompt}"
         start = time.time()
@@ -1902,12 +1937,18 @@ class AeroLLMBackend(BaseBackend):
 
         # Hop to the dedicated runtime thread; .result() blocks until
         # it returns. If the worker raises, .result() re-raises here.
+        # submit() is outside the try on purpose: a RuntimeError from the executor itself ("cannot
+        # schedule new futures after shutdown", or after interpreter shutdown) is ARAIL's own
+        # teardown, not a fault of the binary, and is not filed.
+        future = self._executor.submit(self._generate_on_worker, wrapped, gen_kwargs)
         try:
-            text = self._executor.submit(
-                self._generate_on_worker, wrapped, gen_kwargs
-            ).result()
-        except Exception as exc:
-            _note_deep(False, exc)     # filed for every surface; the caller still sees the error
+            text = future.result()
+        except BaseException as exc:
+            # A runtime fault is filed for every surface, BaseException subclasses included (a
+            # native panic). An interruption, a cancelled call and ARAIL's own teardown are not.
+            # Either way the caller gets the very object that was raised.
+            if not isinstance(exc, _NOT_A_RUNTIME_FAULT):
+                _note_deep(False, exc)
             raise
 
         # The runtime returns just the decoded continuation, but it may

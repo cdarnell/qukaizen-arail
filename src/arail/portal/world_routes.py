@@ -156,8 +156,15 @@ class _CountedRouter:
     on, so on its own a pass cannot tell "the model said nothing is wrong" from "the model never
     answered". This wrapper sits at ARAIL's call site: one exception raised by ``complete`` is
     one failed call, a response with no text is one failed call, and anything else is a call
-    that returned (a reply that does not parse still counts as judged: TD9). The exception is
+    that returned (a reply that does not parse still counts as judged: TD9). An exception is
     re-raised unchanged, so ``dac_world`` skips the call exactly as before.
+
+    One kind of exception is not an ``Exception``: a native panic (PyO3's ``PanicException``
+    derives from ``BaseException``). ``dac_world`` does not catch it, so it would end the pass and
+    leave ``_review_state`` at "running". It is counted as a failed call and re-raised as a
+    ``RuntimeError`` from the original, which ``dac_world`` does skip. An interruption
+    (``KeyboardInterrupt``, ``SystemExit``, ``GeneratorExit``) is not a call that failed and passes
+    through untouched (review B1 of sprint 2026-10-29-arail-deep-honest).
     """
 
     def __init__(self, inner: Any) -> None:
@@ -181,6 +188,12 @@ class _CountedRouter:
         except Exception as e:  # noqa: BLE001 - counted here, then re-raised unchanged
             self._note_failure(f"{type(e).__name__}: {str(e)[:160]}")
             raise
+        except (KeyboardInterrupt, SystemExit, GeneratorExit):
+            raise
+        except BaseException as e:  # noqa: BLE001 - a native panic: counted, then made skippable
+            text = f"{type(e).__name__}: {str(e)[:160]}"
+            self._note_failure(text)
+            raise RuntimeError("the model call ended with " + text) from e
         if not str(getattr(resp, "text", "") or "").strip():
             self._note_failure("the model returned no text")
         return resp

@@ -44,13 +44,17 @@ class _R:
         self.text, self.model = text, model
 
 
+class Panic(BaseException):
+    """Stands in for PyO3's PanicException: a native panic that is a BaseException, not an Exception."""
+
+
 class Scripted:
     """A router whose answers are scripted by call number and prompt."""
 
     def __init__(self, *, name: str = "fake-deep", fail_from: int = 0, empty_from: int = 0,
-                 cancel_after: int = 0, cancel_event=None, flag_term: str = "") -> None:
+                 cancel_after: int = 0, cancel_event=None, flag_term: str = "", panic_from: int = 0) -> None:
         self.backend_name = name
-        self.fail_from, self.empty_from = fail_from, empty_from
+        self.fail_from, self.empty_from, self.panic_from = fail_from, empty_from, panic_from
         self.cancel_after, self.cancel_event, self.flag_term = cancel_after, cancel_event, flag_term
         self.calls = 0
 
@@ -59,6 +63,8 @@ class Scripted:
         n = self.calls
         if self.fail_from and n >= self.fail_from:
             raise RuntimeError(BUG)
+        if self.panic_from and n >= self.panic_from:
+            raise Panic("called `Option::unwrap()` on a `None` value")
         if self.empty_from and n >= self.empty_from:
             return _R("", self.backend_name)
         if self.cancel_after and n == self.cancel_after and self.cancel_event is not None:
@@ -414,6 +420,60 @@ def test_c8_counted_router_counts_empty_text_and_keeps_the_first_error():
     c = wr._CountedRouter(Scripted(empty_from=1))
     assert c.complete("x").text == ""
     assert (c.attempted, c.failed, c.first_error) == (1, 1, "the model returned no text")
+
+
+def test_c8_counted_router_counts_a_native_panic_and_raises_a_runtimeerror_from_it():
+    """A BaseException is not caught by dac_world, so it would end the pass (review B1, scenario 4)."""
+    panic = Panic("native panic")
+
+    class Inner:
+        backend_name = "fake-deep"
+
+        def complete(self, *a, **k):
+            raise panic
+
+    counted = wr._CountedRouter(Inner())
+    with pytest.raises(RuntimeError) as ei:
+        counted.complete("p")
+    assert ei.value.__cause__ is panic, "the original is kept as the cause"
+    assert not isinstance(ei.value, Panic) and isinstance(ei.value, Exception), "now dac_world can skip it"
+    assert (counted.attempted, counted.failed, counted.judged) == (1, 1, 0)
+    assert counted.first_error.startswith("Panic: native panic")
+
+
+@pytest.mark.parametrize("exc", [KeyboardInterrupt("ctrl-c"), SystemExit(3), GeneratorExit()],
+                         ids=["KeyboardInterrupt", "SystemExit", "GeneratorExit"])
+def test_c8_counted_router_lets_an_interruption_through_untouched(exc):
+    class Inner:
+        def complete(self, *a, **k):
+            raise exc
+
+    counted = wr._CountedRouter(Inner())
+    with pytest.raises(type(exc)) as ei:
+        counted.complete("p")
+    assert ei.value is exc, "the same object, not counted as a failed call"
+    assert counted.failed == 0 and counted.first_error is None
+
+
+def test_c8_a_review_whose_judge_panics_reports_partial_and_does_not_stay_running(world, monkeypatch, client):
+    """Before the fix the Panic left the pass dead and _review_state at "running" for ever; _wait
+    raises "never finished" if that comes back."""
+    world.mount(6)
+    monkeypatch.setattr(wr, "_review_router", lambda: Scripted(panic_from=2))
+    st = _review(client)
+    assert st["state"] == "partial" and st["outcome"] == "partial"
+    assert (st["planned"], st["judged"], st["failed"]) == (6, 1, 5)
+    assert st["deep_error"].startswith("Panic: ")
+    assert "failed on 5 calls: Panic: " in st["message"]
+
+
+def test_c8_a_grow_pass_whose_model_panics_is_not_applied(world, monkeypatch, client):
+    catalog = world.mount(6)
+    before = _digest(catalog)
+    monkeypatch.setattr(wr, "_curation_router", lambda brain: Scripted(panic_from=2))
+    st = _grow(client)
+    assert st["state"] == "not_applied" and st["calls"]["failed"] >= 1
+    assert _digest(catalog) == before and not (catalog / "evolution.json").exists()
 
 
 def test_c8_counted_router_is_thread_safe():

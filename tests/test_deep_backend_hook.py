@@ -6,10 +6,15 @@ runs over the fake runtime; nothing here needs Metal.
 """
 from __future__ import annotations
 
+import concurrent.futures
+import threading
+import time
+
 import pytest
 
 from arail import agent_context
 from arail import deep_verdict as dv
+from arail.router.backends import _DeepBackendClosed
 from tests.fakes.fake_deep_runtime import BUG_FRAGMENT, fake_deep  # noqa: F401  (fixture)
 from tests.test_deep_verdict import probe_result, read_store, store_path
 
@@ -93,6 +98,134 @@ def test_b4_a_missing_wheel_is_not_a_deep_failure(tmp_path, monkeypatch):
     with pytest.raises(ImportError):
         AeroLLMBackend()
     assert dv.counters() == {"ok": 0, "failed": 0}
+    assert not store_path().exists()
+
+
+# ── B6 to B8: what is a failure of the binary, and what is not (review B1) ───────────────────
+#
+# A recorded failure is sticky and checkout-wide, so the hook files runtime faults and only those.
+# ARAIL's own teardown (Eject, a model switch, the interpreter exiting) says nothing about the
+# binary; a native panic (a BaseException) says everything.
+
+def test_b6_a_call_after_close_is_arails_own_teardown_not_a_binary_failure(fake_deep):
+    fd = fake_deep("pass")
+    be = fd.backend()
+    assert be.complete("one").text
+    be._close()                                  # what Eject and a deep-model switch call
+    with pytest.raises(_DeepBackendClosed) as ei:
+        be.complete("two")
+    assert isinstance(ei.value, RuntimeError), "a caller that caught the old RuntimeError still does"
+    assert "closed" in str(ei.value) and "Load it again" in str(ei.value)
+    assert dv.current().state == "untested", "no false claim about the binary on any surface"
+    assert dv.counters() == {"ok": 1, "failed": 0}
+    assert not store_path().exists()
+    assert len(fd.gen_calls()) == 1, "the closed call never reached the runtime"
+
+
+def test_b6_a_call_queued_when_close_dropped_the_runtime_is_not_a_binary_failure(fake_deep):
+    fd = fake_deep("pass")
+    be = fd.backend()
+    be._runtime = None                           # _close() dropped it on the worker ...
+    be._closed = True                            # ... and a call had passed the closed check just before
+    with pytest.raises(_DeepBackendClosed):
+        be._generate_on_worker("wrapped", {})
+
+
+def test_b6_the_closed_flag_decides_not_an_empty_runtime(fake_deep):
+    """A Runtime that is absent while the backend is open is a fault of this deep path and is filed
+    (a load failure is filed by note_load_failure, test_b4_a_runtime_load_failure_is_persisted)."""
+    fd = fake_deep("pass")
+    be = fd.backend()
+    be._runtime = None
+    assert be._closed is False
+    with pytest.raises(RuntimeError, match="not running") as ei:
+        be.complete("x")
+    assert not isinstance(ei.value, _DeepBackendClosed)
+    assert dv.current().state == "failing" and dv.counters() == {"ok": 0, "failed": 1}
+
+
+def test_b6_an_error_from_submit_itself_is_not_filed(fake_deep):
+    fd = fake_deep("pass")
+    be = fd.backend()
+    be._executor.shutdown(wait=True)             # concurrent.futures refuses new work, closed flag unset
+    assert be._closed is False
+    with pytest.raises(RuntimeError, match="cannot schedule new futures"):
+        be.complete("x")
+    assert dv.current().state == "untested" and dv.counters() == {"ok": 0, "failed": 0}
+
+
+def test_b6_a_call_cancelled_by_close_is_not_a_binary_failure(fake_deep):
+    """_close() waits 10 s for the Runtime to drop, then shuts the executor down with cancel_futures=True.
+    A call queued behind a long generation gets CancelledError, which is an Exception on 3.11."""
+    fd = fake_deep("slow:1.5")
+    be = fd.backend()
+    got: dict = {}
+
+    def call(name):
+        try:
+            got[name] = be.complete(name)
+        except BaseException as e:               # noqa: BLE001 - the test reads what came out
+            got[name] = e
+
+    a = threading.Thread(target=call, args=("a",))
+    a.start()
+    end = time.monotonic() + 10
+    while len(fd.gen_calls()) < 1 and time.monotonic() < end:
+        time.sleep(0.02)
+    assert len(fd.gen_calls()) == 1, "call a is inside the runtime"
+    b = threading.Thread(target=call, args=("b",))
+    b.start()
+    time.sleep(0.3)                              # b is queued behind a on the single worker
+    be._executor.shutdown(wait=False, cancel_futures=True)       # the call _close() makes after its wait
+    a.join(15)
+    b.join(15)
+    assert isinstance(got["b"], concurrent.futures.CancelledError), got["b"]
+    assert got["a"].text, "the call that was running finished"
+    assert dv.current().state == "untested"
+    assert dv.counters() == {"ok": 1, "failed": 0}
+
+
+def test_b7_a_baseexception_from_the_runtime_is_filed_and_reraised_as_the_same_object(fake_deep):
+    """PyO3's PanicException derives from BaseException. `except Exception` missed it, so nothing was
+    filed and every surface kept saying deep was fine."""
+    fd = fake_deep("panic2")
+    be = fd.backend()
+    import aerollm_api
+    assert be.complete("one").text
+    with pytest.raises(aerollm_api.PanicException) as ei:
+        be.complete("two")
+    assert ei.value is aerollm_api.LAST_PANIC, "the same object, not a copy or a wrapper"
+    assert not isinstance(ei.value, Exception)
+    v = dv.current()
+    assert v.state == "failing" and v.source == "call"
+    assert "PanicException" in v.failure["error"] and v.failure["count"] == 1
+    assert dv.counters() == {"ok": 1, "failed": 1}
+    with pytest.raises(aerollm_api.PanicException):
+        be.complete("three")
+    assert dv.current().failure["count"] == 2
+
+
+@pytest.mark.parametrize("make", [
+    lambda: KeyboardInterrupt("ctrl-c"),
+    lambda: SystemExit(3),
+    lambda: GeneratorExit(),
+    lambda: concurrent.futures.CancelledError(),
+    lambda: _DeepBackendClosed("closed"),
+], ids=["KeyboardInterrupt", "SystemExit", "GeneratorExit", "CancelledError", "DeepBackendClosed"])
+def test_b8_an_interruption_or_arails_own_teardown_is_not_filed_and_is_reraised_unchanged(fake_deep, make):
+    fd = fake_deep("pass")
+    be = fd.backend()
+    assert be.complete("one").text
+    boom = make()
+
+    def generate(*a, **k):
+        raise boom
+
+    be._runtime.generate = generate
+    with pytest.raises(type(boom)) as ei:
+        be.complete("two")
+    assert ei.value is boom, "the same object that was raised"
+    assert dv.current().state == "untested" and dv.counters() == {"ok": 1, "failed": 0}
     assert not store_path().exists()
 
 

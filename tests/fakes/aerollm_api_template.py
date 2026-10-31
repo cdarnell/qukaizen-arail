@@ -11,6 +11,8 @@ Modes:
   pass          every call answers
   fail2         call 1 answers; every later call raises the real bug's message
   empty2        call 1 answers; every later call returns an empty string
+  panic2        call 1 answers; every later call raises PanicException, a BaseException
+                that is not an Exception, as PyO3's pyo3_runtime.PanicException is
   crash3        call 3 kills the process with a signal (SIGKILL by default)
   hang2         call 2 never returns
   loadfail      Runtime.start() raises
@@ -43,6 +45,16 @@ BUG = (
     "\"[rms_norm] (*weight) must have the same size as the last dimension of x "
     "but has 1 elements."
 )
+
+
+class PanicException(BaseException):
+    """Stands in for pyo3_runtime.PanicException (a Rust panic crossing into Python), which derives
+    from BaseException: ``except Exception`` does not catch it."""
+
+
+# The instance most recently raised, so a test can check that it came out of ARAIL's
+# backend as the same object and not a copy or a wrapper.
+LAST_PANIC = None
 
 
 def _mode():
@@ -82,6 +94,7 @@ class Runtime:
         _log({"ev": "start"})
 
     def generate(self, prompt, max_new_tokens=512, temperature=0.7, **kw):
+        global LAST_PANIC
         self.calls += 1
         n = self.calls
         mode = _mode()
@@ -94,6 +107,9 @@ class Runtime:
             raise RuntimeError(BUG)
         if mode == "empty2" and n >= 2:
             return ""
+        if mode == "panic2" and n >= 2:
+            LAST_PANIC = PanicException("called `Option::unwrap()` on a `None` value (fake native panic)")
+            raise LAST_PANIC
         if mode == "crash3" and n == 3:
             os.write(2, b"native runtime: fatal error in layer 3 (test double)\n")
             name = os.environ.get("ARAIL_FAKE_DEEP_CRASH_SIGNAL", "KILL")

@@ -47,6 +47,22 @@ def test_empty2_answers_once_then_returns_empty_text(fake_deep):
     assert be.complete("hello").text == ""
 
 
+def test_panic2_answers_once_then_raises_a_baseexception_that_is_not_an_exception(fake_deep):
+    """PyO3's PanicException derives from BaseException, so `except Exception` does not catch it. The
+    review (B1) found the backend hook missed exactly that; this mode is how the hook is tested."""
+    fake_deep("panic2")
+    import aerollm_api
+    rt = aerollm_api.Runtime("m")
+    rt.start()
+    assert rt.generate("a")
+    for _ in range(2):
+        with pytest.raises(BaseException) as ei:
+            rt.generate("b")
+        assert type(ei.value) is aerollm_api.PanicException
+        assert not isinstance(ei.value, Exception), "`except Exception` must not catch it"
+        assert ei.value is aerollm_api.LAST_PANIC, "the module keeps the instance it raised"
+
+
 def test_loadfail_raises_while_the_backend_is_built(fake_deep):
     fd = fake_deep("loadfail")
     with pytest.raises(RuntimeError, match="could not start"):
