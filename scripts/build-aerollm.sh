@@ -496,15 +496,11 @@ bundle_install() {
     cp -f "$extract_dir/aerollm_api.abi3.so" "$dest_so"
     cp -f "$extract_dir/MANIFEST.json" "$dest_marker"
 
-    if ! import_ok; then
-        # F1: never leave a broken artifact shadowing a future good install.
-        rm -f "$dest_so" "$dest_marker"
-        err "Installed the bundled extension but \`import aerollm_api\` failed."
-        warn "Removed the broken artifact. Run ./arailctl deep status for details."
-        warn "If this was a browser download, quarantine may be the cause (F5) — retry via setup."
-        exit 1
-    fi
-    # The file that loads must be the file we verified against MANIFEST.json.
+    # The file that loads must be the file we verified against MANIFEST.json. A bundle that does not
+    # import at all is the same case (nothing loads, so no sha256 matches): verify_loaded puts the
+    # previous .so and its install record back, or removes the new ones when there was no previous
+    # install. (A separate "if the import fails, delete both files" check used to sit here and ran
+    # first, which left a user whose old bundle worked with no deep runtime at all.)
     verify_loaded "$dest_so" "$so_sha_actual" "$backup" "$dest_marker" "$mbackup"
     rm -f -- "$backup" "$mbackup"
     local ver; ver="$("$PY" -c "import json; print(json.load(open('$dest_marker')).get('aerollm_version','unknown'))" 2>/dev/null || echo unknown)"

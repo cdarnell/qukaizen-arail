@@ -13,6 +13,7 @@ import os
 import re
 import subprocess
 import sys
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -46,7 +47,9 @@ class _Loader(importlib.abc.Loader):
         return m
 
     def exec_module(self, module):
-        pass
+        with open(self.path, "rb") as fh:
+            if b"FAILS-TO-IMPORT" in fh.read():       # a native module the loader rejects
+                raise ImportError("fake native module refused to load: " + self.path)
 
 
 class Finder(importlib.abc.MetaPathFinder):
@@ -485,6 +488,61 @@ def test_s11_bundle_refuses_a_shadowed_target_before_anything_else_and_force_doe
         assert "A copy at" in text and "would never load. Nothing was installed." in text
         assert "does not exist" not in text and "Checksum" not in text, "the tarball was never looked at"
         assert env.listing() == before
+
+
+# ── W1 of the review: a bundle that will not import must not cost the user the install they had ──────────
+
+MACHO = bytes.fromhex("cffaedfe") + b"\0" * 28           # the 4 magic bytes the script checks, then padding
+
+
+def make_bundle(tmp: Path, so: bytes, version: str = "1.1.0") -> tuple[Path, str]:
+    """A bundle tarball the script accepts: the four expected members and a MANIFEST that matches the .so."""
+    src = tmp / "bundle-src"
+    src.mkdir()
+    (src / "aerollm_api.abi3.so").write_bytes(so)
+    (src / "MANIFEST.json").write_text(json.dumps({"sha256": sha(so), "aerollm_version": version,
+                                                   "aerollm_commit": "abcdef0123456789", "built_at": "2026-10-01"}))
+    (src / "LICENSE").write_text("license\n")
+    (src / "NOTICE").write_text("notice\n")
+    tarball = tmp / "bundle.tar.gz"
+    with tarfile.open(tarball, "w:gz") as tf:
+        for name in ("aerollm_api.abi3.so", "MANIFEST.json", "LICENSE", "NOTICE"):
+            tf.add(src / name, arcname=name)
+    return tarball, sha(tarball.read_bytes())
+
+
+@darwin_arm64
+@pytest.mark.parametrize("force", [False, True], ids=["the pin moved to a new tag", "install --force"])
+def test_w1_a_bundle_that_fails_to_import_puts_the_previous_working_install_back(env, force):
+    env.fake_importer()
+    old_so = MACHO + b"PREVIOUS-WORKING-BUNDLE\n" * 40
+    old_marker = json.dumps({"arail_release": "v1.1.0" if force else "v0.9.0", "sha256": sha(old_so),
+                             "aerollm_version": "0.9.0"}).encode()
+    (env.site / "aerollm_api.abi3.so").write_bytes(old_so)
+    (env.site / "aerollm_api.bundle.json").write_bytes(old_marker)
+    tarball, tar_sha = make_bundle(env.tmp, MACHO + b"NEW-BUNDLE-FAILS-TO-IMPORT\n" * 40)
+
+    r = env.run("bundle", *(("--force",) if force else ()), AEROLLM_BUNDLE_FILE=tarball,
+                AEROLLM_BUNDLE_SHA256=tar_sha, AEROLLM_BUNDLE_TAG="v1.1.0")
+
+    text = out(r)
+    assert r.returncode == 1, text
+    assert f"Installed {env.site}/aerollm_api.abi3.so, but `import aerollm_api` fails in {env.py}. Removed the copy." in text
+    assert "The file that was there before was put back." in text
+    assert (env.site / "aerollm_api.abi3.so").read_bytes() == old_so, "the working install, byte for byte"
+    assert (env.site / "aerollm_api.bundle.json").read_bytes() == old_marker, "and its install record"
+    assert list(env.tmpdir.iterdir()) == [], "no temp backup or extract folder is left behind"
+
+
+@darwin_arm64
+def test_w1_a_first_install_that_fails_to_import_leaves_nothing_behind(env):
+    env.fake_importer()
+    tarball, tar_sha = make_bundle(env.tmp, MACHO + b"NEW-BUNDLE-FAILS-TO-IMPORT\n" * 40)
+    before = env.listing()
+    r = env.run("bundle", AEROLLM_BUNDLE_FILE=tarball, AEROLLM_BUNDLE_SHA256=tar_sha, AEROLLM_BUNDLE_TAG="v1.1.0")
+    assert r.returncode == 1 and "fails in" in out(r) and "was put back" not in out(r)
+    assert env.listing() == before, "the failed first install is removed with its marker"
+    assert list(env.tmpdir.iterdir()) == []
 
 
 @darwin_arm64
