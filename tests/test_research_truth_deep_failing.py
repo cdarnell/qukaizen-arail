@@ -107,12 +107,30 @@ def test_t1_a_cleared_failure_returns_the_strip_to_ok(strip):
     assert _deep(strip.client)["reason_code"] == "ok"
 
 
-def test_t1_the_operators_toggle_still_wins_over_the_reason_text(strip, monkeypatch):
+def test_t1_the_toggle_still_explains_a_deep_that_is_not_failing(strip, monkeypatch):
+    monkeypatch.setenv("AEROLLM_RESEARCH", "false")
+    d = _deep(strip.client)
+    assert d["reason_code"] == "disabled" and d["enabled_by_user"] is False and d["eligible_now"] is False
+    assert "flip the toggle" in d["reason"]
+    assert d["generation"]["state"] == "untested"
+
+
+def test_t1_a_failing_deep_outranks_the_toggle_in_the_reason(strip, monkeypatch):
+    """Review W5. With research deep passes switched off and deep failing, the strip said "deep passes are
+    switched off - flip the toggle to use the QueueLLM deep model", in the dim class: it promised that the
+    toggle makes deep usable, and it does not. Failing now outranks the toggle, as tier_locked and
+    wheel_missing already did. The toggle's own state is still reported."""
     monkeypatch.setenv("AEROLLM_RESEARCH", "false")
     dv.note_call(False, error="boom")
     d = _deep(strip.client)
-    assert d["reason_code"] == "disabled", "existing precedence is unchanged"
-    assert d["generation"]["state"] == "failing", "but the failure is still reported beside it"
+    assert d["reason_code"] == "deep_failing" and d["eligible_now"] is False
+    assert d["enabled_by_user"] is False, "the toggle is still reported as off"
+    assert d["reason"].startswith("deep generation is failing on this build")
+    assert "flip the toggle" not in d["reason"] and "switched off" not in d["reason"]
+    assert d["generation"]["state"] == "failing"
+    # and the page paints that code in the danger class, whatever the toggle says
+    html = (PORTAL / "templates" / "research.html").read_text(encoding="utf-8")
+    assert "deep.reason_code === 'deep_failing' ? 'rx-truth-danger' : 'rx-truth-dim'" in html
 
 
 # ── T2: the page ───────────────────────────────────────────────────────────

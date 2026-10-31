@@ -4525,7 +4525,9 @@ def _research_models_block() -> dict | None:
     binary this process loaded: state untested | passing | failing, and when
     failing since when, from which consumer, and how many failure events.
     Availability (tier/wheel) outranks the operator's toggle so a
-    minimalist user sees a locked control, not a dead one. Never raises —
+    minimalist user sees a locked control, not a dead one, and so does a deep
+    that is failing: "flip the toggle" must never promise a deep that does not
+    generate. Never raises —
     returns None and the strip hides.
     """
     try:
@@ -4560,7 +4562,7 @@ def _research_models_block() -> dict | None:
 
         enabled_by_user = research_deep_enabled()
         eligible, code, detail = deep_policy.explain(foreground=False)
-        if not enabled_by_user and code not in ("tier_locked", "wheel_missing"):
+        if not enabled_by_user and code not in ("tier_locked", "wheel_missing", "deep_failing"):
             eligible = False
             code = "disabled"
             detail = ("deep passes are switched off — flip the toggle to use "
