@@ -4,8 +4,8 @@
 **Vision:** [VISION.md](./VISION.md) at `942cbda8`
 **Branch:** `qukaizen/arail-deep-honest` (from arail main `62d5ebdf`). Not pushed.
 **Started:** 2026-10-29
-**Finished:** 2026-10-31
-**Status:** done. All steps 0 to 9 are committed. The live check passes on today's broken wheel.
+**Finished:** 2026-10-31 (the original build); the fix pass after the review was done the same day
+**Status:** done. All steps 0 to 9 are committed. The live check passes on today's broken wheel. The architect's review (`REVIEW.md`) returned BLOCK on B1 and B2; "Fix pass" at the end of this file records what was fixed and how it was checked. The numbers above that section are as of the original build (`fdc069bd`).
 
 ## Hard rules this build kept
 
@@ -282,7 +282,7 @@ The dry run (fake runtime, a copy of the repo with one product line broken) must
    - W7 runs `bash scripts/build-aerollm.sh build` and `auto`, not `./arailctl deep rebuild`, because this build's rules forbid running that command. The row checks that `arailctl` dispatches `rebuild` to exactly that line. A stub `cargo` (records and fails; called 0 times), an empty scratch venv with no pip and an absent bundle file make a build, an install or a download impossible even if the script were wrong.
 6. **Two driver flags exist only for the dry run:** `--extra-env KEY=VALUE` and `--pythonpath-prepend DIR` (how the fake runtime gets in front). The wrapper does not use them.
 7. **The time bar moved.** The architecture said "about 3 to 5 minutes". The four live runs took 64 s, 141 s, 55 s and 60 s, so the teaching now says "under 5 minutes" and names the first two runs (`06e58b9a`).
-8. **TD7 is reworded** in the backlog (an ASGI client, not `TestClient`) and **TD13 is added**: four hints still say "run ./arailctl deep rebuild" (`portal/app.py:2110`, `:8821`, `:10134`, `portal/templates/chat.html:2803`). Against a renamed checkout that command now refuses. They are outside the architecture's list, so they are filed, not changed.
+8. **TD7 is reworded** in the backlog (an ASGI client, not `TestClient`) and **TD13 is added**: four hints still say "run ./arailctl deep rebuild" (`portal/app.py:2110`, `:8821`, `:10134`, `portal/templates/chat.html:2803`). Against a renamed checkout that command now refuses. They are outside the architecture's list, so they are filed, not changed. (The review ruled TD13 "fix now"; it is repaid in the fix pass, item 2.)
 
 ## Architect feedback required
 
@@ -297,6 +297,8 @@ No gap stopped the build, and nothing here needs a new design pass. These are th
 
 
 ## Final state
+
+This is the state at the end of the original build (`ebdbaa23`, before the review). The fix pass has its own numbers and its own pre-handoff checks at the end of this file.
 
 ### The full suite, against the baseline
 
@@ -353,3 +355,140 @@ Builder commits: 29 with this one (28 before it), from `818ea0bf` to this commit
 ### Cleanup
 
 Removed: the scratch venv and its package cache, the baseline source copies and their output, every scratch root the live runs and dry runs made, the mutation-check copy of the repo, and every temp file; the git-ignored files the suite and the runs wrote into the worktree (`lab/`, `logs/`, `__pycache__`); no `yes`, probe, pytest or harness process was left running. The operator's `.venv`, `.env`, Worlds and the QueueLLM checkout were read, never written, as shown by the before/after comparison of the live runs. The scratch folder was removed after this commit.
+
+## Fix pass (after the review)
+
+The architect's review (`REVIEW.md`, commit `46ebcc30`) returned **BLOCK** on B1 and B2. It also listed five weak points (W1 to W5) and twelve notes (N1 to N12). This pass fixes the items the coordinator's fix-pass message named and nothing else. Each fix is its own commit with its test in the same commit. The pass starts at `0f2f8d25` and adds 12 commits, then one more that writes this section. The 12 change 26 files: 10 product, script and doc files (+210 and -60 lines), 14 test files (+606 and -19), and two sprint records. No new test file was needed. Nothing was pushed. `SPRINT.md` was not edited. No frozen name was renamed.
+
+| # | Item | Commit | New tests (collected) |
+|---|---|---|---|
+| 1 | B1: the hook files runtime faults only, and files a native panic | `82f57206` | 18: fake pin 1, hook 11, Curator 6 |
+| 2 | B2 and TD13: no hint sends a user without a checkout to `deep rebuild` | `13cd7fac`, follow-up `66d1fc5d` | 3; four existing tests follow the new wording |
+| 3 | W1: a bundle that fails to import no longer deletes the working install | `d2893be0` | 3 |
+| 4 | W3: the probe's tag check and its getppid check each get a test | `857bc0ee` | 2 |
+| 5 | W5: the research toggle no longer hides `deep_failing` | `e32efda3` | 1 (one test became two) |
+| 6 | N3: a build the marker check cannot read is refused | `f57ebcec` | 1 |
+| 7 | N4: a marker says "tree state unknown" when git cannot say | `bfa6e932` | 1, and one test extended |
+| 8 | N8: a probe that passed 5 of 5 but could not save exits 1 | `d5a4de46` | 1; two existing tests follow |
+| 9 | W4: every number is taught, and the texts teach the right thing | `ef8aec48` | 5; TQ1 and TQ2 extended |
+| 10 | Backlog: TD14 to TD23 | `4c5386cd` | none |
+| - | `LIVE_RUN.txt` from the second live run | `58af5cb9` | none |
+
+That is 35 new tests in 13 test files (261 collected before, 296 now). The order of the commits is the order in the table, except that the follow-up `66d1fc5d` was made last, after a check of my own (item 2). Two commits were amended while the pass was running, before any hash was written down: B2 once for a neighbouring test it left red, and again after the referencing run found a second one. The hashes here are final.
+
+### 1. B1: what the hook records (`82f57206`)
+
+- **Changed.** `router/backends.py`: a new `_DeepBackendClosed(RuntimeError)`. `complete()` raises it before `submit()` when `self._closed` is true. `_generate_on_worker` raises it when `_close()` dropped the Runtime from under a call that was already queued. `submit()` moved out of the `try`, so an error from the executor itself (a closed executor, interpreter exit) is not filed. The `try` around `.result()` now catches `BaseException`. It files the failure unless the exception is `KeyboardInterrupt`, `SystemExit`, `GeneratorExit`, `concurrent.futures.CancelledError` or `_DeepBackendClosed`, and it re-raises the very object it caught. `portal/world_routes.py`: `_CountedRouter.complete` counts a non-`Exception` `BaseException` as a failed call and raises `RuntimeError(...) from exc`. `dac_world` skips that call, so the pass ends `partial` and `_review_state` does not stay at `running`. The three interruptions pass through untouched.
+- **Tests (18).** The fake runtime has a `panic2` mode: call 1 answers, later calls raise a `PanicException` that derives from `BaseException`, as PyO3's does. It has its own pin test in `test_fake_deep_runtime.py`. `test_deep_backend_hook.py` has five tests of what is not filed or is: a call after `_close()`, a call whose Runtime was dropped, an error from `submit()` and a call cancelled by `shutdown(cancel_futures=True)` leave the verdict untested, and an empty Runtime on a backend that is still open is filed. A `BaseException` from `generate` is filed and re-raised as the same object (checked with `is`). The five excluded exceptions are not filed and are re-raised unchanged (one test, five cases). `test_curator_honest.py` has the counting wrapper on a panic, on each of the three interruptions, a review whose judge panics from call 2 (6 terms planned, 1 judged, 5 failed calls, state `partial`) and a grow pass whose model panics (`not_applied`, no file written).
+- **Settled.** The discriminator is `self._closed`. `_runtime` starts as `None` and is filled on the worker thread by `_init_runtime`; `_close()` sets `_closed` first and then empties it on the worker. So an empty `_runtime` alone cannot tell ARAIL's teardown from a lost runtime. A Runtime that is missing while the backend is open is still filed ("the deep runtime is not running"), as a fault of this path. A load failure is still filed by `note_load_failure`, unchanged. The set that is not filed is the review's five, no more.
+- **Can the tests fail?** Nine one-line breakages of the fix, made in a scratch copy, were each caught by at least one of them.
+- **Not done.** Four things next to it, listed under "Seen and not changed" (1 to 4).
+
+### 2. B2 and TD13: no hint sends a user without a checkout to `deep rebuild` (`13cd7fac`, `66d1fc5d`)
+
+- **Changed.** `scripts/build-aerollm.sh`, `clone_hint` (the no-checkout message): "No QueueLLM checkout at X." then "A source build here needs a checkout that still has crates/aerollm-api; QueueLLM main has the renamed crates/queuellm-api, which this ARAIL refuses. Nothing was built or installed." then "For the prebuilt QueueLLM: ./arailctl deep install." The clone advice and the `deep update` suggestion (it needs private-index credentials) are gone. The four portal hints of TD13 now say `./arailctl deep install`: the compute-source error and the Chat error reply's `install_command` (with its comment) and the `/api/chat/models` `install_command` in `portal/app.py`, and the compare-mode notice in `chat.html` (now "isn't installed" where it said "isn't built"). `sprints/BACKLOG.md` marks TD13 repaid.
+- **One more hint, found by the grep and fixed.** `scripts/upgrade.sh` printed "1. Build QueueLLM: ./arailctl deep rebuild" as the first step after an upgrade to maximus. It now says "1. Install QueueLLM: ./arailctl deep install". The message's grep scope was docs, templates and JS; this is a shell script. It is the same defect on the path a new user takes, so I fixed it here and say so.
+- **Tests.** S1 and `test_build_fails_clearly_when_sibling_missing`, which both pinned the clone advice, now assert the new text and the absence of "git clone". `test_aerollm_compute_source.py:73` asserts `deep install`. `test_aerollm_model_ready.py` follows the new `chat.html` wording (it pinned "QueueLLM isn't built"). `test_install_hints_honest.py` has 3 new tests: the portal's two other hints, the Chat page's hint, and the upgrade hint.
+- **Settled.** Text that describes `rebuild` as the maintainer's dev-build verb is left alone; the places are listed under "Seen and not changed" (8).
+- **Follow-up `66d1fc5d`, found late by my own check.** Review item 12 says no frozen-name count may go down in a modified file. A script over the 25 modified files, compared with `62d5ebdf`, found one: the comment I rewrote in `portal/app.py` had dropped its only mention of the env var `ARAIL_AEROLLM_REPO`, so the count of `AEROLLM_` in that file was 23 against 24 on main. The comment names the variable again. It is a comment, so there is no test. The same script now finds no drop in any of `aerollm_api`, `AERO_`, `AEROLLM_`, `tier1-aerollm`, `AeroLLMBackend`, `build-aerollm.sh` or `backend="aerollm"`.
+
+### 3. W1: a bundle that fails to import (`d2893be0`)
+
+- **Confirmed first.** `verify_loaded` already handles "the import fails". With an empty `loaded_sha` it removes the new `.so` and its install record, puts the previous ones back from their backups, says "The file that was there before was put back." and deletes the temp copies. With no previous install it only removes the new files.
+- **Changed.** The `if ! import_ok` block in `bundle_install` ran first, deleted both files and exited. It is gone, with a comment that says why.
+- **Tests (3, darwin arm64 like the other bundle-path tests).** A new bundle whose `.so` the importer rejects is installed over a working one, once by a moved pin and once by `--force`: the old `.so` and its install record are back byte for byte, the message says the earlier file was put back, and no temp copy is left. A first install that fails to import leaves the site folder exactly as it was. The fake importer rejects a file that carries a marker; a helper builds a bundle tarball the script accepts (Mach-O magic, a matching MANIFEST). All three failed on the script as it was, and pass now.
+- **Seen.** The removed block also printed "If this was a browser download, quarantine may be the cause (F5) — retry via setup." That line is gone with it ("Seen and not changed", 5).
+
+### 4. W3: two layers that had no test of their own (`857bc0ee`)
+
+- **(a) The `"probe": 1` tag check.** A unit test gives `_drive_child` a protocol stream with a forged `{"ev": "call", ...}` line that has no tag, one with the wrong tag and one that is not JSON, and asserts that none of them becomes an event or a result.
+- **(b) The `getppid()` check: kept, and tested with the protocol reader kept alive.** The reason it is kept and not deleted: ARCHITECTURE F21 names that check as the mechanism, and EPIPE works only while no other process holds the read end of the pipe. The test holds the read end open in the test process (a middle process starts the child on the write end and is then killed). EPIPE cannot end the child. It asserts that the child finishes the call it was in, starts no other, and has written only identity, loaded and one call.
+- **Can they fail?** Each test fails with its line removed. Q8 and Q19 pass in both cases, which is why the review could not see the gap.
+- **Not done.** W3(c): `tests/test_no_user_visible_aerollm.py` is red on `origin/main` and on this branch (`model_resolve.py:290`), so it cannot flag a new string. It was not in the coordinator's list.
+
+### 5. W5: the research toggle (`e32efda3`)
+
+- **Changed.** One condition in `_research_models_block` (and its docstring): the override that rewrites the reason to "disabled" now skips `deep_failing`, as it already skipped `tier_locked` and `wheel_missing`. The toggle's own state is still reported in `enabled_by_user`.
+- **Tests.** The test that pinned the old precedence ("the toggle still wins") is split in two. Toggle off and deep not failing still says "disabled" with the toggle text. Toggle off and deep failing says `deep_failing`, carries the verdict's detail, does not say "flip the toggle", and the page paints that code in the danger class. The second test fails without the change.
+
+### 6. N3, N4 and N8
+
+- **N3 (`f57ebcec`).** The preamble check counts the Metal error marker (`downloadComponent`) with `grep -c`. If grep itself fails (an unreadable file) it prints nothing, and `${poison:-0}` turned that into 0, so a build the script had not checked was installed. Empty output is now a refusal that names the file ("Could not read ... to check it ... Not installed."). The test gives the fake cargo an artifact left at mode 000 (skipped when run as root, which can read it). Without the change the build is installed.
+- **N4 (`bfa6e932`).** `write_build_marker` wrote `queuellm_dirty: false` whenever `git status --porcelain` printed nothing, including when git failed. A failed `git status` now writes `null`. The reader had the same blind spot: `deep status` showed ", dirty tree" for true and nothing otherwise. It now says ", tree state unknown" for `null` (a clean tree still says nothing extra). Tests: a checkout that is a plain folder gets commit "unknown" and dirty `null` (the fake-cargo harness now sets `GIT_CEILING_DIRECTORIES` so a parent repo cannot be found), and the channel line for clean, dirty and unknown markers. Each fails with its half of the change removed.
+- **N8 (`d5a4de46`): exit 1, not "document 0". Why.** The review gave two options. Exit 1 is the smaller one: C3, `docs/cli.md` and the `exit_code` teaching all say exit 0 means "recorded passing", and "only 0 clears a recorded failure". Documenting 0 would have made that sentence false. Now the exit code is 0 only when the pass was recorded and no failure survives. The activity line for a 5 of 5 that could not be saved is a warning that says nothing was recorded and a failure already on record is not cleared (it used to say "Deep is cleared for agents and the Curator"). The NOT SAVED line says in words that the probe exits non-zero. `docs/cli.md` (exit 1 has a third case), the `exit_code` teaching (meaning, out of range, where the fault lives), the usage line and the module docstring say the same. The new test fails on both halves of the change; Q17 and the `--help` test follow the usage line.
+
+### 7. W4: every number is taught (`ef8aec48`)
+
+- **(a)** The live check said every row's counts come from "ARAIL's per-process deep counters, not by this script". For W5 they are the probe's own, read from its JSON (`total`, and `total` minus `passed`). W5 now has its own "what it is". A `COUNT_SOURCE` table says which rows count in process, which copy the probe's numbers and which count nothing, and a test holds each row's text to that source and the source to the row's code.
+- **(b)** W0 printed "11 aerollm or queuellm files recorded, 455 top-level entries" with no meaning, bar or range. It now says what it recorded for W8 to compare, in words, with no bare count.
+- **(c)** W4 printed "Curator 7/6, backend 7/6". It now says "the Curator said attempted 7, failed 6; the backend counted attempted 7, failed 6". The new guard found one more line the review did not name, W2's "Tier 0 is pointed at ..." (a bare 0). It now says "The fast tier is pointed at ...".
+- **(d)** `deep status`'s detail and the probe's "recorded failing" line said only a probe of "a new build" clears a failure. A 5 of 5 probe of the same build clears it too (after a one-off failure, TD4, and after a false one). Both now say "until ./arailctl deep probe passes 5/5 on this build".
+- **The legend.** The probe's legend was headed by JSON paths (`calls[].seconds`, `first_error.call`). It is now headed by the label printed on the lines ("seconds (the s column of each call line)", "first error at call", "tokens in", and so on). A `LABELS` table holds each heading and the words printed beside the number, and `_Nums` records which line each number landed on.
+- **TQ1 to TQ4, kept green and extended so that a number printed without its parts fails the build.** TQ1 checks the label table is complete. TQ2 checks that every printed number sits on a line that carries its label's words, and that the legend uses the headings. TQ4 has four new tests. The live check's dry run now fails on a bare number in an evidence line (quoted product text, digests, paths and versions are exempt) and on an unlabelled ratio in a check (the product's own "last probe 1/5" is exempt). Each addition fails without its change. I also ran the guard over the real output of the second live run: no bare number and no unlabelled ratio.
+
+### 8. Backlog (`4c5386cd`)
+
+`sprints/BACKLOG.md` files the ten findings this pass does not fix, each with the event that should pull it: TD14 (W2, the in-place copy of the `.so`), TD15 (N1, the Curator's order of state and activity line), TD16 (N2, wall-clock comparison in `record_probe`), TD17 (N5, the verdict writer's lock), TD18 (N6, the probe's signals), TD19 (N7, stale temp files), TD20 (N9, identity from `__file__`), TD21 (N10, `./arailctl status`), TD22 (N11, the live check's fast stand-in) and TD23 (N12, the conftest bearer patch under a newer Starlette). TD13 was marked repaid in item 2's commit.
+
+### Running the tests
+
+- **Environment.** The scratch venv the reviewer pinned (fastapi 0.140.7, starlette 1.3.1, httpx 0.28.1, no `httpx2`), a scratch `HOME` and `TMPDIR`, `ARAIL_SKIP_OLLAMA=1`. I did not rebuild it, upgrade it or delete it. It has no `pytest-timeout`, and `openai` 3.42.0 in it imports `httpx2`, so `tests/test_host_edge_brain.py` fails at collection (on the base copy too); every run used `--continue-on-collection-errors`.
+- **What was run.** Every new test file, every test file that names `router/backends.py`, `AeroLLMBackend`, `world_routes`, `build-aerollm`, `deep_probe`, `deep_verdict`, `deep_policy` or `deep_honest_win`, every `tests/test_aerollm_*`, and the test files named `test_deep_*` or `test_default_deep_*`: 99 files. (My first list missed 8 of them, among them `test_build_aerollm_honest.py`, which this pass changed. I found that by comparing the list with a grep before writing this section, and ran them. Their result is in the table.)
+- **Baseline for this pass.** A `git archive` copy of `0f2f8d25` in the same venv. It has no `.git`, like the first baseline run of this build, so the tests that ask git something behave differently: 4 ids fail only there, and 2 (`test_queuellm_rename_frozen_surface.py`) fail only in the worktree. Both are known from the first baseline (see above).
+
+| Run | Files | Failed | Passed | Skipped | xfailed | Errors | Time |
+|---|---|---|---|---|---|---|---|
+| base copy of `0f2f8d25`, the first list | 91 | 31 | 1,626 | 11 | 19 | 26 | 4 min 10 s |
+| base copy, the 8 files the first list missed | 8 | 1 | 108 | 1 | 0 | 0 | 12 s |
+| **final tree `66d1fc5d`, all 99 files in one run** | 99 | **30** | **1,775** | **8** | **19** | **26** | 4 min 25 s |
+
+- **New failures against the base copy: 0.** The final run has 56 failing ids (30 failed, 26 errors). They are the same ids as in my earlier runs on this tree. Against the base copy's 58 ids they differ in two ways, both caused by the copy having no `.git`. Four ids fail only in the copy: `test_experiments.py` twice (`git rev-parse HEAD` exits 128) and `test_deep_honest_win.py` twice (the dry run's W8 cannot run `git diff --quiet`, so the dry run is inconclusive). Two ids fail only in the worktree: `test_queuellm_rename_frozen_surface.py` twice, which need git history and fail on `origin/main` too (see above and "Seen and not changed", 9). The other 54 ids are the same in both.
+- **New tests: 35.** Collected, the 99 files held 1,821 tests before and hold 1,856 now. By file: `test_deep_backend_hook` 11 to 22, `test_build_aerollm_honest` 26 to 31, `test_curator_honest` 28 to 34, `test_deep_honest_win` 32 to 36, `test_deep_probe` 47 to 51, `test_install_hints_honest` 3 to 6, `test_fake_deep_runtime` 11 to 12, `test_research_truth_deep_failing` 9 to 10. All eight are among the 18 new files, which now hold 323 tests (288 and 35).
+- **Not run.** The full suite (the coordinator asked for the referencing files). The run in the table is on the tree after the follow-up commit, which only changed a comment.
+
+### The second live run
+
+The check was re-run once at the end, under the same rules as before: the operator's venv interpreter read only with `PYTHONDONTWRITEBYTECODE=1`, four non-secret keys copied from the operator's `.env`, a scratch root, one fresh child process per row. **9 of 9 rows pass** and the total time is 58 s (the bar is under 5 minutes). `LIVE_RUN.txt` is refreshed (`58af5cb9`) because W4 changed what the check prints.
+
+| Row | Deep calls attempted | Deep calls failed | Silent outcomes |
+|---|---|---|---|
+| W1 Chat, five turns | 5 | 4 | 0 |
+| W2 background agents | 2 | 1 | 0 |
+| W3 Curator review | 6 | 5 | 0 |
+| W4 Curator grow | 7 | 6 | 0 |
+| W5 deep probe | 5 | 4 | 0 |
+| W6 fresh process | 0 | 0 | 0 |
+
+These are the same numbers as the first live run. The fix pass changes what is filed in cases the live check never creates (a teardown, a native panic), so on today's wheel the counts should not move, and they did not: it answers call 1 and fails calls 2 to 5, as `DAY1.json` says. A silent outcome is a deep failure that some surface reported as fine or done; the bar is 0 in every row.
+
+- **The operator's systems did not change.** A before and after snapshot taken outside the harness agrees with W8: the `aerollm` entries in the operator's site-packages (names, sizes, mtimes, sha256 `d62e1e16e93c...`), its top-level listing, the QueueLLM checkout (clean tree), the crash-report folder and the operator's arail checkout status were identical, no file in the operator's `.venv` was newer than the run's start, and no probe or harness process was left.
+- **The QueueLLM checkout's HEAD moved between the two live runs**, from `e730d5fe3f6b` to `e6346967e537`. This build does not write to that checkout, so someone else's commit moved it. W8 compares within one run, and the line in `LIVE_RUN.txt` shows the new HEAD.
+
+### Seen and not changed
+
+These are outside the coordinator's list, so I only record them.
+
+1. **A native panic skips the router's trace.** `ModelRouter.complete` records an error outcome only for `Exception` (`router/core.py:306`). A `BaseException` from the deep backend passes the chokepoint with no trace record. The verdict now records the panic (B1), so every surface says failing. The trace is the one place that does not.
+2. **The first panicking background call still reaches the agent.** `complete_preferring_deep` catches `Exception` (`agents/deep_policy.py:343`). A panic is not one, so that call propagates. The verdict records it, so later calls skip deep.
+3. **`asyncio.CancelledError` is not in the excluded set, on purpose.** It cannot come out of a blocking `.result()`. The review's doubt 1 says the same.
+4. **"Never started" cannot reach `complete()` in production.** A backend whose `__init__` failed is never returned to a caller. The branch in `_generate_on_worker` is defensive, and files the fault if it is ever reached. A `KeyboardInterrupt`, `SystemExit` or `GeneratorExit` through `_CountedRouter` leaves `attempted` incremented: it was an attempt, not a failure, and it ends the pass anyway.
+5. **The quarantine hint is gone** with the W1 block (item 3). The strip of the quarantine attribute still runs before the check, and no test pinned the hint. If you want the line back, it is one `warn` in the empty-`loaded_sha` branch of `verify_loaded`.
+6. **`upgrade.sh`** was fixed with B2 though the message's grep scope was docs, templates and JS (item 2).
+7. **The review's N-items I did not fix** are in the backlog (item 8). **W3(c)** (`test_no_user_visible_aerollm.py` is red on base) stays.
+8. **`deep rebuild` text left alone**, because it describes the maintainer's dev-build verb or follows `deep install`: `README.md:106`, `docs/cli.md:407`, `CHANGELOG.md:136`, the comments at `pyproject.toml:101` and `:259`, `scripts/setup.sh:689` (names `deep install` first) and `:695` (the CUDA "once QueueLLM supports it" line), `deep_verdict.py:1185` and the `ImportError` text at `router/backends.py:1616` (both name `deep install` first), and the build script's own refusal lines, which are about a checkout that exists.
+9. **`tests/test_queuellm_rename_frozen_surface.py` is stale and fails on `origin/main`.** Its base is `5f775f1c`, from the display-rename sprint. Since then main moved: `pyproject.toml` has 5 more lines, and `portal/app.py` has 3 fewer `AEROLLM_MODEL` and 1 fewer `AeroLLMBackend` token than at that base. On top of that, this branch removes two `aerollm_version` tokens from `build-aerollm.sh` (the original build's rewrite of the `status` output; the shell function and the marker key are still there and still read). Nothing machine-read was renamed: the env var `ARAIL_AEROLLM_REPO` and the marker key `aerollm_version` are still read by the scripts. The review's item 12 counts against main, and against main no count went down (item 2, follow-up). The test could be re-based or retired; that is not in this pass.
+10. **Order-dependent failure.** `test_qa_provider_dropdown_paranoid.py::test_rf_ctx_override_flows_into_ollama_dispatch_num_ctx` fails only in combined runs, on the base copy too.
+
+### Pre-handoff checks for the fix pass (`0f2f8d25..HEAD`)
+
+- Every item in the table has a commit, and every commit is atomic: one finding each, the test in the same commit (B2 and TD13 are one commit by instruction; W4's four parts and the legend are one commit by instruction; `66d1fc5d` and `58af5cb9` are single changes).
+- `git diff --check` is clean for `0f2f8d25..HEAD` and for `62d5ebdf..HEAD`. No TODO, FIXME, XXX or HACK and no commented-out code in the added lines of the pass (one prose comment starts with the word "import"). A duplicate-definition scan of every changed Python file of the sprint reports none.
+- `pyflakes`: no new warning in any product file (`backends.py` 2, `world_routes.py` 0, `app.py` 26, `deep_probe.py` 1, `deep_verdict.py` 0, `deep_honest_win.py` 0, each equal to the count at `0f2f8d25`). In tests the only increase is the fixture-import pattern ("redefinition of unused 'fake_deep'"), one per new test that takes the fixture: 11 to 18 in `test_deep_backend_hook.py`, 34 to 36 in `test_deep_probe.py`, 12 to 13 in `test_fake_deep_runtime.py`. `shellcheck`: `build-aerollm.sh` has no finding (as at `0f2f8d25` and on main); `upgrade.sh` has the same 2 findings as on main. `bash -n` passes on both.
+- No frozen name lost an occurrence in any modified file against `62d5ebdf`: checked by script over the 25 modified files for `aerollm_api`, `AERO_`, `AEROLLM_`, `tier1-aerollm`, `AeroLLMBackend`, `build-aerollm.sh` and `backend="aerollm"`. It found one drop after `13cd7fac`, which `66d1fc5d` repaired. Against the review head `0f2f8d25`, `build-aerollm.sh` has one fewer `aerollm_api` and two fewer `AEROLLM_` (display text and a shell variable; the file still has more than main).
+- `src/dac_world/` and `src/arail/buddy_host/` are byte-identical to `62d5ebdf`. No added line sends SIGABRT or aborts. No added line has the word "free". All four scripts are mode 755 in git.
+- `tests/fakes/aerollm_api_template.py` changed only by the `panic2` mode and `PanicException`, which are test code.
+- Nothing was pushed.
+
+### Cleanup of the fix pass
+
+Removed after this commit: my scratch folder (`build-fix`, with its lint venv, the base copy, the mutation copies, every output and temp file) and the git-ignored files the runs wrote into the worktree (`lab/`, `logs/`, `__pycache__`), without touching `src/arail.egg-info/`. Kept: the reviewer's scratch venv. The operator's `.venv`, `.env`, `lab/` and Worlds and the QueueLLM checkout were read, never written, as the before and after snapshot of the second live run shows. No pytest, probe, harness or `yes` process was left running.
