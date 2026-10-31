@@ -59,6 +59,7 @@ SCHEMA = "arail.deep-verdict/v1"
 MAX_BINARIES = 32
 LOCK_TIMEOUT_S = 2.0
 CLOCK_SLACK_S = 5.0     # how far ahead of "now" a failure's stamp may be and still be a failure of this moment
+OPEN_ATTEMPTS = 5       # tries at creating a file in the state folder before believing it is gone (_open_in_dir)
 HEALTH_PREFIX = "generation failing on this build"
 UNIDENTIFIED = "unidentified"
 
@@ -601,6 +602,27 @@ def _open_state_dir(d: Path) -> int:
     return fd
 
 
+def _open_in_dir(dir_fd: int, name: str, flags: int, mode: int = 0o600) -> int:
+    """``os.open(name, flags, mode, dir_fd=dir_fd)`` that survives macOS losing a create race with itself.
+
+    When several processes create the same file in one folder at the same instant, ``openat(O_CREAT)`` on
+    macOS lets one of them win and fails the rest with ENOENT, although the folder is there and the file now
+    exists (measured with eight processes: seven failed in nearly every round, and every one succeeded on the
+    next try; the same call by path never failed). The store opens its files through the folder's descriptor
+    (QA-4), so the lock file met it, and the write that did was reported as a failure and kept in memory. A
+    second try opens the file the winner made. A folder that is really gone fails every try, and the last
+    error is raised about 20 ms later. Any other error is raised at once."""
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            return os.open(name, flags, mode, dir_fd=dir_fd)
+        except FileNotFoundError:
+            if attempt >= OPEN_ATTEMPTS:
+                raise
+            time.sleep(0.002 * attempt)
+
+
 def _flock_acquire(fd: int) -> Optional[str]:
     import fcntl  # POSIX only; ARAIL runs on macOS, Linux and WSL
     deadline = time.monotonic() + LOCK_TIMEOUT_S
@@ -685,7 +707,7 @@ def _locked_update(mutate: Callable[[dict], None]) -> Optional[str]:
         except OSError:
             pass
         try:
-            lock_fd = os.open("verdict.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600, dir_fd=dir_fd)
+            lock_fd = _open_in_dir(dir_fd, "verdict.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
         except OSError as e:
             return f"{d}: {e.strerror or e}"
         try:

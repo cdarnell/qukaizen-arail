@@ -536,6 +536,91 @@ def test_qa4_a_folder_swapped_for_a_link_in_the_middle_of_an_update_still_gets_t
     assert stat.S_IMODE(moved.stat().st_mode) == 0o700
 
 
+# ── QA-4 follow-up (fix pass 3): macOS fails a lost create race with ENOENT, and the store retries it ──
+# Found by test_u9 failing one run in about twenty after QA-4 moved the lock file onto the folder's descriptor.
+# When several processes create the same file in one folder at the same instant, openat(O_CREAT) on macOS lets
+# one win and fails the others with ENOENT although the folder is there (measured: with eight processes, seven
+# failed in nearly every round, always fixed by the next attempt; the same call by path never failed). The write
+# that met it was reported as "No such file or directory" and kept in memory, so a count came up one short.
+
+def _enoent_on(monkeypatch, name: str, times: int) -> list:
+    """Make os.open fail with ENOENT the first ``times`` times it is asked to open ``name`` in a folder."""
+    real, seen = os.open, []
+
+    def flaky(path, flags, mode=0o777, *, dir_fd=None):
+        if path == name and dir_fd is not None:
+            seen.append(1)
+            if len(seen) <= times:
+                raise FileNotFoundError(2, "No such file or directory", name)
+        return real(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(os, "open", flaky)
+    return seen
+
+
+def test_qa4_a_lost_create_race_on_the_lock_file_is_retried_not_reported_as_a_failed_write(fake_deep, monkeypatch):
+    fake_deep()
+    b = dv.identity()
+    seen = _enoent_on(monkeypatch, "verdict.lock", times=2)
+    dv.note_call(False, error="RuntimeError: boom", consumer="agent:buddy")
+    assert len(seen) == 3, "two ENOENT answers, then the open that worked"
+    v = dv.current()
+    assert v.store_error is None, v.store_error
+    assert read_store()["binaries"][b.sha256]["failure"]["count"] == 1, "the write landed"
+
+
+def test_qa4_a_folder_that_is_really_gone_fails_after_a_few_tries_and_says_so(fake_deep, monkeypatch):
+    import time
+    fake_deep()
+    dv.identity()
+    seen = _enoent_on(monkeypatch, "verdict.lock", times=10 ** 6)
+    t0 = time.monotonic()
+    problem = dv._locked_update(lambda doc: None)
+    assert problem and "No such file or directory" in problem
+    assert len(seen) == dv.OPEN_ATTEMPTS, "a bounded number of tries"
+    assert time.monotonic() - t0 < 2.0, "and a short wait"
+
+
+def test_qa4_only_a_missing_file_is_retried(fake_deep, monkeypatch):
+    fake_deep()
+    d = dv.state_dir()
+    d.mkdir(parents=True, mode=0o700)
+    dir_fd = dv._open_state_dir(d)
+    calls = []
+
+    def denied(path, flags, mode=0o777, *, dir_fd=None):
+        calls.append(path)
+        raise PermissionError(13, "Permission denied", path)
+
+    monkeypatch.setattr(os, "open", denied)
+    try:
+        with pytest.raises(PermissionError):
+            dv._open_in_dir(dir_fd, "verdict.lock", os.O_RDWR | os.O_CREAT, 0o600)
+    finally:
+        monkeypatch.undo()
+        os.close(dir_fd)
+    assert calls == ["verdict.lock"], "one try; a permission problem does not clear by waiting"
+
+
+def test_qa4_eight_processes_creating_the_store_at_the_same_instant_lose_no_write(fake_deep, tmp_path):
+    """Every process waits for the same instant, then writes into a folder that does not exist yet. Three fresh
+    folders, so the lock file is created three times by eight processes at once."""
+    fd = fake_deep()
+    code = ("import time, sys, aerollm_api\nfrom arail import deep_verdict as dv\n"
+            "dv.LOCK_TIMEOUT_S = 120.0\n"
+            "while time.time() < float(sys.argv[1]):\n    pass\n"
+            "for _ in range(3):\n    dv.note_call(False, error='p', consumer='agent:t')\n")
+    for n in range(3):
+        state = tmp_path / f"race-{n}"
+        t0 = str(__import__("time").time() + 0.6)
+        procs = [subprocess.Popen([sys.executable, "-c", code, t0], env=fd.env(ARAIL_DEEP_STATE_DIR=str(state)),
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) for _ in range(8)]
+        for p in procs:
+            _out, err = p.communicate(timeout=120)
+            assert p.returncode == 0, err
+        doc = json.loads((state / "verdict.json").read_text(encoding="utf-8"))
+        assert doc["binaries"][fd.sha256]["failure"]["count"] == 24, f"round {n}: a write was lost"
+
 # ── QA-5 (fix pass 3): error text reaches a terminal without its control characters ─────────────────
 
 NASTY = "\x1b[2K\x1b[1A\x9b2K\x07\x7f"          # erase line, cursor up, a one-character CSI, BEL, DEL

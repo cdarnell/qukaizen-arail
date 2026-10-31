@@ -430,7 +430,7 @@ def _take_probe_lock(state: Path) -> tuple[Optional[int], Optional[dict]]:
     import fcntl
     dir_fd = dv._open_state_dir(state)       # refuses a link or a folder that is not yours (QA-4)
     try:
-        fd = os.open("probe.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600, dir_fd=dir_fd)
+        fd = dv._open_in_dir(dir_fd, "probe.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     finally:
         os.close(dir_fd)
     try:

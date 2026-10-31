@@ -497,6 +497,25 @@ def test_qa4_a_symlinked_state_folder_is_not_run_says_why_and_leaves_its_target_
     assert list(elsewhere.iterdir()) == [] and fd.gen_calls() == [], "not run: nothing written, no deep call"
 
 
+def test_qa4_the_probe_lock_is_retried_when_macos_loses_a_create_race(fake_deep, tmp_path, monkeypatch):
+    """The same lost-create-race ENOENT as the verdict lock (see test_deep_verdict): two probes started at the
+    same instant must not turn it into 'the probe lock could not be taken'."""
+    fake_deep("pass")
+    real, seen = os.open, []
+
+    def flaky(path, flags, mode=0o777, *, dir_fd=None):
+        if path == "probe.lock" and dir_fd is not None:
+            seen.append(1)
+            if len(seen) <= 2:
+                raise FileNotFoundError(2, "No such file or directory", path)
+        return real(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(os, "open", flaky)
+    lock_fd, holder = dp._take_probe_lock(tmp_path / "deep")
+    os.close(lock_fd)
+    assert len(seen) == 3 and holder is None
+
+
 def test_qa4_a_state_folder_another_user_owns_is_not_run_in_json_too(fake_deep, tmp_path, monkeypatch):
     shared = tmp_path / "shared-deep"
     shared.mkdir()
