@@ -1422,7 +1422,7 @@ def _resolve_kv_budget() -> dict[str, Any]:
         available: int = int(vm.available)
     except Exception as exc:  # noqa: BLE001
         reason = (
-            f"psutil unavailable ({exc}); aerollm will auto-detect KV budget"
+            f"psutil unavailable ({exc}); QueueLLM will auto-detect KV budget"
         )
         return {
             "budget_bytes": None,
@@ -1442,7 +1442,7 @@ def _resolve_kv_budget() -> dict[str, Any]:
     if total == 0:
         return {
             "budget_bytes": None,
-            "reason": "psutil returned total=0; aerollm will auto-detect KV budget",
+            "reason": "psutil returned total=0; QueueLLM will auto-detect KV budget",
             "fields": {
                 "pct_used": pct,
                 "total_gib": 0.0,
@@ -1602,7 +1602,7 @@ class AeroLLMBackend(BaseBackend):
             # repo IDs are the canonical 4-bit MLX conversions.
             hf_repo = "mlx-community/" + self.model_name
             raise RuntimeError(
-                f"AeroLLM model dir not found: {model_path}. "
+                f"QueueLLM model dir not found: {model_path}. "
                 f"Set AEROLLM_MODEL and/or ARAIL_MODELS_DIR, or "
                 f"download the checkpoint with `huggingface-cli download "
                 f"{hf_repo} --local-dir {model_path}`."
@@ -1896,7 +1896,7 @@ class AeroLLMBackend(BaseBackend):
 # ---------------------------------------------------------------------------
 # OllamaNativeBackend  (Ollama native /api/chat — carries options.num_ctx)
 # ---------------------------------------------------------------------------
-def _normalize_keep_alive(value: str) -> "str | int":
+def _normalize_keep_alive(value: "str | int") -> "str | int":
     """Coerce a keep_alive setting into something Ollama actually accepts.
 
     Ollama reads a JSON *string* as a Go duration and a JSON *number* as
@@ -1905,11 +1905,44 @@ def _normalize_keep_alive(value: str) -> "str | int":
     Operators reasonably write ARAIL_OLLAMA_KEEP_ALIVE=-1 meaning
     "forever", so turn any bare integer into the number form and leave
     real durations ("2h", "30s") untouched.
+
+    Called at the REQUEST boundary (complete/stream_complete), not only
+    inside _keep_alive: this bug class has shipped twice — first when the
+    pin value itself was the string "-1" (see tests/router/
+    test_keep_alive.py's CORRECTED note: every /api/chat call 400'd and
+    the whole local lane was dead), then again on a branch whose fork of
+    _keep_alive drifted from the fixed version. Whatever resolves the
+    value — this method, an env override, a subclass, a __new__-built
+    instance — the body that reaches Ollama can never carry a bare
+    numeric string.
     """
     try:
         return int(value)
     except (TypeError, ValueError):
         return value
+
+
+
+def _raise_for_status_with_detail(resp) -> None:
+    """``raise_for_status`` that keeps Ollama's own ``error`` text.
+
+    A bare "400 Bad Request" hid the real cause of the keep_alive bug;
+    the JSON body names it. Truncated to 160 chars; only the response
+    body is read, never request headers.
+    """
+    try:
+        resp.raise_for_status()
+    except Exception as exc:  # noqa: BLE001
+        detail = ""
+        try:
+            payload = resp.json()
+            if isinstance(payload, dict):
+                detail = str(payload.get("error") or "")
+        except Exception:  # noqa: BLE001
+            detail = ""
+        if detail:
+            raise type(exc)(f"{exc}: {detail[:160]}") from exc
+        raise
 
 
 class OllamaNativeBackend(OpenAICompatBackend):
@@ -1955,24 +1988,21 @@ class OllamaNativeBackend(OpenAICompatBackend):
           1. ARAIL_OLLAMA_KEEP_ALIVE, if set at all (including "" — omit
              keep_alive entirely, falling back to Ollama's own default).
              An explicit operator override always wins.
-          2. "-1" (pin forever) when ARAIL_RESIDENT_PIN is truthy
+          2. -1 (int; pin forever) when ARAIL_RESIDENT_PIN is truthy
              (default on) AND this instance's model is the registry's
              tier0/resident entry — the "in the GPU at all times" story
              the two-slot redesign (sprints/2026-08-11-two-slot-chat-
              models Part 3) promises for the resident slot specifically.
           3. "2h" otherwise (any other model, or pin disabled).
 
-        Pinning forever used to be rejected as a *default* because it
-        fights the aeroLLM preload's 0.60 memory-pressure ceiling and the
-        0.75 chat guard on 16 GB boxes — but that objection assumed an
-        arbitrarily large resident model. The resident slot the picker
-        offers by default is capped at <=3B (never past the <8B primary
-        ceiling), so pinned residency is ~1-2 GB: pinned tier0 (~2 GB) +
-        a resident aeroLLM 7B (~4 GB) is still well under 0.60 * 16 GB.
-        Only the model that's actually the registry's tier0 pins — every
-        other Ollama model (picked ad hoc from the rail, or used as a
-        one-off) keeps the old 2h behavior. ARAIL_RESIDENT_PIN=0 restores
-        the pre-Part-3 default everywhere.
+        Pinned residency counts against the boot resolver's RAM budget
+        (A + B together stay under 0.60 x total RAM, A first), so a larger
+        resident model simply makes the resolver drop the deep slot rather
+        than fight the aeroLLM preload's memory-pressure ceiling. Only the
+        model that's actually the registry's tier0 pins -- every other Ollama
+        model (picked ad hoc from the rail, or used as a one-off) keeps the
+        old 2h behavior. ARAIL_RESIDENT_PIN=0 restores the pre-Part-3
+        default everywhere.
         """
         raw = os.getenv("ARAIL_OLLAMA_KEEP_ALIVE")
         if raw is not None:
@@ -2010,6 +2040,16 @@ class OllamaNativeBackend(OpenAICompatBackend):
         except Exception:  # noqa: BLE001
             return False
 
+    @staticmethod
+    def _chat_messages(prompt: str, system: Optional[str], system_as_message: bool) -> list:
+        """The ``messages`` of the request. Default (every caller but the Buddy edge): ``system`` is prepended to the prompt and
+        the request has one user message, as it always had. ``system_as_message``: a ``system`` message, then the user message."""
+        if system and system_as_message:
+            return [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
+        if system:
+            prompt = f"{system}\n\n{prompt}"
+        return [{"role": "user", "content": prompt}]
+
     def _ollama_root(self) -> str:
         """Return the Ollama root URL (strip trailing /v1 from base_url)."""
         base = self.base_url.rstrip("/")
@@ -2022,15 +2062,26 @@ class OllamaNativeBackend(OpenAICompatBackend):
                  top_p: Optional[float] = None,
                  *, system: Optional[str] = None,
                  messages: Optional[list] = None,
-                 think: Optional[bool] = None) -> ModelResponse:
-        if system:
-            prompt = f"{system}\n\n{prompt}"
+                 think: Optional[bool] = None,
+                 response_schema: Optional[dict] = None,
+                 system_as_message: bool = False) -> ModelResponse:
+        """``response_schema`` (sprint 2026-10-20-buddy-always-on, A4): a JSON
+        Schema sent as Ollama's ``format`` for grammar-constrained decoding.
+        None (every existing caller) adds nothing to the request body.
+
+        ``system_as_message`` (same sprint, R1-4c): send ``system`` as a real
+        ``system`` message instead of prepending it to the one user message.
+        With no system message in the request Ollama substitutes the Modelfile's
+        ``SYSTEM`` (``llama-ai-eng``: "You are an AI engineering assistant ..."),
+        so a persona prepended to the prompt is read as user text under a
+        different persona. Only the Buddy edge asks for it; False (every
+        existing caller) leaves the request bytes as they were."""
         start = time.time()
         num_ctx = getattr(self, "_num_ctx", None)  # F-NEW: defensive read
 
         body: dict = {
             "model": self.model_name,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": self._chat_messages(prompt, system, system_as_message),
             "stream": False,
         }
         # options.num_ctx / num_predict only included when set (else Ollama
@@ -2052,9 +2103,13 @@ class OllamaNativeBackend(OpenAICompatBackend):
         # keep their thinking traces.
         if think is not None:
             body["think"] = think
+        if response_schema is not None:
+            body["format"] = response_schema
         keep_alive = self._keep_alive()
         if keep_alive is not None:
-            body["keep_alive"] = keep_alive
+            # Wire guard: whatever produced the value, a bare numeric
+            # string must leave here as a JSON number (Ollama 400s "-1").
+            body["keep_alive"] = _normalize_keep_alive(keep_alive)
 
         resp = self._session.post(
             f"{self._ollama_root()}/api/chat",   # F-OLLAMA-SHIM: native endpoint
@@ -2063,7 +2118,7 @@ class OllamaNativeBackend(OpenAICompatBackend):
             json=body,
             timeout=120,
         )
-        resp.raise_for_status()
+        _raise_for_status_with_detail(resp)
         data = resp.json()
         # Ollama native response shape: {message: {role, content}, done: bool}
         text = (data.get("message") or {}).get("content") or ""
@@ -2084,17 +2139,18 @@ class OllamaNativeBackend(OpenAICompatBackend):
                         top_p: Optional[float] = None,
                         *, system: Optional[str] = None,
                         messages: Optional[list] = None,
-                        think: Optional[bool] = None) -> Iterator[StreamResult]:
+                        think: Optional[bool] = None,
+                        response_schema: Optional[dict] = None,
+                        system_as_message: bool = False) -> Iterator[StreamResult]:
         """Symmetry with OpenAICompatBackend; chat path only calls complete().
-        Streams via /api/chat with stream:true, yields deltas then ModelResponse."""
-        if system:
-            prompt = f"{system}\n\n{prompt}"
+        Streams via /api/chat with stream:true, yields deltas then ModelResponse.
+        ``response_schema`` and ``system_as_message``: see complete()."""
         start = time.time()
         num_ctx = getattr(self, "_num_ctx", None)
 
         body: dict[str, Any] = {
             "model": self.model_name,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": self._chat_messages(prompt, system, system_as_message),
             "stream": True,
         }
         # See complete()'s comments: num_predict must be forwarded or Ollama
@@ -2109,9 +2165,12 @@ class OllamaNativeBackend(OpenAICompatBackend):
             body["options"] = options
         if think is not None:
             body["think"] = think
+        if response_schema is not None:
+            body["format"] = response_schema
         keep_alive = self._keep_alive()
         if keep_alive is not None:
-            body["keep_alive"] = keep_alive
+            # Wire guard — same rule as complete(); see _normalize_keep_alive.
+            body["keep_alive"] = _normalize_keep_alive(keep_alive)
 
         full_text = ""
         eval_count = 0
@@ -2124,7 +2183,7 @@ class OllamaNativeBackend(OpenAICompatBackend):
             timeout=120,
             stream=True,
         ) as resp:
-            resp.raise_for_status()
+            _raise_for_status_with_detail(resp)
             for line in resp.iter_lines(decode_unicode=True):
                 if not line:
                     continue

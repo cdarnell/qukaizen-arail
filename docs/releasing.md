@@ -3,27 +3,27 @@
 This is a checklist doc, not a comprehensive process guide — add sections
 as new release-time steps show up.
 
-## Refreshing the bundled AeroLLM binary
+## Refreshing the bundled QueueLLM binary
 
 The BUNDLED install channel (`./arailctl deep install`,
 `scripts/build-aerollm.sh bundle`) fetches a prebuilt `aerollm_api.abi3.so`
 from a GitHub Release asset on `cdarnell/qukaizen-arail`. This is a
 **manual, maintainer-only step** — deliberately not automated (no
 GitHub Actions workflow builds it, because CI has no access to the private
-aeroLLM source; plumbing a deploy key for that into a public repo's CI
+QueueLLM source; plumbing a deploy key for that into a public repo's CI
 would be a materially worse security posture than a documented manual
 step). See `sprints/2026-08-05-arail-bundled-aerollm/ARCHITECTURE.md` §10
 for the full rationale.
 
-Refresh the bundle whenever aeroLLM ships something worth carrying, or at
+Refresh the bundle whenever QueueLLM ships something worth carrying, or at
 minimum once per ARAIL release that bumps `LAB_TIER=maximus`'s expected
 capability:
 
 ```sh
-# 1. Pull the latest aeroLLM source.
+# 1. Pull the latest QueueLLM source.
 cd ~/ProJects/qukaizen-aerollm && git pull
 
-# 2. Build + package. Refuses a dirty aeroLLM worktree — commit or stash
+# 2. Build + package. Refuses a dirty QueueLLM worktree — commit or stash
 #    first, or ALLOW_DIRTY=1 if you understand the modification-disclosure
 #    consequence (F11 in ARCHITECTURE.md).
 cd ~/ProJects/arail
@@ -39,7 +39,7 @@ ARAIL_RELEASE_TAG=<next-arail-tag> bash scripts/package-aerollm-bundle.sh
 #    e.g. for ARAIL_RELEASE_TAG=v1.1.0:
 #        aerollm-api-v1.1.0-macos-arm64.tar.gz
 #        aerollm-api-v1.1.0-macos-arm64.tar.gz.sha256
-#    The name is derived ONLY from the ARAIL release tag — not aeroLLM's
+#    The name is derived ONLY from the ARAIL release tag — not QueueLLM's
 #    own version or commit hash — so it's identical every time this
 #    checklist runs for the same release, and identical to what the
 #    installer's resolve_bundle_url() constructs at install time. If
@@ -83,6 +83,6 @@ gh release upload <next-arail-tag> dist/aerollm-bundle/*.tar.gz dist/aerollm-bun
 ```
 
 Staleness is visible, not prevented: `./arailctl deep status` always
-prints the installed bundle's aeroLLM version + short commit + build date
-for any channel, so "which aeroLLM am I actually running?" is one command
+prints the installed bundle's QueueLLM version + short commit + build date
+for any channel, so "which QueueLLM am I actually running?" is one command
 away.

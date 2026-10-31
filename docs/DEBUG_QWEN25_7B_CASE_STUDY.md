@@ -1,4 +1,4 @@
-# Case Study: Debugging AeroLLM Qwen2.5-7B Weight Loading Bug
+# Case Study: Debugging QueueLLM Qwen2.5-7B Weight Loading Bug
 
 **Date:** 2026-05-10  
 **Investigation Time:** ~3 hours  
@@ -7,7 +7,7 @@
 
 ## Executive Summary
 
-A shape mismatch error prevented Qwen2.5-7B from running on AeroLLM while smaller models (0.5B, 1.5B) worked fine. Through systematic diagnosis, we discovered the root cause: **quantized linear layer weights were not being loaded from the checkpoint** due to missing `#[param]` annotations in the upstream mlx-rs library (identical to a previously-fixed embedding layer bug).
+A shape mismatch error prevented Qwen2.5-7B from running on QueueLLM while smaller models (0.5B, 1.5B) worked fine. Through systematic diagnosis, we discovered the root cause: **quantized linear layer weights were not being loaded from the checkpoint** due to missing `#[param]` annotations in the upstream mlx-rs library (identical to a previously-fixed embedding layer bug).
 
 **The Fix:** Manually construct parameter trees for `QuantizedLinear` projections, exposing their internal fields (scales, biases, inner) so the safetensors loader can find where to assign weights.
 
@@ -268,7 +268,7 @@ When applying a fix from a precedent, copy the exact pattern:
 
 | Time | Action | Finding |
 |------|--------|---------|
-| T+0m | Fresh ARAIL setup with aeroLLM | Shape mismatch error (448, 152064) |
+| T+0m | Fresh ARAIL setup with QueueLLM | Shape mismatch error (448, 152064) |
 | T+5m | Reproduced on local machine | Consistent error, systematic |
 | T+15m | Analyzed shape mismatch math | Weight is transposed/uninitialized |
 | T+30m | Inspected safetensors header | Weights on disk are correct |
@@ -337,7 +337,7 @@ This case study is **not** just a post-mortem. It's structured as institutional 
    - The systematic diagnostic process (not just the answer)
    - The reasoning chain from symptom → hypothesis → evidence gathering → root cause
    - The pattern matching (this bug is `QuantizedLinear`, mirrors `QuantizedEmbedding`)
-4. **Application Phase** → Next AeroLLM engineer encounters a similar bug:
+4. **Application Phase** → Next QueueLLM engineer encounters a similar bug:
    - AI suggests "Check if this is a parameter loading issue like Qwen2.5-7B"
    - AI knows to inspect safetensors headers before blaming weights
    - AI understands model size deltas matter

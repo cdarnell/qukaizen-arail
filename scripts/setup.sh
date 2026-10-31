@@ -669,30 +669,30 @@ install_accel_deps() {
     # On CUDA Maximus, AeroLLM's CUDA backend isn't ready yet; AirLLM
     # (opt-in) is the fallback.
     if [[ "${LAB_TIER:-minimalist}" != "maximus" ]]; then
-        info "Skipping AeroLLM install — tier is '${LAB_TIER:-minimalist}', not 'maximus'."
+        info "Skipping QueueLLM install — tier is '${LAB_TIER:-minimalist}', not 'maximus'."
         info "  Upgrade with: ./arailctl upgrade maximus"
     elif [[ "${ARAIL_SKIP_AEROLLM_PROBE:-0}" == "1" ]]; then
-        info "Skipping AeroLLM build (ARAIL_SKIP_AEROLLM_PROBE=1)."
+        info "Skipping QueueLLM build (ARAIL_SKIP_AEROLLM_PROBE=1)."
     elif [[ "$(uname -s)" == "Darwin" ]] && [[ "$(uname -m)" == "arm64" ]]; then
         if python3 -c "import aerollm_api" 2>/dev/null; then
-            info "aerollm_api already present — AeroLLM is the deep-mode 2nd inference."
+            info "aerollm_api already present — QueueLLM is the deep-mode 2nd inference."
         else
-            info "Installing AeroLLM (source → release → bundled, first that applies)…"
+            info "Installing QueueLLM (source → release → bundled, first that applies)…"
             if AEROLLM_INDEX_URL="$AEROLLM_INDEX_URL" AEROLLM_PIP_SPEC="$AEROLLM_PIP_SPEC" \
                AEROLLM_BUNDLE_TAG="$AEROLLM_BUNDLE_TAG" \
                AEROLLM_BUNDLE_SHA256="$AEROLLM_BUNDLE_SHA256" \
                bash "${REPO_ROOT:-$PWD}/scripts/build-aerollm.sh" auto; then
-                info "AeroLLM ready — the deep-mode 2nd inference on Apple Silicon."
+                info "QueueLLM ready — the deep-mode 2nd inference on Apple Silicon."
             else
-                warn "AeroLLM not installed (see above). The lab runs without the"
+                warn "QueueLLM not installed (see above). The lab runs without the"
                 warn "2nd inference until you run: ./arailctl deep install (bundled binary,"
                 warn "no source repo or credentials needed — or: deep rebuild / deep update"
-                warn "if you're a maintainer with the aerollm source or private-index access)"
+                warn "if you're a maintainer with the QueueLLM source or private-index access)"
             fi
         fi
     else
-        info "AeroLLM auto-build is Apple-Silicon-only today; on this host run"
-        info "  ./arailctl deep rebuild  once aerollm supports it (CUDA backend WIP)."
+        info "QueueLLM auto-build is Apple-Silicon-only today; on this host run"
+        info "  ./arailctl deep rebuild  once QueueLLM supports it (CUDA backend WIP)."
     fi
 }
 
@@ -1271,7 +1271,7 @@ capture_tier() {
                 HuggingFace) reachable over plain HTTP when
                 LAB_MODE=hybrid.
     ${BOLD}maximus${RESET}     Everything in minimalist + Admin, Notebooks,
-                AeroLLM deep-mode runtime, Anthropic SDK,
+                QueueLLM deep-mode runtime, Anthropic SDK,
                 LangChain/LangGraph, full cloud catalog. Targets 32GB+
                 machines.
 
@@ -1324,7 +1324,7 @@ EOF
     # 16 GB = 17179869184 bytes.
     local _ram_16gb_floor=17179869184
 
-    info "AeroLLM deep model for ${LAB_TIER}: ${BOLD}${AEROLLM_MODEL_ID}${RESET}"
+    info "QueueLLM deep model for ${LAB_TIER}: ${BOLD}${AEROLLM_MODEL_ID}${RESET}"
 
     # RAM-headroom hint for operators who manually upgrade AEROLLM_MODEL in .env
     # to a frontier (32B+) checkpoint. With the 7B default the warning
@@ -1558,12 +1558,12 @@ setup_env() {
         local _aero_basename="${AEROLLM_MODEL_ID##*/}"
         local _aero_dir="lab/models/${_aero_basename}"
         if [[ ! -d "$_aero_dir" ]]; then
-            warn "AeroLLM weights missing at ${_aero_dir}."
+            warn "QueueLLM weights missing at ${_aero_dir}."
             warn "The deep (2nd inference) box won't load until you run:"
             warn "  hf download ${AEROLLM_MODEL_ID} --local-dir ${_aero_dir}"
             warn "Or downgrade AEROLLM_MODEL in .env to a model whose weights you have."
         else
-            info "AeroLLM weights present at ${_aero_dir} ✓"
+            info "QueueLLM weights present at ${_aero_dir} ✓"
         fi
 
         # AeroLLM KV budget — fraction of system RAM the runtime may
@@ -1575,7 +1575,7 @@ setup_env() {
         if grep -q '^AEROLLM_KV_BUDGET_PCT=' .env; then
             sed -i.bak "s|^AEROLLM_KV_BUDGET_PCT=.*|AEROLLM_KV_BUDGET_PCT=${AEROLLM_KV_BUDGET_PCT}|" .env
         else
-            printf '\n# AeroLLM KV-cache budget as a fraction of system RAM. 0.60 by\n# default; raise carefully — exceeding ~0.85 risks portal evictions.\nAEROLLM_KV_BUDGET_PCT=%s\n' "$AEROLLM_KV_BUDGET_PCT" >> .env
+            printf '\n# QueueLLM KV-cache budget as a fraction of system RAM. 0.60 by\n# default; raise carefully — exceeding ~0.85 risks portal evictions.\nAEROLLM_KV_BUDGET_PCT=%s\n' "$AEROLLM_KV_BUDGET_PCT" >> .env
         fi
 
         rm -f .env.bak

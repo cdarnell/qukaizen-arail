@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+{#- login.html — standalone, like welcome.html: it does NOT extend base.html, because _nav.html makes
+    fetch calls that would 401-loop before there is a session. It injects its own theme block. -#}
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ brand.name }} — log in · :{{ portal_port }}</title>
+<link rel="stylesheet" href="/static/style.css">
+<style id="ui-theme-vars">{{ ui_theme_css|safe }}</style>
+<style>
+  body { display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
+  .lg-card {
+    width: min(440px, 92vw); background: var(--surface); border: 1px solid var(--border);
+    border-left: 4px solid var(--accent); border-radius: var(--radius-l);
+    box-shadow: var(--shadow-1); padding: 2rem 2.2rem;
+  }
+  .lg-card h1 { font-family: var(--heading-font); font-size: 1.4rem; font-weight: 650; color: var(--text-strong); margin: 0 0 0.5rem; }
+  .lg-card p { color: var(--text); font-size: 0.9rem; margin: 0 0 1rem; }
+  .lg-field { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 1rem; }
+  .lg-field label { font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted); }
+  .lg-field input {
+    background: var(--surface2); color: var(--text-strong); border: 1px solid var(--border);
+    border-radius: var(--radius-s); padding: 0.5rem 0.7rem; font-size: 0.9rem; font-family: var(--font-sans);
+  }
+  .lg-btn {
+    background: var(--accent); color: color-mix(in srgb, var(--bg) 45%, black); border: none;
+    border-radius: var(--radius-s); padding: 0.55rem 1.1rem; font-size: 0.85rem; font-weight: 600;
+    cursor: pointer; font-family: var(--font-sans);
+  }
+  .lg-err { color: var(--danger); font-size: 0.82rem; margin: 0 0 1rem; }
+  .lg-foot { color: var(--text-muted); font-size: 0.75rem; margin: 1.2rem 0 0; }
+</style>
+</head>
+<body>
+<div class="lg-card" role="main">
+  <h1>{{ brand.name }}</h1>
+  <p>Type the passphrase you chose when you set up this lab.</p>
+  {% if error %}<p class="lg-err" role="alert">{{ error }}</p>{% endif %}
+  <form method="post" action="/login" autocomplete="off">
+    <input type="hidden" name="next" value="{{ next }}">
+    <div class="lg-field">
+      <label for="lg-pass">Passphrase</label>
+      <input id="lg-pass" name="passphrase" type="password" autocomplete="current-password" autofocus required>
+    </div>
+    <button type="submit" class="lg-btn">Log in</button>
+  </form>
+  <p class="lg-foot">Forgot it? On the computer that runs this lab, open a terminal in the lab folder and run
+    <code>./arailctl auth reset</code> to choose a new one. If the page says logging in is paused and you are sure of
+    your passphrase, run <code>./arailctl auth unlock</code> instead.</p>
+</div>
+</body>
+</html>

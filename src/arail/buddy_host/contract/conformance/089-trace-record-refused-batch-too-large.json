@@ -1,0 +1,238 @@
+{
+  "name": "trace-record-refused-batch-too-large",
+  "method": "trace.record",
+  "setup": {},
+  "request": {
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer $CREDENTIAL",
+      "X-Buddy-Contract": "sha256:$CONTRACT_SHA256"
+    },
+    "body": {
+      "v": 1,
+      "records": [
+        {
+          "event": "config_changed",
+          "trace_id": "0123456789abcdef",
+          "client_ts": "$NOW-1s",
+          "channel": "telegram",
+          "identity": null,
+          "outcome": null,
+          "reason": null,
+          "attrs": {}
+        },
+        {
+          "event": "config_changed",
+          "trace_id": "0123456789abcdef",
+          "client_ts": "$NOW-1s",
+          "channel": "telegram",
+          "identity": null,
+          "outcome": null,
+          "reason": null,
+          "attrs": {}
+        },
+        {
+          "event": "config_changed",
+          "trace_id": "0123456789abcdef",
+          "client_ts": "$NOW-1s",
+          "channel": "telegram",
+          "identity": null,
+          "outcome": null,
+          "reason": null,
+          "attrs": {}
+        },
+        {
+          "event": "config_changed",
+          "trace_id": "0123456789abcdef",
+          "client_ts": "$NOW-1s",
+          "channel": "telegram",
+          "identity": null,
+          "outcome": null,
+          "reason": null,
+          "attrs": {}
+        },
+        {
+          "event": "config_changed",
+          "trace_id": "0123456789abcdef",
+          "client_ts": "$NOW-1s",
+          "channel": "telegram",
+          "identity": null,
+          "outcome": null,
+          "reason": null,
+          "attrs": {}
+        },
+        {
+          "event": "config_changed",
+          "trace_id": "0123456789abcdef",
+          "client_ts": "$NOW-1s",
+          "channel": "telegram",
+          "identity": null,
+          "outcome": null,
+          "reason": null,
+          "attrs": {}
+        },
+        {
+          "event": "config_changed",
+          "trace_id": "0123456789abcdef",
+          "client_ts": "$NOW-1s",
+          "channel": "telegram",
+          "identity": null,
+          "outcome": null,
+          "reason": null,
+          "attrs": {}
+        },
+        {
+          "event": "config_changed",
+          "trace_id": "0123456789abcdef",
+          "client_ts": "$NOW-1s",
+          "channel": "telegram",
+          "identity": null,
+          "outcome": null,
+          "reason": null,
+          "attrs": {}
+        },
+        {
+          "event": "config_changed",
+          "trace_id": "0123456789abcdef",
+          "client_ts": "$NOW-1s",
+          "channel": "telegram",
+          "identity": null,
+          "outcome": null,
+          "reason": null,
+          "attrs": {}
+        },
+        {
+          "event": "config_changed",
+          "trace_id": "0123456789abcdef",
+          "client_ts": "$NOW-1s",
+          "channel": "telegram",
+          "identity": null,
+          "outcome": null,
+          "reason": null,
+          "attrs": {}
+        },
+        {
+          "event": "config_changed",
+          "trace_id": "0123456789abcdef",
+          "client_ts": "$NOW-1s",
+          "channel": "telegram",
+          "identity": null,
+          "outcome": null,
+          "reason": null,
+          "attrs": {}
+        },
+        {
+          "event": "config_changed",
+          "trace_id": "0123456789abcdef",
+          "client_ts": "$NOW-1s",
+          "channel": "telegram",
+          "identity": null,
+          "outcome": null,
+          "reason": null,
+          "attrs": {}
+        },
+        {
+          "event": "config_changed",
+          "trace_id": "0123456789abcdef",
+          "client_ts": "$NOW-1s",
+          "channel": "telegram",
+          "identity": null,
+          "outcome": null,
+          "reason": null,
+          "attrs": {}
+        },
+        {
+          "event": "config_changed",
+          "trace_id": "0123456789abcdef",
+          "client_ts": "$NOW-1s",
+          "channel": "telegram",
+          "identity": null,
+          "outcome": null,
+          "reason": null,
+          "attrs": {}
+        },
+        {
+          "event": "config_changed",
+          "trace_id": "0123456789abcdef",
+          "client_ts": "$NOW-1s",
+          "channel": "telegram",
+          "identity": null,
+          "outcome": null,
+          "reason": null,
+          "attrs": {}
+        },
+        {
+          "event": "config_changed",
+          "trace_id": "0123456789abcdef",
+          "client_ts": "$NOW-1s",
+          "channel": "telegram",
+          "identity": null,
+          "outcome": null,
+          "reason": null,
+          "attrs": {}
+        },
+        {
+          "event": "config_changed",
+          "trace_id": "0123456789abcdef",
+          "client_ts": "$NOW-1s",
+          "channel": "telegram",
+          "identity": null,
+          "outcome": null,
+          "reason": null,
+          "attrs": {}
+        },
+        {
+          "event": "config_changed",
+          "trace_id": "0123456789abcdef",
+          "client_ts": "$NOW-1s",
+          "channel": "telegram",
+          "identity": null,
+          "outcome": null,
+          "reason": null,
+          "attrs": {}
+        },
+        {
+          "event": "config_changed",
+          "trace_id": "0123456789abcdef",
+          "client_ts": "$NOW-1s",
+          "channel": "telegram",
+          "identity": null,
+          "outcome": null,
+          "reason": null,
+          "attrs": {}
+        },
+        {
+          "event": "config_changed",
+          "trace_id": "0123456789abcdef",
+          "client_ts": "$NOW-1s",
+          "channel": "telegram",
+          "identity": null,
+          "outcome": null,
+          "reason": null,
+          "attrs": {}
+        },
+        {
+          "event": "config_changed",
+          "trace_id": "0123456789abcdef",
+          "client_ts": "$NOW-1s",
+          "channel": "telegram",
+          "identity": null,
+          "outcome": null,
+          "reason": null,
+          "attrs": {}
+        }
+      ]
+    }
+  },
+  "expect": {
+    "status": 422,
+    "error_code": "schema_invalid",
+    "body_subset": {
+      "error": {
+        "type": "buddy_host_error",
+        "code": "schema_invalid",
+        "message": "The request does not match the contract."
+      }
+    }
+  }
+}

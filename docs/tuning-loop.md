@@ -62,8 +62,8 @@ load-bearing.
   click can't make commits.
 - **Only four files are ever writable by the loop.** Enforced in
   `git_ops.ALLOWED_WRITABLE_FILES` — two per backend:
-  - `config/tuning.yml` + `lab/data/aerollm-bench.jsonl` (AeroLLM/CUDA)
-  - `config/tuning-mlx.yml` + `lab/data/mlx-bench.jsonl` (AeroLLM MLX/Apple)
+  - `config/tuning.yml` + `lab/data/aerollm-bench.jsonl` (QueueLLM/CUDA)
+  - `config/tuning-mlx.yml` + `lab/data/mlx-bench.jsonl` (QueueLLM MLX/Apple)
 
   If the agent somehow proposes a different edit, `commit_experiment`
   raises `GitSafetyError` before anything is staged. A test pins this
@@ -119,7 +119,7 @@ load-bearing.
 ## The candidate list
 
 `autoresearch.CANDIDATES` is a hand-curated list of variants
-mirroring the knobs AeroLLM exposes. Adding a new candidate
+mirroring the knobs QueueLLM exposes. Adding a new candidate
 requires two edits:
 
 1. `config/tuning.yml` — if the variant needs a new knob or a new
@@ -132,7 +132,7 @@ the maintainer's back. Agents that propose variants at runtime
 must pass them via the `candidates` parameter; they cannot extend
 `CANDIDATES` in-place.
 
-## Extending with upstream AeroLLM knobs
+## Extending with upstream QueueLLM knobs
 
 Today `AeroLLMBackend` honors two env-var knobs directly:
 `AEROLLM_COMPRESSION` and `AEROLLM_MAX_LENGTH`. The other four —

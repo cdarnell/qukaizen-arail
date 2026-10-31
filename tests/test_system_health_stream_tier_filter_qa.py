@@ -374,6 +374,11 @@ def test_stream_tier_bypass_headers_ignored(monkeypatch, tmp_path, header_name, 
     """Spoofed tier headers must not unlock max-only stream checks."""
     client = _client(monkeypatch, tmp_path, "min")
     r = client.get("/api/system/health/stream", headers={header_name: header_value})
+    if header_name == "Authorization":
+        # Portal auth (S4): a spoofed Authorization replaces the test client's real bearer and is
+        # refused outright, so it cannot unlock anything either.
+        assert r.status_code == 401
+        return
     assert r.status_code == 200
     names = {e["name"] for e in _check_events(_parse_sse(r.text))}
     for n in MAX_ONLY:

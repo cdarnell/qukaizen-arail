@@ -1,0 +1,54 @@
+{
+  "name": "brain-chat-flattening-text-parts",
+  "method": "brain.chat",
+  "setup": {},
+  "request": {
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer $CREDENTIAL",
+      "X-Buddy-Contract": "sha256:$CONTRACT_SHA256"
+    },
+    "body": {
+      "model": "buddy-fast",
+      "messages": [
+        {
+          "role": "system",
+          "content": "BUDDY-TURN/1 {\"trace_id\":\"0123456789abcdef\",\"channel\":\"telegram\",\"identity\":{\"pseudonym\":\"p_0123456789\",\"role\":\"talker\"},\"response_schema\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"kind\",\"answer\",\"cite\",\"propose\"],\"properties\":{\"kind\":{\"enum\":[\"answer\",\"abstain\",\"refuse\",\"escalate\"]},\"answer\":{\"type\":\"string\",\"maxLength\":600},\"cite\":{\"type\":\"array\",\"maxItems\":3,\"uniqueItems\":true,\"items\":{\"enum\":[\"pre-existing-failure\",\"flaky-test\"]}},\"propose\":{\"enum\":[\"none\",\"pause_research\"]}}}}\nYou are Buddy, a QA expert. Answer from the qa-practice World terms only. Built with Llama."
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "a"
+            },
+            {
+              "type": "text",
+              "text": "b"
+            }
+          ]
+        }
+      ],
+      "stream": true,
+      "stream_options": {
+        "include_usage": true
+      },
+      "max_tokens": 400
+    }
+  },
+  "expect": {
+    "status": 200,
+    "error_code": null,
+    "body_subset": {},
+    "stream": {
+      "media_type": "text/event-stream",
+      "assembled_content": "$FAKE_REPLY",
+      "finish_reason": "stop",
+      "final_usage": true,
+      "ends_with_done": true
+    },
+    "brain_received": {
+      "prompt": "### user\na\nb\n\n"
+    }
+  }
+}

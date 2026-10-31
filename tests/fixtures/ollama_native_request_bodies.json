@@ -1,0 +1,301 @@
+{
+ "_provenance": "Request bodies OllamaNativeBackend sends on main@ca0a8f81, before response_schema existed (sprint 2026-10-20-buddy-always-on A4). ARAIL_OLLAMA_KEEP_ALIVE=2h; the session is a recorder.",
+ "cases": {
+  "complete_messages_ignored|num_ctx=4096": {
+   "json": {
+    "keep_alive": "2h",
+    "messages": [
+     {
+      "content": "hello",
+      "role": "user"
+     }
+    ],
+    "model": "llama-ai-eng",
+    "options": {
+     "num_ctx": 4096,
+     "num_predict": 64
+    },
+    "stream": false
+   },
+   "stream": false,
+   "url": "http://127.0.0.1:11434/api/chat"
+  },
+  "complete_messages_ignored|num_ctx=None": {
+   "json": {
+    "keep_alive": "2h",
+    "messages": [
+     {
+      "content": "hello",
+      "role": "user"
+     }
+    ],
+    "model": "llama-ai-eng",
+    "options": {
+     "num_predict": 64
+    },
+    "stream": false
+   },
+   "stream": false,
+   "url": "http://127.0.0.1:11434/api/chat"
+  },
+  "complete_no_max_tokens|num_ctx=4096": {
+   "json": {
+    "keep_alive": "2h",
+    "messages": [
+     {
+      "content": "hello",
+      "role": "user"
+     }
+    ],
+    "model": "llama-ai-eng",
+    "options": {
+     "num_ctx": 4096
+    },
+    "stream": false
+   },
+   "stream": false,
+   "url": "http://127.0.0.1:11434/api/chat"
+  },
+  "complete_no_max_tokens|num_ctx=None": {
+   "json": {
+    "keep_alive": "2h",
+    "messages": [
+     {
+      "content": "hello",
+      "role": "user"
+     }
+    ],
+    "model": "llama-ai-eng",
+    "stream": false
+   },
+   "stream": false,
+   "url": "http://127.0.0.1:11434/api/chat"
+  },
+  "complete_plain|num_ctx=4096": {
+   "json": {
+    "keep_alive": "2h",
+    "messages": [
+     {
+      "content": "hello",
+      "role": "user"
+     }
+    ],
+    "model": "llama-ai-eng",
+    "options": {
+     "num_ctx": 4096,
+     "num_predict": 100
+    },
+    "stream": false
+   },
+   "stream": false,
+   "url": "http://127.0.0.1:11434/api/chat"
+  },
+  "complete_plain|num_ctx=None": {
+   "json": {
+    "keep_alive": "2h",
+    "messages": [
+     {
+      "content": "hello",
+      "role": "user"
+     }
+    ],
+    "model": "llama-ai-eng",
+    "options": {
+     "num_predict": 100
+    },
+    "stream": false
+   },
+   "stream": false,
+   "url": "http://127.0.0.1:11434/api/chat"
+  },
+  "complete_system|num_ctx=4096": {
+   "json": {
+    "keep_alive": "2h",
+    "messages": [
+     {
+      "content": "SYS\n\nhello",
+      "role": "user"
+     }
+    ],
+    "model": "llama-ai-eng",
+    "options": {
+     "num_ctx": 4096,
+     "num_predict": 64
+    },
+    "stream": false
+   },
+   "stream": false,
+   "url": "http://127.0.0.1:11434/api/chat"
+  },
+  "complete_system|num_ctx=None": {
+   "json": {
+    "keep_alive": "2h",
+    "messages": [
+     {
+      "content": "SYS\n\nhello",
+      "role": "user"
+     }
+    ],
+    "model": "llama-ai-eng",
+    "options": {
+     "num_predict": 64
+    },
+    "stream": false
+   },
+   "stream": false,
+   "url": "http://127.0.0.1:11434/api/chat"
+  },
+  "complete_think_false|num_ctx=4096": {
+   "json": {
+    "keep_alive": "2h",
+    "messages": [
+     {
+      "content": "ping",
+      "role": "user"
+     }
+    ],
+    "model": "llama-ai-eng",
+    "options": {
+     "num_ctx": 4096,
+     "num_predict": 1
+    },
+    "stream": false,
+    "think": false
+   },
+   "stream": false,
+   "url": "http://127.0.0.1:11434/api/chat"
+  },
+  "complete_think_false|num_ctx=None": {
+   "json": {
+    "keep_alive": "2h",
+    "messages": [
+     {
+      "content": "ping",
+      "role": "user"
+     }
+    ],
+    "model": "llama-ai-eng",
+    "options": {
+     "num_predict": 1
+    },
+    "stream": false,
+    "think": false
+   },
+   "stream": false,
+   "url": "http://127.0.0.1:11434/api/chat"
+  },
+  "stream_plain|num_ctx=4096": {
+   "json": {
+    "keep_alive": "2h",
+    "messages": [
+     {
+      "content": "hello",
+      "role": "user"
+     }
+    ],
+    "model": "llama-ai-eng",
+    "options": {
+     "num_ctx": 4096,
+     "num_predict": 100
+    },
+    "stream": true
+   },
+   "stream": true,
+   "url": "http://127.0.0.1:11434/api/chat"
+  },
+  "stream_plain|num_ctx=None": {
+   "json": {
+    "keep_alive": "2h",
+    "messages": [
+     {
+      "content": "hello",
+      "role": "user"
+     }
+    ],
+    "model": "llama-ai-eng",
+    "options": {
+     "num_predict": 100
+    },
+    "stream": true
+   },
+   "stream": true,
+   "url": "http://127.0.0.1:11434/api/chat"
+  },
+  "stream_system|num_ctx=4096": {
+   "json": {
+    "keep_alive": "2h",
+    "messages": [
+     {
+      "content": "SYS\n\nhello",
+      "role": "user"
+     }
+    ],
+    "model": "llama-ai-eng",
+    "options": {
+     "num_ctx": 4096,
+     "num_predict": 64
+    },
+    "stream": true
+   },
+   "stream": true,
+   "url": "http://127.0.0.1:11434/api/chat"
+  },
+  "stream_system|num_ctx=None": {
+   "json": {
+    "keep_alive": "2h",
+    "messages": [
+     {
+      "content": "SYS\n\nhello",
+      "role": "user"
+     }
+    ],
+    "model": "llama-ai-eng",
+    "options": {
+     "num_predict": 64
+    },
+    "stream": true
+   },
+   "stream": true,
+   "url": "http://127.0.0.1:11434/api/chat"
+  },
+  "stream_think_false|num_ctx=4096": {
+   "json": {
+    "keep_alive": "2h",
+    "messages": [
+     {
+      "content": "ping",
+      "role": "user"
+     }
+    ],
+    "model": "llama-ai-eng",
+    "options": {
+     "num_ctx": 4096,
+     "num_predict": 1
+    },
+    "stream": true,
+    "think": false
+   },
+   "stream": true,
+   "url": "http://127.0.0.1:11434/api/chat"
+  },
+  "stream_think_false|num_ctx=None": {
+   "json": {
+    "keep_alive": "2h",
+    "messages": [
+     {
+      "content": "ping",
+      "role": "user"
+     }
+    ],
+    "model": "llama-ai-eng",
+    "options": {
+     "num_predict": 1
+    },
+    "stream": true,
+    "think": false
+   },
+   "stream": true,
+   "url": "http://127.0.0.1:11434/api/chat"
+  }
+ }
+}

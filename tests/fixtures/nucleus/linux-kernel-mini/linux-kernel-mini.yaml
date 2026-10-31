@@ -1,0 +1,32 @@
+# Fully synthetic fixture domain — see make_fixture_repo.py. Never staged
+# against a real kernel clone; used only by tests/nucleus/test_corpus_stage.py
+# and the stub-provider Gate A end-to-end test (commit 22).
+
+student:
+  base: qwen2.5-3b-instruct
+
+teacher:
+  profile: local
+  model: auto
+
+runtime: queuellm
+
+corpus:
+  sources:
+    - git:linux
+    - cve:vulns
+  cutoff: "2026-06-01"
+
+eval:
+  cert_set: frozen
+  eyeball_prompts: linux-kernel-mini.eyeball.txt
+  dev_fraction: 0.1
+  cert_n: 20
+
+fidelity:
+  target: 0.6
+
+distill:
+  top_n: 5
+
+shard: qkz-linux-kernel-mini

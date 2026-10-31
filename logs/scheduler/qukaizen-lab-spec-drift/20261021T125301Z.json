@@ -1,0 +1,15 @@
+{
+ "job_id": "qukaizen-lab-spec-drift",
+ "name": "Spec drift",
+ "started_at": "2026-10-21T12:53:01.676015+00:00",
+ "cmd": [
+  "python3",
+  "lab/spec_drift.py",
+  "/Users/netsushi/ProJects/qukaizen-team"
+ ],
+ "cwd": "/Users/netsushi/ProJects/qukaizen-team/worlds/qukaizen-lab",
+ "finished_at": "2026-10-21T12:53:01.699746+00:00",
+ "exit_code": 0,
+ "status": "ok",
+ "output_tail": "  no instance.json yet -- nothing has been adopted or trialed here\n==============================================================================\n  SPEC DRIFT -- every 'adopted' trial, checked against the file it\n  claims to have changed\n==============================================================================\n  repo root /Users/netsushi/ProJects/qukaizen-team - 0 adopted entries, 0 still awaiting verdict\n\n  REFLECTED (0) -- adopted here, and actually present in ARAIL's spec\n\n  DRIFTED (0) -- adopted here, NOT found where it claims to be written\n\n  UNTARGETED (0) -- marked adopted with no written_to declared at all.\n  Worse than drift: there's no file this script can even check.\n\n  AWAITING VERDICT (0) -- can't be checked for drift yet; nothing's been ruled on.\n\n  POSTURE QUESTIONS FOR CHARLIE (candidates, not verdicts)\n    - Nothing adopted yet. This script has nothing to do until your first\n      verdict on model_ceiling (or anything else) moves it from trial to adopted.\n\n  COVERAGE -- what this scan cannot see\n    - Whether the spec file's text, even if present, is semantically correct --\n      this checks for the pattern, not for meaning.\n    - Any adopted entry pointing outside repo_root.\n    - Spec files that express the same rule in different words than expect_pattern.\n\n  wrote /Users/netsushi/ProJects/qukaizen-team/worlds/qukaizen-lab/views/spec_drift.json\n"
+}

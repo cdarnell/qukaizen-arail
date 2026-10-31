@@ -137,6 +137,48 @@ def _isolated_env_file(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def _hermetic_boot_models(request, monkeypatch, tmp_path):
+    """Keep the portal's boot model resolution/warm off the real machine.
+
+    Starting the app (``with TestClient(app)``) now resolves the two model
+    slots and warms them by default (sprints/2026-10-20-boot-model-
+    autoresolve). Tests must never talk to a developer's real Ollama or load
+    weights, so: warm is off (ARAIL_BOOT_WARM=0) and the resolver's two
+    network reads report "Ollama unreachable". Tests that exercise the
+    resolver patch these themselves (their patch runs after this one);
+    ``@pytest.mark.real_resolver_net`` opts out entirely.
+    """
+    # The resolver stamps MODEL_NAME / AEROLLM_MODEL (and remembers the .env
+    # values in ARAIL_ENV_PREF_*) straight into os.environ, bypassing
+    # monkeypatch -- restore them by hand, as isolated_secrets does.
+    _stamped = ("MODEL_NAME", "AEROLLM_MODEL", "ARAIL_ENV_PREF_A", "ARAIL_ENV_PREF_B")
+    saved = {k: os.environ.get(k) for k in _stamped}
+    os.environ.pop("ARAIL_ENV_PREF_A", None)
+    os.environ.pop("ARAIL_ENV_PREF_B", None)
+    if not request.node.get_closest_marker("real_resolver_net"):
+        monkeypatch.setenv("ARAIL_BOOT_WARM", "0")
+        from arail import model_resolve
+        monkeypatch.setattr(model_resolve, "_fetch_ollama_tags", lambda: None)
+        monkeypatch.setattr(model_resolve, "_fetch_capabilities", lambda name: None)
+    # Pins/cache and the crash sentinel are per-test, never the session's or
+    # a developer's real files.
+    monkeypatch.setenv("ARAIL_MODEL_DEFAULTS_FILE",
+                       str(tmp_path / "model_defaults.yaml"))
+    from arail.portal import model_warmth as _mw
+    monkeypatch.setattr(_mw, "sentinel_path",
+                        lambda: tmp_path / ".aerollm_boot_warm.inflight")
+    from arail import model_resolve as _mr
+    _mr.last_resolution().clear()
+    yield
+    _mr.last_resolution().clear()
+    for k, v in saved.items():
+        if v is None:
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = v
+
+
+@pytest.fixture(autouse=True)
 def _no_ambient_lab_mode_env(monkeypatch):
     """Delete (and restore after the test) the lab-mode/identity env keys.
 
@@ -186,6 +228,96 @@ def _allow_testclient_host(monkeypatch):
     non-loopback Host header.
     """
     monkeypatch.setenv("ARAIL_ALLOWED_HOSTS", "testserver")
+
+
+PORTAL_TEST_TOKEN = "arl1_" + "A" * 43  # fixed and obviously fake; never a real token
+
+
+def _write_0600(path, text):
+    """Write ``text`` to ``path`` with mode 0600 and return the path."""
+    path.write_text(text + "\n")
+    path.chmod(0o600)
+    return path
+
+
+@pytest.fixture
+def portal_bearer():
+    """Headers carrying the test bearer, for clients that are not a Starlette TestClient
+    (``httpx.ASGITransport`` callers pass ``headers=portal_bearer``)."""
+    return {"Authorization": f"Bearer {PORTAL_TEST_TOKEN}"}
+
+
+_bearer_active = {"on": False}
+_send_patched = {"done": False}
+
+
+def _patch_testclient_send_once():
+    """Wrap ``TestClient.send`` once per process; the wrapper is a no-op unless a test has the
+    bearer switched on. Patching ``send`` (not ``__init__``) also covers module- and
+    session-scoped clients, which are built before any function-scoped fixture runs."""
+    if _send_patched["done"]:
+        return
+    try:
+        import httpx
+        from starlette.testclient import TestClient
+    except ImportError:
+        # A minimal CI job (no httpx/starlette) builds no TestClient, so there is
+        # nothing to wrap and no portal test can run there.
+        return
+
+    orig_send = httpx.Client.send
+
+    def send(self, request, **kw):
+        # /api/host/v1/* has its own bhc1_ credential; a portal bearer there would turn
+        # "credential_missing" into "credential_invalid".
+        if (_bearer_active["on"] and "authorization" not in request.headers
+                and not request.url.path.startswith("/api/host/v1/")):
+            request.headers["Authorization"] = f"Bearer {PORTAL_TEST_TOKEN}"
+        return orig_send(self, request, **kw)
+
+    TestClient.send = send
+    _send_patched["done"] = True
+
+
+@pytest.fixture(autouse=True)
+def _portal_bearer_for_tests(request, monkeypatch, tmp_path):
+    """Give every ``TestClient`` request the portal bearer, so ~7k tests keep working unedited.
+
+    Portal auth (ARAIL D3, sprint 2026-10-25-buddy-s4-gateway-in-box) requires a credential on
+    every route. Rather than a test-mode switch (an env flag that disables auth is one ``.env``
+    line from shipping), this fixture points ``auth.token_path`` at a real 0600 file holding a
+    fixed fake token and makes ``TestClient`` add an ``Authorization`` header to any request
+    that has none. Existing tests therefore pass through the REAL bearer check, not a bypass. A
+    test that sends its own ``Authorization`` keeps it; a test of auth itself opts out with
+    ``@pytest.mark.real_auth`` and uses ``logged_in_client`` or its own headers.
+
+    Debt TD4: patching ``TestClient.send`` is clever; if it ever bites, the fallback is an
+    explicit ``portal_client`` fixture and a mechanical rewrite of the 136 files.
+    """
+    from arail import config as arail_config
+    from arail.portal import auth as portal_auth
+
+    # No test may write session or token state into the real lab/data, or leak a login lockout
+    # or a cached session store into the next test.
+    monkeypatch.setattr(portal_auth, "_stores", {})
+    monkeypatch.setattr(portal_auth, "limiter", portal_auth.LoginLimiter())
+    monkeypatch.setattr(portal_auth, "device_limiters", {})
+    # A test that enters a TestClient context runs the portal's startup hook; that must never bind
+    # the real Buddy edge port. Edge tests choose their own free port.
+    monkeypatch.setenv("ARAIL_EDGE_PORT", "0")
+    if request.node.get_closest_marker("real_auth"):
+        monkeypatch.setattr(arail_config, "DATA_DIR", tmp_path / "portal_data")
+        yield
+        return
+    token_file = _write_0600(tmp_path / "portal.token", PORTAL_TEST_TOKEN)
+    monkeypatch.setattr(portal_auth, "token_path", lambda: token_file)
+    monkeypatch.setattr(portal_auth, "sessions_path", lambda: tmp_path / "portal_sessions.json")
+    _patch_testclient_send_once()
+    _bearer_active["on"] = True
+    try:
+        yield
+    finally:
+        _bearer_active["on"] = False
 
 
 @pytest.fixture(autouse=True)

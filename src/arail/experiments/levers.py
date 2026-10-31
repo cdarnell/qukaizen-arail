@@ -107,7 +107,7 @@ def handoff_line(hypothesis: str) -> str:
     hits = levers_for(hypothesis)
     if not hits:
         return ("No knob in either tuning config varies this — testing it "
-                "means changing AeroLLM itself, not a lab setting.")
+                "means changing QueueLLM itself, not a lab setting.")
     by_backend: Dict[str, List[str]] = {}
     for knob, backend in hits:
         by_backend.setdefault(backend, []).append(knob)

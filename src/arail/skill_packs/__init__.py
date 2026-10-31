@@ -20,6 +20,7 @@ unless ``force=True``. The Skills tab UI calls these via the
 
 from __future__ import annotations
 
+import hashlib
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -127,6 +128,32 @@ def installed_skills_in_pack(
     ]
 
 
+# sha256 of SKILL.md files as shipped before the QueueLLM display rename
+# (origin/main 5f775f1c), keyed by skill id. An installed copy that is
+# byte-equal to one of these was never edited, so it is refreshed even with
+# ``force=False``; a hand-edited copy never matches and survives.
+_PRE_RENAME_SHA256: dict[str, frozenset[str]] = {
+    "frontier-local-models": frozenset({
+        "3b593874699947a41c37fc59bf47ccef9dca28d874192196cc6fde3c6776169c"}),
+    "optimize-aerollm": frozenset({
+        "d3b59d81e52cc0818dd56da2955258d06694033e71759141318b5c79b204f597"}),
+    "understanding-precision": frozenset({
+        "ecea3beb63c093434895ab6c979285082cb31a75a33237e7036c7f630349db8e"}),
+    "setup-arail": frozenset({
+        "66a44ba74b96fbdee7b343195e242b4110d7f9e259c32290dec500068177454b"}),
+}
+
+
+def _is_unedited_pre_rename(skill_id: str, path: Path) -> bool:
+    known = _PRE_RENAME_SHA256.get(skill_id)
+    if not known:
+        return False
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest() in known
+    except OSError:
+        return False
+
+
 def install_pack(
     pack_id: str,
     *,
@@ -159,7 +186,8 @@ def install_pack(
             continue
         dst_dir = _installed_skill_dir(sid, pkb_root=pkb_root)
         dst = dst_dir / "SKILL.md"
-        if dst.exists() and not force:
+        if (dst.exists() and not force
+                and not _is_unedited_pre_rename(sid, dst)):
             skipped.append(sid)
             continue
         dst_dir.mkdir(parents=True, exist_ok=True)

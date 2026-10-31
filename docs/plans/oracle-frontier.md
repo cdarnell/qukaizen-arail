@@ -6,7 +6,7 @@
 
 ## TL;DR
 
-Oracle is the page where slow is the point. You ask a hard question; the lab spins up a frontier-class model that *doesn't fit in your RAM*; weights stream from NVMe layer-by-layer; the streaming is visible; and the answer makes the wait obvious-in-hindsight. Built on AirLLM today (using our [#281](https://github.com/lyogavin/airllm/pull/281) fork), with AeroLLM Phase 4 swap-back as the v1.5 milestone for a ~3× speedup at zero UX cost.
+Oracle is the page where slow is the point. You ask a hard question; the lab spins up a frontier-class model that *doesn't fit in your RAM*; weights stream from NVMe layer-by-layer; the streaming is visible; and the answer makes the wait obvious-in-hindsight. Built on AirLLM today (using our [#281](https://github.com/lyogavin/airllm/pull/281) fork), with QueueLLM Phase 4 swap-back as the v1.5 milestone for a ~3× speedup at zero UX cost.
 
 **Default model v1:** `gpt-oss-120b` — 117B total, **5.1B active per token** (MoE), 234 GB on disk. The MoE structure is the engineering story: only ~10 GB working set on a 16 GB Mac, because only the active experts need to be resident at any moment.
 
@@ -130,7 +130,7 @@ That's the loop. Single-turn for v1 (multi-turn deferred to v1.5 — see Q1).
 |---|---|---|
 | AirLLM (upstream main) | broken on Apple Silicon | crashes per [#280](https://github.com/lyogavin/airllm/issues/280); use our fork |
 | AirLLM (`qukaizen/airllm@fix/mlx-torch-tensor-coerce`) | works on Apple Silicon | our fork with [#281](https://github.com/lyogavin/airllm/pull/281) patch applied |
-| AeroLLM | not yet — Phase 4 (MoE) is the AeroLLM port that lights this up | swap-back happens automatically once Phase 4 lands |
+| QueueLLM | not yet — Phase 4 (MoE) is the QueueLLM port that lights this up | swap-back happens automatically once Phase 4 lands |
 
 **v1 backend: AirLLM via our fork.** Pinned in `.env`:
 
@@ -140,9 +140,9 @@ ORACLE_MODEL=gpt-oss-120b
 ORACLE_BACKEND=airllm
 ```
 
-**v1.5 backend: AeroLLM Phase 4 swap-back.** When AeroLLM ships its MoE port, the runtime preference becomes `["aerollm", "airllm"]` and the page transparently uses AeroLLM with no UX change. Expected outcome: ~3× speedup (per the v0.1-alpha headline ratio of AeroLLM vs `mlx_lm`); a 9-minute Oracle becomes a 3-minute Oracle.
+**v1.5 backend: QueueLLM Phase 4 swap-back.** When QueueLLM ships its MoE port, the runtime preference becomes `["aerollm", "airllm"]` and the page transparently uses QueueLLM with no UX change. Expected outcome: ~3× speedup (per the v0.1-alpha headline ratio of QueueLLM vs `mlx_lm`); a 9-minute Oracle becomes a 3-minute Oracle.
 
-**Engine picker:** hidden behind an "Advanced" toggle; default + recommend AirLLM today, AeroLLM after Phase 4.
+**Engine picker:** hidden behind an "Advanced" toggle; default + recommend AirLLM today, QueueLLM after Phase 4.
 
 ## The five "wow" features
 
@@ -150,7 +150,7 @@ These are what make Oracle unforgettable on first use. Engineered together, not 
 
 ### 1. Live layer-streaming visualization
 
-Subscribe to AirLLM's layer-load events (or AeroLLM's `aero-bus` `PrefetchHit` / `PrefetchMiss` / `LayerInstalled` / `LayerEvicted` after swap-back) and render them as:
+Subscribe to AirLLM's layer-load events (or QueueLLM's `aero-bus` `PrefetchHit` / `PrefetchMiss` / `LayerInstalled` / `LayerEvicted` after swap-back) and render them as:
 
 - A live progress bar (layer N / 80)
 - A sparkline of recent prefetch hit-rate
@@ -187,7 +187,7 @@ Powered by hand-tuned heuristics in v1 — `(model_total_b, prompt_tokens, max_n
 
 The marquee feature for the OSS launch. Same question, two engines, side by side:
 
-- Left: Qwen2.5-7B via AeroLLM mlx-native (~15s)
+- Left: Qwen2.5-7B via QueueLLM mlx-native (~15s)
 - Right: gpt-oss-120b via AirLLM (our fork, ~9 min)
 
 With word counts, citation counts, and time-to-first-token displayed for both. The visual contrast — short-and-confident vs long-and-substantive — is what gets shared on Twitter.
@@ -250,7 +250,7 @@ Each sprint is its own PR with a real test bar. Bail point after Sprint D if the
 
 ### Sprint E — Compare mode + PKB integration (~4 days, ~600 LOC)
 
-- "Compare" button triggers a parallel run of Qwen2.5-7B (via AeroLLM mlx-native) on the same prompt
+- "Compare" button triggers a parallel run of Qwen2.5-7B (via QueueLLM mlx-native) on the same prompt
 - Side-by-side rendering: word counts, citation counts, time-to-first-token, total wall-clock
 - "Save to PKB" button creates `lab/pkb/study/<date>-<slug>.md` with the full session
 - Replay-bundle integration: every session writes to `lab/pkb/oracle/replays/<run-id>.json`
@@ -286,11 +286,11 @@ If the estimator consistently misleads users (says "9 minutes" but Oracle takes 
 
 ### R4 — Compare-mode RAM contention
 
-Running Qwen2.5-7B (via AeroLLM, ~14 GB resident) and gpt-oss-120b (via AirLLM, ~10 GB working set) in parallel hits ~24 GB RAM on a 16 GB Mac. Mitigation in Sprint E: serialize them — fast model first (~15s), then Oracle solo. Compare view fills in progressively.
+Running Qwen2.5-7B (via QueueLLM, ~14 GB resident) and gpt-oss-120b (via AirLLM, ~10 GB working set) in parallel hits ~24 GB RAM on a 16 GB Mac. Mitigation in Sprint E: serialize them — fast model first (~15s), then Oracle solo. Compare view fills in progressively.
 
-### R5 — AirLLM-vs-AeroLLM swap-back UX continuity
+### R5 — AirLLM-vs-QueueLLM swap-back UX continuity
 
-When AeroLLM Phase 4 ships and we swap back to AeroLLM as the v1.5 backend, the Oracle UX must be identical. Mitigation: route through `arail.router.backends` (already supports backend_preference list) — Oracle code never references "AirLLM" or "AeroLLM" directly, only "the Oracle backend the router resolves."
+When QueueLLM Phase 4 ships and we swap back to QueueLLM as the v1.5 backend, the Oracle UX must be identical. Mitigation: route through `arail.router.backends` (already supports backend_preference list) — Oracle code never references "AirLLM" or "QueueLLM" directly, only "the Oracle backend the router resolves."
 
 ### R6 — AirLLM upstream non-merge of #281
 
@@ -360,7 +360,7 @@ open http://localhost:8080/oracle
 The user's "≤ 1.5 TB benchmarking" requirement is a parallel effort, lives in [`qukaizen/aerollm`](https://github.com/qukaizen/aerollm) under `docs/benchmarks/frontier-bench-plan.md` (to be authored as a sibling plan). Scope:
 
 - Extend `scripts/perf/airllm_baseline.py` to handle 400B+ checkpoints (long warmup, longer per-prompt timeout, reduced n_prompts to keep total runtime sane)
-- Same comparison shape: AeroLLM (when Phase 4 lands) vs AirLLM-via-our-fork
+- Same comparison shape: QueueLLM (when Phase 4 lands) vs AirLLM-via-our-fork
 - Catalog `benchmark_eligible == true` resolves the model set automatically
 - Hardware requirements: NVMe ≥ 1 TB free for the larger models (Llama-3.1-405B = 810 GB, GLM-4.5 = 710 GB, DeepSeek-V3 = 1.3 TB)
 
@@ -370,6 +370,6 @@ Oracle and benchmarking share the catalog and the model fixtures; they have diff
 
 - [`BLUEPRINTS.md`](../../BLUEPRINTS.md) — blueprint concept; Oracle becomes a feature highlight after Sprint F
 - [`catalog/models.toml`](../../catalog/models.toml) — gains `oracle_eligible` + `benchmark_eligible` fields in Sprint A
-- [`qukaizen/aerollm` Phase 4](https://github.com/qukaizen/aerollm/blob/main/MILESTONES.md) — the AeroLLM MoE port that lights up v1.5 swap-back
+- [`qukaizen/aerollm` Phase 4](https://github.com/qukaizen/aerollm/blob/main/MILESTONES.md) — the QueueLLM MoE port that lights up v1.5 swap-back
 - [`lyogavin/airllm#281`](https://github.com/lyogavin/airllm/pull/281) — the MLX patch our fork carries until upstream merges
 - [`docs/plans/oracle-frontier-results.md`](oracle-frontier-results.md) — Sprint F deliverable; honest write-up of what the v1 Oracle measured (positive or negative)

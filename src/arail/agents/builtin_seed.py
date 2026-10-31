@@ -293,7 +293,7 @@ title: SSD-hosted model inference — lab research program
 section: research
 tags: [meta, agent-instructions, aerollm, ssd-inference, optimization]
 lab_theme: Making SSD-hosted model inference faster
-auto_goal: Optimize AeroLLM's tokens-per-minute on frontier-scale models
+auto_goal: Optimize QueueLLM's tokens-per-minute on frontier-scale models
 ---
 
 # SSD-hosted model inference — the lab's signature research area
@@ -303,10 +303,10 @@ SSD-hosted model inference faster — running frontier open-weight
 models on laptop hardware at usable speeds.
 
 This is the long-running research area. Specific goals come and go
-(today it's "optimize AeroLLM's tokens-per-minute"); the theme is
+(today it's "optimize QueueLLM's tokens-per-minute"); the theme is
 the north star that outlasts any single goal.
 
-**Today's concrete goal.** AeroLLM runs frontier-scale language
+**Today's concrete goal.** QueueLLM runs frontier-scale language
 models (100B-750B+) on laptop hardware by streaming transformer
 layers from disk with a multi-threaded prefetcher that overlaps
 I/O and compute across concurrent prompts. It works, but there's
@@ -317,7 +317,7 @@ contribute them upstream.
 
 ## Goal
 
-**Increase AeroLLM throughput on frontier-scale models by at least
+**Increase QueueLLM throughput on frontier-scale models by at least
 2× without sacrificing more than 0.5% quality on a held-out eval.**
 
 Primary metric: tokens-per-minute (t/min), captured automatically
@@ -345,12 +345,12 @@ Ordered by estimated effort/impact ratio. Pick one per cycle.
    INT4. ~30-50% disk shrink with minimal quality loss. Easy win
    once you've measured per-layer sensitivity.
 3. **Speculative decoding with the lab's fast SLM** — the 8B model
-   already loaded in RAM drafts tokens; AeroLLM validates in batch.
+   already loaded in RAM drafts tokens; QueueLLM validates in batch.
    Hard to implement, 3-5× potential. Lab-specific advantage.
 4. **Persistent KV cache** — cache per-layer K/V to disk keyed by
    prompt prefix hash so follow-up messages skip most work.
    Huge on conversational use cases.
-5. **Concurrent-prompt batching** — AeroLLM's raison d'être; keep
+5. **Concurrent-prompt batching** — QueueLLM's raison d'être; keep
    pushing N up and measure where the per-prompt latency curve
    flattens on your hardware.
 
@@ -364,7 +364,7 @@ A candidate optimization "ships" when:
 - A human can look at before/after t/min graph and see it.
 
 Anything that clears those bars → PR to
-[github.com/cdarnell/qukaizen-aerollm](https://github.com/cdarnell/qukaizen-aerollm).
+[github.com/cdarnell/qukaizen-queuellm](https://github.com/cdarnell/qukaizen-queuellm).
 Anything that doesn't → stays in the lab's branch as an experiment.
 
 ## Constraints
@@ -398,13 +398,13 @@ every LLM call — edit them to sharpen the agent's approach:
 - **Training** — this lab doesn't train models. Quantization means
   post-training quantization only.
 - **Alternative inference engines** — no vLLM, no TGI, no separate
-  MLX port. The goal is specifically to improve AeroLLM.
+  MLX port. The goal is specifically to improve QueueLLM.
 - **New model architectures** — we use whatever Qwen/GLM/DeepSeek
   ships. Research is on the inference stack, not the models.
 
 ## Background / prior art
 
-- [AeroLLM source](https://github.com/cdarnell/qukaizen-aerollm)
+- [QueueLLM source](https://github.com/cdarnell/qukaizen-queuellm)
 - Model primers in [lab/pkb/sources/seeds/model-building/](../sources/seeds/model-building/)
 - The existing [evaluate-llm](../skills/evaluate-llm/SKILL.md)
   and [falsify-hypothesis](../skills/falsify-hypothesis/SKILL.md)
@@ -412,11 +412,11 @@ every LLM call — edit them to sharpen the agent's approach:
 """
 
 
-_RESEARCH_PREPARE_PY = '''"""prepare.py — validation substrate for the AeroLLM research goal.
+_RESEARCH_PREPARE_PY = '''"""prepare.py — validation substrate for the QueueLLM research goal.
 
 This is the cheat-proof side of the research contract: the
 researcher agent CANNOT modify this file. If it wants a better
-throughput number, it has to write faster AeroLLM code, not
+throughput number, it has to write faster QueueLLM code, not
 redefine what "good" means.
 
 See program.md for the natural-language side.

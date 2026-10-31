@@ -10,7 +10,7 @@
 > see [`models-on-disk.md`](./models-on-disk.md); for the shipped build
 > surfaces, see the `/build` tab explainer. Keep this as the forward design.
 
-> Implementation plan for the local model lifecycle: download → register → fit-check → load (full / streaming / hybrid) → infer → fine-tune → re-register. Owns the contract between AeroLLM, the QuKaizen swarm, and the portal UI.
+> Implementation plan for the local model lifecycle: download → register → fit-check → load (full / streaming / hybrid) → infer → fine-tune → re-register. Owns the contract between QueueLLM, the QuKaizen swarm, and the portal UI.
 >
 > Companion docs: [`design.md`](./design.md) (visual contract for the loader UI), [`tuning-loop.md`](./tuning-loop.md) (chat-side speed work), [`agents.md`](./agents.md) (orchestrator agents).
 
@@ -46,13 +46,13 @@
         ┌─────────────────┐  ┌──────────────────────────────────┐
         │ /models/local/  │  │  Workers (subprocess / k8s pod)  │
         │ /models/finetuned│  │  • download_worker              │
-        └─────────────────┘  │  • loader_worker  (AeroLLM API)  │
+        └─────────────────┘  │  • loader_worker  (QueueLLM API)  │
                              │  • finetune_worker (fsdp_qlora) │
                              │  • eval_worker                   │
                              └─────────┬───────────────────────┘
                                        ▼
                                  ┌──────────┐
-                                 │  AeroLLM  │ ← Rust inference
+                                 │  QueueLLM  │ ← Rust inference
                                  │   /HF py  │   layer-streaming
                                  └──────────┘
 ```
@@ -935,7 +935,7 @@ SCENARIO: HF token rotated
 | Phase | Scope | Exit criteria |
 |---|---|---|
 | **0 — scaffolding** | Repo layout, manifest schema, registry FS-watcher, CLI shells | `arail model list` returns seeded models; tests pass |
-| **1 — download + load (full only)** | HF download w/ license gate, full-load via AeroLLM, SSE status, UI block-until-resident | tiny-llama lifecycle e2e green |
+| **1 — download + load (full only)** | HF download w/ license gate, full-load via QueueLLM, SSE status, UI block-until-resident | tiny-llama lifecycle e2e green |
 | **2 — fit estimator + streaming** | Fit math, streaming + hybrid loaders, strategy chooser UI | 70B model loads on a 24GB card via stream-hot-pinned |
 | **3 — fine-tune factory** | Job orchestrator, finetune worker, eval hooks, artifact registration | QLoRA smoke test green; manifest reproducible |
 | **4 — router + adapters** | Provider abstraction, /infer with primary/fallback/compare, provenance | local + Claude side-by-side compare in chat UI |

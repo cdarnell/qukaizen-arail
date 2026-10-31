@@ -45,7 +45,7 @@ state and auto-respawning browser-reachable shells at login is attack surface.
 | Tier | Mechanism | Status you'll see |
 |---|---|---|
 | 0 (resident) | every Ollama request carries `keep_alive` (default **2h**, `ARAIL_OLLAMA_KEEP_ALIVE`); a real 1-token warm runs at boot (`ARAIL_TIER0_BOOT_WARM`) | `healthy — resident` vs `cold — server up, model not loaded` (from `/api/ps`, not optimism) |
-| 1 (deep, aeroLLM) | background preload (`ARAIL_AEROLLM_PRELOAD`, default on) strictly gated by `background_safe()`: operator absent, Metal pressure < 0.60, jobs not halted; re-checked after acquiring the inference slot | `cold → warming → healthy(resident)` in the statusbar/switcher |
+| 1 (deep, QueueLLM) | background preload (`ARAIL_AEROLLM_PRELOAD`, default on) strictly gated by `background_safe()`: operator absent, Metal pressure < 0.60, jobs not halted; re-checked after acquiring the inference slot | `cold → warming → healthy(resident)` in the statusbar/switcher |
 
 `keep_alive=-1` pins Tier 0 forever — note it raises baseline Metal pressure
 and can keep the Tier 1 preload standing down. `/metrics` exposes

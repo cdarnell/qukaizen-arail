@@ -8,7 +8,7 @@
 in that repo). `aerollm-api 1.0.0` was published to
 `pypi.qukaizen.com` — the **private index only** — immediately before
 this verification ran; no public-PyPI byte was uploaded and no
-`v1.0.0` git tag was cut in the aerollm repo.
+`v1.0.0` git tag was cut in the QueueLLM repo.
 **Precedent this mirrors:** `sprints/2026-07-11-aerollm-release-arail-verify/`
 (the original gate-#12 downstream-consumer-wheel proof, done at
 `0.1.0`). This is the same discipline, re-run at `1.0.0`.
@@ -17,7 +17,7 @@ this verification ran; no public-PyPI byte was uploaded and no
 
 A real chat turn ran end-to-end through `AeroLLMBackend` against the
 published `1.0.0` wheel, installed via pip into an isolated scratch
-venv (the RELEASE channel — no local aerollm sibling repo present, no
+venv (the RELEASE channel — no local QueueLLM sibling repo present, no
 `maturin develop`, no cargo build). The real `~/ProJects/arail/.venv`
 was untouched throughout.
 
@@ -29,7 +29,7 @@ was untouched throughout.
 - `ARAIL_AEROLLM_REPO` pointed at a nonexistent directory
   (`.../scratchpad/arail-1.0-verify/nonexistent-aerollm`) to force the
   RELEASE (pip-from-index) channel, not the DEV (cargo sibling-build)
-  channel — this is F8 from the aerollm sprint's own failure-mode
+  channel — this is F8 from the QueueLLM sprint's own failure-mode
   table: "verification silently uses the DEV/cargo channel, proving
   nothing."
 - `AEROLLM_PIP_SPEC="aerollm-api>=1.0,<2.0"` — the exact new pin, as it
@@ -141,7 +141,7 @@ exist for it (metadata only, no downloaded weight blobs). A different,
 fully-downloaded, architecturally-supported local checkpoint was
 substituted instead: **`mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit`**
 (`model_type: "qwen3_moe"` — native Qwen3-MoE, the same architecture
-family aeroLLM's GA MoE evidence is built on, ADR 0012 in the aerollm
+family QueueLLM's GA MoE evidence is built on, ADR 0012 in the QueueLLM
 repo), pointed to directly via `AEROLLM_MODEL=<absolute snapshot path>`
 (`AeroLLMBackend` accepts an absolute path for `AEROLLM_MODEL`, bypassing
 the `ARAIL_MODELS_DIR` join). Same allowance the prior gate-#12 sprint
@@ -152,7 +152,7 @@ named here, not hidden.
 `AeroLLMBackend.complete()` was called directly (bypassing arail's
 `arail.router` package `__init__` chain, which pulls in an unrelated
 required dependency — `dac_world`, a private git package — not
-relevant to proving the aerollm wheel path works; `backends.py` itself
+relevant to proving the QueueLLM wheel path works; `backends.py` itself
 has zero `arail.*` imports, so it loads cleanly via
 `importlib.util.spec_from_file_location` without the package parent).
 
@@ -196,12 +196,12 @@ failure; the process's actual exit code was `0`.)
 **Non-empty text, real generation (`api_version=1.0.0`), clean process
 exit.** Assertion 6: ✅.
 
-## Where evidence lives (per the aerollm sprint's evidence-splitting design)
+## Where evidence lives (per the QueueLLM sprint's evidence-splitting design)
 
 - **This file** (arail repo): the full transcript — install log,
   `status` output, all nine assertions, the chat turn, the negative
   control. Authoritative for a future arail maintainer.
-- **aerollm repo** (`sprints/2026-07-24-private-1.0-version-bump/BUILD_LOG.md`):
+- **QueueLLM repo** (`sprints/2026-07-24-private-1.0-version-bump/BUILD_LOG.md`):
   pass/fail summary, the wheel sha256, and this PR's URL + commit SHA
   as a cross-reference — not a duplicate transcript.
 

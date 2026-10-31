@@ -57,6 +57,15 @@ class AgentCall:
     # nests ... and the record carries parent_agent_id") — additive, not a
     # redefinition of any documented field.
     parent_agent_id: Optional[str] = None
+    # Sprint 2026-10-20-buddy-always-on (A1, ARCHITECTURE.md §5.10): who asked
+    # and through what. ``channel`` is a sanitised token ("telegram"),
+    # ``identity`` is (salted pseudonym, role) — never a raw platform id — and
+    # ``origin`` says which writer owns the trace record ("in_process" |
+    # "edge"; None is read as "in_process"). All three default to None, so
+    # every existing caller is unchanged.
+    channel: Optional[str] = None
+    identity: Optional[tuple] = None
+    origin: Optional[str] = None
 
 
 _CALL: "contextvars.ContextVar[Optional[AgentCall]]" = contextvars.ContextVar(
@@ -87,6 +96,28 @@ def _sanitize_agent_id(agent_id: Any) -> Optional[str]:
     if not s:
         return None
     return s[:_MAX_ID_LEN]
+
+
+def _sanitize_token(value: Any) -> Optional[str]:
+    """Channel / origin labels: a lowercase ``[a-z0-9_.-]`` token or None."""
+    if not isinstance(value, str):
+        return None
+    s = _SANITIZE_RE.sub("_", value.strip().lower()).strip("_")
+    return s[:_MAX_ID_LEN] or None
+
+
+def _sanitize_identity(value: Any) -> Optional[tuple]:
+    """``(pseudonym, role)`` — two non-empty strings — or None. Never raises,
+    never stores anything else: a malformed identity is an absent one."""
+    if not isinstance(value, (tuple, list)) or len(value) != 2:
+        return None
+    pseudonym, role = value
+    if not (isinstance(pseudonym, str) and isinstance(role, str)):
+        return None
+    pseudonym, role = pseudonym.strip(), role.strip().lower()
+    if not pseudonym or not role or len(pseudonym) > _MAX_ID_LEN or len(role) > _MAX_ID_LEN:
+        return None
+    return (pseudonym, role)
 
 
 def _mint_trace_id() -> str:
@@ -136,8 +167,16 @@ def agent_call(
     foreground: Optional[bool] = None,
     deep_reason: Optional[tuple] = None,
     trace_id: Optional[str] = None,
+    channel: Optional[str] = None,
+    identity: Optional[tuple] = None,
+    origin: Optional[str] = None,
 ) -> Iterator[Optional[AgentCall]]:
     """Attribute the enclosed block to ``agent_id``.
+
+    ``channel`` / ``identity`` / ``origin`` (A1) say who asked and through
+    what. A same-agent inner call that does not set them inherits the outer
+    call's, like the trace id; a *different* agent nested inside does not
+    inherit a phone identity.
 
     Reentrant: an inner ``agent_call`` with the same (sanitised) ``agent_id``
     reuses the outer ``trace_id`` and lineage, so a multi-step decision by
@@ -167,10 +206,17 @@ def agent_call(
         elif len(deep_reason) == 2:
             reason_code, reason_detail = deep_reason
 
+    call_channel = _sanitize_token(channel)
+    call_identity = _sanitize_identity(identity)
+    call_origin = _sanitize_token(origin)
+
     outer = current()
     if outer is not None and outer.kind == "agent" and outer.agent_id == sanitized:
         tid = outer.trace_id
         parent = outer.parent_agent_id
+        call_channel = call_channel or outer.channel
+        call_identity = call_identity or outer.identity
+        call_origin = call_origin or outer.origin
     else:
         tid = trace_id or _mint_trace_id()
         parent = outer.agent_id if outer is not None else None
@@ -186,6 +232,9 @@ def agent_call(
         deep_reason_code=reason_code,
         deep_reason_detail=reason_detail,
         parent_agent_id=parent,
+        channel=call_channel,
+        identity=call_identity,
+        origin=call_origin,
     )
     token = _CALL.set(call)
     try:

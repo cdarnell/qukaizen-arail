@@ -52,7 +52,7 @@ survey instead of opening a lab.
    - **Minimalist** — Python runtime + AirLLM. Lightweight inference only.
      Right when the box has ≤ 16 GB unified memory or a slow disk, or when
      the user just wants to try it.
-   - **Maximus** — Python + Rust + AeroLLM. Full lab, full pipeline.
+   - **Maximus** — Python + Rust + QueueLLM. Full lab, full pipeline.
      Right when the box can spare 50 GB of disk and the user wants to run
      experiments.
    Default to Minimalist unless the doctor reading + stated goal scream

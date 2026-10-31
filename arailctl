@@ -253,7 +253,7 @@ EOF
     uninstall-daemon  remove launchd supervision (back to dev/foreground mode)
     tier [<tier>]   switch (or print) the feature-set tier — minimalist | maximus
                     ('upgrade' is a permanent alias — see docs/cli.md)
-    deep <op>       AeroLLM 2nd inference: install (bundled binary) | rebuild (source) |
+    deep <op>       QueueLLM 2nd inference: install (bundled binary) | rebuild (source) |
                     update (wheel) | status
     version         show installed component versions
     status [--json[=full|instances]] [--probe|--no-probe] [--quiet]  show what's
@@ -262,6 +262,11 @@ EOF
     logs [comp]     tail activity log — filter by component
     reset [mode]    wipe state — models|data|pkb|plugins|env|full|destroy
     world <op>      DaC WorldBundle: list | mount <dir> [--apply-face] | verify <dir> | verify-shipped [--examples] | swap <dir> | unmount
+    nucleus <verb>  Model Forge (local domain distillation): plan | stage | build | spike |
+                    eval | certify | verify | status | list — see docs/nucleus.md
+    auth <verb>     Portal credentials: token [--rotate] | reset | logout-all | unlock  (each takes --world SLUG)
+    buddy <verb>    Buddy on your phone (loopback edge): link --buddy-home PATH [--rotate] [--yes] |
+                    unlink [--buddy-home PATH] | status [--json] — see docs/buddy-edge.md
     pkb <op>        ARAIL lab content: ingest | compile | browse | prune | bootstrap
     wiki <op>       ARAIL docs-as-code: build | info | new <title>
     kb <op>         QuKaiZen Karpathy Wiki: status | compile | lint | query
@@ -835,6 +840,29 @@ case "$cmd" in
     status)  exec bash "$REPO_ROOT/scripts/status.sh" "$@" ;;
     logs)
         LOG_FILE="$REPO_ROOT/lab/data/activity.jsonl"
+        if [[ "${1:-}" == "--since" ]]; then
+            # Non-streaming window for Buddy: events from the last 2m|10m|1h, then exit.
+            [[ -f "$LOG_FILE" ]] || die "No activity log yet — start the lab first: ./arailctl start"
+            case "${2:-}" in 2m) _win=120 ;; 10m) _win=600 ;; 1h) _win=3600 ;;
+                *) die "logs --since takes 2m, 10m or 1h" ;; esac
+            python3 -I - "$LOG_FILE" "$_win" <<'PYSINCE'
+import sys, json
+from datetime import datetime, timezone
+path, win = sys.argv[1], int(sys.argv[2])
+now = datetime.now(timezone.utc)
+for line in open(path, encoding="utf-8", errors="replace"):
+    try:
+        e = json.loads(line)
+        ts = datetime.fromisoformat(e["ts"])
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        if -5 <= (now - ts).total_seconds() <= win:  # 5s of clock skew; never the future
+            print(f"{e['ts'][:19].replace('T',' ')}  {str(e.get('source','?')):<12}  {e.get('message','')}")
+    except (ValueError, KeyError, TypeError):
+        pass
+PYSINCE
+            exit 0
+        fi
         COMP="${1:-all}"; shift || true
         LINES="${1:-50}"; shift || true
         if [[ ! -f "$LOG_FILE" ]]; then
@@ -933,6 +961,17 @@ LOGSEOF
                 die "Unknown component: $COMP — run ./arailctl logs help for options"
                 ;;
         esac
+        ;;
+    drift)
+        # Buddy's vocabulary: spec-vs-actual gate. Alias of `db drift`.
+        exec "$REPO_ROOT/arailctl" db drift "$@"
+        ;;
+    rule)
+        # The `y` a person presses: ./arailctl rule "<rendered command>" allow|deny
+        [[ $# -eq 2 && ( "$2" == "allow" || "$2" == "deny" ) ]] \
+            || die 'usage: ./arailctl rule "<rendered command>" allow|deny'
+        [[ -x "$REPO_ROOT/.venv/bin/python" ]] || die "missing .venv — run ./arailctl setup first"
+        exec "$REPO_ROOT/.venv/bin/python" -m arail.ops.buddy_floor rule "$1" "$2"
         ;;
     doctor)
         # Exit-code contract (ARCHITECTURE.md §12/§13): 0 healthy · 1 broken
@@ -1280,11 +1319,53 @@ TEMPLATE
             *) die "wiki op must be one of: build | info | new <title> | serve" ;;
         esac
         ;;
+    nucleus)
+        # Model Forge — see docs/nucleus.md. `python -m arail.nucleus` owns
+        # its own tier gate and exit-code contract (0 ok / 1 internal error /
+        # 2 usage / 3 refused by policy); this case is a thin exec, same
+        # pattern as `world` and `pkb` above.
+        [[ -d .venv ]] || die "missing .venv — run ./arailctl setup"
+        # shellcheck disable=SC1091
+        source .venv/bin/activate
+        exec python -m arail.nucleus "$@"
+        ;;
     world)
         [[ -d .venv ]] || die "missing .venv — run ./arailctl setup"
         # shellcheck disable=SC1091
         source .venv/bin/activate
         exec python -m arail.world_mount "$@"
+        ;;
+    auth)
+        # Portal credentials (ARCHITECTURE.md C7). `--world SLUG` is resolved here, from the
+        # instance registry, so the Python side only ever sees ARAIL_DATA_DIR/ARAIL_INSTANCE.
+        [[ -d .venv ]] || die "missing .venv — run ./arailctl setup"
+        _auth_args=()
+        _auth_world=""
+        while [[ $# -gt 0 ]]; do
+            if [[ "$1" == "--world" ]]; then
+                [[ -n "${2:-}" ]] || die "auth: --world needs a slug"
+                _auth_world="$2"; shift 2
+            else
+                _auth_args+=("$1"); shift
+            fi
+        done
+        if [[ -n "$_auth_world" ]]; then
+            [[ -d "$(inst_instance_dir "$_auth_world")" ]] || die "auth: no World instance '$_auth_world'"
+            export ARAIL_INSTANCE="$_auth_world"
+            export ARAIL_DATA_DIR="$(inst_data_dir "$_auth_world")"
+        fi
+        # shellcheck disable=SC1091
+        source .venv/bin/activate
+        exec python -m arail.portal.auth_cli ${_auth_args[@]+"${_auth_args[@]}"}
+        ;;
+    buddy)
+        # Buddy on your phone — see docs/buddy-edge.md. `python -m arail.buddy_host`
+        # owns its exit codes (0 ok / 2 usage / 3 refused by policy) and never
+        # prints the credential; thin exec, same pattern as `world` and `nucleus`.
+        [[ -d .venv ]] || die "missing .venv — run ./arailctl setup"
+        # shellcheck disable=SC1091
+        source .venv/bin/activate
+        exec python -m arail.buddy_host "$@"
         ;;
     benchmark_models|benchmark|aerollm)
         [[ -d .venv ]] || die "missing .venv — run ./arailctl setup"

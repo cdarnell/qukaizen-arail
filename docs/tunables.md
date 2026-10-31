@@ -186,7 +186,7 @@ PRNG seed for sampling. `0` means fresh randomness on every call.
 These don't change the model's *output*; they change *how the model gets loaded* on your hardware.
 
 ### prefetch depth (range 0–8 layers, default 2)
-For streaming-load backends (AirLLM, AeroLLM): how many model layers to prefetch from disk while compute runs on the current layer.
+For streaming-load backends (AirLLM, QueueLLM): how many model layers to prefetch from disk while compute runs on the current layer.
 
 - Higher = smoother streaming, more RAM/VRAM held.
 - Lower = saves memory at the cost of IO stalls between layers.
@@ -240,7 +240,7 @@ Tunables apply per-model and persist in `localStorage`. Switching source doesn't
 Click **+ Compare** in Column A's quickbar. Column B appears beside Column A.
 
 - Column A is your **primary on-GPU model** — typically a 7B–14B local model.
-- Column B is restricted to **deep layer-streaming backends** (AirLLM / AeroLLM) so it can coexist with Column A without oversubscribing VRAM.
+- Column B is restricted to **deep layer-streaming backends** (AirLLM / QueueLLM) so it can coexist with Column A without oversubscribing VRAM.
 - Each column has its own quickbar and tunables — you can run the same prompt at temp 0.2 in A and temp 1.4 in B to compare deterministic vs creative responses from two different models.
 
 Why the constraint? Loading two competing local models on one GPU thrashes VRAM. AirLLM streams its layers from NVMe so it shares the GPU politely.

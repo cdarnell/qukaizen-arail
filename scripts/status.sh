@@ -599,6 +599,27 @@ print(json.dumps(out))
 fi
 export DB_JSON DB_COLLECTOR_FAILED DB_COLLECTOR_ERROR
 
+# ── Models (sprints/2026-10-20-boot-model-autoresolve) — the last-resolved
+# slot A/B cache, read from model_defaults.yaml. A local file read: no
+# network, no model load, permitted under --no-probe. Additive: a missing
+# or unreadable file just means no `models` key.
+MODELS_JSON="$(ARAIL_MODEL_DEFAULTS_FILE="${ARAIL_MODEL_DEFAULTS_FILE:-$REPO_ROOT/model_defaults.yaml}" python3 -c '
+import json
+try:
+    from arail import model_defaults as md
+    d = md.read()
+    r = d.get("resolved") or {}
+    w = r.get("warm") or {}
+    out = {}
+    for k in ("a", "b"):
+        s = r.get(k) if isinstance(r.get(k), dict) else {}
+        out[k] = {"model": s.get("model"), "source": s.get("source"), "warm": w.get(k)}
+    print(json.dumps(out if r else {}))
+except Exception:
+    print("{}")
+' 2>/dev/null || echo '{}')"
+export MODELS_JSON
+
 GENERATED_AT="$(python3 -c 'import datetime; print(datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))')"
 PROVISIONED="false"
 [[ -d .venv ]] && PROVISIONED="true"
@@ -673,6 +694,10 @@ root_services = json.loads(os.environ["ROOT_SERVICES_JSON"])
 agents = json.loads(os.environ["AGENTS_JSON"])
 warnings = json.loads(os.environ["WARNINGS_JSON"])
 db_by_slug = json.loads(os.environ.get("DB_JSON") or "{}")
+try:
+    models_info = json.loads(os.environ.get("MODELS_JSON") or "{}")
+except ValueError:
+    models_info = {}
 db_collector_failed = os.environ.get("DB_COLLECTOR_FAILED") == "1"
 db_collector_error = os.environ.get("DB_COLLECTOR_ERROR") or ""
 
@@ -884,6 +909,8 @@ doc = {
     },
     "verdict": verdict,
 }
+if models_info:
+    doc["models"] = models_info     # additive; schema stays arail.status/v2
 
 if mode == "json":
     print(json.dumps(doc, indent=2))
@@ -977,6 +1004,17 @@ else:
     print(f"  {BOLD}Supervision{RESET}: foreground (start.sh) — see ./arailctl install-daemon")
     print("")
 
+if models_info:
+    _ma, _mb = models_info.get("a") or {}, models_info.get("b") or {}
+
+    def _mfmt(slot, m):
+        name = m.get("model") or "(none)"
+        extra = ", ".join(x for x in (m.get("source"),
+                                      f"warm {m['warm']}" if m.get("warm") else None) if x)
+        return f"{slot} {name}" + (f" ({extra})" if extra else "")
+    print(f"  models: {_mfmt('fast', _ma)} · {_mfmt('deep', _mb)}")
+    print("")
+
 # ── Root lab (ARCHITECTURE.md §7.1 — "root lab: not started" replaces the
 # five dim "not running" rows; a foreign checkout is named as such) ─────
 if root_state == "not-started":
@@ -1033,14 +1071,20 @@ if [[ "$MODE" == "human" ]]; then
     # BIND_ADDR=0.0.0.0 it silently never fired, since probing
     # http://0.0.0.0:<port> is unreliable on macOS. Display still uses
     # $BIND (the configured address); only the probe target changes.
-    if command -v curl >/dev/null && curl -sf "http://${PROBE_HOST}:${PORTAL_PORT_EFF}/api/jobs/state" >/dev/null 2>&1; then
+    # /api/jobs/state is behind portal auth: the helper hands curl the lab's bearer token without
+    # putting it in argv. Without a readable token (another user, or not onboarded) say so.
+    _jobs_data_dir="${ARAIL_DATA_DIR:-${LAB_ROOT:-lab}/data}"
+    if command -v curl >/dev/null && state_json="$(svc_portal_curl "$_jobs_data_dir" -sf "http://${PROBE_HOST}:${PORTAL_PORT_EFF}/api/jobs/state" 2>/dev/null)"; then
         echo ""
-        state_json="$(curl -sf "http://${PROBE_HOST}:${PORTAL_PORT_EFF}/api/jobs/state")"
         window=$(echo "$state_json"  | python3 -c "import sys,json;print(json.load(sys.stdin).get('label','?'))" 2>/dev/null || echo "?")
         halted=$(echo "$state_json"  | python3 -c "import sys,json;print(json.load(sys.stdin).get('halted','?'))" 2>/dev/null || echo "?")
         echo -e "  ${BOLD}Scheduler${RESET}"
         dim "window: ${window}"
         dim "halted: ${halted}"
+    elif command -v curl >/dev/null && [[ ! -r "$_jobs_data_dir/portal.token" ]] && curl -sf "http://${PROBE_HOST}:${PORTAL_PORT_EFF}/api/system/health" >/dev/null 2>&1; then
+        echo ""
+        echo -e "  ${BOLD}Scheduler${RESET}"
+        dim "jobs: needs \`arailctl\` as the lab owner"
     fi
 
     # ── lab/ state (skipped under --no-sizes or --quiet — T34/A: a `du`

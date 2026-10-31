@@ -48,6 +48,7 @@ _SHAPE_PATTERNS: tuple["re.Pattern[str]", ...] = (
     re.compile(r"nvapi-\S{16,}"),
     re.compile(r"(?:ghp|gho|github_pat)_\S{16,}"),
     re.compile(r"AKIA[0-9A-Z]{16}"),
+    re.compile(r"arl1s?_[A-Za-z0-9_-]{43}"),  # portal bearer + shim-scoped token (arail.portal.auth)
     re.compile(r"Bearer\s+[A-Za-z0-9._\-]{20,}"),
     re.compile(
         r"(?i)\b(api[_-]?key|token|secret|password|passphrase)\b\s*[:=]\s*\S{8,}"

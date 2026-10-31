@@ -46,7 +46,7 @@ def test_mixed_precision_spans_both_backends():
 def test_no_knob_says_so_plainly(hyp):
     assert levers.levers_for(hyp) == []
     line = levers.handoff_line(hyp)
-    assert "No knob" in line and "AeroLLM itself" in line
+    assert "No knob" in line and "QueueLLM itself" in line
 
 
 def test_handoff_line_never_invents_a_knob(monkeypatch):

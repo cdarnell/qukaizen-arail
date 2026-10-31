@@ -335,9 +335,9 @@ class ModelBenchmark:
         batch_size: int,
         max_tokens: int,
     ) -> BenchmarkRun | None:
-        """Benchmark model via AeroLLM (Rust runtime)."""
+        """Benchmark model via QueueLLM (Rust runtime)."""
         # TODO: wire this once AeroLLM stable Rust API is available
-        log.warning("AeroLLM benchmarking not yet implemented")
+        log.warning("QueueLLM benchmarking not yet implemented")
         return None
 
 
@@ -359,7 +359,7 @@ class Candidate:
         if self.key_env and not os.getenv(self.key_env):
             return f"{self.key_env} not set"
         if self.backend == "aerollm":
-            return "aerollm backend not yet wired"
+            return "QueueLLM backend not yet wired"
         if self.backend == "airllm" and not (MODELS_DIR / self.name).exists():
             return f"no model dir at {MODELS_DIR / self.name}"
         return None

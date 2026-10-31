@@ -405,7 +405,7 @@ a wide size range so you can pick one that matches your hardware.
 `MODEL_NAME=mlx-community/Qwen2.5-3B-Instruct-4bit` (MLX default — kept under
 the primary answering-model ceiling; see `arail.registry.ceiling`).
 `MODEL_NAME=Qwen/Qwen2.5-3B-Instruct` (CUDA / HuggingFace default).
-`AEROLLM_MODEL=Qwen2.5-7B-Instruct-4bit` (AeroLLM secondary — larger models
+`AEROLLM_MODEL=Qwen2.5-7B-Instruct-4bit` (QueueLLM secondary — larger models
 are fine here, capped by discovered hardware, not by the primary ceiling).
 
 Source: <https://qwenlm.github.io/blog/qwen3/>

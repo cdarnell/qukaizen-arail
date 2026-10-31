@@ -175,6 +175,34 @@ class ModelRouter:
         return slot
 
     @staticmethod
+    def _identity_dict(identity: Optional[tuple]) -> Optional[dict]:
+        if not identity:
+            return None
+        return {"pseudonym": identity[0], "role": identity[1]}
+
+    @staticmethod
+    def _cost_fields(rec: Any, tokens_in: int, tokens_out: int) -> Optional[dict]:
+        """The trace record's ``cost`` (v2). ``simulated_usd`` is the what-if
+        cloud-equivalent figure and says so; ``cash_usd`` is a real charge only
+        for a billed-estimate backend, else 0.0 with a basis that says why.
+        Never raises — a cost field must not be the reason a trace is lost."""
+        try:
+            if rec is None:
+                return None
+            source = getattr(rec, "cloud_cost_source", "unpriced")
+            billed = source == "billed_estimate"
+            cash = getattr(rec, "cloud_cost_usd", None)
+            return {
+                "tokens": int(tokens_in) + int(tokens_out),
+                "simulated_usd": round(float(rec.cloud_equivalent_usd), 6),
+                "cash_usd": float(cash) if billed and cash is not None else 0.0,
+                "cash_basis": "estimate" if billed else ("local" if source == "local" else "unpriced"),
+                "label": "simulated",
+            }
+        except Exception:  # noqa: BLE001 - observability must never break inference
+            return None
+
+    @staticmethod
     def _halted() -> Optional[bool]:
         try:
             from arail import scheduler as _job_scheduler
@@ -191,6 +219,10 @@ class ModelRouter:
             return
         if ctx is not None:
             base = {
+                "record_type": "model_call",
+                "channel": ctx.channel,
+                "identity": self._identity_dict(ctx.identity),
+                "origin": ctx.origin or "in_process",
                 "trace_id": ctx.trace_id,
                 "agent_id": ctx.agent_id,
                 "parent_agent_id": ctx.parent_agent_id,
@@ -207,6 +239,10 @@ class ModelRouter:
             }
         else:
             base = {
+                "record_type": "model_call",
+                "channel": None,
+                "identity": None,
+                "origin": "in_process",
                 "trace_id": None,
                 "agent_id": None,
                 "parent_agent_id": None,
@@ -230,7 +266,15 @@ class ModelRouter:
                  temperature: float = 0.7,
                  top_p: Optional[float] = None,
                  *, system: Optional[str] = None,
-                 messages: Optional[list] = None) -> ModelResponse:
+                 messages: Optional[list] = None,
+                 response_schema: Optional[dict] = None,
+                 system_as_message: bool = False) -> ModelResponse:
+        """``response_schema`` (A4): a JSON Schema for grammar-constrained
+        output. Handed to the backend only when not None, so every existing
+        caller's request is unchanged; only ``OllamaNativeBackend`` accepts it
+        (any other backend raises TypeError, which is traced as an error).
+        ``system_as_message`` (R1-4c): the same rule, handed on only when True; it
+        asks the backend to send ``system`` as a real system message."""
         ctx = agent_context.current()
         slot = self._slot_info()
         # F10 (latching): read the recorder flag ONCE at call start and use
@@ -248,11 +292,16 @@ class ModelRouter:
                          ttft_ms=None, ttft_status="non_streaming")
             raise
 
+        backend_kw: dict = {}
+        if response_schema is not None:
+            backend_kw["response_schema"] = response_schema
+        if system_as_message:
+            backend_kw["system_as_message"] = True
         agent_context.note_agent_call_entered(ctx)
         try:
             response = self._backend.complete(
                 prompt, max_tokens, temperature, top_p=top_p,
-                system=system, messages=messages,
+                system=system, messages=messages, **backend_kw,
             )
         except Exception as exc:
             self._record(ctx, slot=slot, streamed=False,
@@ -263,7 +312,7 @@ class ModelRouter:
 
         # Track cost — estimate input tokens from prompt + frozen prefix length
         tokens_in = max((len(prompt) + len(system or "")) // 4, 1)
-        cost_tracker.track(
+        cost_rec = cost_tracker.track(
             backend=response.backend,
             model=response.model,
             tokens_in=tokens_in,
@@ -300,6 +349,7 @@ class ModelRouter:
             latency_ms=response.latency_ms,
             ttft_ms=None, ttft_status="non_streaming",
             bodies=bodies,
+            cost=self._cost_fields(cost_rec, tokens_in, response.tokens_used),
         )
         return response
 
@@ -307,7 +357,10 @@ class ModelRouter:
                         temperature: float = 0.7,
                         top_p: Optional[float] = None,
                         *, system: Optional[str] = None,
-                        messages: Optional[list] = None) -> Iterator[StreamResult]:
+                        messages: Optional[list] = None,
+                        response_schema: Optional[dict] = None,
+                        system_as_message: bool = False) -> Iterator[StreamResult]:
+        """See :meth:`complete` for ``response_schema`` and ``system_as_message``."""
         ctx = agent_context.current()
         slot = self._slot_info()
         tokens_in = max((len(prompt) + len(system or "")) // 4, 1)
@@ -334,6 +387,11 @@ class ModelRouter:
                          ttft_ms=None, ttft_status=None)
             raise
 
+        backend_kw: dict = {}
+        if response_schema is not None:
+            backend_kw["response_schema"] = response_schema
+        if system_as_message:
+            backend_kw["system_as_message"] = True
         agent_context.note_agent_call_entered(ctx)
         try:
             for item in self._backend.stream_complete(
@@ -343,6 +401,7 @@ class ModelRouter:
                 top_p=top_p,
                 system=system,
                 messages=messages,
+                **backend_kw,
             ):
                 if is_first_item:
                     is_first_item = False
@@ -363,7 +422,7 @@ class ModelRouter:
                         # terminal response.
                         ttft_status = "no_tokens"
                     prefill_ms = getattr(item, "prefill_ms", None)
-                    cost_tracker.track(
+                    cost_rec = cost_tracker.track(
                         backend=item.backend,
                         model=item.model,
                         tokens_in=tokens_in,
@@ -399,6 +458,7 @@ class ModelRouter:
                         prefill_ms=prefill_ms,
                         prefill_source="server_reported" if prefill_ms is not None else None,
                         bodies=bodies,
+                        cost=self._cost_fields(cost_rec, tokens_in, item.tokens_used),
                     )
                 yield item
         except Exception as exc:

@@ -75,9 +75,9 @@
      title="Agents — Status · Skills · Activity">Agents</a>
   {% endif %}
 
-  {% if 'build' in _ts %}
-  <a href="/build"{% if active == 'build' %} class="active"{% endif %}
-     title="Model Building — build, distill, and register models via the Nucleus pipeline.">Model Building</a>
+  {% if 'forge' in _ts %}
+  <a href="/forge"{% if active == 'forge' %} class="active"{% endif %}
+     title="Model Forge — signed DNA cards from local arailctl nucleus builds.">Model Forge</a>
   {% endif %}
 
   {% if 'admin' in _ts %}
@@ -119,6 +119,7 @@
           title="Hold all agents — agents stop calling models and stop posting findings, suggestions and announcements. Operational/error lines and SRE crash alerts continue.">⏸ Hold all agents</button>
   <button class="btn btn-sm btn-primary" id="btn-resume" style="display:none"
           title="Resume scheduler">▶ Resume</button>
+  <form method="post" action="/logout" style="display:inline;margin:0"><button class="btn btn-sm" type="submit" title="End this browser's session">Log out</button></form>
 </div>
 {% include "_model_switcher.html" %}
 {% include "_model_boot_banner.html" %}

@@ -103,7 +103,7 @@ reason unless `--force`.
 | `[1/5] source` | `git pull --ff-only`; prints `old…new` short SHAs + commit count; **re-execs itself if HEAD moved** so a self-update never runs on stale bytes | not a git repo · dirty worktree · detached HEAD · no upstream · diverged (not a fast-forward) · airgapped without `--force` |
 | `[2/5] deps` | `pip install -e ".[$LAB_TIER]"` (idempotent); with `--rebuild-venv`, recreates `.venv` first (**failure here is a hard failure, exit 1** — not degraded) | airgapped without `--force` |
 | `[3/5] components` | `scripts/update.sh --apply --non-interactive` — `components.json` drives it; a single component's failure warns and continues | airgapped without `--force` (`update.sh`'s own check) |
-| `[4/5] models` | Compares the expected primary chat model (`model_defaults.yaml`'s `default_a` if present, else `llama-ai-eng`) against `ollama list`; reports drift + the exact commands; applies only with `--models` | ollama absent / daemon unreachable → skipped (never hangs); the apply step also honors the airgap refusal |
+| `[4/5] models` | Compares the expected primary chat model (the last-resolved slot A in `model_defaults.yaml`, else its pin or a v1 `default_a`, else `llama-ai-eng`) against `ollama list`; reports drift + the exact commands; applies only with `--models` | ollama absent / daemon unreachable → skipped (never hangs); the apply step also honors the airgap refusal |
 | `[5/5] verify` | `./arailctl doctor` — its exit code folds straight through (`3`→degraded, `1`→hard failure); before that, ensures every resolved root's `arail.db` is created and forward-migrated (see "The relational store" below) | — |
 
 **The relational store (`arail.db`).** Before `[5/5] verify`, `install`
@@ -191,24 +191,46 @@ directly, even when a daemon is active — daemon-mode refusal is
 `start.sh`'s own job so it can name the World slug (or `--root`) in the
 message.
 
-**Model selection, settled once and read-only here.** The readiness
-banner always prints a `Models:` block — the two boot slots (A: the
-resident chat model; B: the model AeroLLM references for deep answers),
-each with size, on-filesystem presence, and RAM fit, plus the exact
-`ollama pull` / `hf download` command when a configured model is
-missing. `start` never picks a model itself and never prompts — the
-interactive two-slot picker lives in the portal (a banner under the
-statusbar on every page until you confirm once, then only reappearing if
-something breaks — missing, doesn't fit, or `.env` drifted away from
-what was settled). Both surfaces read the same source of truth:
+**Model selection is automatic; `start` only reports it.** The readiness
+banner always prints a `Models:` block with the two slots (A: the fast,
+resident Ollama chat model; B: the deep model QueueLLM streams in) and
+where each came from (`source:` `pin`, `env`, `auto` or `cache`, plus a
+reason when something fell through). `start` never picks a model and
+never prompts: the portal resolves both slots itself every time it
+starts, from what is installed and what this machine can hold, then
+loads them (below). Precedence per slot is **pin** (`model_defaults.yaml`
+`pins`) > **`.env`** (`MODEL_NAME` / `AEROLLM_MODEL`) > **auto**
+(installed x fits x ranked) > none. A pin or `.env` value that is not
+installed, too big, or over the RAM budget never blocks anything: it
+falls through to the next level and the portal's degraded strip says so,
+with the exact `ollama pull` / `hf download` command as text.
+
 `model_defaults.yaml` (repo root, gitignored — see
-`model_defaults.yaml.example`), written by the portal's
-`POST /api/models/settle` and read back with
-`python -m arail.model_defaults --banner` (what `start` shells out to)
-or `--get default_a`/`--get default_b` (one resolved value, empty line
-if unset — used to fix the Ollama-presence check below instead of
-hardcoding `llama-ai-eng`). Deleting `model_defaults.yaml` re-arms the
-portal picker on the next page load.
+`model_defaults.yaml.example`) holds your `pins` (preserved across boots;
+`null` = auto, slot B may be `none` to keep the deep slot off) and a
+`resolved` cache of the last result, rewritten every boot and never
+compared for "drift". The banner reads that cache with
+`python -m arail.model_defaults --banner` (what `start` shells out to) or
+`--get default_a`/`--get default_b` (empty line if unset — used to fix
+the Ollama-presence check below instead of hardcoding `llama-ai-eng`);
+`--json` prints `{version, path, pins, resolved, ...}`. Pin from the
+portal (the Resident chip, or `POST /api/models/pin`). Deleting the file
+just means "re-resolve, no pins". A v1 file (`default_a` / `default_b`)
+is upgraded on first portal boot, keeping `.model_defaults.v1.bak`;
+`default_b: null` becomes the `none` pin so a deep model you disabled
+stays disabled. `POST /api/models/settle` still works for one release as
+a deprecated alias for two pins.
+
+**Boot warm is on by default** and no longer waits for
+`ARAIL_AUTOCHECKS` (loading a local model is local work; the interval
+health loop and Claude-cache prewarm stay autochecks-gated). Slot A warms
+with a 1-token completion; slot B (maximus + the `aerollm_api` wheel) loads
+once, memory-pressure permitting. A crash while loading B leaves a
+sentinel, and that model is skipped on later boots until you pin a
+different one or re-pin it. Opt out with `ARAIL_BOOT_WARM=0` (both slots),
+`ARAIL_TIER0_BOOT_WARM=0` (slot A) or `ARAIL_AEROLLM_PRELOAD=0` (slot B).
+`GET /api/instance` reports `warm_a` / `warm_b` (`ok|skipped|failed|
+deferred|disabled`).
 
 **The relational store (`arail.db`), a dependent service** (sprints/
 2026-08-10-arail2-persistence-instantiated §4.5). Before the portal
@@ -370,7 +392,7 @@ active).
 
 ### `deep <op>`
 
-AeroLLM 2nd-inference control: `install` (bundled prebuilt binary) |
+QueueLLM 2nd-inference control: `install` (bundled prebuilt binary) |
 `rebuild` (from source) | `update` (published wheel) | `status`.
 
 Three install channels, dispatched by `scripts/build-aerollm.sh auto`
@@ -380,7 +402,7 @@ channel both use):
 | Channel | Op | Requires | Who it's for |
 |---|---|---|---|
 | BUNDLED | `deep install` | network to `github.com` (or a local tarball via `AEROLLM_BUNDLE_FILE`) | outside users — no source repo, no credentials |
-| DEV | `deep rebuild` | the aeroLLM sibling repo checked out at `$ARAIL_AEROLLM_REPO` | maintainers with local aeroLLM changes |
+| DEV | `deep rebuild` | the QueueLLM sibling repo checked out at `$ARAIL_AEROLLM_REPO` | maintainers with local QueueLLM changes |
 | RELEASE | `deep update` | `pypi.qukaizen.com` index credentials | maintainers on the private index |
 
 `auto` picks DEV if the sibling repo is present, RELEASE if
@@ -400,7 +422,7 @@ regardless of what's on disk.
 | `AEROLLM_BUNDLE_SHA256` | read from `pyproject.toml [tool.arail.package-sources] aerollm_bundle_sha256` — a genuine out-of-band pin, independent of the download — on both routes: `./arailctl setup` forwards it, and standalone `./arailctl deep install` reads pyproject itself when the env var is unset. An explicit env value always wins. Only if pyproject can't be read at all does it fall back to the same-origin `.sha256` sidecar | pin/override the expected **tarball** digest |
 
 `./arailctl deep status` reports a `channel:` line (`dev` \| `release` \|
-`bundled` \| `none`) and, when bundled, an `aerollm <version> (<short-sha>,
+`bundled` \| `none`) and, when bundled, a `QueueLLM <version> (<short-sha>,
 built <date>)` provenance line read from `aerollm_api.bundle.json`.
 
 **What the sha256 check does and doesn't guarantee (v1):** when
@@ -479,6 +501,14 @@ scheduler window and `lab/` disk usage. Stale registry records are pruned
 **after** rendering, in every mode — a status command that silently
 deletes what it just reported would be surprising.
 
+**Models (`models`).** `--json`/`--json=full` also carries an optional
+`models` object, `{"a": {"model", "source", "warm"}, "b": {...}}`, read
+from the last-resolved cache in `model_defaults.yaml` (a local file read:
+no network, nothing loaded, allowed under `--no-probe`). It is additive,
+so the document stays `arail.status/v2`; it is absent when no cache
+exists yet, and human mode prints one matching `models:` line.
+`--json=instances` is untouched.
+
 **The relational store (`arail.db`) as a dependent service**
 (sprints/2026-08-10-arail2-persistence-instantiated §4.4). Every
 resolved root — root lab, every `registry.d/*.json` slug, and every
@@ -548,6 +578,21 @@ degraded (a required check failed, or `--strict` promoted an info one).
 Tail `lab/data/activity.jsonl`, optionally filtered by component
 (`browser`\|`system`\|`researcher`\|`goal`\|`wiki`\|`pkb`\|`chat`\|`consent`).
 Unchanged.
+
+`logs --since 2m|10m|1h` prints the events from that window and exits (no
+tail). It is the form Buddy uses. Any other window is refused.
+
+### `drift`
+
+Alias of `db drift`. CI gate: `0` in sync, `3` on drift.
+
+### `rule "<rendered command>" allow|deny`
+
+Appends a ruling to `~/.qukaizen/rulings.jsonl` (`$QKZ_HOME` overrides). This
+is the `y` a person presses in their own pane for a command Buddy may not run
+unattended (for example `pactl apply teams.toml`). A ruling allows that exact
+invocation once. Only commands Buddy can propose for a ruling are accepted.
+Needs `.venv` with the `buddy` extra (`pip install -e '.[buddy]'`).
 
 ### `db <op>`
 
@@ -743,6 +788,51 @@ another `pkb reembed` already running against this root) · `2` the given
 
 DaC WorldBundle ops — passthrough to `python -m arail.world_mount`.
 Unchanged.
+
+### `auth <verb>`
+
+Portal credentials, run from the machine's own shell (exit codes: `0` ok · `2` usage · `3`
+refused: not onboarded, unsafe token file, or not the lab's owner). Every verb takes
+`--world <slug>` to act on a World instance's own token, sessions and passphrase.
+
+| Verb | Effect |
+|---|---|
+| `token` | Make sure `<DATA_DIR>/portal.token` exists (`0600`); print its **id** and path, never the value. Programs send it as `Authorization: Bearer <token>`. |
+| `token --rotate` | New token; the old one stops working on the next request. |
+| `reset` | New lab passphrase (asked twice). It also ends every browser session and remembered browser, replaces the portal token and the OpenCode shim token (it prints the new token id and where the token lives), and clears a login lockout. Use it when you forget the passphrase, or when you think someone got in. |
+| `logout-all` | End every browser session, including in a portal that is already running. |
+| `unlock` | Clear a login lockout. After 5 wrong passphrases in a row (from any local process) new logins wait 10 s, doubling to 5 min; a browser that has logged in before is not held by that. |
+
+### `buddy <verb>`
+
+Link a Buddy (the always-on QA expert you reach from your phone) to this lab through the
+loopback edge `buddy.host/v1` — passthrough to `python -m arail.buddy_host` (`0` ok · `2`
+usage · `3` refused by policy). It never prints the credential. See `docs/buddy-edge.md`.
+
+| Verb | What it does |
+|----|--------------|
+| `link --buddy-home PATH [--yes]` | Shows the consent text, records consent to `api.telegram.org`, mints the credential (ARAIL keeps only its sha256) and writes it to Buddy's `secrets.env` (`0600`). Root lab only, portal bound to loopback. |
+| `link --rotate --buddy-home PATH` | New credential; the old one dies at once |
+| `unlink [--buddy-home PATH]` | Delete ARAIL's link and revoke consent; with a path, also Buddy's link and credential line |
+| `status [--json]` | Linked? credential id, since when, contract currency, consent |
+
+### `nucleus <verb>`
+
+Model Forge (local domain distillation) — passthrough to
+`python -m arail.nucleus`, which owns its own tier gate and exit-code
+contract (`0` ok · `1` internal error · `2` usage · `3` refused by
+policy). See `docs/nucleus.md` for the full tour.
+
+| Verb | What it does |
+|----|--------------|
+| `plan "<intent>" --name <slug>` | Writes `configs/domains/<slug>.yaml` and confirms it resolves |
+| `stage <slug> --source KIND:NAME=<path>` | Stages a local corpus; makes zero network calls |
+| `build <slug> --profile local` | Preflight, then extract / extract-on-cert / train / fuse / eval |
+| `spike <slug>` | Gate B half-day M5 harness |
+| `certify <build_id>` | Contamination gate, DNA card, seal, build report, local ledger |
+| `verify <shard>@<version>|<dir>` | Re-checks a card's signature, key trust, and content hashes |
+| `status <build_id>` | Prints a build's `run.json` |
+| `list` | Shows certified shards |
 
 ### `benchmark_models` (aliases: `benchmark`, `aerollm`)
 

@@ -1,0 +1,27 @@
+{
+  "name": "brain-models-ok",
+  "method": "brain.models",
+  "setup": {},
+  "request": {
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer $CREDENTIAL",
+      "X-Buddy-Contract": "sha256:$CONTRACT_SHA256"
+    },
+    "body": null
+  },
+  "expect": {
+    "status": 200,
+    "error_code": null,
+    "body_subset": {
+      "object": "list",
+      "data": [
+        {
+          "id": "buddy-fast",
+          "object": "model",
+          "owned_by": "arail"
+        }
+      ]
+    }
+  }
+}

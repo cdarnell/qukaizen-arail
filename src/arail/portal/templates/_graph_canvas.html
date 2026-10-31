@@ -689,7 +689,7 @@ async function refreshHealth() {
       html += `<div class="health-row"><span class="health-label">GPU</span><span class="health-value">${h.gpu.name}</span></div>`;
     }
     if (h.deep_enabled) {
-      html += `<div class="health-row"><span class="health-label">Deep</span><span class="health-value health-deep">AeroLLM ✓</span></div>`;
+      html += `<div class="health-row"><span class="health-label">Deep</span><span class="health-value health-deep">QueueLLM ✓</span></div>`;
     }
     html += `<div class="health-row last"><span class="health-label">Services</span><span class="health-value">`;
     for (const [name, up] of Object.entries(h.services)) {

@@ -778,7 +778,7 @@ def bootstrap(pkb_root: Path | None = None, *, dry_run: bool = False) -> dict[st
         candidate_paths: list[str] = []
         if world_slug:
             try:
-                from arail.build.world_corpus import resolve_world_bundle
+                from arail.world_catalog import resolve_world_bundle
                 bundle = resolve_world_bundle(world_slug)
                 terms = bundle.get("terms", [])
             except FileNotFoundError:

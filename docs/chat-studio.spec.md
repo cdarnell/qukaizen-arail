@@ -1,6 +1,6 @@
 # ARAIL Chat Studio — Redesign Spec
 
-> A world-class developer-friendly chat surface. Reads like LM Studio, behaves like AeroLLM. Built on the ARAIL design system ([`design.md`](./design.md)) and the model/job backend ([`maximus.plan.md`](./maximus.plan.md)). Implementable by a small team in 4–6 weeks.
+> A world-class developer-friendly chat surface. Reads like LM Studio, behaves like QueueLLM. Built on the ARAIL design system ([`design.md`](./design.md)) and the model/job backend ([`maximus.plan.md`](./maximus.plan.md)). Implementable by a small team in 4–6 weeks.
 
 ---
 
@@ -122,8 +122,8 @@ mlx · Qwen3-8B-4bit · 18.4 t/s · 1873 ms · 412 tok
 > dropdown below was superseded by two named slot chips because a single
 > dropdown can't express the resident-vs-deep distinction that's the whole
 > point of the redesign: "this model in the GPU at all times" (resident,
-> ~1–3B by default) plus "a second model for AeroLLM" (deep, served
-> resident-once-loaded by AeroLLM). See the sprint's VISION.md for the full
+> ~1–3B by default) plus "a second model for QueueLLM" (deep, served
+> resident-once-loaded by QueueLLM). See the sprint's VISION.md for the full
 > rationale and the five-overlapping-affordances problem it replaced.
 
 Two header chips, each mapped 1:1 onto a registry entry (`tier0-local` /
@@ -131,7 +131,7 @@ Two header chips, each mapped 1:1 onto a registry entry (`tier0-local` /
 Brain"/"Model" dropdown:
 
 ```
- ● RESIDENT  ollama · ai-engineer:latest   eject  ▾        ● DEEP · AEROLLM  aerollm · Qwen2.5-7B-Instruct-4bit   eject  ▾
+ ● RESIDENT  ollama · ai-engineer:latest   eject  ▾        ● DEEP · QUEUELLM  queuellm · Qwen2.5-7B-Instruct-4bit   eject  ▾
 ```
 
 Clicking a chip's `▾` opens that slot's picker:
@@ -139,9 +139,9 @@ Clicking a chip's `▾` opens that slot's picker:
 ```
 Resident chip ▾                                    Deep chip ▾
 ┌─────────────────────────────────────────┐        ┌─────────────────────────────────────────┐
-│ RESIDENT MODEL      Apple M5 Max·17GB free│        │ DEEP MODEL · AEROLLM   ~32B cap on this HW│
+│ RESIDENT MODEL      Apple M5 Max·17GB free│        │ DEEP MODEL · QUEUELLM  ~32B cap on this HW│
 │                                           │        │                                           │
-│ llama-ai-eng:latest ·ollama NEW           │        │ Qwen2.5-7B-Instruct-4bit ·aerollm  DEEP   │
+│ llama-ai-eng:latest ·ollama NEW           │        │ Qwen2.5-7B-Instruct-4bit ·queuellm DEEP   │
 │   Built with Llama          1.2 GB  good  │        │   ~7B params                    resident  │
 │ llama3.2:1b ·ollama NEW           1.2 GB  good│        │                                           │
 │ Qwen2.5-0.5B-Instruct-4bit ·mlx   0.3 GB  good│        │ OTHER INSTALLED MODELS  estimate — server │
@@ -149,9 +149,9 @@ Resident chip ▾                                    Deep chip ▾
 │ [ show larger (19) — up to <8B ]         │        │ Llama-3.1-70B-Instruct-4bit ·mlx  STREAMED│
 │                                           │        │   37.0 GB          requires streaming     │
 │ PROVIDER · RUN ON      where this runs   │        │   ~70B is over the ~32B this machine can  │
-│ [Local] AeroLLM Claude NVIDIA OpenRouter…│        │   hold as a resident deep model.          │
+│ [Local] QueueLLM Claude NVIDIA OpenRouter…│        │   hold as a resident deep model.          │
 └─────────────────────────────────────────┘        │                                           │
-                                                     │ Resident once loaded — aeroLLM keeps its  │
+                                                     │ Resident once loaded — QueueLLM keeps its  │
                                                      │ model fully in memory; it does not stream.│
                                                      │ PROVIDER · RUN ON ...                     │
                                                      └─────────────────────────────────────────┘
@@ -165,7 +165,7 @@ Resident chip ▾                                    Deep chip ▾
   never re-derived client-side). A row that would violate the ceiling still
   renders, marked ineligible, with the ceiling's own refusal string inline
   (reason-strings-first) instead of failing silently at send time.
-- **Deep picker** lists the configured aeroLLM model plus every other
+- **Deep picker** lists the configured QueueLLM model plus every other
   installed MLX-runtime model as a real alternative, each checked against
   `hardware.secondary_model_cap_b()`; over-cap rows are shown-but-marked,
   never hidden. Selecting a different deep model swaps it in-process

@@ -34,7 +34,10 @@ from collections import deque
 from datetime import datetime, timezone
 from typing import Any, AsyncGenerator, Optional
 
-SCHEMA = "arail.agent_trace/v1"
+# v2 (sprint 2026-10-20-buddy-always-on, ARCHITECTURE.md §5.10): every v1 key
+# keeps its name, meaning and position; v2 only appends. A v2 reader treats a
+# missing v2 key as null. 3D.EVAL reads v1 by name (debt D9).
+SCHEMA = "arail.agent_trace/v2"
 
 _log = logging.getLogger(__name__)
 
@@ -54,6 +57,13 @@ _FIELDS: tuple[str, ...] = (
     "halted",
     "outcome", "error_class",
     "bodies", "bodies_purged",
+    # --- v2 (appended) ---
+    # record_type: "model_call" (the router chokepoint) | "event" (the Buddy
+    # edge). None reads as "model_call". identity is {pseudonym, role}, never
+    # a raw platform id. cost is {tokens, simulated_usd, cash_usd, cash_basis,
+    # label}; refusals and errors carry None.
+    "record_type", "event", "channel", "identity", "cost", "origin",
+    "reason", "attrs",
 )
 
 # ---------------------------------------------------------------------------
@@ -204,12 +214,29 @@ def tokens_out_by_agent() -> dict[str, int]:
     was actually spent."""
     out: dict[str, int] = {}
     for rec in _get_ring():
-        if rec.get("kind") != "agent":
+        if rec.get("kind") != "agent" or not _is_model_call(rec):
             continue
         agent_id = rec.get("agent_id")
         if not agent_id:
             continue
         out[agent_id] = out.get(agent_id, 0) + int(rec.get("tokens_out") or 0)
+    return out
+
+
+def _is_model_call(rec: dict) -> bool:
+    """A chokepoint record. v1 records and callers that never set
+    ``record_type`` read as model calls; ``"event"`` records (the Buddy edge's
+    steps) are not model calls and must not move a lane's call counters."""
+    return rec.get("record_type") in (None, "model_call")
+
+
+def _without_bodies(rec: dict) -> dict:
+    """A shallow copy with ``bodies`` cleared. The lanes ``recent`` list and
+    the detail route's ``related`` list never carry prompt or response text,
+    recorder on or off: they exist to show *steps*, and a phone user's words
+    must not ride along into a list the operator scrolls."""
+    out = dict(rec)
+    out["bodies"] = None
     return out
 
 
@@ -247,6 +274,29 @@ def find(trace_id: str) -> Optional[dict]:
         if rec.get("trace_id") == trace_id:
             return _strip_bodies_if_recorder_off(rec)
     return None
+
+
+RELATED_LIMIT = 20
+RECENT_LIMIT = 50
+
+
+def find_with_related(trace_id: str) -> Optional[tuple[dict, list[dict]]]:
+    """``find()`` plus up to :data:`RELATED_LIMIT` other ring records that
+    share the trace id, oldest first, bodies stripped. One Buddy turn writes
+    several records under one trace id (accepted, model call, reply, ...), so
+    the "why?" drill-in can show the whole turn. None for an unknown id."""
+    first: Optional[dict] = None
+    related: list[dict] = []
+    for rec in _get_ring():
+        if rec.get("trace_id") != trace_id:
+            continue
+        if first is None:
+            first = rec
+        elif len(related) < RELATED_LIMIT:
+            related.append(_without_bodies(rec))
+    if first is None:
+        return None
+    return _strip_bodies_if_recorder_off(first), related
 
 
 def stats() -> dict:
@@ -376,6 +426,7 @@ def lanes_snapshot() -> dict:
     records = ring(_get_ring().maxlen or 500)
 
     by_agent: dict[str, list[dict]] = {}
+    recent_by_agent: dict[str, list[dict]] = {}
     unattributed_sites: dict[str, int] = {}
     user_defined_calls = 0
     known_ids = {aid for aid, _ in FIXED_LANES}
@@ -384,10 +435,13 @@ def lanes_snapshot() -> dict:
         kind = rec.get("kind")
         agent_id = rec.get("agent_id")
         if kind == "agent" and agent_id:
-            by_agent.setdefault(agent_id, []).append(rec)
-            if agent_id not in known_ids:
-                user_defined_calls += 1
-        elif rec.get("attribution") == "unattributed":
+            if _is_model_call(rec):
+                by_agent.setdefault(agent_id, []).append(rec)
+                if agent_id not in known_ids:
+                    user_defined_calls += 1
+            if rec.get("channel"):
+                recent_by_agent.setdefault(agent_id, []).append(rec)
+        elif rec.get("attribution") == "unattributed" and _is_model_call(rec):
             site = rec.get("call_site") or "unknown"
             unattributed_sites[site] = unattributed_sites.get(site, 0) + 1
 
@@ -415,6 +469,13 @@ def lanes_snapshot() -> dict:
             "deep_reason_code": last.get("deep_reason_code") if last else None,
             "deep_reason_detail": last.get("deep_reason_detail") if last else None,
             "empty_reason": _empty_reason(agent_id, bool(calls)),
+            # Additive (A2): the last RECENT_LIMIT records of this agent that
+            # came through a channel (Buddy on the phone), newest first. The
+            # one-row-per-lane view above cannot show a seven-step run.
+            "recent": [
+                _without_bodies(r)
+                for r in reversed(recent_by_agent.get(agent_id, [])[-RECENT_LIMIT:])
+            ],
         })
 
     try:

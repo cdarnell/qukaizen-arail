@@ -261,23 +261,34 @@ def _watch_crash_recurrence() -> Optional[Observation]:
 
 
 def _watch_service_health() -> Optional[Observation]:
-    """Fires when the portal's /api/jobs/state endpoint is unreachable.
+    """Fires when the portal's liveness endpoint is unreachable or unhealthy.
 
-    A quick GET with a 2-second timeout. If it fails or times out,
-    we surface a warn. Cooldown: 10 min (keyed to 'service-health').
+    Probes ``/api/system/health``, which portal auth keeps anonymous (a liveness check that needed
+    a credential would report "down" whenever the token file was unreadable or rotated). A quick
+    GET with a 2-second timeout. A 4xx/5xx means the portal is up but unhealthy; only a connection
+    failure means unreachable. Cooldown: 10 min (keyed to 'service-health').
     """
     try:
+        import urllib.error
         import urllib.request
         port = int(os.getenv("PORTAL_PORT", "8080"))
-        url = f"http://127.0.0.1:{port}/api/jobs/state"
+        url = f"http://127.0.0.1:{port}/api/system/health"
         req = urllib.request.urlopen(url, timeout=2)
         req.read()
         return None  # healthy
+    except urllib.error.HTTPError as exc:
+        return Observation(
+            watcher="service-health",
+            severity="warn",
+            fact=f"Portal is up but unhealthy: /api/system/health answered HTTP {exc.code}.",
+            cooldown_key="service-health",
+            cooldown_sec=10 * 60,
+        )
     except OSError:
         return Observation(
             watcher="service-health",
             severity="warn",
-            fact=f"Portal /api/jobs/state is unreachable — portal may be down.",
+            fact="Portal /api/system/health is unreachable — portal may be down.",
             cooldown_key="service-health",
             cooldown_sec=10 * 60,
         )

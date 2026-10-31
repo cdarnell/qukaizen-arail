@@ -331,7 +331,7 @@ class GoalParser:
 
         # Infer resources from domain
         resource_hints: Dict[str, list[str]] = {
-            "ml-research": ["local LLM", "GPU or AeroLLM", "research papers"],
+            "ml-research": ["local LLM", "GPU or QueueLLM", "research papers"],
             "farming": ["weather data", "soil data", "crop databases"],
             "culinary": ["recipe databases", "ingredient sources"],
             "business": ["market data", "analytics tools"],

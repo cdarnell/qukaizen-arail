@@ -131,7 +131,8 @@ def test_agent_trace_stream_gated_and_reachable(monkeypatch):
             "raw_path": b"/api/admin/agent-trace-stream",
             "query_string": b"",
             "root_path": "",
-            "headers": [(b"host", b"testserver")],
+            "headers": [(b"host", b"testserver"),
+                        (b"authorization", b"Bearer arl1_" + b"A" * 43)],   # the conftest bearer: raw ASGI bypasses TestClient
             "client": ("testclient", 50000),
             "server": ("testserver", 80),
         }

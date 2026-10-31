@@ -80,9 +80,16 @@ def test_pin_forever_passthrough(backend, monkeypatch):
     a number, never as the bare string Ollama refuses."""
     monkeypatch.setenv("ARAIL_OLLAMA_KEEP_ALIVE", "-1")
     backend.complete("hi", max_tokens=8)
-    sent = backend._session.bodies[0]["keep_alive"]
-    assert sent == -1
-    assert not isinstance(sent, str)
+    # Ollama >=0.32 rejects the *string* "-1" (400 "missing unit in
+    # duration"); a numeric -1 is what it accepts.
+    assert backend._session.bodies[0]["keep_alive"] == -1
+    assert isinstance(backend._session.bodies[0]["keep_alive"], int)
+
+
+def test_env_duration_string_passes_through(backend, monkeypatch):
+    monkeypatch.setenv("ARAIL_OLLAMA_KEEP_ALIVE", "5m")
+    backend.complete("hi", max_tokens=8)
+    assert backend._session.bodies[0]["keep_alive"] == "5m"
 
 
 def test_explicit_env_wins_even_when_this_is_the_tier0_model(monkeypatch, tmp_path):
@@ -114,8 +121,8 @@ def test_tier0_model_pins_by_default(monkeypatch):
     be.model_name = "llama-ai-eng:latest"
     be._session = _CapturingSession()
     be.complete("hi", max_tokens=8)
-    sent = be._session.bodies[0]["keep_alive"]
-    assert sent == -1 and not isinstance(sent, str)
+    assert be._session.bodies[0]["keep_alive"] == -1
+    assert isinstance(be._session.bodies[0]["keep_alive"], int)
 
 
 def test_tier0_model_pins_even_when_bare_tag_matches_tagged_registry_entry(monkeypatch):
@@ -128,8 +135,8 @@ def test_tier0_model_pins_even_when_bare_tag_matches_tagged_registry_entry(monke
     be.model_name = "llama-ai-eng:latest"
     be._session = _CapturingSession()
     be.complete("hi", max_tokens=8)
-    sent = be._session.bodies[0]["keep_alive"]
-    assert sent == -1 and not isinstance(sent, str)
+    assert be._session.bodies[0]["keep_alive"] == -1
+    assert isinstance(be._session.bodies[0]["keep_alive"], int)
 
 
 def test_non_tier0_model_keeps_2h(monkeypatch):
@@ -207,3 +214,127 @@ def test_chat_gallery_new_path_gets_keep_alive_too(monkeypatch):
     be._session = _CapturingSession()
     be.complete("hi", max_tokens=8)
     assert be._session.bodies[0]["keep_alive"] == "2h"
+
+
+# ---------------------------------------------------------------------------
+# The wire guard: complete()/stream_complete() normalize keep_alive at the
+# request boundary, so NO producer — env, pin, a subclass, a drifted fork of
+# _keep_alive on another branch — can put the bare string "-1" on the wire.
+# (Ollama parses a string keep_alive as a Go duration; "-1" has no unit and
+# 400s the call — the failure that painted the dashboard's "unhealthy"
+# banner over a perfectly healthy lab.)
+# ---------------------------------------------------------------------------
+
+class _StreamingCapturingSession(_CapturingSession):
+    """Adds the context-manager + iter_lines surface stream_complete needs."""
+
+    def post(self, url, headers=None, json=None, timeout=None, stream=False):
+        self.bodies.append(json)
+
+        class _R:
+            status_code = 200
+
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"message": {"content": "ok"}, "eval_count": 1,
+                        "model": "m"}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def iter_lines(self, decode_unicode=False):
+                return iter(['{"message":{"content":"ok"},"done":true,'
+                             '"eval_count":1,"model":"m"}'])
+        return _R()
+
+
+def test_wire_guard_normalizes_a_drifted_keep_alive_override(backend, monkeypatch):
+    """Simulates the fork drift that re-shipped this bug: _keep_alive
+    resolving to the bare string "-1". The body must still carry the
+    JSON number."""
+    monkeypatch.delenv("ARAIL_OLLAMA_KEEP_ALIVE", raising=False)
+    monkeypatch.setattr(backend, "_keep_alive", lambda: "-1")
+    backend.complete("hi", max_tokens=8)
+    sent = backend._session.bodies[0]["keep_alive"]
+    assert sent == -1
+    assert not isinstance(sent, str)
+
+
+def test_wire_guard_leaves_real_durations_alone(backend, monkeypatch):
+    monkeypatch.delenv("ARAIL_OLLAMA_KEEP_ALIVE", raising=False)
+    monkeypatch.setattr(backend, "_keep_alive", lambda: "30s")
+    backend.complete("hi", max_tokens=8)
+    assert backend._session.bodies[0]["keep_alive"] == "30s"
+
+
+def test_stream_body_keep_alive_is_normalized_too(monkeypatch):
+    monkeypatch.setenv("MODEL_NAME", "ai-engineer:latest")
+    monkeypatch.delenv("MODEL_API_BASE", raising=False)
+    monkeypatch.setenv("ARAIL_OLLAMA_KEEP_ALIVE", "-1")
+    be = OllamaNativeBackend()
+    be._session = _StreamingCapturingSession()
+    list(be.stream_complete("hi", max_tokens=8))
+    sent = be._session.bodies[0]["keep_alive"]
+    assert sent == -1
+    assert not isinstance(sent, str)
+
+
+# ---------------------------------------------------------------------------
+# FM7: Ollama's own error text must reach the caller, not a bare "400"
+# ---------------------------------------------------------------------------
+
+class _ErrSession:
+    """Always answers with an HTTP error whose JSON body carries ``payload``."""
+
+    def __init__(self, status=400, payload=None):
+        self.status, self.payload = status, payload
+
+    def post(self, url, headers=None, json=None, timeout=None, stream=False):
+        outer = self
+
+        class _R:
+            status_code = outer.status
+            text = ""
+
+            def json(self):
+                return outer.payload
+
+            def raise_for_status(self):
+                import requests
+                raise requests.HTTPError(f"{outer.status} Client Error")
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        return _R()
+
+
+def test_complete_error_includes_ollama_error_text(backend):
+    backend._session = _ErrSession(
+        payload={"error": 'time: missing unit in duration "-1"'})
+    with pytest.raises(Exception) as ei:
+        backend.complete("hi", max_tokens=8)
+    assert 'missing unit in duration' in str(ei.value)
+
+
+def test_stream_error_includes_ollama_error_text(backend):
+    backend._session = _ErrSession(payload={"error": "boom-from-ollama"})
+    with pytest.raises(Exception) as ei:
+        list(backend.stream_complete("hi", max_tokens=8))
+    assert "boom-from-ollama" in str(ei.value)
+
+
+def test_error_text_truncated_and_no_auth_header(backend):
+    backend._session = _ErrSession(payload={"error": "x" * 500})
+    with pytest.raises(Exception) as ei:
+        backend.complete("hi", max_tokens=8)
+    assert len(str(ei.value)) < 400
+    assert "Bearer" not in str(ei.value)

@@ -141,12 +141,21 @@ and (more deeply) `docs/agents-explained.md`:
    `lab/pkb/agents/<id>/` with `AGENT.md` + `<id>.py`.
 
 `maximus` adds **Admin** (system health, plugin manager, diagnostics),
-**Notebooks/Workbench**, **Tuning**, **Plugins**, and **Model Building** (`/build`).
-**Docs** and the **Knowledge (`/dac`)** and **Worlds** surfaces are every-tier
-(both minimalist and maximus — the source of truth is `_TIER_SURFACES` in
-`src/arail/portal/app.py`). These maximus-only surfaces are now server-side
-tier-gated (a minimalist user who types the URL gets a 404), not just hidden in
-the nav.
+**Notebooks/Workbench**, **Tuning**, and **Plugins**.
+**Docs**, the **Knowledge (`/dac`)** and **Worlds** surfaces, and
+**Model Forge (`/forge`)** are every-tier (both minimalist and maximus —
+the source of truth is `_TIER_SURFACES` in `src/arail/portal/app.py`).
+These maximus-only surfaces are now server-side tier-gated (a minimalist
+user who types the URL gets a 404), not just hidden in the nav.
+
+**Model Forge** (`arailctl nucleus <verb>`; read-only viewer at `/forge`)
+replaced the old **Model Building** `/build` tab 2026-09-23
+(sprints/2026-09-23-nucleus-sprint-1) — a local, in-repo distillation
+pipeline (`plan` → `stage` → `build` → `certify`) instead of a thin
+client for a separate `qukaizen-nucleus` process. `stage`/`build`/
+`eval`/`certify`/`spike` need the maximus deep runtime; `plan`/`verify`/
+`status`/`list` and the `/forge` viewer work on minimalist. See
+`docs/nucleus.md`.
 
 ## Repo layout (orientation)
 
@@ -222,6 +231,12 @@ parts.
   `lab/pkb/agents/<id>/AGENT.md` + `lab/pkb/agents/<id>/<id>.py`. The
   loader discovers them on start. Don't shortcut by editing the
   built-in agents.
+- **Boot auto-resolves models; `model_defaults.yaml` = pins + last-resolved cache.**
+  Slot A (fast, Ollama) and slot B (deep, aerollm) are chosen by
+  `arail.model_resolve` at portal start (pin > `.env` > auto > none) and
+  warmed by default (`ARAIL_BOOT_WARM=0` opts out). The yaml is never a
+  gate and there is no "drift" state; `POST /api/models/pin` is the only
+  override. See `docs/cli.md` §start.
 - **Conversation memory is PKB-rooted and gated.** Chat transcripts live at
   `lab/pkb/conversations/<id>/transcript.jsonl` — **`.jsonl`, never `.json`**,
   because `_PKB_TEXT_SUFFIXES` (`pkb.py:376`) includes `.json` and would

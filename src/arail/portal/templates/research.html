@@ -31,7 +31,7 @@
   <span class="rx-truth-text" id="rx-truth-text">—</span>
   <span class="rx-truth-controls">
     <label class="rx-truth-toggle" id="rx-truth-toggle"
-           title="Use the aeroLLM deep model for planning and interpretation passes when the lab is idle">
+           title="Use the QueueLLM deep model for planning and interpretation passes when the lab is idle">
       <input type="checkbox" id="rx-truth-toggle-input">
       <span>deep passes</span>
     </label>
@@ -301,7 +301,7 @@
       <div class="rx-branches-kicker">Tuning loop — experiment branches</div>
       <div class="rx-branches-title">autoresearch/* git history</div>
       <div class="rx-branches-sub">Branch-per-run ledger written by the separate
-        <a href="/tuning">aerollm-tuning</a> loop — not by the experiments above.</div>
+        <a href="/tuning">QueueLLM tuning</a> loop — not by the experiments above.</div>
     </div>
     <div class="rx-branches-filters" id="rx-branches-filters">
       <label class="compute-opt">
@@ -314,7 +314,7 @@
       </label>
       <label class="compute-opt">
         <input type="radio" name="rx-backend" value="aerollm">
-        <span>AeroLLM</span>
+        <span>QueueLLM</span>
       </label>
     </div>
   </div>
@@ -895,8 +895,8 @@ function renderTruthStrip() {
   text.innerHTML =
     'Research runs on ' + fastHtml +
     ' <span class="rx-truth-sep">·</span> Deep passes: <strong>' +
-    esc(deep.display_name || 'aeroLLM') + '</strong>' +
-    ' <span class="rx-truth-dim">@ aeroLLM</span> — ' + state;
+    esc(deep.display_name || 'QueueLLM') + '</strong>' +
+    ' <span class="rx-truth-dim">@ QueueLLM</span> — ' + state;
 
   const locked = deep.reason_code === 'tier_locked' || deep.reason_code === 'wheel_missing';
   input.checked = !!deep.enabled_by_user;
@@ -905,7 +905,7 @@ function renderTruthStrip() {
   lock.hidden = !locked;
   if (locked) {
     lock.textContent = deep.reason_code === 'tier_locked'
-      ? '🔒 maximus tier' : '🔒 aeroLLM not installed';
+      ? '🔒 maximus tier' : '🔒 QueueLLM not installed';
     lock.title = deep.reason || '';
   }
   strip.hidden = false;
