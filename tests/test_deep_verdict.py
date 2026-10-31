@@ -363,6 +363,59 @@ def test_qa2_an_empty_failure_object_is_a_failure_that_says_it_has_no_error_text
     assert dv.current().state == "passing", "a passing probe clears an empty failure like any other"
 
 
+# ── QA-3 (fix pass 3): only a failure that could have landed during a probe survives its pass ───────
+
+def test_qa3_the_window_a_failure_must_fall_in_to_survive_a_passing_probe():
+    """Between the probe's start and now (plus a few seconds of clock slack): it landed while the probe ran.
+    Before the start: the pass clears it (as before). After now, or not a finite time: it cannot have landed
+    during this probe, so the pass clears it too; that is the clock stepped back, or a hand edit."""
+    started, now = 1_000.0, 1_100.0
+    landed = dv._landed_during_probe
+    for ts, why in ((1_050.0, "inside the run"), (started, "at the start"), (now, "at the end"),
+                    (now + dv.CLOCK_SLACK_S - 1, "inside the clock slack")):
+        assert landed({"last_ts": ts}, started, now) is True, why
+    for ts, why in ((999.0, "before the probe"), (now + 3600.0, "an hour in the future"),
+                    (now + dv.CLOCK_SLACK_S + 1, "just past the slack"), (float("nan"), "NaN"),
+                    (float("inf"), "infinity"), (float("-inf"), "minus infinity"), ("soon", "text"),
+                    ([1], "a list"), (None, "missing")):
+        assert landed({"last_ts": ts}, started, now) is False, why
+
+
+@pytest.mark.parametrize("stamp, survives", [(4_970.0, False), (4_980.0, True), (4_990.0, True), (5_000.0, True),
+                                             (5_002.0, True), (5_000.0 + 3_600.0, False)],
+                         ids=["before the probe", "at its start", "inside its run", "at its end",
+                              "2 s ahead (slack)", "an hour ahead"])
+def test_qa3_a_passing_probe_clears_a_failure_stamped_outside_its_window_and_keeps_one_inside_it(
+        fake_deep, monkeypatch, stamp, survives):
+    fake_deep()
+    b = dv.identity()
+    store_path().parent.mkdir(parents=True, exist_ok=True)
+    store_path().write_text(json.dumps(_entry_doc(b.sha256, failure=_good_failure(last_ts=stamp, since_ts=stamp))),
+                            encoding="utf-8")
+    monkeypatch.setattr(dv, "_now", lambda: 5_000.0)                  # the probe finishes at 5000, began at 4980
+    written, err = dv.record_probe(probe_result(b, "pass", passed=5, started_ts=4_980.0))
+    assert written, err
+    assert (dv.current().state == "failing") is survives, dv.current().detail
+
+
+@pytest.mark.parametrize("stamp", ["NaN", "Infinity", "-Infinity"])
+def test_qa3_record_probe_clears_a_non_finite_stamp_on_its_own_even_if_the_validator_lets_it_through(
+        fake_deep, monkeypatch, stamp):
+    """The validator (QA-2) makes such a file unreadable, and the probe's move-aside then replaces it. This
+    is the rule in record_probe itself, kept as the second line so the fix does not depend on the first."""
+    fake_deep()
+    b = dv.identity()
+    monkeypatch.setattr(dv, "_validate_doc", lambda doc: None)
+    raw = json.dumps(_entry_doc(b.sha256, failure=_good_failure(last_ts=0.0))).replace('"last_ts": 0.0', f'"last_ts": {stamp}')
+    store_path().parent.mkdir(parents=True, exist_ok=True)
+    store_path().write_text(raw, encoding="utf-8")
+    assert dv.current().state == "failing"
+    written, err = dv.record_probe(probe_result(b, "pass", passed=5, started_ts=dv._now()))
+    assert written, err
+    assert dv.current().state == "passing"
+    assert not list(store_path().parent.glob("verdict.json.corrupt-*")), "cleared in place, not moved aside"
+
+
 # ── U5: a failure persists, other processes see it, a later success does not clear ──
 
 def test_u5_a_failure_persists_and_another_process_sees_it(fake_deep):

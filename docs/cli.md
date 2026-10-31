@@ -537,9 +537,12 @@ file the process loaded (`<state dir>/verdict.json`, schema
 lab of this checkout, or from a load keeps deep marked **failing** until a
 probe of *the same binary* passes 5 of 5. A later successful call does not
 clear it: call 1 works on every build tested, so one answer proves nothing. A
-new build starts "never tested", not "passing". The record is written under a
-lock with an atomic replace; a corrupt file reads as failing and is moved
-aside by the next writer.
+new build starts "never tested", not "passing". The probe clears a failure
+unless that failure could have landed while it ran, so a failure stamped in the
+future (the clock was stepped back after it) is cleared too, and so is one with
+no usable time. The record is written under a lock with an atomic replace; a
+corrupt file (one that does not parse, is nested too deeply, or has an entry
+the readers cannot use) reads as failing and is moved aside by the next writer.
 
 **Who reads it.** The research truth strip (`reason_code: deep_failing`), the
 tier-1 health of the model registry (status bar dot, degradation banner,

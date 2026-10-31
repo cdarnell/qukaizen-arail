@@ -17,7 +17,9 @@ State is keyed by the sha256 of the *native* file the process loaded:
 * ``verdict.json`` (schema ``arail.deep-verdict/v1``) lives in ``state_dir()``.
 * A failure (a probe, a deep call, a load) sets "failing" for that binary.
 * A later successful call clears nothing. Only ``record_probe`` with a 5/5
-  pass clears a failure, and only one last seen before that probe started.
+  pass clears a failure, and not one that could have landed while that probe
+  ran: a failure last seen before the probe started is cleared, and so is one
+  stamped in the future (the clock was stepped back) or not a time at all.
 * A new binary has its own key. It starts "never tested", not "passing".
 
 Writes take ``verdict.lock`` (flock, retried for up to 2 s), then write a
@@ -56,6 +58,7 @@ NATIVE_MODULE_NAMES = ("aerollm_api", "queuellm_api")   # names a native module 
 SCHEMA = "arail.deep-verdict/v1"
 MAX_BINARIES = 32
 LOCK_TIMEOUT_S = 2.0
+CLOCK_SLACK_S = 5.0     # how far ahead of "now" a failure's stamp may be and still be a failure of this moment
 HEALTH_PREFIX = "generation failing on this build"
 UNIDENTIFIED = "unidentified"
 
@@ -667,6 +670,23 @@ def _new_failure(source: str, consumer: str, lab: str, err: str, now: float) -> 
             "consumer": consumer, "lab": lab, "error": err, "last_error": err, "count": 1}
 
 
+def _landed_during_probe(f: dict, started_ts: float, now: float) -> bool:
+    """Could failure ``f`` have been recorded while a probe that began at ``started_ts`` was running?
+
+    Only if its stamp is a time between the probe's start and now. A stamp later than now (the wall clock
+    was stepped back after the failure, as NTP or a VM resume can do) or not a finite number (a hand edit:
+    every comparison with NaN is false, and infinity is later than any now) cannot belong to this probe,
+    and leaving it would lock deep as failing until the clock caught up, which for NaN is never.
+    ``CLOCK_SLACK_S`` forgives the few milliseconds two processes' clocks can disagree by. TD16's count
+    snapshot would also cover a clock stepped back *during* a probe; this is the smaller rule, and it needs
+    no new field in the probe's result."""
+    try:
+        last = float(f.get("last_ts") or 0.0)
+    except (TypeError, ValueError):
+        return False
+    return started_ts <= last <= now + CLOCK_SLACK_S
+
+
 def _bump_failure(f: dict, err: str, now: float) -> None:
     f["last_at"] = _iso(now)
     f["last_ts"] = now
@@ -797,8 +817,9 @@ def record_probe(result: dict) -> tuple[bool, Optional[str]]:
     ``first_error`` {call, kind, error} or None; ``started_ts`` (float);
     ``started_at``; optional ``at``; ``model``; ``ring_depth``;
     ``ring_depth_source``; ``max_tokens``; ``prompt_set_sha256``; ``python``;
-    ``lab``. A pass clears the binary's failure only if that failure was last
-    seen before ``started_ts``.
+    ``lab``. A pass clears the binary's failure unless that failure could have
+    landed while the probe ran (see ``_landed_during_probe``): one last seen before
+    ``started_ts`` is cleared, and so is one stamped in the future or not a time.
     """
     try:
         if not isinstance(result, dict):
@@ -837,7 +858,7 @@ def record_probe(result: dict) -> tuple[bool, Optional[str]]:
             if outcome == "pass":
                 if f is None:
                     entry["last_pass_at"] = at
-                elif float(f.get("last_ts") or 0.0) < started_ts:
+                elif not _landed_during_probe(f, started_ts, _now()):
                     entry["failure"] = None
                     entry["last_pass_at"] = at
                 # else: a failure landed while the probe ran; it survives the pass
