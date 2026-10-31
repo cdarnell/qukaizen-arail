@@ -284,6 +284,85 @@ def test_qa1_a_failure_is_kept_in_memory_and_says_why_when_the_store_cannot_be_w
     assert v.store_error and "RecursionError" in v.store_error
 
 
+# ── QA-2 (fix pass 3): the store is validated for what the readers rely on, and for nothing more ────
+
+def _entry_doc(sha: str, **entry) -> dict:
+    base = {"module": "aerollm_api", "native_path": "/x", "bytes": 1, "version": "v", "failure": None,
+            "last_probe": None, "last_pass_at": None}
+    base.update(entry)
+    return {"schema": "arail.deep-verdict/v1", "updated_at": "2026-10-31T00:00:00Z", "binaries": {sha: base}}
+
+
+def _good_failure(**over) -> dict:
+    f = {"since": "2026-10-31T00:00:00Z", "since_ts": 1.0, "last_at": "2026-10-31T00:00:00Z", "last_ts": 2.0,
+         "source": "call", "consumer": "agent:buddy", "lab": "root", "error": "e", "last_error": "e", "count": 1}
+    f.update(over)
+    return f
+
+
+BAD_ENTRIES = {
+    "last_ts is text": {"failure": _good_failure(last_ts="soon")},
+    "last_ts is NaN": {"failure": _good_failure(last_ts=float("nan"))},
+    "since_ts is infinite": {"failure": _good_failure(since_ts=float("inf"))},
+    "count is a fraction": {"failure": _good_failure(count=2.5)},
+    "count is a boolean": {"failure": _good_failure(count=True)},
+    "last_at is a number": {"failure": _good_failure(last_at=7)},
+    "last_probe is a string": {"last_probe": "passed"},
+    "last_probe is a list": {"last_probe": [1, 2]},
+    "last_probe.started_ts is text": {"last_probe": {"outcome": "pass", "started_ts": "now"}},
+    "last_probe.first_error is text": {"last_probe": {"outcome": "fail", "first_error": "boom"}},
+    "last_probe.passed is NaN": {"last_probe": {"outcome": "pass", "passed": float("nan"), "total": 5}},
+    "last_probe.at is a number": {"last_probe": {"outcome": "pass", "at": 5}},
+    "last_pass_at is a number": {"last_pass_at": 12345},
+}
+
+
+@pytest.mark.parametrize("entry", list(BAD_ENTRIES.values()), ids=list(BAD_ENTRIES))
+def test_qa2_an_entry_the_readers_cannot_use_fails_closed_and_the_next_writer_moves_the_file_aside(fake_deep, entry):
+    fake_deep()
+    b = dv.identity()
+    store_path().parent.mkdir(parents=True, exist_ok=True)
+    store_path().write_text(json.dumps(_entry_doc(b.sha256, **entry)), encoding="utf-8")   # NaN is written as NaN
+    v = dv.current()
+    assert v.state == "failing" and v.source == "store_unreadable", v.detail
+    assert f"binaries[{b.sha256[:12]}]" in v.store_error
+    assert "./arailctl deep probe" in v.detail
+    dv.note_call(False, error="RuntimeError: boom", consumer="agent:buddy")
+    assert len(list(store_path().parent.glob("verdict.json.corrupt-*"))) == 1
+    assert read_store()["binaries"][b.sha256]["failure"]["count"] == 1
+
+
+def test_qa2_unknown_extra_keys_are_valid_and_are_kept_when_the_store_is_written(fake_deep):
+    """A later version may add keys. This one reads what it relies on and carries the rest through."""
+    fake_deep()
+    b = dv.identity()
+    doc = _entry_doc(b.sha256, failure=_good_failure(future_failure_key={"a": [1, 2]}), future_entry_key="kept")
+    doc["future_doc_key"] = {"nested": True}
+    assert dv._validate_doc(doc) is None
+    store_path().parent.mkdir(parents=True, exist_ok=True)
+    store_path().write_text(json.dumps(doc), encoding="utf-8")
+    assert dv.current().state == "failing" and dv.current().source == "call"
+    dv.note_call(False, error="RuntimeError: another", consumer="agent:buddy")
+    after = read_store()
+    entry = after["binaries"][b.sha256]
+    assert after["future_doc_key"] == {"nested": True} and entry["future_entry_key"] == "kept"
+    assert entry["failure"]["future_failure_key"] == {"a": [1, 2]} and entry["failure"]["count"] == 2
+    assert not list(store_path().parent.glob("verdict.json.corrupt-*")), "a valid file is not moved aside"
+
+
+def test_qa2_an_empty_failure_object_is_a_failure_that_says_it_has_no_error_text(fake_deep):
+    """C2: failure not null means failing. The text must not trail off after a colon."""
+    fake_deep()
+    b = dv.identity()
+    store_path().parent.mkdir(parents=True, exist_ok=True)
+    store_path().write_text(json.dumps(_entry_doc(b.sha256, failure={})), encoding="utf-8")
+    v = dv.current()
+    assert v.state == "failing" and "no error text was recorded" in v.detail
+    written, err = dv.record_probe(probe_result(b, "pass", passed=5, started_ts=dv._now() + 1))
+    assert written, err
+    assert dv.current().state == "passing", "a passing probe clears an empty failure like any other"
+
+
 # ── U5: a failure persists, other processes see it, a later success does not clear ──
 
 def test_u5_a_failure_persists_and_another_process_sees_it(fake_deep):

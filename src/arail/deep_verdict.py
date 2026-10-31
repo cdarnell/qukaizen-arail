@@ -38,6 +38,7 @@ import importlib
 import importlib.machinery
 import importlib.util
 import json
+import math
 import os
 import random
 import stat
@@ -413,7 +414,59 @@ def _empty_doc() -> dict:
     return {"schema": SCHEMA, "updated_at": _iso(_now()), "binaries": {}}
 
 
+def _is_finite_number(v: Any) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+
+
+def _is_int(v: Any) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+def _bad_field(obj: dict, where: str, name: str, ok: Callable[[Any], bool], what: str) -> Optional[str]:
+    """``where.name is not <what>`` when the field is present, not null, and fails *ok*."""
+    v = obj.get(name)
+    if v is not None and not ok(v):
+        return f"{where}.{name} is not {what}"
+    return None
+
+
+def _validate_entry(sha: str, e: dict) -> Optional[str]:
+    """What the readers rely on in one binary's record, and nothing more. An unknown extra key is kept."""
+    where = f"binaries[{sha[:12]}]"
+    f = e.get("failure")
+    if f is not None:
+        if not isinstance(f, dict):
+            return f"{where}.failure is not null or an object"
+        for name in ("since_ts", "last_ts"):
+            bad = _bad_field(f, f"{where}.failure", name, _is_finite_number, "a finite number")
+            if bad:
+                return bad
+        for name in ("since", "last_at"):
+            bad = _bad_field(f, f"{where}.failure", name, lambda v: isinstance(v, str), "a string")
+            if bad:
+                return bad
+        bad = _bad_field(f, f"{where}.failure", "count", _is_int, "a whole number")
+        if bad:
+            return bad
+    lp = e.get("last_probe")
+    if lp is not None:
+        if not isinstance(lp, dict):
+            return f"{where}.last_probe is not null or an object"
+        checks = (("started_ts", _is_finite_number, "a finite number"),
+                  ("at", lambda v: isinstance(v, str), "a string"),
+                  ("started_at", lambda v: isinstance(v, str), "a string"),
+                  ("passed", _is_int, "a whole number"), ("total", _is_int, "a whole number"),
+                  ("first_error", lambda v: isinstance(v, dict), "an object"))
+        for name, ok, what in checks:
+            bad = _bad_field(lp, f"{where}.last_probe", name, ok, what)
+            if bad:
+                return bad
+    return _bad_field(e, where, "last_pass_at", lambda v: isinstance(v, str), "a string")
+
+
 def _validate_doc(doc: Any) -> Optional[str]:
+    """``None`` when the document is safe to read; else why not. A store that fails here is unreadable
+    (fail closed: deep reads as failing) and the next writer moves it aside."""
     if not isinstance(doc, dict):
         return "not a JSON object"
     if doc.get("schema") != SCHEMA:
@@ -421,6 +474,10 @@ def _validate_doc(doc: Any) -> Optional[str]:
     bins = doc.get("binaries")
     if not isinstance(bins, dict) or any(not isinstance(v, dict) for v in bins.values()):
         return "'binaries' is not an object of objects"
+    for sha, entry in bins.items():
+        bad = _validate_entry(str(sha), entry)
+        if bad:
+            return bad
     return None
 
 
@@ -820,7 +877,7 @@ def record_for(sha256: str) -> Optional[dict]:
 def _what_failed(f: dict, lp: Optional[dict]) -> str:
     source = f.get("source")
     lab, consumer = f.get("lab") or "root", f.get("consumer") or "unattributed"
-    err = _clip(f.get("last_error") or f.get("error"), 120)
+    err = _clip(f.get("last_error") or f.get("error"), 120) or "no error text was recorded"
     if source == "probe":
         fe = (lp or {}).get("first_error") or {}
         if lp and lp.get("outcome") == "fail":
@@ -870,9 +927,11 @@ def _assemble(b: Optional[Binary], doc: Optional[dict], store_err: Optional[str]
     persisted_f = entry.get("failure") if isinstance(entry, dict) else None
     mem_f = _P.mem.get(key)
     lp = copy.deepcopy(entry.get("last_probe")) if isinstance(entry, dict) else None
-    f = copy.deepcopy(persisted_f) if persisted_f else None
-    f = f or mem_f
-    if persisted_f and mem_f and float(mem_f.get("last_ts") or 0) > float(persisted_f.get("last_ts") or 0):
+    # "failure is not null" means failing (C2), so an empty object is a failure too.
+    f = copy.deepcopy(persisted_f) if persisted_f is not None else None
+    f = f if f is not None else mem_f
+    if persisted_f is not None and mem_f is not None \
+            and float(mem_f.get("last_ts") or 0) > float(persisted_f.get("last_ts") or 0):
         f = mem_f
     if f is not None:
         detail = _failing_detail(b, f, lp, changed)
