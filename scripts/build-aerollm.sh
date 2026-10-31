@@ -165,9 +165,12 @@ refuse_repo() {  # $1 = state (no-repo | new | none)
     esac
 }
 
+# The digest is taken from the file's CONTENT on stdin, never from its name: given a name with a backslash or a
+# newline in it, `shasum -a 256 <name>` escapes the output line and puts a "\" in front of the digest, and
+# then no digest ever matches.
 sha256_of() {  # $1 = file
     if command -v shasum >/dev/null 2>&1; then
-        shasum -a 256 "$1" | awk '{print $1}'
+        shasum -a 256 < "$1" | awk '{print $1}'
     else
         "$PY" -c "import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" "$1"
     fi
@@ -461,11 +464,7 @@ bundle_install() {
         exit 1
     fi
     local sha_actual
-    if command -v shasum >/dev/null 2>&1; then
-        sha_actual="$(shasum -a 256 "$tarball" | awk '{print $1}')"
-    else
-        sha_actual="$("$PY" -c "import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" "$tarball")"
-    fi
+    sha_actual="$(sha256_of "$tarball")"
     if [[ "$sha_actual" != "$sha_expected" ]]; then
         err "Checksum mismatch — refusing to install."
         warn "  expected: ${sha_expected}"
@@ -499,11 +498,7 @@ bundle_install() {
     # manifest doesn't carry one; a bundle producer must always emit it.
     local so_sha_expected so_sha_actual
     so_sha_expected="$("$PY" -c "import json; print(json.load(open('$extract_dir/MANIFEST.json')).get('sha256',''))" 2>/dev/null || echo '')"
-    if command -v shasum >/dev/null 2>&1; then
-        so_sha_actual="$(shasum -a 256 "$extract_dir/aerollm_api.abi3.so" | awk '{print $1}')"
-    else
-        so_sha_actual="$("$PY" -c "import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" "$extract_dir/aerollm_api.abi3.so")"
-    fi
+    so_sha_actual="$(sha256_of "$extract_dir/aerollm_api.abi3.so")"
     if [[ -z "$so_sha_expected" || "$so_sha_actual" != "$so_sha_expected" ]]; then
         err "aerollm_api.abi3.so does not match MANIFEST.json's recorded sha256 — refusing to install."
         warn "  manifest:  ${so_sha_expected:-<missing>}"

@@ -703,6 +703,29 @@ def test_qa8_the_commit_shown_is_seven_hex_characters_or_unknown_never_the_raw_t
     assert "\x1b" not in text and "forged" not in text
 
 
+# ── QA-11 (fix pass 3): a digest is taken from the file's content, never from a name that may need escaping ──
+# QA's test covers the build path (sha256_of). The bundle path hashed by name at two more places, and both sit
+# under $TMPDIR: the script's own copy of the tarball ($tmp/bundle.tar.gz) and the .so it extracts beside it.
+# shasum escapes the output line for a name with a backslash and puts a "\" before the digest, so a correct
+# bundle was refused ("Checksum mismatch") when TMPDIR had one. Where the user keeps the original tarball does
+# not matter: the script hashes its copy.
+
+@darwin_arm64
+def test_qa11_a_bundle_installs_when_the_temp_folder_has_a_backslash_in_its_name(env):
+    env.fake_importer()
+    odd_tmp = env.tmp / "tmp\\dir"
+    odd_tmp.mkdir()
+    so = MACHO + b"BUNDLE-EXTRACTED-UNDER-AN-ODD-TMPDIR\n" * 40
+    tarball, tar_sha = make_bundle(env.tmp, so)
+    r = env.run("bundle", AEROLLM_BUNDLE_FILE=tarball, AEROLLM_BUNDLE_SHA256=tar_sha, AEROLLM_BUNDLE_TAG="v1.1.0",
+                TMPDIR=odd_tmp)
+    text = out(r)
+    assert r.returncode == 0, "a correct bundle was refused:\n" + text
+    assert "Checksum verified" in text and "Checksum mismatch" not in text
+    assert "does not match MANIFEST.json" not in text
+    assert (env.site / "aerollm_api.abi3.so").read_bytes() == so
+
+
 def test_a_good_install_leaves_no_temp_backups_behind(env):
     env.checkout("aerollm-api")
     env.fake_importer()
