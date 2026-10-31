@@ -70,6 +70,7 @@ echo "$PWD :: $*" >> "${FAKE_CARGO_LOG:?}"
 mkdir -p "$PWD/target/release"
 cp "${FAKE_CARGO_ARTIFACT:?}" "$PWD/target/release/libaerollm_api.dylib"
 if [[ -n "${FAKE_CARGO_TOUCH:-}" ]]; then touch "$FAKE_CARGO_TOUCH"; fi
+if [[ -n "${FAKE_CARGO_UNREADABLE:-}" ]]; then chmod 000 "$PWD/target/release/libaerollm_api.dylib"; fi
 """
 
 
@@ -254,6 +255,24 @@ def test_s5_an_artifact_with_the_metal_error_marker_is_refused(env):
             "Not installed. See QueueLLM docs/self-hosted-runner-setup.md.") in out(r)
     assert env.cargo_ran()
     assert env.listing() == before and not (env.site / "aerollm_api.abi3.so").exists()
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root can read a mode-000 file")
+def test_n3_an_artifact_the_marker_check_cannot_read_is_refused_not_passed(env):
+    """Review N3. When grep itself fails, it prints nothing; the script treated "nothing" as a count of 0
+    and went on to install a build it had not checked."""
+    env.checkout("aerollm-api")
+    before = env.listing()
+    r = env.run("build", FAKE_CARGO_UNREADABLE="1")
+    built = env.repo / "target" / "release" / "libaerollm_api.dylib"
+    try:
+        assert r.returncode == 1, out(r)
+        assert (f"Could not read {built} to check it for the Metal toolchain error marker (downloadComponent). "
+                "Not installed.") in out(r)
+        assert "installed (source build" not in out(r)
+        assert env.listing() == before and not (env.site / "aerollm_api.abi3.so").exists()
+    finally:
+        built.chmod(0o644)
 
 
 # ── S6: a good build is installed, verified and recorded ───────────────────

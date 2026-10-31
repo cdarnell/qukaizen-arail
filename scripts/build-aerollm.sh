@@ -247,7 +247,12 @@ cargo_build() {
     # QueueLLM's own preamble check: a build made while the Metal toolchain was down can exit 0
     # and still fail at runtime. The marker string must not be in the artifact.
     local poison; poison="$(LC_ALL=C grep -a -c downloadComponent "$built" || true)"
-    if [[ "${poison:-0}" != "0" ]]; then
+    if [[ -z "$poison" ]]; then
+        # grep prints a count even for zero matches; no output at all means it could not read the file.
+        err "Could not read ${built} to check it for the Metal toolchain error marker (downloadComponent). Not installed."
+        exit 1
+    fi
+    if [[ "$poison" != "0" ]]; then
         err "The build carries the Metal toolchain error marker (downloadComponent). It would fail at runtime. Not installed. See QueueLLM docs/self-hosted-runner-setup.md."
         exit 1
     fi
