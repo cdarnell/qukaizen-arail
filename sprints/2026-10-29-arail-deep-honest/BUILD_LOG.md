@@ -5,7 +5,7 @@
 **Branch:** `qukaizen/arail-deep-honest` (from arail main `62d5ebdf`). Not pushed.
 **Started:** 2026-10-29
 **Finished:** 2026-10-31 (the original build); the fix pass after the review was done the same day
-**Status:** done. All steps 0 to 9 are committed. The live check passes on today's broken wheel. The architect's review (`REVIEW.md`) returned BLOCK on B1 and B2; "Fix pass" at the end of this file records what was fixed and how it was checked. The numbers above that section are as of the original build (`fdc069bd`).
+**Status:** done. All steps 0 to 9 are committed. The live check passes on today's broken wheel. The architect's review (`REVIEW.md`) returned BLOCK on B1 and B2; "Fix pass" at the end of this file records what was fixed and how it was checked. The numbers above that section are as of the original build (`fdc069bd`). The re-review of that pass returned WEAK_PASS; "Fix pass 2" at the very end records what was fixed from it.
 
 ## Hard rules this build kept
 
@@ -475,7 +475,7 @@ These are outside the coordinator's list, so I only record them.
 5. **The quarantine hint is gone** with the W1 block (item 3). The strip of the quarantine attribute still runs before the check, and no test pinned the hint. If you want the line back, it is one `warn` in the empty-`loaded_sha` branch of `verify_loaded`.
 6. **`upgrade.sh`** was fixed with B2 though the message's grep scope was docs, templates and JS (item 2).
 7. **The review's N-items I did not fix** are in the backlog (item 8). **W3(c)** (`test_no_user_visible_aerollm.py` is red on base) stays.
-8. **`deep rebuild` text left alone**, because it describes the maintainer's dev-build verb or follows `deep install`: `README.md:106`, `docs/cli.md:407`, `CHANGELOG.md:136`, the comments at `pyproject.toml:101` and `:259`, `scripts/setup.sh:689` (names `deep install` first) and `:695` (the CUDA "once QueueLLM supports it" line), `deep_verdict.py:1185` and the `ImportError` text at `router/backends.py:1616` (both name `deep install` first), and the build script's own refusal lines, which are about a checkout that exists.
+8. **`deep rebuild` text left alone**, because it describes the maintainer's dev-build verb or follows `deep install`: `README.md:106`, `docs/cli.md:407`, `CHANGELOG.md:136`, the comments at `pyproject.toml:101` and `:259`, `scripts/setup.sh:689` (names `deep install` first) and `:695` (the CUDA "once QueueLLM supports it" line), `deep_verdict.py:1185` and the `ImportError` text at `router/backends.py:1616` (both name `deep install` first), and the build script's own refusal lines, which are about a checkout that exists. (The re-review then found `setup.sh:695` and the unqualified alternatives at `setup.sh:689` and `deep_verdict.py:1185` wrong for a user with nothing installed, and `docs/cli.md:407` and `README.md:106` too vague; fix pass 2 changed all five: V2, V3 and V4.)
 9. **`tests/test_queuellm_rename_frozen_surface.py` is stale and fails on `origin/main`.** Its base is `5f775f1c`, from the display-rename sprint. Since then main moved: `pyproject.toml` has 5 more lines, and `portal/app.py` has 3 fewer `AEROLLM_MODEL` and 1 fewer `AeroLLMBackend` token than at that base. On top of that, this branch removes two `aerollm_version` tokens from `build-aerollm.sh` (the original build's rewrite of the `status` output; the shell function and the marker key are still there and still read). Nothing machine-read was renamed: the env var `ARAIL_AEROLLM_REPO` and the marker key `aerollm_version` are still read by the scripts. The review's item 12 counts against main, and against main no count went down (item 2, follow-up). The test could be re-based or retired; that is not in this pass.
 10. **Order-dependent failure.** `test_qa_provider_dropdown_paranoid.py::test_rf_ctx_override_flows_into_ollama_dispatch_num_ctx` fails only in combined runs, on the base copy too.
 
@@ -492,3 +492,130 @@ These are outside the coordinator's list, so I only record them.
 ### Cleanup of the fix pass
 
 Removed after this commit: my scratch folder (`build-fix`, with its lint venv, the base copy, the mutation copies, every output and temp file) and the git-ignored files the runs wrote into the worktree (`lab/`, `logs/`, `__pycache__`), without touching `src/arail.egg-info/`. Kept: the reviewer's scratch venv. The operator's `.venv`, `.env`, `lab/` and Worlds and the QueueLLM checkout were read, never written, as the before and after snapshot of the second live run shows. No pytest, probe, harness or `yes` process was left running.
+
+## Fix pass 2 (after the re-review)
+
+The re-review of the fix pass (`REVIEW.md`, "Re-review of the fix pass", commit `30495f82`) returned **WEAK_PASS** with no blocker. The coordinator decided what to fix now and what to file. This pass does that list and nothing else: V1 to V4, M2, M4, M5 and M7 are fixed, and the rest is filed or accepted below. It starts at `5ff035aa` (the coordinator's ledger commit on top of the reviewer's `30495f82`; the last code commit before it is `d071dc6c`). Each fix is its own commit with its test in the same commit. Nothing was pushed. `SPRINT.md` and `REVIEW.md` were not edited. QueueLLM, the operator's `.venv`, `.env` and `lab/` were not touched, no `deep rebuild`, `deep install` or `deep update` was run, and the live check was not run.
+
+| # | Item | Commit | New tests (collected) |
+|---|---|---|---|
+| 1 | V1 and M2, and the double full stop: a pass whose calls ARAIL closed does not blame the deep runtime | `b6144556` | 11: Curator 10, hook 1 |
+| 2 | V2: setup does not send a host with no QueueLLM build to `deep rebuild` | `bf700157` | 3 |
+| 3 | V3: the maintainer routes say who can use them | `baaa2f84` | 1; two existing tests extended |
+| 4 | V4: `docs/cli.md` and the README describe `auto` and the channel line as the code does | `9e2aa208` | 2 |
+| 5 | M4: the build marker takes git's answer only for the checkout's own repository | `15bf987a` | 2 |
+| 6 | M5: `ARAIL_AEROLLM_REPO` back in the clone hint, "aerollm" back in the `app.py` comment | `e3f1ef88` | 0; S1 extended |
+| 7 | M7: U9 no longer depends on how busy the machine is | `ea1fd3e9` | 1 (`test_u9b`) |
+| - | Backlog: TD24, TD25, and M3 and M8 on TD10 | `8a4d3573` | none |
+| - | This section | the commit that adds it | none |
+
+That is 20 new tests in 6 test files (160 collected at the start of the pass, 180 now). No new test file.
+
+### Where this pass differs from the message, and why
+
+1. **V1, one definition of "closed by ARAIL".** `CLOSED_BY_ARAIL` (`_DeepBackendClosed` and `concurrent.futures.CancelledError`) is defined once in `router/backends.py`. The hook's not-a-runtime-fault set is built from it and `portal/world_routes.py` imports it, so the hook and the Curator cannot disagree about what "closed" means. The message named the two exceptions; a test pins the construction.
+2. **V1, which error a report quotes.** In a pass with both kinds of failure, `first_error` (quoted in the message and stored as `deep_error`) is the first failure that was not a closed call. Without that, a closed call that came first would be quoted as the evidence for "the fault is in the deep runtime". A test has the closed call first.
+3. **V1, the wording of the all-closed report.** The review says "QueueLLM failed on 4 calls." and then the closed sentence. It does not quote the raw error: that error is the closed message, and it would say the same thing twice. The grow text drops its parenthesised error for the same reason. `deep_error` in `review.json` still holds it. `closed` stays inside `_CountedRouter`; no new number is added to the JSON, so no new teaching entry is needed.
+4. **V1, the teaching.** The teaching entries for `failed` and `calls.failed` said "for QueueLLM run ./arailctl deep probe". Next to a message that says "run the pass again" that would teach the wrong thing, which the operator's standing rule forbids, so both entries name the closed case. It is a text change in a table, and it is not in the message's list.
+5. **V3, the shape of the sentence in `setup.sh`.** The message's parenthesis does not fit there, because the sentence already has one open for "(bundled binary, ...)". It reads "... no source repo or credentials needed). Maintainers: deep rebuild needs a pre-rename checkout; deep update needs the private index." The `deep status` line uses the message's words exactly. The message said to update the tests that pin the old text; a search found none that pinned "(or: deep rebuild / deep update)" or the old `setup.sh` lines, so three tests now pin the new words (`test_cli_status_when_the_runtime_is_not_importable`, `test_s9_status_with_nothing_installed`, and the new `test_setup_failure_message_says_who_can_use_the_maintainer_routes`).
+6. **V4, two more stale claims, found while checking every claim against the code.** (a) The page said a bare `./arailctl deep install` runs `build-aerollm.sh auto`. `arailctl:806` runs `bundle`; only `setup.sh` runs `auto`. (b) It said `AEROLLM_CHANNEL` forces a channel "regardless of what's on disk". `dev` still refuses a checkout that has no `crates/aerollm-api`, and only `auto` reads the variable. Both sit in the paragraph V4 rewrites, so both are fixed there. I also added the `crate:` line of `deep status`, which is the other half of the same state. V4 is a docs item, but it has two doc-pin tests, because the staleness came from an original-build page that nothing checked.
+7. **M4, the test harness.** `Env.run` in `tests/test_build_aerollm_honest.py` sets `GIT_CEILING_DIRECTORIES` for every run (a folder is not a repository). A `None` value now removes a variable, so the new tests can run without it. The N4 test is unchanged and keeps the ceiling.
+8. **M5, where the hint goes.** "A checkout elsewhere: set ARAIL_AEROLLM_REPO." is the second line of the clone hint, straight after "No QueueLLM checkout at X.".
+9. **M7, a second test.** U9 now raises `LOCK_TIMEOUT_S` in its writers (and its wait to 300 s), which keeps its claim exact. That removes the only (accidental) coverage of the 2-second cap, so `test_u9b` pins the cap directly: a lock held past the cap leaves the failure in memory, sets `store_error`, writes nothing, and the next write after release lands.
+
+### Running the tests
+
+- **Environment.** The reviewer's pinned scratch venv (fastapi 0.140.7, starlette 1.3.1, httpx 0.28.1, no `httpx2`), a scratch `HOME` and `TMPDIR`, `ARAIL_SKIP_OLLAMA=1`. It was not rebuilt or upgraded. Every run used `--continue-on-collection-errors`, because `tests/test_host_edge_brain.py` still cannot be collected in that venv.
+- **The six test files this pass touches** (`test_curator_honest`, `test_deep_backend_hook`, `test_install_hints_honest`, `test_deep_verdict_cli`, `test_build_aerollm_honest`, `test_deep_verdict`): 180 tests, **180 passed**.
+- **The referencing set: 144 files.** I rebuilt it by grepping the tests for the modules and pages this pass changes (`router/backends`, `AeroLLMBackend`, `world_routes`, `_CountedRouter`, `deep_verdict`, `deep_probe`, `deep_policy`, `deep_honest_win`, `build-aerollm`, `setup.sh`, `upgrade.sh`, `docs/cli.md`, `README.md`), then added every `test_aerollm_*`, `test_deep_*` and `test_default_deep_*`, and the families the re-review named: swap and eject, `tests/router/test_aerollm_*`, the bundle tests, the research tests, the Curator neighbours, `tests/registry`, the frozen-name tests, `test_host_contract_vendor` and `test_cli_qa_edge`. It includes the six files above and `test_deep_honest_win.py`, so the dry-run guard ran. Compared by id with a fresh `git archive` of `0f2f8d25`, in the same venv, in parallel:
+
+| Run | Collected | Failed | Passed | Skipped | xfailed | Errors | Time |
+|---|---|---|---|---|---|---|---|
+| archive copy of `0f2f8d25` | 2,342 | 60 | 2,221 | 17 | 20 | 26 | 6 min 16 s |
+| **tree** (the tip before one test docstring was reworded; see below) | 2,397 | 57 | 2,283 | 13 | 20 | 26 | 6 min 27 s |
+
+- **No new failure.** 86 ids fail or error in the archive copy, 83 in the tree, and 81 are in both. Five fail only in the archive copy, which has no `.git`, and each one calls git: `test_deep_honest_win.py` twice (the dry run's W8 cannot run `git diff`), `test_experiments.py` twice (`git rev-parse HEAD`) and `test_instance_secrets.py::test_git_check_ignore_covers_instance_secrets` (`git check-ignore`). The fifth is new to this list because the set now holds more readers of `setup.sh`; it is the `git check-ignore` test the first baseline named. Two fail only in the tree, `test_queuellm_rename_frozen_surface.py` twice (they need git history, and they fail on `origin/main` too). `test_no_user_visible_aerollm` fails in both (`model_resolve.py:290`). Nothing else differs.
+- **The wording amend.** After these runs I reworded one word in the docstring of `test_m4_a_plain_folder_...` ("free to find the parent" became "able to find the parent", so the scan for the word "free" finds nothing) and replayed the three commits after it. The difference between the old tip and the new one is that one line. The six touched files were run again afterwards: 180 passed. The hashes above are the final ones.
+- **M7, U9 under load.** The machine has 18 cores.
+  - 8 busy-loop processes, three runs of the new U9: 3 passed, 0.34 to 0.36 s each. That is no contention for 8 writers, so it is the case the message asked for and not a stress test.
+  - A stress test that does reproduce the failure: 150 busy-loop processes, and the test at background priority (`taskpolicy -b`), load average 150 to 210. With plain busy loops, even 150 of them, the old test passed in about 1.5 s. At background priority the **old U9 failed both times: 283 and 276 of 400** (117 and 124 writes lost to the 2-second cap; 102 s and 91 s). The **new U9 passed with exactly 400 in both runs I let finish: 112 s and 467 s.** I stopped before a third. The slowness is the starved writers waiting for each other, which is the point of the longer cap.
+  - With the lock removed (a mutation), the new U9 fails: **102 of 400** writes survive.
+
+### Mutations
+
+Every new or changed test was checked the same way. The product line (or the doc line) was broken in a scratch copy of the worktree, the named tests were run, the test had to fail, and the copy was discarded. The worktree itself was never mutated.
+
+| Mutation | What was broken | Caught by |
+|---|---|---|
+| V1-1 | a closed call is not counted as closed | `test_v1_a_review_whose_calls_were_closed_by_arail_does_not_blame_the_runtime[DeepBackendClosed]` |
+| V1-2 | all_closed is true when any call was closed | `test_v1_one_real_failure_among_closed_calls_keeps_the_probe_advice_and_quotes_the_real_error` |
+| V1-3 | the first error is quoted even when it was a closed call | `test_v1_one_real_failure_among_closed_calls_keeps_the_probe_advice_and_quotes_the_real_error` |
+| V1-4 | the double full stop is back | `test_v1_a_report_does_not_double_the_full_stop_of_an_error_that_ends_with_one` |
+| V1-5 | the review report ignores all_closed | `test_v1_a_review_whose_calls_were_closed_by_arail_does_not_blame_the_runtime[DeepBackendClosed]` |
+| V1-6 | the grow report ignores all_closed | `test_v1_a_grow_pass_whose_calls_were_closed_by_arail_is_not_applied_and_does_not_blame_the_runtime` |
+| V1-7 | the teaching no longer names the closed case | `test_v1_the_teaching_for_failed_calls_names_the_closed_case` |
+| V1-8 | CancelledError is not closed by ARAIL | `test_b8_an_interruption_or_arails_own_teardown_is_not_filed_and_is_reraised_unchanged[CancelledError]` |
+| M2-1 | the closed message ends with the old advice | `test_b6_a_call_after_close_is_arails_own_teardown_not_a_binary_failure` |
+| V2-1 | the old deep rebuild line is back | `test_setup_on_a_host_with_no_queuellm_build_does_not_send_the_user_to_deep_rebuild[linux-x86_64]` |
+| V2-2 | the AirLLM route is not mentioned | `test_setup_on_a_host_with_no_queuellm_build_does_not_send_the_user_to_deep_rebuild[linux-x86_64]` |
+| V2-3 | the notice does not say the lab runs without the 2nd inference | `test_setup_on_a_host_with_no_queuellm_build_does_not_send_the_user_to_deep_rebuild[linux-x86_64]` |
+| V3-1 | deep_verdict status offers deep rebuild / deep update as alternatives again | `test_cli_status_when_the_runtime_is_not_importable` |
+| V3-2 | the status line through the build script has the old tail | `test_s9_status_with_nothing_installed` |
+| V3-3 | setup.sh offers the maintainer routes as alternatives again | `test_setup_failure_message_says_who_can_use_the_maintainer_routes` |
+| V3-4 | setup.sh drops 'needs a pre-rename checkout' | `test_setup_failure_message_says_who_can_use_the_maintainer_routes` |
+| V4-1 | the old auto paragraph is back | `test_the_cli_docs_describe_auto_as_the_script_does` |
+| V4-2 | the old channel-line paragraph is back | `test_the_cli_docs_list_every_form_of_the_channel_line_the_code_prints` |
+| V4-3 | the DEV row does not say pre-rename | `test_the_cli_docs_describe_auto_as_the_script_does` |
+| V4-4 | auto is not said to refuse without switching | `test_the_cli_docs_describe_auto_as_the_script_does` |
+| V4-5 | the README does not say pre-rename | `test_the_cli_docs_describe_auto_as_the_script_does` |
+| V4-6 | the docs drop the 'unknown' form | `test_the_cli_docs_list_every_form_of_the_channel_line_the_code_prints` |
+| M4-1 | git's answer is accepted whatever repository it comes from | `test_m4_a_plain_folder_inside_another_repository_does_not_get_that_repositorys_commit` |
+| M4-2 | the checkout's path is compared as written, not resolved | `test_m4_a_symlink_to_a_checkout_still_records_the_real_repositorys_commit` |
+| M4-3 | the commit is taken from the parent when the answer is refused | `test_m4_a_plain_folder_inside_another_repository_does_not_get_that_repositorys_commit` |
+| M5-1 | the clone hint does not name ARAIL_AEROLLM_REPO | `test_s1_no_checkout_gets_the_true_message` |
+| M5-2 | the clone hint names the wrong variable | `test_s1_no_checkout_gets_the_true_message` |
+| M7-1 | the lock is removed (the writers never wait or exclude each other) | `test_u9_eight_processes_fifty_writes_each_keep_an_exact_count` |
+| M7-2 | a failed write no longer says why (store_error is not set) | `test_u9b_a_lock_held_past_the_cap_keeps_the_failure_in_memory_and_says_so` |
+| M7-3 | a failure that could not be written is not kept in memory | `test_u9b_a_lock_held_past_the_cap_keeps_the_failure_in_memory_and_says_so` |
+
+30 mutations, all caught on the final tree: V1 8, M2 1, V2 3, V3 4, V4 6, M4 3, M5 2, M7 3. M7 has one more result that is a number rather than a pass: with the lock removed, the new U9 keeps 102 of 400 writes.
+
+### Frozen names (M5)
+
+The rule is the re-review's item 12 and M5: no occurrence count of `aerollm_api`, `AERO_`, `AEROLLM_`, `tier1-aerollm`, `AeroLLMBackend`, `build-aerollm.sh` or `backend="aerollm"` goes down in a modified file. The re-review also counted the lowercase word `aerollm`, so that is counted here too. The coordinator's reading is that the rule guards renames: a count may fall when a line is deleted on purpose, and each such drop is listed with its reason. A script compares the final tree with the blob at each base, for every file the branch modifies (files it adds have no base; `sprints/` is left out):
+
+| Base | Modified files checked | Drops in the seven tokens | Drops in lowercase `aerollm` |
+|---|---|---|---|
+| `0f2f8d25`, the head the first fix pass started from | 26 | one: `scripts/build-aerollm.sh`, `aerollm_api`, 38 to 37 | none |
+| `origin/main` `62d5ebdf` | 25 | none | none |
+
+The one drop left against `0f2f8d25` is a deliberate deletion. It is the old import-failure message in `bundle_install` (`Installed the bundled extension but \`import aerollm_api\` failed.`), removed in the first fix pass with the W1 block it belonged to. It was display text. `verify_loaded` still prints its own message that names `import aerollm_api`, and the script still runs that import. Against `origin/main` nothing is lower.
+
+The three drops the re-review listed are settled:
+
+| File and token | `62d5ebdf` | `0f2f8d25` | after the first fix pass | now | Why |
+|---|---|---|---|---|---|
+| `scripts/build-aerollm.sh`, `AEROLLM_` | 63 | 73 | 71 | 75 | the clone hint names `ARAIL_AEROLLM_REPO` again (M5), and M4 reads `$AEROLLM_REPO` |
+| `scripts/build-aerollm.sh`, `aerollm_api` | 29 | 38 | 37 | 37 | the deliberate deletion above |
+| `src/arail/portal/app.py`, lowercase `aerollm` | 131 | 131 | 130 | 131 | the comment says again that local aerollm changes flow into the lab (M5) |
+
+### Accepted, and filed
+
+- **M1, accepted.** The `runtime is None` branch of `_generate_on_worker` while the backend is open is unreachable in production. `AeroLLMBackend.__new__` hands out only instances whose `__init__` finished (`_initialized` is set last), and only `_close()` empties `_runtime`, after it sets `_closed`. I read `__new__`, `__init__` and `_close()` to confirm this. If the branch were ever reached, the cause would be ARAIL's, not the binary's, and the hook would still file it; the B6 test that empties `_runtime` by hand pins that. The coordinator accepted it as low risk, so it is left as it is.
+- **M6, accepted.** The W4 guard (`unlabelled_numbers()` and `RATIO`) runs only in tests, over dry-run output, so a false positive cannot fail a live run: it can only make a test red, which is the safe direction (an all-digit identifier, such as a pid, can trip it). Its misses are the ones the review lists: a ratio in an evidence line, a number with a unit attached ("58s"), and anything after a quoting prefix. They are limits of the guard, and I know of no number the live check prints that they let through.
+- **Filed in `sprints/BACKLOG.md`.** TD24 (a native panic leaves no router trace; `router/core.py:306` and its streaming twin) and TD25 (a native panic in a background call kills that agent's loop with no activity line), both with the trigger "before the first QueueLLM build that passes `./arailctl deep probe` 5/5 is installed in a lab (TD5's sprint)" and with the one-site alternative (`AeroLLMBackend.complete` re-raises `RuntimeError(...) from exc` after filing a panic, which breaks B7's "same object" contract; decide when they are pulled). TD10 now also carries M3 (a closed call still stamps `deep_failing` and calls `report_failure`; give it its own code such as `deep_closed`) and M8 (a Chat turn cancelled by an Eject replies "Inference failed: " with no reason).
+- **Seen, not changed.** `scripts/build-aerollm.sh:27` says `AEROLLM_CHANNEL` "forces a channel from any mode". Only `auto` reads it (V4 says so on the page). The script's comment is not in this pass's list.
+
+### Pre-handoff checks for fix pass 2 (`5ff035aa..HEAD`)
+
+- Every item in the table has a commit, and every commit is atomic: one finding each, the test in the same commit (V1 and M2 are one commit, as the message said). Each message names what it fixed and ends with the `Co-Authored-By` line.
+- `git diff --check` is clean for `5ff035aa..HEAD` and for `62d5ebdf..HEAD`. No TODO, FIXME, XXX or HACK in the added lines outside `sprints/`, no commented-out code (the scan of added comment lines that look like code found none), no use of SIGABRT or abort. The word "free" does not appear in the added lines. A duplicate-definition scan of every changed Python file reports none.
+- `pyflakes`: no new warning in any product file (`deep_verdict.py` 0, `world_routes.py` 0, `backends.py` 2, `app.py` 26, each equal to the count at the start of the pass). In tests the only increase is the fixture-import pattern ("redefinition of unused 'fake_deep'"): one more in `test_deep_verdict.py` (23 to 24), for the new `test_u9b`. `shellcheck`: `build-aerollm.sh` has no finding (0 before, 0 now); `setup.sh` has 19, the same as at the start of the pass and on main. `bash -n` passes on both.
+- Frozen names: see the table above. No machine-read name changed.
+- `src/dac_world/` and `src/arail/buddy_host/` are byte-identical to `62d5ebdf`. All five scripts are mode 755 in git. `SPRINT.md` and `REVIEW.md` are unchanged.
+- No new test file: the 20 new tests are in the six files the pass touched.
+- Nothing was pushed.
+
+### Cleanup of fix pass 2
+
+Removed after this commit: my scratch folder (`fix2`, with the base copies, the mutation copy, every output and helper) and the git-ignored files the runs wrote into the worktree (`lab/`, `logs/`, `__pycache__`), without touching `src/arail.egg-info/`. Kept: the reviewer's scratch venv. The 150 busy-loop processes of the M7 load runs stop themselves and were also stopped by PID; none is left. The operator's `.venv`, `.env`, `lab/` and Worlds and the QueueLLM checkout were not touched.
