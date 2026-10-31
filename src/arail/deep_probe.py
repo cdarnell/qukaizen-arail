@@ -20,8 +20,10 @@ Two processes, so a crash or a hang cannot take the supervisor with it:
   builds ``AeroLLMBackend`` and makes the five calls.
 
 Exit codes: 0 five of five and recorded passing; 1 the probe ran and fewer than
-five answered (a load failure, a crash and a timeout count); 2 usage; 5 not run
-(nothing recorded); 130 interrupted (child killed, nothing recorded).
+five answered (a load failure, a crash and a timeout count), or five answered but
+the result could not be saved or a failure elsewhere still stands, so deep is not
+cleared; 2 usage; 5 not run (nothing recorded); 130 interrupted (child killed,
+nothing recorded).
 
 Every number printed carries its meaning, its bar and why, what out of range
 means and where the failure lives (``TEACHING``). A surface prints numbers only
@@ -162,11 +164,14 @@ TEACHING: dict[str, dict[str, str]] = {
         "failure_lives_in": "deep_probe.py",
     },
     "exit_code": {
-        "meaning": "the process exit code: 0 five of five, 1 fewer, 5 not run, 130 interrupted",
+        "meaning": "the process exit code: 0 five of five and recorded passing, 1 deep is not cleared, "
+                   "5 not run, 130 interrupted",
         "threshold": "0, and only 0 clears a recorded failure",
-        "out_of_range": "1: the probe ran and deep is failing. 5: nothing ran and nothing was recorded, "
-                        "so fix the line that says why and run it again",
-        "failure_lives_in": "the line that explains it: the first error for 1, the not-run reason for 5",
+        "out_of_range": "1: fewer than five answered, so deep is failing; or five answered but the result could "
+                        "not be saved or a failure elsewhere still stands, so deep is not cleared. 5: nothing ran "
+                        "and nothing was recorded, so fix the line that says why and run it again",
+        "failure_lives_in": "the line that explains it: the first error for 1 (or the NOT SAVED line, or the line "
+                            "about a failure elsewhere), the not-run reason for 5",
     },
 }
 
@@ -232,7 +237,7 @@ records the result for the binary it loaded. Explicit only: nothing runs it at b
   --json    one JSON object on stdout and nothing else (schema arail.deep-probe/v1)
   --force   skip the memory refusal only; never the lock
 
-exit: 0 five of five | 1 fewer than five | 2 usage | 5 not run | 130 interrupted
+exit: 0 five of five, recorded | 1 deep not cleared | 2 usage | 5 not run | 130 interrupted
 """
 
 
@@ -892,10 +897,14 @@ def _execute_locked(opts, nums, say, doc, done, not_run, memory_reader, holders_
     elif still_failing:
         dv._emit("warn", "Deep probe: 5/5 passed on build %s, but a deep call failed elsewhere while the probe "
                          "ran, so deep is still failing." % sha12)
+    elif not written:
+        dv._emit("warn", "Deep probe: 5/5 passed on build %s, but the result could not be saved (%s), so nothing "
+                         "was recorded and a failure already on record is not cleared."
+                 % (sha12, dv._clip(store_err, 100)))
     else:
         dv._emit("success", "Deep probe: 5/5 passed on build %s — median %.1f s. Deep is cleared for agents "
                             "and the Curator." % (sha12, doc["median_ok_s"] or 0.0))
-    return done(EXIT_PASS if (full and not still_failing) else EXIT_FAIL)
+    return done(EXIT_PASS if (full and written and not still_failing) else EXIT_FAIL)
 
 
 def _summary_lines(doc: dict, nums: _Nums, say: Callable[[str], None]) -> None:
@@ -920,7 +929,9 @@ def _summary_lines(doc: dict, nums: _Nums, say: Callable[[str], None]) -> None:
             say("first     " + fe["kind"] + ": " + dv._clip(fe["error"], 160))
     vs = doc["verdict_store"]
     if not vs["written"]:
-        say("recorded  NOT SAVED (" + str(vs["error"]) + ") — status surfaces will not show this result")
+        say("recorded  NOT SAVED (" + str(vs["error"]) + ") — status surfaces will not show this result"
+            + (", and the probe exits non-zero: a failure already on record is not cleared by a pass that "
+               "was not recorded" if doc["outcome"] == "pass" else ""))
     elif vs.get("still_failing"):
         say("recorded  " + vs["path"] + " · a deep call failed elsewhere while the probe ran; still failing")
     elif doc["outcome"] == "pass":

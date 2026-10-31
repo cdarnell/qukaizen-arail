@@ -521,6 +521,26 @@ def test_q17_an_unwritable_store_prints_not_saved(fake_deep):
     assert "recorded  NOT SAVED (" in text and "status surfaces will not show this result" in text
 
 
+def test_n8_a_pass_that_could_not_be_saved_exits_1_and_does_not_say_deep_is_cleared(fake_deep):
+    """Review N8. Exit 0 means "recorded passing" (C3, docs/cli.md, the teaching). A 5 of 5 whose result
+    was not written clears nothing, so it must not exit 0, and the activity line must not say "cleared"."""
+    fd = fake_deep("pass")
+    state = dv.state_dir()
+    state.mkdir(parents=True, exist_ok=True)
+    (state / "verdict.lock").mkdir()                  # the store lock cannot be opened as a file
+    r, doc = probe_json(fd)
+    assert doc["passed"] == 5 and doc["outcome"] == "pass" and doc["verdict_store"]["written"] is False
+    assert r.returncode == 1 and doc["exit_code"] == 1
+    text = run_probe(fd)
+    assert text.returncode == 1
+    assert "the probe exits non-zero: a failure already on record is not cleared by a pass that was not recorded" \
+        in text.stdout
+    lines = [e for e in _activity(fd) if e["message"].startswith("Deep probe:")]
+    assert lines and all(e["level"] == "warn" for e in lines)
+    assert "could not be saved" in lines[-1]["message"] and "not cleared" in lines[-1]["message"]
+    assert not any("Deep is cleared" in e["message"] for e in lines)
+
+
 # ── F14: a failure that lands while a passing probe runs survives ──────────
 
 def test_f14_a_failure_elsewhere_during_a_passing_probe_keeps_deep_failing(fake_deep):
@@ -733,7 +753,8 @@ def test_usage_errors_exit_2(fake_deep):
     r = run_probe(fd, "--nonsense")
     assert r.returncode == 2 and "usage:" in r.stderr and "unknown argument" in r.stderr
     r = run_probe(fd, "--help")
-    assert r.returncode == 0 and "exit: 0 five of five | 1 fewer than five | 2 usage | 5 not run | 130" in r.stdout
+    assert r.returncode == 0
+    assert "exit: 0 five of five, recorded | 1 deep not cleared | 2 usage | 5 not run | 130" in r.stdout
 
 
 def test_a_bug_in_the_probe_is_not_run_not_a_verdict(fake_deep, monkeypatch):

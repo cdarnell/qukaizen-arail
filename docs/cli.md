@@ -498,7 +498,7 @@ Exit codes (additive to the contract above):
 | Code | Meaning |
 |---|---|
 | `0` | 5 of 5 answered, and the record now says `passing` |
-| `1` | The probe ran and fewer than 5 answered (a load failure, a crash and a timeout all count). Recorded `failing`. Also `1` when 5 of 5 answered but a deep call failed in another lab while the probe ran: that failure survives, so deep is still failing |
+| `1` | The probe ran and fewer than 5 answered (a load failure, a crash and a timeout all count). Recorded `failing`. Also `1` when 5 of 5 answered but a deep call failed in another lab while the probe ran (that failure survives, so deep is still failing), and when 5 of 5 answered but the result could not be saved (`recorded  NOT SAVED`): nothing was written, so a failure already on record is not cleared. Only `0` means deep is cleared |
 | `2` | Usage error |
 | `5` | Not run, nothing recorded: see the exit-code table above |
 | `130` | Interrupted (SIGINT). The child is stopped and nothing is recorded |
