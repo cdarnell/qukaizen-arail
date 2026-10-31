@@ -397,20 +397,37 @@ QueueLLM 2nd-inference control: `install` (bundled prebuilt binary) |
 `rebuild` (from source) | `update` (published wheel) | `status` |
 `probe` (does it generate? see below).
 
-Three install channels, dispatched by `scripts/build-aerollm.sh auto`
-(what `setup.sh` and a bare `./arailctl deep install` with no forced
-channel both use):
+Three install channels. Each op runs one channel directly: `deep install`
+runs `scripts/build-aerollm.sh bundle`, `deep rebuild` runs `build`, and
+`deep update` runs `update`. `setup.sh` (at tier `maximus`, on Apple
+Silicon, when `aerollm_api` is not already importable) runs
+`scripts/build-aerollm.sh auto` instead, which chooses:
 
 | Channel | Op | Requires | Who it's for |
 |---|---|---|---|
 | BUNDLED | `deep install` | network to `github.com` (or a local tarball via `AEROLLM_BUNDLE_FILE`) | outside users — no source repo, no credentials |
-| DEV | `deep rebuild` | the QueueLLM sibling repo checked out at `$ARAIL_AEROLLM_REPO` | maintainers with local QueueLLM changes |
+| DEV | `deep rebuild` | a pre-rename QueueLLM checkout (it has `crates/aerollm-api`) at `$ARAIL_AEROLLM_REPO`, default `~/ProJects/qukaizen-queuellm` | maintainers with local QueueLLM changes |
 | RELEASE | `deep update` | `pypi.qukaizen.com` index credentials | maintainers on the private index |
 
-`auto` picks DEV if the sibling repo is present, RELEASE if
-`AEROLLM_CHANNEL=release` or index credentials are configured, and
-BUNDLED otherwise. Force any channel with `AEROLLM_CHANNEL=dev|release|bundle`
-regardless of what's on disk.
+With `AEROLLM_CHANNEL` unset, `auto` looks at `$ARAIL_AEROLLM_REPO` first:
+
+- **A pre-rename checkout** (it has `crates/aerollm-api`): DEV, a source
+  build.
+- **A checkout this ARAIL cannot build**: QueueLLM `main` has only the
+  renamed `crates/queuellm-api`, which this ARAIL refuses, and a folder with
+  neither crate is not a QueueLLM checkout. `auto` prints the reason, builds
+  and installs nothing, and exits `1`. It **never switches channel on its
+  own**: it names `./arailctl deep install` (or `AEROLLM_CHANNEL=bundle`) as
+  the prebuilt route.
+- **No checkout at that path**: RELEASE if release-index credentials are
+  configured (`PIP_INDEX_URL` or `PIP_EXTRA_INDEX_URL` is set,
+  `AEROLLM_INDEX_URL` differs from its default, or `~/.netrc` has an entry
+  for `pypi.qukaizen.com`), BUNDLED otherwise.
+
+`AEROLLM_CHANNEL=dev|release|bundle` makes `auto` run that channel and skip
+the choice. It does not make a channel possible: `dev` still refuses a
+checkout that has no `crates/aerollm-api`. Any other value exits `2`. The
+ops `deep install`, `deep rebuild` and `deep update` do not read it.
 
 **Bundled-channel env knobs** (all optional):
 
@@ -423,9 +440,20 @@ regardless of what's on disk.
 | `AEROLLM_BUNDLE_FILE` | unset | use a local tarball instead of downloading — the offline / airgapped install path |
 | `AEROLLM_BUNDLE_SHA256` | read from `pyproject.toml [tool.arail.package-sources] aerollm_bundle_sha256` — a genuine out-of-band pin, independent of the download — on both routes: `./arailctl setup` forwards it, and standalone `./arailctl deep install` reads pyproject itself when the env var is unset. An explicit env value always wins. Only if pyproject can't be read at all does it fall back to the same-origin `.sha256` sidecar | pin/override the expected **tarball** digest |
 
-`./arailctl deep status` reports a `channel:` line (`dev` \| `release` \|
-`bundled` \| `none`) and, when bundled, a `QueueLLM <version> (<short-sha>,
-built <date>)` provenance line read from `aerollm_api.bundle.json`.
+`./arailctl deep status` reports what is at `$ARAIL_AEROLLM_REPO` on a
+`crate:` line (the pre-rename crate, which `deep rebuild` can build; the
+renamed crate or neither crate, which it cannot; or no checkout), and, on its
+`channel:` line, how the binary that `import aerollm_api` loads got there.
+It says so only when it can prove it, by the sha256 of the loaded file; it
+never guesses from what is on disk:
+
+| `channel:` line | Proof |
+|---|---|
+| `bundled — QueueLLM <version> (<short commit>, built <date>)` | `aerollm_api.bundle.json` names the loaded file |
+| `source build — QueueLLM commit <short commit>, built <date>`, with `, dirty tree` or `, tree state unknown` after the commit | `aerollm_api.build.json`, which a source build writes, names the loaded file |
+| `pip (<package> <version>, regular install)` or `pip (<package> <version>, editable, <url>)` | pip's `RECORD` lists the loaded file with the same hash |
+| `none` | nothing is installed |
+| `unknown — <reason>` | no install record, a record that names a different binary, a pip package that does not list the file or whose file was replaced outside pip, or a binary that could not be identified |
 
 **What the sha256 check does and doesn't guarantee (v1):** when
 `AEROLLM_BUNDLE_SHA256` is unset, the expected digest is fetched from the

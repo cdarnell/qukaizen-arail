@@ -489,6 +489,22 @@ def test_s9_status_with_nothing_installed(env):
     assert re.search(r"channel:\s+none", text) and "not applicable — nothing is installed" in text
 
 
+def test_the_cli_docs_describe_auto_as_the_script_does():
+    """Review V4. docs/cli.md said `auto` picks DEV if the sibling repo is present and that a bare `deep install`
+    runs `auto`. Neither is true: S6 and S8 pin what `auto` does, and arailctl runs `bundle` for `deep install`."""
+    doc = " ".join((REPO / "docs" / "cli.md").read_text(encoding="utf-8").split())
+    assert "`auto` picks DEV if the sibling repo is present" not in doc
+    assert "a bare `./arailctl deep install` with no forced" not in doc
+    for said in ("`deep install` runs `scripts/build-aerollm.sh bundle`",
+                 "a pre-rename QueueLLM checkout (it has `crates/aerollm-api`)",
+                 "**never switches channel on its own**", "builds and installs nothing, and exits `1`",
+                 "`dev` still refuses a checkout that has no `crates/aerollm-api`", "Any other value exits `2`"):
+        assert said in doc, said
+    assert 'install) exec bash "$REPO_ROOT/scripts/build-aerollm.sh" bundle' in (REPO / "arailctl").read_text()
+    readme = " ".join(ln.lstrip("> ") for ln in (REPO / "README.md").read_text(encoding="utf-8").splitlines())
+    assert "(source build from a local pre-rename QueueLLM checkout)" in readme
+
+
 # ── S10: the false lines never come back, in any mode ──────────────────────
 
 @pytest.mark.parametrize("state", ["no-repo", "old", "new", "none"])

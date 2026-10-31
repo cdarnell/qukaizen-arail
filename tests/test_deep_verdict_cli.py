@@ -145,6 +145,38 @@ def test_the_channel_is_source_build_only_when_the_build_marker_names_this_file(
     assert "source-build marker is present but names a different binary" in ch
 
 
+def test_the_cli_docs_list_every_form_of_the_channel_line_the_code_prints(live_site):
+    """Review V4. docs/cli.md said the line was `dev | release | bundled | none`, forms the code has not printed
+    since this sprint. Each form below is produced by the real code, and the docs must show the same words."""
+    doc = " ".join((Path(__file__).resolve().parents[1] / "docs" / "cli.md").read_text(encoding="utf-8").split())
+    site = live_site.site
+
+    def line() -> str:
+        return _find(_lines(site), "channel").split("channel:")[1].strip()
+
+    produced = {"unknown — ": line()}                      # a pip package whose file was replaced outside pip
+    live_site.so.write_bytes(PIP_BYTES)
+    dv._reset_for_tests()
+    produced["pip ("] = line()
+    live_site.so.write_bytes(LIVE_BYTES)
+    dv._reset_for_tests()
+    (site / "aerollm_api.bundle.json").write_text(json.dumps({
+        "sha256": _sha(LIVE_BYTES), "aerollm_version": "1.1.0", "aerollm_commit": "2ae56afb" + "0" * 32,
+        "built_at": "2026-10-11T00:00:00Z"}))
+    produced["bundled — QueueLLM "] = line()
+    (site / "aerollm_api.bundle.json").unlink()
+    (site / "aerollm_api.build.json").write_text(json.dumps({
+        "artifact_sha256": _sha(LIVE_BYTES), "queuellm_commit": "unknown", "queuellm_dirty": None,
+        "built_at": "2026-10-29T14:00:00Z"}))
+    produced["source build — QueueLLM commit "] = line()
+    for prefix, text in produced.items():
+        assert text.startswith(prefix), (prefix, text)
+        assert f"`{prefix}" in doc, f"docs/cli.md does not show the channel line form that starts {prefix!r}"
+    assert ", dirty tree" in doc and ", tree state unknown" in doc
+    assert "| `none` | nothing is installed |" in doc
+    assert "(`dev` \\| `release` \\| `bundled` \\| `none`)" not in doc, "the old list of forms"
+
+
 def test_no_record_at_all_says_so(live_site):
     import shutil
     shutil.rmtree(live_site.dist)
