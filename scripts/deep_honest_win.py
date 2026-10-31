@@ -246,7 +246,8 @@ def teaching_for(row: str) -> dict:
 
 TIME_TEACHING = {
     "meaning": "wall time of the whole check, from the first row to the last",
-    "threshold": "about 3 to 5 minutes: nine rows, the longest are the model loads and the probe",
+    "threshold": "under 5 minutes: nine rows, and the longest are the model loads and the probe (the first two "
+                 "live runs took 64 s and 141 s)",
     "out_of_range": "much longer: a row waited for a deadline, which means a call hung",
     "failure_lives_in": "the slowest row; its log is in the scratch root when ARAIL_WIN_KEEP=1",
 }
@@ -926,9 +927,10 @@ def row_w2(cfg: dict, res: RowResult) -> None:
     res.check("the stamp carries a reason a reader can use", all(str(x.get("deep_reason_detail") or "").strip() for x in fast),
               clip(fast[0].get("deep_reason_detail"), 120), "a non-empty detail", silent=True)
     answered = [x for x in fast if x.get("outcome") == "ok"]
-    res.evidence.append("the fast model %s (%s)" % (
-        "answered" if answered else "did not answer",
-        "Ollama on this machine, token-free" if answered else clip(fast[0].get("error_class"), 60)))
+    res.evidence.append("the fast model %s (%s). Tier 0 is pointed at a model name that does not exist, on purpose: "
+                        "it answers nothing and Ollama never loads one of yours" % (
+                            "answered" if answered else "did not answer",
+                            "Ollama on this machine, token-free" if answered else clip(fast[0].get("error_class"), 60)))
     read_surfaces(cfg, portal, res)
 
 
