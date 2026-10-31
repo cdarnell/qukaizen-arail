@@ -536,6 +536,23 @@ def test_qa4_a_folder_swapped_for_a_link_in_the_middle_of_an_update_still_gets_t
     assert stat.S_IMODE(moved.stat().st_mode) == 0o700
 
 
+def test_qa4_an_unexpected_error_opening_the_state_folder_is_a_failed_write_not_an_exception(fake_deep, monkeypatch):
+    """Writers never raise into a deep call: a failure that cannot be saved is kept in memory and says why. That
+    holds for an error nobody planned for while the folder is being opened, not only for an OSError."""
+    fake_deep()
+    dv.identity()
+
+    def boom(d):
+        raise RuntimeError("something nobody planned for")
+
+    monkeypatch.setattr(dv, "_open_state_dir", boom)
+    problem = dv._locked_update(lambda doc: None)
+    assert problem and "RuntimeError: something nobody planned for" in problem
+    dv.note_call(False, error="RuntimeError: rms_norm", consumer="agent:buddy")
+    v = dv.current()
+    assert v.state == "failing", "the failure was kept in this process"
+    assert v.store_error and "something nobody planned for" in v.store_error
+
 # ── QA-4 follow-up (fix pass 3): macOS fails a lost create race with ENOENT, and the store retries it ──
 # Found by test_u9 failing one run in about twenty after QA-4 moved the lock file onto the folder's descriptor.
 # When several processes create the same file in one folder at the same instant, openat(O_CREAT) on macOS lets
