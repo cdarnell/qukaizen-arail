@@ -650,6 +650,59 @@ def test_f7_says_only_what_is_known(env):
     assert (env.site / "aerollm_api.abi3.so").read_bytes() == b"half-written"
 
 
+# ── QA-8 (fix pass 3): the F7 refusal names the build record when one describes that very file ─────
+
+def _plant_installed_file_and_record(env, record) -> None:
+    (env.site / "aerollm_api.abi3.so").write_bytes(GOOD)
+    (env.site / "aerollm_api.build.json").write_text(record if isinstance(record, str) else json.dumps(record))
+
+
+def _refused(env) -> str:
+    r = env.run("bundle", AEROLLM_BUNDLE_FILE=env.tmp / "absent.tar.gz", AEROLLM_BUNDLE_SHA256="0" * 64)
+    assert r.returncode == 1
+    assert (env.site / "aerollm_api.abi3.so").read_bytes() == GOOD, "the install is never overwritten"
+    return out(r)
+
+
+@darwin_arm64
+def test_qa8_a_record_that_names_the_file_makes_the_refusal_say_source_build(env):
+    _plant_installed_file_and_record(env, {"artifact_sha256": sha(GOOD), "queuellm_commit": "e730d5fe" + "0" * 32})
+    text = _refused(env)
+    assert f"a source build (QueueLLM commit e730d5f) is already at {env.site}/aerollm_api.abi3.so." in text
+    assert "no install record" not in text
+    assert "Refusing to overwrite it. Re-run with --force" in text
+
+
+@darwin_arm64
+@pytest.mark.parametrize("record,why", [
+    ({"artifact_sha256": "a" * 64, "queuellm_commit": "e730d5fe" + "0" * 32}, "a record of a different file"),
+    ({"queuellm_commit": "e730d5fe" + "0" * 32}, "a record that names no file"),
+    ("{not json", "a record that is not JSON"),
+    ("[1, 2]", "a record that is not an object"),
+    ("[" * 5000 + "]" * 5000, "a record nested too deeply to read"),
+])
+def test_qa8_a_record_that_does_not_name_the_file_keeps_todays_sentence(env, record, why):
+    _plant_installed_file_and_record(env, record)
+    text = _refused(env)
+    assert f"an aerollm_api.abi3.so with no install record is already at {env.site}/aerollm_api.abi3.so." in text, why
+    assert "source build" not in text
+
+
+@darwin_arm64
+@pytest.mark.parametrize("commit,shown", [
+    ("unknown", "unknown"), ("", "unknown"), (None, "unknown"), ("abc", "unknown"),
+    ("\x1b[2K\x07forged text", "unknown"), ("E730D5FE" + "0" * 32, "E730D5F"),
+], ids=["unknown", "empty", "missing", "too short", "control characters", "upper-case hex"])
+def test_qa8_the_commit_shown_is_seven_hex_characters_or_unknown_never_the_raw_text(env, commit, shown):
+    record = {"artifact_sha256": sha(GOOD)}
+    if commit is not None:
+        record["queuellm_commit"] = commit
+    _plant_installed_file_and_record(env, record)
+    text = _refused(env)
+    assert f"a source build (QueueLLM commit {shown}) is already at " in text
+    assert "\x1b" not in text and "forged" not in text
+
+
 def test_a_good_install_leaves_no_temp_backups_behind(env):
     env.checkout("aerollm-api")
     env.fake_importer()

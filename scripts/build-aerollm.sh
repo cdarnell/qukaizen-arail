@@ -297,6 +297,23 @@ json.dump({
 PYMARK
 }
 
+# What the F7 guard below needs to tell a source build from a binary nobody recorded: the first 7 characters of
+# the QueueLLM commit in <site>/aerollm_api.build.json, printed only when that record names the file whose
+# sha256 is $2. No record, not JSON, or a record of a different file prints nothing. Only 7 hex characters or
+# "unknown" are ever printed, whatever the file holds, because the result goes to a terminal.
+build_record_commit() {  # $1 = path of aerollm_api.build.json, $2 = sha256 of the installed file
+    "$PY" -c '
+import json, re, sys
+try:
+    m = json.load(open(sys.argv[1]))
+    if m.get("artifact_sha256") == sys.argv[2]:
+        c = str(m.get("queuellm_commit") or "")
+        print(c[:7] if re.fullmatch("[0-9a-fA-F]{7,40}", c) else "unknown")
+except Exception:
+    pass
+' "$1" "$2" 2>/dev/null
+}
+
 pip_install() {  # $* = extra pip args (e.g. --upgrade)
     info "Installing aerollm_api from index ${BOLD}${AEROLLM_INDEX_URL}${RST}…"
     if ! "$PY" -m pip install "$@" \
@@ -370,7 +387,15 @@ bundle_install() {
     # some other channel — only a channel that left the provenance marker
     # (i.e. a previous bundled install) is safe to silently overwrite.
     if [[ -f "$dest_so" && ! -f "$dest_marker" && "$FORCE" != "1" ]]; then
-        err "an aerollm_api.abi3.so with no install record is already at ${BOLD}${dest_so}${RST}."
+        # A source build has a record of its own (aerollm_api.build.json). Say so when it names this very file,
+        # so the refusal does not claim there is none.
+        local built_commit
+        built_commit="$(build_record_commit "$dest_dir/aerollm_api.build.json" "$(sha256_of "$dest_so")")"
+        if [[ -n "$built_commit" ]]; then
+            err "a source build (QueueLLM commit ${built_commit}) is already at ${BOLD}${dest_so}${RST}."
+        else
+            err "an aerollm_api.abi3.so with no install record is already at ${BOLD}${dest_so}${RST}."
+        fi
         warn "Refusing to overwrite it. Re-run with --force to install the bundled channel anyway."
         exit 1
     fi
