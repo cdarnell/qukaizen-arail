@@ -458,7 +458,10 @@ def _read_store(*, use_cache: bool = True) -> tuple[Optional[dict], Optional[str
             err = f"{path}: {bad}"
         else:
             doc = parsed
-    except (OSError, ValueError, UnicodeDecodeError) as e:
+    except RecursionError:
+        # json.loads raises this, not a ValueError, for JSON nested deeper than the interpreter allows.
+        err = f"{path}: RecursionError: the JSON is nested too deeply to read"
+    except Exception as e:  # noqa: BLE001 - OSError, bad UTF-8, bad JSON, anything: the file is unreadable
         err = f"{path}: {type(e).__name__}: {e}"
     _P.read_cache = (str(path), sig, doc, err)
     return doc, err
@@ -557,6 +560,8 @@ def _locked_update(mutate: Callable[[dict], None]) -> Optional[str]:
             return None
         except OSError as e:
             return f"{d}: {e.strerror or e}"
+        except Exception as e:  # noqa: BLE001 - never an exception in a caller: they keep the failure in memory
+            return f"{d}: {type(e).__name__}: {e}"
         finally:
             try:
                 import fcntl
@@ -999,7 +1004,7 @@ def _read_json(path: Path) -> Optional[dict]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         return data if isinstance(data, dict) else None
-    except (OSError, ValueError):
+    except Exception:  # noqa: BLE001 - unreadable, not JSON, or nested too deeply (RecursionError): no marker
         return None
 
 
@@ -1028,7 +1033,7 @@ def _pip_record(native_path: str, site_dir: Path) -> Optional[dict]:
                 du = json.loads(raw)
                 if (du.get("dir_info") or {}).get("editable"):
                     info["editable_url"] = du.get("url")
-            except ValueError:
+            except Exception:  # noqa: BLE001 - not JSON, or nested too deeply (RecursionError)
                 pass
         rel = os.path.relpath(os.path.realpath(native_path), os.path.realpath(str(site_dir)))
         for f in dist.files or []:
@@ -1098,7 +1103,7 @@ def _owner_of(path: str) -> str:
                         raw = dist.read_text("direct_url.json")
                         try:
                             du = json.loads(raw) if raw else {}
-                        except ValueError:
+                        except Exception:  # noqa: BLE001 - not JSON, or nested too deeply (RecursionError)
                             du = {}
                         if (du.get("dir_info") or {}).get("editable") and du.get("url"):
                             text += f", editable from {du['url']}"

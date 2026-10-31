@@ -453,6 +453,33 @@ def test_w3_a_line_without_the_probe_tag_is_not_an_event():
     assert [e["ev"] for e in seen] == ["identity", "loaded", "call", "done"]
 
 
+def test_qa1_a_deeply_nested_line_from_the_child_is_ignored_like_any_other_noise():
+    """json.loads raises RecursionError, not ValueError, for JSON nested too deeply; the protocol reader
+    treated only ValueError as "not an event"."""
+    nested = "[" * 100_000 + "]" * 100_000
+    lines = [nested, json.dumps({"probe": 1, "ev": "done"})]
+    proc = subprocess.Popen([sys.executable, "-c", "import sys\nfor l in sys.argv[1:]:\n    print(l, flush=True)\n",
+                             *lines], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    st = dp._drive_child(proc, load_timeout=30, call_timeout=30, interrupted=threading.Event(),
+                         on_event=lambda ev: None)
+    assert st["end"] == "done" and st["calls"] == []
+
+
+def test_qa1_a_probe_lock_whose_holder_note_is_nested_too_deeply_is_still_refused_cleanly(fake_deep, tmp_path):
+    import fcntl
+    state = tmp_path / "state"
+    state.mkdir()
+    held = os.open(state / "probe.lock", os.O_RDWR | os.O_CREAT, 0o600)
+    fcntl.flock(held, fcntl.LOCK_EX)                       # another probe holds it ...
+    os.write(held, ("[" * 100_000 + "]" * 100_000).encode())  # ... and its note cannot be parsed
+    try:
+        fd, holder = dp._take_probe_lock(state)
+    finally:
+        fcntl.flock(held, fcntl.LOCK_UN)
+        os.close(held)
+    assert fd is None and holder == {}
+
+
 def test_w3_the_child_stops_at_the_next_call_when_its_supervisor_is_gone_and_the_pipe_stays_open(fake_deep):
     """The getppid check, alone. Q19 passes without it, because a killed supervisor closes the pipe and the
     child's next write fails with EPIPE. Here this test holds the pipe's read end open, so EPIPE cannot

@@ -252,6 +252,38 @@ def test_u4_corrupt_store_fails_closed_then_is_moved_aside(fake_deep, content):
     assert dv.current().source == "call"
 
 
+# ── QA-1 (fix pass 3): a writer that fails for any reason reports a problem; it never raises ────────
+
+def test_qa1_a_writer_that_breaks_for_any_reason_returns_a_problem_and_releases_the_lock(fake_deep):
+    """A RecursionError from the parser was one case of "the store cannot be read or written". Whatever
+    else goes wrong inside the update, the caller gets a one-line problem (it keeps the failure in
+    memory and says why), the lock is released, and the next writer works."""
+    fake_deep()
+    dv.identity()
+
+    def boom(doc):
+        raise ZeroDivisionError("the update broke")
+
+    problem = dv._locked_update(boom)
+    assert problem and "ZeroDivisionError" in problem and "the update broke" in problem
+    assert dv._locked_update(lambda doc: None) is None, "the lock was released and the store still works"
+    assert not list(dv.state_dir().glob("verdict.json.tmp-*")), "no temp file left behind"
+
+
+def test_qa1_a_failure_is_kept_in_memory_and_says_why_when_the_store_cannot_be_written_back(fake_deep, monkeypatch):
+    fake_deep()
+    dv.identity()
+
+    def too_deep(path, doc):
+        raise RecursionError("maximum recursion depth exceeded while encoding a JSON object")
+
+    monkeypatch.setattr(dv, "_write_atomic", too_deep)
+    dv.note_call(False, error="RuntimeError: rms_norm has 1 elements", consumer="agent:buddy")
+    v = dv.current()
+    assert v.state == "failing", "the failure is not lost"
+    assert v.store_error and "RecursionError" in v.store_error
+
+
 # ── U5: a failure persists, other processes see it, a later success does not clear ──
 
 def test_u5_a_failure_persists_and_another_process_sees_it(fake_deep):

@@ -177,6 +177,27 @@ def test_the_cli_docs_list_every_form_of_the_channel_line_the_code_prints(live_s
     assert "(`dev` \\| `release` \\| `bundled` \\| `none`)" not in doc, "the old list of forms"
 
 
+NESTED = "[" * 100_000 + "]" * 100_000       # JSON that json.loads cannot finish: RecursionError, not ValueError
+
+
+def test_qa1_a_marker_nested_too_deeply_reads_as_no_marker_not_as_a_crash(live_site):
+    """QA-1 (fix pass 3): every JSON read treats what the parser cannot finish as unreadable. The
+    install markers and the pip metadata are read by `deep status`, which must still print."""
+    (live_site.site / "aerollm_api.bundle.json").write_text(NESTED)
+    (live_site.site / "aerollm_api.build.json").write_text(NESTED)
+    ch = _find(_lines(live_site.site), "channel")
+    assert "unknown" in ch and "bundle marker" not in ch and "source-build marker" not in ch
+
+
+def test_qa1_pip_metadata_nested_too_deeply_loses_only_the_editable_url(live_site):
+    live_site.so.write_bytes(PIP_BYTES)
+    dv._reset_for_tests()
+    (live_site.dist / "direct_url.json").write_text(NESTED)
+    ch = _find(_lines(live_site.site), "channel")
+    assert "pip (aerollm-api 0.1.0, regular install)" in ch, ch
+    assert dv._owner_of(str(live_site.so)) == "pip package aerollm-api 0.1.0"
+
+
 def test_no_record_at_all_says_so(live_site):
     import shutil
     shutil.rmtree(live_site.dist)

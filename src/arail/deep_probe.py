@@ -435,7 +435,7 @@ def _take_probe_lock(state: Path) -> tuple[Optional[int], Optional[dict]]:
         if e.errno in (errno.EAGAIN, errno.EACCES, errno.EWOULDBLOCK):
             try:
                 holder = json.loads(os.pread(fd, 4096, 0).decode("utf-8") or "{}")
-            except (OSError, ValueError):
+            except Exception:  # noqa: BLE001 - unreadable, not JSON, or nested too deeply (RecursionError)
                 holder = {}
         os.close(fd)
         return None, holder
@@ -509,7 +509,7 @@ def _drive_child(proc: subprocess.Popen, *, load_timeout: float, call_timeout: f
             raw, buf = buf.split(b"\n", 1)
             try:
                 ev = json.loads(raw.decode("utf-8", "replace"))
-            except ValueError:
+            except (ValueError, RecursionError):
                 continue
             if not isinstance(ev, dict) or ev.get("probe") != 1:
                 continue                            # not ours: native noise that happened to look like JSON
