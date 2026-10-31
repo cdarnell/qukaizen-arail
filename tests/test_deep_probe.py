@@ -16,6 +16,8 @@ import subprocess
 import sys
 import threading
 import time
+import types
+from collections import deque
 from pathlib import Path
 
 import pytest
@@ -540,6 +542,82 @@ def test_qa5_probe_json_keeps_the_data_and_has_no_raw_del_or_c1(fake_deep):
     assert r.returncode == 5
     assert hostile in json.loads(r.stdout)["not_run_reason"], "the data is the same"
     assert _controls(r.stdout) == []
+
+
+# ── QA-12 (fix pass 3): the stderr reader holds a chunk and one line's head, never a whole line ────
+
+def gathered(data: bytes) -> list[str]:
+    """Run _gather_stderr over ``data`` the way the supervisor does, through a real pipe; return the tail."""
+    r, w = os.pipe()
+    proc = types.SimpleNamespace(stderr=os.fdopen(r, "rb"))
+    tail: deque = deque(maxlen=dp.STDERR_TAIL_LINES)
+    pump = dp._gather_stderr(proc, tail)                 # reading before the write, so a big write cannot block
+    with os.fdopen(w, "wb") as wf:
+        wf.write(data)
+    pump.join(timeout=30)
+    assert not pump.is_alive()
+    proc.stderr.close()
+    return list(tail)
+
+
+def readline_oracle(data: bytes) -> list[str]:
+    """What the supervisor kept before this fix: one clipped entry per readline()."""
+    return [dv._clip(raw.decode("utf-8", "replace").rstrip("\n"), 300) for raw in io.BytesIO(data).readlines()]
+
+
+NORMAL = {
+    "short lines": b"first\nsecond\nthird\n",
+    "no newline on the last line": b"first\nsecond",
+    "empty lines": b"\n\nx\n\n",
+    "CRLF": b"one\r\ntwo\r\n",
+    "a 500-character line": b"y" * 500 + b"\nz\n",
+    "control characters": b"a\x1b[2Kb\x07c\n",
+    "invalid UTF-8": b"ok \xff\xfe bad\n",
+    "accents and symbols": "échec — 失败 · 😀\n".encode(),
+    "whitespace runs": b"a \t \t b\n",
+    "nothing at all": b"",
+}
+
+
+@pytest.mark.parametrize("chunk", [1, 3, 7, 65536])
+@pytest.mark.parametrize("data", list(NORMAL.values()), ids=list(NORMAL))
+def test_qa12_lines_under_the_cap_come_out_exactly_as_readline_gave_them(data, chunk, monkeypatch):
+    monkeypatch.setattr(dp, "STDERR_CHUNK_BYTES", chunk)
+    assert gathered(data) == readline_oracle(data)
+
+
+@pytest.mark.parametrize("chunk", [1, 5, 65536])
+def test_qa12_a_line_past_the_cap_keeps_its_start_and_the_next_line_is_intact(chunk, monkeypatch):
+    monkeypatch.setattr(dp, "STDERR_LINE_BYTES", 16)
+    monkeypatch.setattr(dp, "STDERR_CHUNK_BYTES", chunk)
+    data = (b"0123456789abcdef" + b"A" * 84 + b"\nB\n"            # 100 bytes: the start is kept
+            + b"ghijklmnopqrstuv" + b"C" * 24 + b"\n"            # 40 bytes
+            + b"1234567890123456D" + b"\nE\n")                   # 17 bytes: one past the cap
+    assert gathered(data) == ["0123456789abcdef", "B", "ghijklmnopqrstuv", "1234567890123456", "E"]
+
+
+@pytest.mark.parametrize("chunk", [1, 5, 65536])
+def test_qa12_a_line_exactly_at_the_cap_is_kept_whole(chunk, monkeypatch):
+    monkeypatch.setattr(dp, "STDERR_LINE_BYTES", 16)
+    monkeypatch.setattr(dp, "STDERR_CHUNK_BYTES", chunk)
+    assert gathered(b"A" * 16 + b"\nB\n") == ["A" * 16, "B"]
+
+
+@pytest.mark.parametrize("chunk", [1, 5, 65536])
+def test_qa12_a_last_line_past_the_cap_with_no_newline_is_still_recorded(chunk, monkeypatch):
+    monkeypatch.setattr(dp, "STDERR_LINE_BYTES", 16)
+    monkeypatch.setattr(dp, "STDERR_CHUNK_BYTES", chunk)
+    assert gathered(b"first\n" + b"0123456789abcdef" + b"Z" * 84) == ["first", "0123456789abcdef"]
+
+
+def test_qa12_a_line_of_millions_of_bytes_ends_as_one_short_entry():
+    entries = gathered(b"x" * (6 * 1024 * 1024) + b"\nafter\n")
+    assert entries == ["x" * 299 + "…", "after"]
+
+
+def test_qa12_the_tail_still_keeps_only_the_last_lines():
+    entries = gathered(b"".join(b"line %d\n" % i for i in range(30)))
+    assert entries == [f"line {i}" for i in range(10, 30)] and len(entries) == dp.STDERR_TAIL_LINES
 
 
 def test_w3_the_child_stops_at_the_next_call_when_its_supervisor_is_gone_and_the_pipe_stays_open(fake_deep):

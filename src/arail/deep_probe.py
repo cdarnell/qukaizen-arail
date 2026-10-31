@@ -55,6 +55,8 @@ HEADROOM_GIB = 2.0
 DEFAULT_CALL_TIMEOUT_S = 300.0
 DEFAULT_LOAD_TIMEOUT_S = 300.0
 STDERR_TAIL_LINES = 20
+STDERR_LINE_BYTES = 8192      # how much of ONE stderr line the supervisor keeps; the record shows 300 characters of it
+STDERR_CHUNK_BYTES = 65536    # how much it reads at a time, so a line without a newline never has to fit in memory
 
 EXIT_PASS, EXIT_FAIL, EXIT_USAGE, EXIT_NOT_RUN, EXIT_INTERRUPTED = 0, 1, 2, 5, 130
 
@@ -554,10 +556,40 @@ def _drive_child(proc: subprocess.Popen, *, load_timeout: float, call_timeout: f
 
 
 def _gather_stderr(proc: subprocess.Popen, tail: deque) -> threading.Thread:
+    """Collect the child's stderr into ``tail``, a line at a time, holding at most one chunk and one line's head.
+
+    ``readline()`` would hold a whole line before it could be clipped, and a native progress bar redrawn with
+    ``\\r``, or a runaway log, is one line of any length (QA-12: 64 MB took the supervisor up by 283 MB). The
+    start of each line is kept, as before (the record shows 300 characters of it); what is past
+    ``STDERR_LINE_BYTES`` is read and dropped up to the line's newline, and the next line starts clean."""
     def pump() -> None:
         assert proc.stderr is not None
-        for raw in iter(proc.stderr.readline, b""):
-            tail.append(dv._clip(raw.decode("utf-8", "replace").rstrip("\n"), 300))
+        fd = proc.stderr.fileno()
+        head = bytearray()          # the kept start of the line being read
+        dropping = False            # this line is past the cap: skip to its newline
+        while True:
+            try:
+                chunk = os.read(fd, STDERR_CHUNK_BYTES)
+            except OSError:
+                break
+            if not chunk:
+                break
+            start = 0
+            while True:
+                nl = chunk.find(b"\n", start)
+                piece = chunk[start:] if nl < 0 else chunk[start:nl]
+                if not dropping:
+                    room = STDERR_LINE_BYTES - len(head)
+                    head += piece[:room]
+                    dropping = len(piece) > room
+                if nl < 0:
+                    break
+                tail.append(dv._clip(head.decode("utf-8", "replace"), 300))
+                head.clear()
+                dropping = False
+                start = nl + 1
+        if head:                    # a last line with no newline: readline() returned it as well
+            tail.append(dv._clip(head.decode("utf-8", "replace"), 300))
     t = threading.Thread(target=pump, name="deep-probe-stderr", daemon=True)
     t.start()
     return t
