@@ -2298,3 +2298,29 @@ would receive Buddy's `bhc1_` credential; ARAIL logs `port_in_use` but Buddy doe
 **Pay it by:** a server proof in the handshake (for example the lab signs a nonce with a key only ARAIL holds, pinned in
 `link.json`). **Trigger:** S5 start, because the box then routes to this port through a proxy.
 
+
+---
+
+## ARAIL deep, honest (2026-10-29): TD1 to TD12 and one find from the build
+
+**Filed by:** `sprints/2026-10-29-arail-deep-honest/` (ARCHITECTURE.md, "Tech debt: Added"; BUILD_LOG.md for TD13).
+The sprint closed five silent paths: agents that fell back without a word, a Check that erased the one failure
+record, a Curator that said "All clear" and resealed after failed calls, a build script that said "QueueLLM ready"
+for a binary that answers once per process, and `deep status` lines that guessed the channel. What it left open is
+small, and each row has the event that should pull it.
+
+| # | Debt | Trigger that pays it down |
+|---|---|---|
+| TD1 | **The verdict is keyed by binary only**, not binary + model + ring depth. A pass with one model vouches for another. | The 2026-11-19 model question, or a bug that depends on depth. |
+| TD2 | **nucleus builds its own `Runtime`**, so its failures do not feed the verdict (A5). | nucleus becomes a regular deep consumer. |
+| TD3 | **`explain()` has `deep_failing`, but Buddy's contract has no `/deep`.** When `/deep` reopens (D-S6-8) the contract must carry the code (S6 route, step 4). | `/deep` reopens. |
+| TD4 | **One failure keeps deep failing until a probe passes (D1).** A one-off error locks deep out until `./arailctl deep probe` passes 5/5. | The operator reports a lockout after a one-off error. |
+| TD5 | **`deep rebuild` still cannot build QueueLLM main.** D-S6-10 stays open but narrower: the false lines and the shadowed install are fixed, and a build is moot while main fails the probe. | A QueueLLM build passes the probe 5/5. |
+| TD6 | **The old-crate source path is reachable only with a pre-rename checkout.** | Drop it in TD5's sprint. |
+| TD7 | **The win harness drives the portal in process, with no lifespan** (an ASGI client on one event loop; the architecture said `TestClient`). Boot paths (boot warm, preload, the registry resolver) are covered by unit tests only. | A boot-path regression the unit tests missed. |
+| TD8 | **The probe tests one ring depth:** the one the runtime profile gives when it runs. | A depth-specific failure. |
+| TD9 | **A judge answer that does not parse still counts as judged** (pre-existing; the bar is "returned"). | The Curator needs "judged and understood". |
+| TD10 | **`deferred_now` and the other non-failing codes are still not stamped on traces**, only `deep_failing` is. | 3D.EVAL or QA asks why an agent call ran on the fast model for another reason. |
+| TD11 | **The World Terms notice has only a static test.** The portal has no JS harness. | A JS harness exists for any portal page. |
+| TD12 | **Twenty empty grow passes remain in three Worlds' `evolution.json`**, and those bundles were resealed twenty times. They are records of what happened and changed no terms. | An operator asks for them to be cleaned, or a World's history is audited. |
+| TD13 | **Four hints still say "run ./arailctl deep rebuild"** (`portal/app.py:2110`, `:8821`, `:10134` and `portal/templates/chat.html:2803`). Against a renamed QueueLLM checkout that command now refuses, so the hint sends the user to a dead end. Found while finishing the build; not in the architecture's list, so not changed. | TD5's sprint, or the first user report. |
