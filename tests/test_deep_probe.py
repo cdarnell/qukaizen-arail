@@ -14,6 +14,7 @@ import re
 import signal
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -423,6 +424,87 @@ def test_q19_a_killed_supervisor_leaves_a_child_that_exits_after_its_call(fake_d
         pytest.fail("the orphaned child kept running")
     assert len(fd.gen_calls()) <= 2, "it finished its running call and did not start another"
     assert not (dv.state_dir() / "verdict.json").exists()
+
+
+# ── W3 of the review: the two layers that had no test of their own ──────────────────────────
+
+def test_w3_a_line_without_the_probe_tag_is_not_an_event():
+    """Native code can print JSON to fd 1 that looks like a protocol line. dup2 keeps almost all of it
+    off the pipe (Q8, which passes without the tag check); the "probe": 1 tag is the second layer, and
+    this test is the one that fails without it."""
+    lines = [
+        json.dumps({"ev": "call", "i": 99, "kind": "forged", "ok": True, "s": 0.1, "words": 3}),      # no tag
+        json.dumps({"probe": 2, "ev": "call", "i": 98, "kind": "forged", "ok": True, "s": 0.1}),      # wrong tag
+        json.dumps({"probe": 1, "ev": "identity", "sha256": "a" * 64}),
+        json.dumps({"probe": 1, "ev": "loaded", "seconds": 0.1}),
+        json.dumps({"probe": 1, "ev": "call", "i": 1, "kind": "short", "ok": True, "s": 0.2, "words": 4}),
+        "native banner that is not JSON at all",
+        json.dumps({"probe": 1, "ev": "done"}),
+    ]
+    proc = subprocess.Popen([sys.executable, "-c", "import sys\nfor l in sys.argv[1:]:\n    print(l, flush=True)\n",
+                             *lines], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    seen: list = []
+    st = dp._drive_child(proc, load_timeout=30, call_timeout=30, interrupted=threading.Event(),
+                         on_event=seen.append)
+    assert st["end"] == "done"
+    assert [c["i"] for c in st["calls"]] == [1], "the forged calls 98 and 99 are not results"
+    assert [e["ev"] for e in seen] == ["identity", "loaded", "call", "done"]
+
+
+def test_w3_the_child_stops_at_the_next_call_when_its_supervisor_is_gone_and_the_pipe_stays_open(fake_deep):
+    """The getppid check, alone. Q19 passes without it, because a killed supervisor closes the pipe and the
+    child's next write fails with EPIPE. Here this test holds the pipe's read end open, so EPIPE cannot
+    happen, and only the check can stop the child. Why it is kept: the architecture (F21) names it as the
+    mechanism, and EPIPE depends on nobody else ever holding that read end."""
+    fd = fake_deep("slow:1.2")
+    r, w = os.pipe()
+    middle = (
+        "import os, subprocess, sys, time\n"
+        "env = dict(os.environ, ARAIL_DEEP_PROBE_CHILD='1', HF_HUB_OFFLINE='1', TRANSFORMERS_OFFLINE='1')\n"
+        "p = subprocess.Popen([sys.executable, '-m', 'arail.deep_probe', '--child'], env=env,\n"
+        "                     stdout=int(sys.argv[1]), stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)\n"
+        "print(p.pid, flush=True)\n"
+        "time.sleep(600)\n")
+    sup = subprocess.Popen([sys.executable, "-c", middle, str(w)], env=fd.env(), stdout=subprocess.PIPE,
+                           text=True, pass_fds=(w,))
+    os.close(w)                                        # the child (and the middle process) are the writers now
+    child = int(sup.stdout.readline())
+    try:
+        end = time.monotonic() + 60
+        while len(fd.gen_calls()) < 1 and time.monotonic() < end:
+            time.sleep(0.05)
+        assert len(fd.gen_calls()) == 1, "the child is inside its first call"
+        sup.kill()                                     # the supervisor dies; the read end of the pipe stays here
+        sup.wait(timeout=30)
+        end = time.monotonic() + 30
+        while time.monotonic() < end:
+            try:
+                os.kill(child, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.1)
+        else:
+            pytest.fail("the orphaned child kept running")
+        assert len(fd.gen_calls()) == 1, "it finished the call it was in and did not start another"
+        os.set_blocking(r, False)
+        data = b""
+        try:
+            while True:
+                chunk = os.read(r, 65536)
+                if not chunk:
+                    break
+                data += chunk
+        except BlockingIOError:
+            pass
+        evs = [json.loads(l)["ev"] for l in data.decode().splitlines() if l.strip()]
+        assert evs == ["identity", "loaded", "call"], evs
+    finally:
+        for pid in (child, sup.pid):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        os.close(r)
 
 
 # ── Q17: a store that cannot be written ────────────────────────────────────
