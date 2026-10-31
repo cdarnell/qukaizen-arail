@@ -1219,26 +1219,6 @@ async def api_review_get():
     return _with_teaching(out)
 
 
-async def api_review_get():
-    bundle_dir = _mounted_catalog_dir()
-    flags: list = []
-    doc: dict = {}
-    if bundle_dir is not None and _review_path(bundle_dir).exists():
-        try:
-            doc = json.loads(_review_path(bundle_dir).read_bytes())
-            if doc.get("schema") == REVIEW_SCHEMA:
-                flags = doc.get("flags", [])
-            else:
-                doc = {}
-        except Exception:  # noqa: BLE001
-            doc = {}
-    return {"state": _review_state.get("state", "idle"),
-            "message": _review_state.get("message", ""),
-            "reviewed_at": doc.get("reviewed_at"),
-            "reviewed_count": doc.get("reviewed_count"),
-            "flags": flags}
-
-
 # ═══════════════════════ GROWTH ENGINE (organic evolution) ════════════════
 
 _grow_lock = asyncio.Lock()
@@ -1407,24 +1387,6 @@ async def api_grow_get():
            "calls": _grow_state.get("calls"),
            "passes": passes}
     return _with_teaching(out)
-
-
-async def api_grow_get():
-    bundle_dir = _mounted_catalog_dir()
-    passes: list = []
-    if bundle_dir is not None and _evolution_path(bundle_dir).exists():
-        try:
-            doc = json.loads(_evolution_path(bundle_dir).read_bytes())
-            if doc.get("schema") == GROW_SCHEMA:
-                passes = doc.get("passes", [])
-        except Exception:  # noqa: BLE001
-            pass
-    return {"state": _grow_state.get("state", "idle"),
-            "stage": _grow_state.get("stage", ""),
-            "message": _grow_state.get("message", ""),
-            "added": _grow_state.get("added"),
-            "corrected": _grow_state.get("corrected"),
-            "passes": passes}
 
 
 @router.post("/api/worlds/grow/cancel")
