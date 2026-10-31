@@ -480,6 +480,33 @@ def test_qa1_a_probe_lock_whose_holder_note_is_nested_too_deeply_is_still_refuse
     assert fd is None and holder == {}
 
 
+def test_qa4_a_symlinked_state_folder_is_not_run_says_why_and_leaves_its_target_alone(fake_deep, tmp_path, monkeypatch):
+    fd = fake_deep("pass")
+    elsewhere = tmp_path / "somebody-elses-dir"
+    elsewhere.mkdir()
+    link = tmp_path / "deep"
+    link.symlink_to(elsewhere, target_is_directory=True)
+    monkeypatch.setenv("ARAIL_DEEP_STATE_DIR", str(link))
+    buf = io.StringIO()
+    rc = dp.run([], out=buf)
+    assert rc == 5, buf.getvalue()
+    assert "not run   the probe lock could not be taken: " in buf.getvalue()
+    assert "is a symbolic link" in buf.getvalue() and "ARAIL_DEEP_STATE_DIR" in buf.getvalue()
+    assert list(elsewhere.iterdir()) == [] and fd.gen_calls() == [], "not run: nothing written, no deep call"
+
+
+def test_qa4_a_state_folder_another_user_owns_is_not_run_in_json_too(fake_deep, tmp_path, monkeypatch):
+    shared = tmp_path / "shared-deep"
+    shared.mkdir()
+    monkeypatch.setenv("ARAIL_DEEP_STATE_DIR", str(shared))
+    monkeypatch.setattr(dv, "_my_uid", lambda: os.getuid() + 1)
+    buf = io.StringIO()
+    rc = dp.run(["--json"], out=buf)
+    doc = json.loads(buf.getvalue())
+    assert rc == 5 and doc["outcome"] == "not_run" and "owned by another user" in doc["not_run_reason"]
+    assert list(shared.iterdir()) == []
+
+
 def test_w3_the_child_stops_at_the_next_call_when_its_supervisor_is_gone_and_the_pipe_stays_open(fake_deep):
     """The getppid check, alone. Q19 passes without it, because a killed supervisor closes the pipe and the
     child's next write fails with EPIPE. Here this test holds the pipe's read end open, so EPIPE cannot

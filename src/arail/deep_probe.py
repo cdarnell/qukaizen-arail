@@ -426,8 +426,11 @@ def _child_main() -> int:
 def _take_probe_lock(state: Path) -> tuple[Optional[int], Optional[dict]]:
     """``(fd, None)`` when taken, else ``(None, holder)``. flock, non-blocking."""
     import fcntl
-    os.makedirs(state, mode=0o700, exist_ok=True)
-    fd = os.open(state / "probe.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    dir_fd = dv._open_state_dir(state)       # refuses a link or a folder that is not yours (QA-4)
+    try:
+        fd = os.open("probe.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600, dir_fd=dir_fd)
+    finally:
+        os.close(dir_fd)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError as e:
@@ -731,6 +734,8 @@ def execute(opts: dict, *, memory_reader: Optional[Callable[[], Optional[float]]
     state = dv.state_dir()
     try:
         lock_fd, holder = _take_probe_lock(state)
+    except dv.StateDirRefused as e:
+        return not_run("the probe lock could not be taken: " + str(e.strerror))
     except OSError as e:
         return not_run("the probe lock could not be taken (" + str(state) + ": " + str(e.strerror or e)
                        + ") — check the permissions of that folder")

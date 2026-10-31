@@ -35,7 +35,7 @@ renumbered or reused for a different meaning (`sprints/2026-07-29-elite-cli/ARCH
 | `2` | Usage error — bad flag, missing flag value, invalid slug, ambiguous non-interactive target, unknown `--json` value, `install daemon` (typo) | every verb with flags |
 | `3` | **Degraded** — partially up, a phase refused/failed but the lab is still usable, `--check` pending changes | `status`, `doctor`, `install`, `update` |
 | `4` | **Nothing running** | `status` only |
-| `5` | **Not run** — the operation could not start, and nothing was recorded (`deep probe`: `aerollm_api` is not importable by that interpreter, the model dir is missing, another probe is running, there is not enough available memory for a second copy and `--force` was not given, or the binary could not be identified; also a bug in the probe itself) | `deep probe` only |
+| `5` | **Not run** — the operation could not start, and nothing was recorded (`deep probe`: `aerollm_api` is not importable by that interpreter, the model dir is missing, another probe is running, there is not enough available memory for a second copy and `--force` was not given, the binary could not be identified, or the verdict folder is a symbolic link or belongs to another user; also a bug in the probe itself) | `deep probe` only |
 | `130` / `143` | Killed by SIGINT / SIGTERM | `start --world <slug>` (foreground instance/root path); `deep probe` exits `130` on SIGINT, stops its child and records nothing |
 
 `stop` deliberately always exits `0` when there was nothing to stop — a
@@ -543,6 +543,10 @@ future (the clock was stepped back after it) is cleared too, and so is one with
 no usable time. The record is written under a lock with an atomic replace; a
 corrupt file (one that does not parse, is nested too deeply, or has an entry
 the readers cannot use) reads as failing and is moved aside by the next writer.
+ARAIL checks the verdict folder before every write: if it is itself a symbolic
+link, or belongs to another user, nothing is written there (the failure is kept
+in memory and `deep status` says `NOT SAVED` and why; the probe exits `5`). A
+symbolic link above it, such as a lab kept on another disk, is fine.
 
 **Who reads it.** The research truth strip (`reason_code: deep_failing`), the
 tier-1 health of the model registry (status bar dot, degradation banner,

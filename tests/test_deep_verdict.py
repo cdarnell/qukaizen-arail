@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import stat
 import subprocess
 import sys
@@ -274,7 +275,7 @@ def test_qa1_a_failure_is_kept_in_memory_and_says_why_when_the_store_cannot_be_w
     fake_deep()
     dv.identity()
 
-    def too_deep(path, doc):
+    def too_deep(path, doc, dir_fd=None):
         raise RecursionError("maximum recursion depth exceeded while encoding a JSON object")
 
     monkeypatch.setattr(dv, "_write_atomic", too_deep)
@@ -414,6 +415,125 @@ def test_qa3_record_probe_clears_a_non_finite_stamp_on_its_own_even_if_the_valid
     assert written, err
     assert dv.current().state == "passing"
     assert not list(store_path().parent.glob("verdict.json.corrupt-*")), "cleared in place, not moved aside"
+
+
+# ── QA-4 (fix pass 3): the state folder is checked before every write ───────────────────────────────
+
+def _state_at(monkeypatch, folder: Path) -> None:
+    monkeypatch.setenv("ARAIL_DEEP_STATE_DIR", str(folder))
+    dv._reset_for_tests()
+    dv.identity()
+
+
+def test_qa4_a_link_to_a_folder_that_does_not_exist_makes_nothing_at_its_target(fake_deep, tmp_path, monkeypatch):
+    fake_deep()
+    link = tmp_path / "deep"
+    link.symlink_to(tmp_path / "nowhere", target_is_directory=True)
+    _state_at(monkeypatch, link)
+    dv.note_call(False, error="RuntimeError: boom", consumer="agent:buddy")
+    v = dv.current()
+    assert v.state == "failing", "the failure is kept in this process"
+    assert "is a symbolic link" in v.store_error and "ARAIL_DEEP_STATE_DIR" in v.store_error
+    assert not (tmp_path / "nowhere").exists(), "makedirs did not follow the link and create its target"
+
+
+def test_qa4_a_folder_that_another_user_owns_is_refused_and_left_exactly_as_it_was(fake_deep, tmp_path, monkeypatch):
+    """Not reachable by a QA test without a second account: the owner check is driven with a different uid."""
+    fake_deep()
+    shared = tmp_path / "shared-checkout-deep"
+    shared.mkdir()
+    shared.chmod(0o775)
+    _state_at(monkeypatch, shared)
+    monkeypatch.setattr(dv, "_my_uid", lambda: os.getuid() + 1)       # the folder is not ours
+    dv.note_call(False, error="RuntimeError: boom", consumer="agent:buddy")
+    v = dv.current()
+    assert v.state == "failing" and "owned by another user" in v.store_error
+    assert f"uid {os.getuid()}" in v.store_error and "ARAIL_DEEP_STATE_DIR" in v.store_error
+    assert list(shared.iterdir()) == [], "nothing was written there"
+    assert stat.S_IMODE(shared.stat().st_mode) == 0o775, "and it was not re-permissioned"
+
+
+def test_qa4_a_symlink_above_the_state_folder_keeps_working(fake_deep, tmp_path, monkeypatch):
+    """The lab kept on another disk: tmp/lab is a link, the folder under it is a real one."""
+    fake_deep()
+    disk2 = tmp_path / "disk2" / "lab"
+    disk2.mkdir(parents=True)
+    (tmp_path / "lab").symlink_to(disk2, target_is_directory=True)
+    _state_at(monkeypatch, tmp_path / "lab" / "data" / "deep")
+    dv.note_call(False, error="RuntimeError: boom", consumer="agent:buddy")
+    v = dv.current()
+    assert v.state == "failing" and v.store_error is None, v.store_error
+    real = disk2 / "data" / "deep"
+    assert json.loads((real / "verdict.json").read_text())["binaries"]
+    assert stat.S_IMODE(real.stat().st_mode) == 0o700 and stat.S_IMODE((real / "verdict.json").stat().st_mode) == 0o600
+
+
+def test_qa4_a_link_planted_after_the_check_cannot_redirect_the_write(fake_deep, tmp_path, monkeypatch):
+    """The folder is checked, then opened; the lock, the temp file, the replace and the move-aside all go
+    through that descriptor. Swap the folder for a link to somewhere else after the open: the write still
+    lands in the folder that was checked."""
+    fake_deep()
+    d = tmp_path / "deep"
+    _state_at(monkeypatch, d)
+    fd = dv._open_state_dir(d)
+    try:
+        moved, other = tmp_path / "moved-away", tmp_path / "attackers-folder"
+        d.rename(moved)
+        other.mkdir()
+        d.symlink_to(other, target_is_directory=True)
+        dv._write_atomic(d / "verdict.json", {"schema": dv.SCHEMA, "updated_at": "x", "binaries": {}}, fd)
+        (moved / "verdict.json.bad").write_text("x")
+        (moved / "verdict.json").write_text("{not json")
+        dv._move_aside(d / "verdict.json", fd)
+    finally:
+        os.close(fd)
+    assert list(other.iterdir()) == [], "nothing reached the folder that was planted"
+    assert sorted(p.name for p in moved.iterdir() if p.name.startswith("verdict.json.corrupt-")), "moved aside inside the checked folder"
+
+
+def test_qa4_a_link_that_appears_between_the_check_and_the_open_is_refused_by_the_open(fake_deep, tmp_path, monkeypatch):
+    """Two layers: lstat first, then an open that refuses a link by itself. Make lstat lie (it reports a real
+    folder) and the open must still refuse."""
+    fake_deep()
+    elsewhere = tmp_path / "somebody-elses-dir"
+    elsewhere.mkdir()
+    link = tmp_path / "deep"
+    link.symlink_to(elsewhere, target_is_directory=True)
+    real_lstat = os.lstat
+    monkeypatch.setattr(os, "lstat", lambda p, *a, **k: real_lstat(elsewhere) if str(p) == str(link) else real_lstat(p, *a, **k))
+    with pytest.raises(dv.StateDirRefused) as ei:
+        dv._open_state_dir(link)
+    assert "is a symbolic link" in ei.value.strerror
+    assert list(elsewhere.iterdir()) == []
+
+
+def test_qa4_a_folder_swapped_for_a_link_in_the_middle_of_an_update_still_gets_the_whole_write(
+        fake_deep, tmp_path, monkeypatch):
+    """The swap happens right after the folder was checked and opened, whatever the code does next: the
+    re-permissioning, the lock file, the temp file and the replace all follow the descriptor, so all of them
+    land in the folder that was checked and none of them touches the folder that was planted."""
+    fake_deep()
+    d, moved, other = tmp_path / "deep", tmp_path / "moved-away", tmp_path / "attackers-folder"
+    other.mkdir()
+    other.chmod(0o755)
+    _state_at(monkeypatch, d)
+    real_open, swapped = dv._open_state_dir, []
+
+    def swap_right_after_the_open(folder):
+        fd = real_open(folder)                # the folder passed the check and is open
+        if not swapped:
+            swapped.append(1)
+            d.rename(moved)
+            d.symlink_to(other, target_is_directory=True)
+        return fd
+
+    monkeypatch.setattr(dv, "_open_state_dir", swap_right_after_the_open)
+    assert dv._locked_update(lambda doc: doc["binaries"].setdefault("x", {})) is None
+    assert swapped, "the folder was swapped for a link after it was opened"
+    assert list(other.iterdir()) == [], "nothing reached the folder that was planted"
+    assert stat.S_IMODE(other.stat().st_mode) == 0o755, "and the folder that was planted was not re-permissioned"
+    assert {"verdict.lock", "verdict.json"} <= {p.name for p in moved.iterdir()}
+    assert stat.S_IMODE(moved.stat().st_mode) == 0o700
 
 
 # ── U5: a failure persists, other processes see it, a later success does not clear ──

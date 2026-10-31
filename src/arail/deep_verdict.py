@@ -527,6 +527,60 @@ def _read_store(*, use_cache: bool = True) -> tuple[Optional[dict], Optional[str
     return doc, err
 
 
+class StateDirRefused(OSError):
+    """ARAIL will not write the verdict store in this folder. ``strerror`` is the whole sentence: what is
+    wrong, why it matters and what to do."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(errno.EPERM, message)
+
+
+def _my_uid() -> int:
+    return os.getuid()
+
+
+def _open_state_dir(d: Path) -> int:
+    """Create the state folder if it is missing and return a file descriptor for it.
+
+    The files of the store open with ``O_NOFOLLOW``, which guards only the last path component. When the
+    folder itself is a symbolic link, ``makedirs`` and ``chmod`` follow it and every write lands in whatever
+    it points at (QA-4), so the folder is checked with ``lstat`` before every write: a link is refused, and
+    so is a folder this user does not own. It is then opened with ``O_NOFOLLOW``, and the lock, the temp
+    file, the replace and the move-aside all go through that descriptor (``dir_fd``), so a link planted after
+    the check cannot redirect them either. A symbolic link *above* the folder (a lab kept on another disk)
+    is fine: only the last component is refused. Raises ``StateDirRefused`` or ``OSError``; the caller closes
+    the descriptor."""
+    try:
+        lst = os.lstat(d)
+    except FileNotFoundError:
+        lst = None
+    link = (f"{d} is a symbolic link, and ARAIL never writes the deep verdict through one. Replace it with "
+            "a real folder, or set ARAIL_DEEP_STATE_DIR to a folder you own.")
+    if lst is not None and stat.S_ISLNK(lst.st_mode):
+        raise StateDirRefused(link)
+    os.makedirs(d, mode=0o700, exist_ok=True)
+    try:
+        fd = os.open(d, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | os.O_NOFOLLOW)
+    except OSError as e:
+        # makedirs(exist_ok=True) has just passed, so the path is a folder or a link to one. A refusal of
+        # O_NOFOLLOW|O_DIRECTORY is therefore a link: ELOOP on Linux, ENOTDIR on macOS. It may have appeared
+        # between the lstat above and this open.
+        if e.errno in (errno.ELOOP, errno.ENOTDIR):
+            raise StateDirRefused(link) from e
+        raise
+    try:
+        owner = os.fstat(fd).st_uid
+        if owner != _my_uid():
+            raise StateDirRefused(
+                f"{d} is owned by another user (uid {owner}; you are uid {_my_uid()}), and ARAIL never writes "
+                "the deep verdict into a folder that is not yours. Use a folder you own, or set "
+                "ARAIL_DEEP_STATE_DIR to one.")
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
+
 def _flock_acquire(fd: int) -> Optional[str]:
     import fcntl  # POSIX only; ARAIL runs on macOS, Linux and WSL
     deadline = time.monotonic() + LOCK_TIMEOUT_S
@@ -542,36 +596,52 @@ def _flock_acquire(fd: int) -> Optional[str]:
         time.sleep(0.002 + random.random() * 0.006)
 
 
-def _write_atomic(path: Path, doc: dict) -> None:
-    tmp = path.with_name(f"{path.name}.tmp-{os.getpid()}-{threading.get_ident()}")
+def _write_atomic(path: Path, doc: dict, dir_fd: Optional[int] = None) -> None:
+    """Write *doc* to a temp file and replace *path* with it. With ``dir_fd`` (the state folder, from
+    ``_open_state_dir``) every name is relative to that descriptor."""
+    name = f"{path.name}.tmp-{os.getpid()}-{threading.get_ident()}"
+    tmp, target = (name, path.name) if dir_fd is not None else (str(path.with_name(name)), str(path))
     data = (json.dumps(doc, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
     try:
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        fd = os.open(tmp, flags, 0o600, dir_fd=dir_fd)
     except FileExistsError:           # a stale temp from a crashed writer with the same pid
-        os.unlink(tmp)
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        os.unlink(tmp, dir_fd=dir_fd)
+        fd = os.open(tmp, flags, 0o600, dir_fd=dir_fd)
     try:
         with os.fdopen(fd, "wb") as fh:
             fh.write(data)
             fh.flush()
             os.fsync(fh.fileno())
-        os.replace(tmp, path)
+        os.replace(tmp, target, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
     except BaseException:
         try:
-            os.unlink(tmp)
+            os.unlink(tmp, dir_fd=dir_fd)
         except OSError:
             pass
         raise
 
 
-def _move_aside(path: Path) -> None:
+def _move_aside(path: Path, dir_fd: Optional[int] = None) -> None:
+    """Rename an unreadable store to ``verdict.json.corrupt-<stamp>``, keeping it for a human."""
     stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(_now()))
-    dest = path.with_name(f"{path.name}.corrupt-{stamp}")
+
+    def where(name: str) -> str:
+        return name if dir_fd is not None else str(path.with_name(name))
+
+    def taken(name: str) -> bool:
+        try:
+            os.lstat(where(name), dir_fd=dir_fd)
+            return True
+        except FileNotFoundError:
+            return False
+
+    dest = f"{path.name}.corrupt-{stamp}"
     n = 1
-    while dest.exists() or dest.is_symlink():
+    while taken(dest):
         n += 1
-        dest = path.with_name(f"{path.name}.corrupt-{stamp}-{n}")
-    os.rename(path, dest)
+        dest = f"{path.name}.corrupt-{stamp}-{n}"
+    os.rename(where(path.name), where(dest), src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
 
 
 def _locked_update(mutate: Callable[[dict], None]) -> Optional[str]:
@@ -582,54 +652,64 @@ def _locked_update(mutate: Callable[[dict], None]) -> Optional[str]:
     """
     d = state_dir()
     try:
-        os.makedirs(d, mode=0o700, exist_ok=True)
-        try:
-            os.chmod(d, 0o700)
-        except OSError:
-            pass
-        lock_fd = os.open(d / "verdict.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        dir_fd = _open_state_dir(d)
+    except StateDirRefused as e:
+        return str(e.strerror)
     except OSError as e:
         return f"{d}: {e.strerror or e}"
+    except Exception as e:  # noqa: BLE001 - never an exception in a caller: they keep the failure in memory
+        return f"{d}: {type(e).__name__}: {e}"
     try:
         try:
-            os.fchmod(lock_fd, 0o600)
+            os.fchmod(dir_fd, 0o700)          # through the descriptor: never through a link
         except OSError:
             pass
-        err = _flock_acquire(lock_fd)
-        if err:
-            return err
         try:
-            path = d / "verdict.json"
-            doc, read_err = _read_store(use_cache=False)
-            if read_err is not None:
-                try:
-                    _move_aside(path)
-                except OSError as e:
-                    return f"{path}: could not move the unreadable file aside ({e.strerror or e})"
-                doc = None
-            if doc is None:
-                doc = _empty_doc()
-            mutate(doc)
-            doc["updated_at"] = _iso(_now())
-            _write_atomic(path, doc)
-            try:
-                lst = os.lstat(path)
-                _P.read_cache = (str(path), (lst.st_mtime_ns, lst.st_size, lst.st_ino), doc, None)
-            except OSError:
-                _P.read_cache = None
-            return None
+            lock_fd = os.open("verdict.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600, dir_fd=dir_fd)
         except OSError as e:
             return f"{d}: {e.strerror or e}"
-        except Exception as e:  # noqa: BLE001 - never an exception in a caller: they keep the failure in memory
-            return f"{d}: {type(e).__name__}: {e}"
-        finally:
+        try:
             try:
-                import fcntl
-                fcntl.flock(lock_fd, fcntl.LOCK_UN)
-            except Exception:  # noqa: BLE001
+                os.fchmod(lock_fd, 0o600)
+            except OSError:
                 pass
+            err = _flock_acquire(lock_fd)
+            if err:
+                return err
+            try:
+                path = d / "verdict.json"
+                doc, read_err = _read_store(use_cache=False)
+                if read_err is not None:
+                    try:
+                        _move_aside(path, dir_fd)
+                    except OSError as e:
+                        return f"{path}: could not move the unreadable file aside ({e.strerror or e})"
+                    doc = None
+                if doc is None:
+                    doc = _empty_doc()
+                mutate(doc)
+                doc["updated_at"] = _iso(_now())
+                _write_atomic(path, doc, dir_fd)
+                try:
+                    lst = os.lstat(path)
+                    _P.read_cache = (str(path), (lst.st_mtime_ns, lst.st_size, lst.st_ino), doc, None)
+                except OSError:
+                    _P.read_cache = None
+                return None
+            except OSError as e:
+                return f"{d}: {e.strerror or e}"
+            except Exception as e:  # noqa: BLE001 - never an exception in a caller: they keep the failure in memory
+                return f"{d}: {type(e).__name__}: {e}"
+            finally:
+                try:
+                    import fcntl
+                    fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                except Exception:  # noqa: BLE001
+                    pass
+        finally:
+            os.close(lock_fd)
     finally:
-        os.close(lock_fd)
+        os.close(dir_fd)
 
 
 def _entry_for(doc: dict, info: dict) -> dict:
