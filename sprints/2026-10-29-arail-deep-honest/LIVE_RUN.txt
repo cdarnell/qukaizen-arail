@@ -1,0 +1,452 @@
+Deep honest check. Token-free: local only, nothing installed, nothing downloaded.
+python /Users/netsushi/ProJects/qukaizen-arail/.venv/bin/python
+checkout /Users/netsushi/ProJects/.claude/worktrees/sprint-command-error-060a85/arail-deep-wt
+scratch /private/tmp/claude-501/-Users-netsushi-ProJects--claude-worktrees-sprint-command-error-060a85/b8dbbfe8-4399-41ee-b2d5-83e731cff931/scratchpad/build-deep/tmp/arail-deep-honest.FVfNVT (removed at the end)
+
+running W0 preflight ...
+
+W0  preflight: what is installed and what the model folder holds  [PASS]
+      scratch .env holds only: AEROLLM_KV_BUDGET_PCT, AEROLLM_MODEL, ARAIL_MODELS_DIR, LAB_TIER
+      aerollm_api resolves to /Users/netsushi/ProJects/qukaizen-arail/.venv/lib/python3.11/site-packages/aerollm_api/__init__.py
+      site-packages: /Users/netsushi/ProJects/qukaizen-arail/.venv/lib/python3.11/site-packages (11 aerollm or queuellm files recorded, 455 top-level entries)
+      QueueLLM checkout: /Users/netsushi/ProJects/qukaizen-queuellm, HEAD e730d5fe3f6b, working tree clean
+      [ok  ] the code under test is this checkout: /Users/netsushi/ProJects/.claude/worktrees/sprint-command-error-060a85/arail-deep-wt/src/arail/__init__.py
+      [ok  ] aerollm_api resolves, without importing it: /Users/netsushi/ProJects/qukaizen-arail/.venv/lib/python3.11/site-packages/aerollm_api/aerollm_api.abi3.so
+      [ok  ] the model folder exists: /Users/Shared/models/Qwen2.5-7B-Instruct-4bit
+      [ok  ] the preflight made no deep call: attempted 0, failed 0
+
+running W1 Chat x5 ...
+
+W1  Chat, five turns on the deep backend  [PASS]
+      turn 1 (short): answered
+      turn 2 (long): Inference failed: backend `mlx-native` failed: apply_pre_block: Qwen2Model::forward (prefill head): "[rms_n...
+      turn 3 (short-repeat): Inference failed: backend `mlx-native` failed: apply_pre_block: Qwen2Model::forward (prefill head): "[rms_n...
+      turn 4 (long-shared-prefix): Inference failed: backend `mlx-native` failed: apply_pre_block: Qwen2Model::forward (prefill head): "[rms_n...
+      turn 5 (short-2): Inference failed: backend `mlx-native` failed: apply_pre_block: Qwen2Model::forward (prefill head): "[rms_n...
+      [ok  ] Chat turn 2 says it failed: Inference failed: backend `mlx-native` failed: apply_pre_block: Qwe...
+      [ok  ] Chat turn 2 did not fall back to another model: backend=aerollm
+      [ok  ] Chat turn 3 says it failed: Inference failed: backend `mlx-native` failed: apply_pre_block: Qwe...
+      [ok  ] Chat turn 3 did not fall back to another model: backend=aerollm
+      [ok  ] Chat turn 4 says it failed: Inference failed: backend `mlx-native` failed: apply_pre_block: Qwe...
+      [ok  ] Chat turn 4 did not fall back to another model: backend=aerollm
+      [ok  ] Chat turn 5 says it failed: Inference failed: backend `mlx-native` failed: apply_pre_block: Qwe...
+      [ok  ] Chat turn 5 did not fall back to another model: backend=aerollm
+      [ok  ] deep calls: all five turns tried deep, turns 2 to 5 failed: attempted 5, failed 4
+      [ok  ] explain(foreground=True): deep_failing: deep generation is failing on this build (QueueLLM 0.1.0-rc.2, sha256 d62e1e16e93c): a ...
+      [ok  ] explain(foreground=False): deep_failing: deep generation is failing on this build (QueueLLM 0.1.0-rc.2, sha256 d62e1e16e93c): a ...
+      [ok  ] GET /api/research/status (truth strip): HTTP 200, reason_code=deep_failing, eligible_now=False
+      [ok  ] GET /api/models/state (tier 1): health=unhealthy
+      [ok  ] POST /api/models/health/refresh (Check), then GET: after Check: unhealthy, then unhealthy
+      [ok  ] ./arailctl deep status: exit 0, generation: FAILING
+      [ok  ] boot line 'Deep model loaded at boot': failing: Deep model loaded at boot (weights resident), but generation is failing on this build: a deep call failed i...
+      [ok  ] boot line 'Deep model preloaded': failing: Deep model preloaded (weights resident), but generation is failing on this build: a deep call failed in roo...
+      [ok  ] reading the surfaces and pressing Check generated nothing: deep calls 5 -> 5
+
+running W2 agents x5 ...
+
+W2  background agents, five calls (Buddy 2, debt advisor 2, consolidation analyzer 1)  [PASS]
+      opened the background gate with the portal's own endpoints: window override heavy accepted, profile throughput accepted
+      call 1, buddy: ok; the agent got text
+      call 2, buddy: error then error [stamped deep_failing] then error [stamped deep_failing]; the agent got no text
+      call 3, debt_advisor: error [stamped deep_failing] then error [stamped deep_failing]; the agent got no text
+      call 4, debt_advisor: error [stamped deep_failing] then error [stamped deep_failing]; the agent got no text
+      call 5, consolidation_analyzer: error [stamped deep_failing] then error [stamped deep_failing]; the agent got no text
+      the fast model did not answer (HTTPError). Tier 0 is pointed at a model name that does not exist, on purpose: it answers nothing and Ollama never loads one of yours
+      [ok  ] deep calls: call 1 answered, call 2 failed, calls 3 to 5 did not try deep: attempted 2, failed 1
+      [ok  ] call 1 was one deep call that answered: 1 trace record(s): ok
+      [ok  ] call 2's first trace is the deep failure: error
+      [ok  ] every fast call after the failure carries the deep_failing stamp: 8 of 8 stamped
+      [ok  ] the stamp carries a reason a reader can use: deep generation is failing on this build (QueueLLM 0.1.0-rc.2, sha256 d62e1e16e93c): a deep call failed in root (agen...
+      [ok  ] explain(foreground=True): deep_failing: deep generation is failing on this build (QueueLLM 0.1.0-rc.2, sha256 d62e1e16e93c): a ...
+      [ok  ] explain(foreground=False): deep_failing: deep generation is failing on this build (QueueLLM 0.1.0-rc.2, sha256 d62e1e16e93c): a ...
+      [ok  ] GET /api/research/status (truth strip): HTTP 200, reason_code=deep_failing, eligible_now=False
+      [ok  ] GET /api/models/state (tier 1): health=unhealthy
+      [ok  ] POST /api/models/health/refresh (Check), then GET: after Check: unhealthy, then unhealthy
+      [ok  ] ./arailctl deep status: exit 0, generation: FAILING
+      [ok  ] boot line 'Deep model loaded at boot': failing: Deep model loaded at boot (weights resident), but generation is failing on this build: a deep call failed i...
+      [ok  ] boot line 'Deep model preloaded': failing: Deep model preloaded (weights resident), but generation is failing on this build: a deep call failed in roo...
+      [ok  ] reading the surfaces and pressing Check generated nothing: deep calls 2 -> 2
+
+running W3 Curator review ...
+
+W3  Curator review of a scratch 6-term World  [PASS]
+      the Curator says: Curator review of 'Math World' is partial: 1 of 6 terms judged. A full review judges all 6; the 5 unjudged terms have no flags, so their silence means nothing. QueueLLM failed on 5 calls: RuntimeError: backend `mlx-na...
+      [ok  ] the review was accepted: HTTP 202
+      [ok  ] deep calls: one judge call per term, the first answered: attempted 6, failed 5
+      [ok  ] outcome is partial, not complete: partial
+      [ok  ] it says judged 1 of 6, failed 5: judged 1 of 6, failed 5
+      [ok  ] its count matches what the backend saw: Curator judged 1, backend answered 1
+      [ok  ] no 'All clear' in the activity log: 0 line(s) say it
+      [ok  ] explain(foreground=True): deep_failing: deep generation is failing on this build (QueueLLM 0.1.0-rc.2, sha256 d62e1e16e93c): a ...
+      [ok  ] explain(foreground=False): deep_failing: deep generation is failing on this build (QueueLLM 0.1.0-rc.2, sha256 d62e1e16e93c): a ...
+      [ok  ] GET /api/research/status (truth strip): HTTP 200, reason_code=deep_failing, eligible_now=False
+      [ok  ] GET /api/models/state (tier 1): health=unhealthy
+      [ok  ] POST /api/models/health/refresh (Check), then GET: after Check: unhealthy, then unhealthy
+      [ok  ] ./arailctl deep status: exit 0, generation: FAILING
+      [ok  ] boot line 'Deep model loaded at boot': failing: Deep model loaded at boot (weights resident), but generation is failing on this build: a deep call failed i...
+      [ok  ] boot line 'Deep model preloaded': failing: Deep model preloaded (weights resident), but generation is failing on this build: a deep call failed in roo...
+      [ok  ] reading the surfaces and pressing Check generated nothing: deep calls 6 -> 6
+
+running W4 Curator grow ...
+
+W4  Curator grow of the same World  [PASS]
+      the Curator says: Growth pass on 'Math World' not applied: QueueLLM failed on 6 of 7 calls (RuntimeError: backend `mlx-native` failed: apply_pre_block: Qwen2Model::forward (prefill head): "[rms_norm] (*weight) must have the same size a...
+      [ok  ] the growth pass was accepted: HTTP 202
+      [ok  ] deep calls: the first answered, every other call failed: attempted 7, failed 6
+      [ok  ] the state is not_applied: not_applied
+      [ok  ] terms.json, manifest.json and evolution.json are unchanged: changed: none
+      [ok  ] no 'evolved via' line in the activity log: 0 line(s) say it
+      [ok  ] its own call count matches the backend's: Curator 7/6, backend 7/6
+      [ok  ] explain(foreground=True): deep_failing: deep generation is failing on this build (QueueLLM 0.1.0-rc.2, sha256 d62e1e16e93c): a ...
+      [ok  ] explain(foreground=False): deep_failing: deep generation is failing on this build (QueueLLM 0.1.0-rc.2, sha256 d62e1e16e93c): a ...
+      [ok  ] GET /api/research/status (truth strip): HTTP 200, reason_code=deep_failing, eligible_now=False
+      [ok  ] GET /api/models/state (tier 1): health=unhealthy
+      [ok  ] POST /api/models/health/refresh (Check), then GET: after Check: unhealthy, then unhealthy
+      [ok  ] ./arailctl deep status: exit 0, generation: FAILING
+      [ok  ] boot line 'Deep model loaded at boot': failing: Deep model loaded at boot (weights resident), but generation is failing on this build: a deep call failed i...
+      [ok  ] boot line 'Deep model preloaded': failing: Deep model preloaded (weights resident), but generation is failing on this build: a deep call failed in roo...
+      [ok  ] reading the surfaces and pressing Check generated nothing: deep calls 7 -> 7
+
+running W5 deep probe ...
+
+W5  ./arailctl deep probe --json on a fresh state folder  [PASS]
+      the probe said: fail; first error: RuntimeError: backend `mlx-native` failed: apply_pre_block: Qwen2Model::forward (prefill head): "[rms_norm] (*weight) must have the same size as th...
+      [ok  ] the probe printed one JSON document: exit 1, schema arail.deep-probe/v1
+      [ok  ] exit code 1: the probe ran and deep is failing: exit 1
+      [ok  ] passed 1 of 5: passed 1 of 5
+      [ok  ] the first error is at call 2 and names rms_norm: call 2: RuntimeError: backend `mlx-native` failed: apply_pre_block: Qwen2Model::forwa...
+      [ok  ] the import resolves to a package's __init__.py: /Users/netsushi/ProJects/qukaizen-arail/.venv/lib/python3.11/site-packages/aerollm_api/__init__.py
+      [ok  ] the binary is the day-1 wheel (sha256): d62e1e16e93c264b...
+      [ok  ] the version is the day-1 version: 0.1.0-rc.2
+      [ok  ] the failure was written to the verdict file: written=True error=None
+      [ok  ] every number in the probe's JSON has its four taught parts: missing: none
+
+running W6 fresh process ...
+
+W6  a fresh process on W5's state: every surface, then Check  [PASS]
+      [ok  ] explain(foreground=True): deep_failing: deep generation is failing on this build (QueueLLM 0.1.0-rc.2, sha256 d62e1e16e93c): la...
+      [ok  ] explain(foreground=False): deep_failing: deep generation is failing on this build (QueueLLM 0.1.0-rc.2, sha256 d62e1e16e93c): la...
+      [ok  ] GET /api/research/status (truth strip): HTTP 200, reason_code=deep_failing, eligible_now=False
+      [ok  ] GET /api/models/state (tier 1): health=unhealthy
+      [ok  ] POST /api/models/health/refresh (Check), then GET: after Check: unhealthy, then unhealthy
+      [ok  ] ./arailctl deep status: exit 0, generation: FAILING
+      [ok  ] boot line 'Deep model loaded at boot': failing: Deep model loaded at boot (weights resident), but generation is failing on this build: last probe 1/5, firs...
+      [ok  ] boot line 'Deep model preloaded': failing: Deep model preloaded (weights resident), but generation is failing on this build: last probe 1/5, first err...
+      [ok  ] reading the surfaces and pressing Check generated nothing: deep calls 0 -> 0
+      [ok  ] this process made no deep call: attempted 0, failed 0
+
+running W7 build script ...
+
+W7  deep status, and the build script's refusals (deep rebuild and auto)  [PASS]
+      channel line: unknown — pip package aerollm-api 0.1.0 (editable, file:///Users/netsushi/ProJects/aerollm/crates/aerollm-api), but its binary was replaced outside pip (RECORD 80bfe0f...
+      ./arailctl deep rebuild is only `exec bash scripts/build-aerollm.sh build`, so this row runs that line; the rule for this build is not to run ./arailctl deep rebuild itself
+      [ok  ] deep status prints the import line: present
+      [ok  ] deep status prints the binary line: present
+      [ok  ] deep status prints the sha256 line: present
+      [ok  ] deep status prints the shadowed line: present
+      [ok  ] deep status prints the channel line: present
+      [ok  ] deep status prints the generation line: present
+      [ok  ] the channel is unknown, because nothing proves otherwise: unknown — pip package aerollm-api 0.1.0 (editable, file:/...
+      [ok  ] the generation line says FAILING: exit 0, FAILING
+      [ok  ] the sha256 line names the day-1 wheel: found
+      [ok  ] deep rebuild dispatches to build-aerollm.sh build: yes
+      [ok  ] build-aerollm.sh build refuses with exit 1: exit 1
+      [ok  ] build-aerollm.sh build says nothing was built or installed: ✗ /Users/netsushi/ProJects/qukaizen-queuellm has the renamed crate crates/queuellm-api (module queuellm_api...
+      [ok  ] build-aerollm.sh auto refuses with exit 1: exit 1
+      [ok  ] build-aerollm.sh auto says nothing was built or installed: ✗ /Users/netsushi/ProJects/qukaizen-queuellm has the renamed crate crates/queuellm-api (module queuellm_api...
+      [ok  ] cargo was never started (a stub stood in its place): 0 call(s)
+      [ok  ] the old false claim is gone: No QueueLLM sibling repo: 0 time(s) in the three outputs
+      [ok  ] the old false claim is gone: QueueLLM ready: 0 time(s) in the three outputs
+      [ok  ] the old false claim is gone: (missing -> release/bundled channel): 0 time(s) in the three outputs
+      [ok  ] the old false claim is gone: (found -> source/dev channel): 0 time(s) in the three outputs
+      [ok  ] the old false claim is gone: a channel: line that says release or dev: 0 time(s) in the three outputs
+
+running W8 postflight ...
+
+W8  postflight: nothing of the operator's changed  [PASS]
+      [ok  ] the aerollm and queuellm files in site-packages are identical to W0's: changed: none
+      [ok  ] the top-level site-packages listing is identical: added or removed: none
+      [ok  ] the QueueLLM checkout (HEAD and working tree) is identical: e730d5fe3f6b, tree clean
+      [ok  ] src/dac_world is byte-identical to 62d5ebdf: identical
+      [ok  ] no probe child process is left: left: none
+
+SUMMARY
+
+row  check           attempted  failed  silent  result
+------------------------------------------------------
+W0   preflight               0       0       -  PASS
+W1   Chat x5                 5       4       0  PASS
+W2   agents x5               2       1       0  PASS
+W3   Curator review          6       5       0  PASS
+W4   Curator grow            7       6       0  PASS
+W5   deep probe              5       4       0  PASS
+W6   fresh process           0       0       0  PASS
+W7   build script            -       -       0  PASS
+W8   postflight              -       -       -  PASS
+
+attempted = deep calls attempted, failed = deep calls failed, silent = silent outcomes.
+Every number is taught below, row by row.
+
+WHAT THE NUMBERS MEAN
+Each number has four parts: what it is, the bar and why, what out of range means, and where the fault lives.
+
+W0  preflight: what is installed and what the model folder holds
+    deep calls attempted = 0
+        what it is: deep (QueueLLM) generation calls the row's consumers made in the row's own fresh
+            process, counted by ARAIL's per-process deep counters, not by this script
+        the bar and why: 0: the preflight reads files and git state only. A deep call here would be
+            recorded as a failure and spoil the rows after it
+        out of range: more than the bar: ARAIL kept calling a build it already knew was failing, so
+            a gate did not close. fewer: a call that should have run did not, so the row did not
+            test what it claims
+        the fault lives in: ARAIL: the gate (deep_policy.explain) and the backend hook
+            (router/backends.py), not QueueLLM
+    deep calls failed = 0
+        what it is: of those calls, the ones that raised an error or returned no text
+        the bar and why: 0, for the same reason: no call, no failure
+        out of range: fewer than the bar: the wheel behaves differently from DAY1.json (re-baseline
+            it) or an error was swallowed before it was counted. more: a new fault, such as call 1
+            failing too
+        the fault lives in: the failures themselves live in the QueueLLM binary (DAY1.json:
+            mlx-native Qwen2 prefill, an rms_norm weight of 1 element); a failure that was not
+            counted lives in ARAIL's backend hook
+    silent outcomes = -
+        what it is: not counted in this row
+        the bar and why: the preflight only records what is installed; it states nothing about deep
+            that could be wrong
+        out of range: not applicable: the cell shows - and there is nothing to range-check
+        the fault lives in: not applicable: nothing is measured here
+
+W1  Chat, five turns on the deep backend
+    deep calls attempted = 5
+        what it is: deep (QueueLLM) generation calls the row's consumers made in the row's own fresh
+            process, counted by ARAIL's per-process deep counters, not by this script
+        the bar and why: 5: Chat is the operator's own pick, so every turn calls deep, even after a
+            failure. It never falls back to the fast model on its own
+        out of range: more than the bar: ARAIL kept calling a build it already knew was failing, so
+            a gate did not close. fewer: a call that should have run did not, so the row did not
+            test what it claims
+        the fault lives in: ARAIL: the gate (deep_policy.explain) and the backend hook
+            (router/backends.py), not QueueLLM
+    deep calls failed = 4
+        what it is: of those calls, the ones that raised an error or returned no text
+        the bar and why: 4: calls 2 to 5. The day-1 wheel answers once per process (DAY1.json)
+        out of range: fewer than the bar: the wheel behaves differently from DAY1.json (re-baseline
+            it) or an error was swallowed before it was counted. more: a new fault, such as call 1
+            failing too
+        the fault lives in: the failures themselves live in the QueueLLM binary (DAY1.json:
+            mlx-native Qwen2 prefill, an rms_norm weight of 1 element); a failure that was not
+            counted lives in ARAIL's backend hook
+    silent outcomes = 0
+        what it is: places where ARAIL said deep was fine, or the work done, when it was not: a
+            surface that does not say failing, a reply or a log line that hides an error
+        the bar and why: 0, because any one is the bug this sprint fixes: ARAIL said deep was fine,
+            or the work done, when it was not
+        out of range: 1 or more: the check lines of the row name the row and the surface that said
+            it. Any one is the bug this sprint fixes
+        the fault lives in: the code of the surface a failed check names, not QueueLLM
+
+W2  background agents, five calls (Buddy 2, debt advisor 2, consolidation analyzer 1)
+    deep calls attempted = 2
+        what it is: deep (QueueLLM) generation calls the row's consumers made in the row's own fresh
+            process, counted by ARAIL's per-process deep counters, not by this script
+        the bar and why: 2: call 1 answers, call 2 fails and is recorded, then deep is marked
+            failing and calls 3 to 5 do not try it. 5 would mean agents kept calling a build ARAIL
+            knew was failing
+        out of range: more than the bar: ARAIL kept calling a build it already knew was failing, so
+            a gate did not close. fewer: a call that should have run did not, so the row did not
+            test what it claims
+        the fault lives in: ARAIL: the gate (deep_policy.explain) and the backend hook
+            (router/backends.py), not QueueLLM
+    deep calls failed = 1
+        what it is: of those calls, the ones that raised an error or returned no text
+        the bar and why: 1: only call 2 meets the bug; after it the agents stop calling deep
+        out of range: fewer than the bar: the wheel behaves differently from DAY1.json (re-baseline
+            it) or an error was swallowed before it was counted. more: a new fault, such as call 1
+            failing too
+        the fault lives in: the failures themselves live in the QueueLLM binary (DAY1.json:
+            mlx-native Qwen2 prefill, an rms_norm weight of 1 element); a failure that was not
+            counted lives in ARAIL's backend hook
+    silent outcomes = 0
+        what it is: places where ARAIL said deep was fine, or the work done, when it was not: a
+            surface that does not say failing, a reply or a log line that hides an error
+        the bar and why: 0, because any one is the bug this sprint fixes: ARAIL said deep was fine,
+            or the work done, when it was not
+        out of range: 1 or more: the check lines of the row name the row and the surface that said
+            it. Any one is the bug this sprint fixes
+        the fault lives in: the code of the surface a failed check names, not QueueLLM
+
+W3  Curator review of a scratch 6-term World
+    deep calls attempted = 6
+        what it is: deep (QueueLLM) generation calls the row's consumers made in the row's own fresh
+            process, counted by ARAIL's per-process deep counters, not by this script
+        the bar and why: 6: one judge call per term, and the World has 6 terms (the Curator reviews
+            up to 16 per pass)
+        out of range: more than the bar: ARAIL kept calling a build it already knew was failing, so
+            a gate did not close. fewer: a call that should have run did not, so the row did not
+            test what it claims
+        the fault lives in: ARAIL: the gate (deep_policy.explain) and the backend hook
+            (router/backends.py), not QueueLLM
+    deep calls failed = 5
+        what it is: of those calls, the ones that raised an error or returned no text
+        the bar and why: 5: calls 2 to 6. The review must say judged 1 of 6, not 'All clear'
+        out of range: fewer than the bar: the wheel behaves differently from DAY1.json (re-baseline
+            it) or an error was swallowed before it was counted. more: a new fault, such as call 1
+            failing too
+        the fault lives in: the failures themselves live in the QueueLLM binary (DAY1.json:
+            mlx-native Qwen2 prefill, an rms_norm weight of 1 element); a failure that was not
+            counted lives in ARAIL's backend hook
+    silent outcomes = 0
+        what it is: places where ARAIL said deep was fine, or the work done, when it was not: a
+            surface that does not say failing, a reply or a log line that hides an error
+        the bar and why: 0, because any one is the bug this sprint fixes: ARAIL said deep was fine,
+            or the work done, when it was not
+        out of range: 1 or more: the check lines of the row name the row and the surface that said
+            it. Any one is the bug this sprint fixes
+        the fault lives in: the code of the surface a failed check names, not QueueLLM
+
+W4  Curator grow of the same World
+    deep calls attempted = 7
+        what it is: deep (QueueLLM) generation calls the row's consumers made in the row's own fresh
+            process, counted by ARAIL's per-process deep counters, not by this script
+        the bar and why: 2 or more: a growth pass reviews terms and then proposes new ones, so the
+            count depends on the World. The bar is that every call is counted
+        out of range: more than the bar: ARAIL kept calling a build it already knew was failing, so
+            a gate did not close. fewer: a call that should have run did not, so the row did not
+            test what it claims
+        the fault lives in: ARAIL: the gate (deep_policy.explain) and the backend hook
+            (router/backends.py), not QueueLLM
+    deep calls failed = 6
+        what it is: of those calls, the ones that raised an error or returned no text
+        the bar and why: the calls minus 1: the wheel answers once per process, so every call after
+            the first fails, and a pass with any failed call must change nothing (state not_applied)
+        out of range: fewer than the bar: the wheel behaves differently from DAY1.json (re-baseline
+            it) or an error was swallowed before it was counted. more: a new fault, such as call 1
+            failing too
+        the fault lives in: the failures themselves live in the QueueLLM binary (DAY1.json:
+            mlx-native Qwen2 prefill, an rms_norm weight of 1 element); a failure that was not
+            counted lives in ARAIL's backend hook
+    silent outcomes = 0
+        what it is: places where ARAIL said deep was fine, or the work done, when it was not: a
+            surface that does not say failing, a reply or a log line that hides an error
+        the bar and why: 0, because any one is the bug this sprint fixes: ARAIL said deep was fine,
+            or the work done, when it was not
+        out of range: 1 or more: the check lines of the row name the row and the surface that said
+            it. Any one is the bug this sprint fixes
+        the fault lives in: the code of the surface a failed check names, not QueueLLM
+
+W5  ./arailctl deep probe --json on a fresh state folder
+    deep calls attempted = 5
+        what it is: deep (QueueLLM) generation calls the row's consumers made in the row's own fresh
+            process, counted by ARAIL's per-process deep counters, not by this script
+        the bar and why: 5: the probe makes five sequential calls in one fresh process (its bar and
+            its reason are in the probe's own output)
+        out of range: more than the bar: ARAIL kept calling a build it already knew was failing, so
+            a gate did not close. fewer: a call that should have run did not, so the row did not
+            test what it claims
+        the fault lives in: ARAIL: the gate (deep_policy.explain) and the backend hook
+            (router/backends.py), not QueueLLM
+    deep calls failed = 4
+        what it is: of those calls, the ones that raised an error or returned no text
+        the bar and why: 4: calls 2 to 5, as in DAY1.json. The probe must exit 1 and record it
+        out of range: fewer than the bar: the wheel behaves differently from DAY1.json (re-baseline
+            it) or an error was swallowed before it was counted. more: a new fault, such as call 1
+            failing too
+        the fault lives in: the failures themselves live in the QueueLLM binary (DAY1.json:
+            mlx-native Qwen2 prefill, an rms_norm weight of 1 element); a failure that was not
+            counted lives in ARAIL's backend hook
+    silent outcomes = 0
+        what it is: places where ARAIL said deep was fine, or the work done, when it was not: a
+            surface that does not say failing, a reply or a log line that hides an error
+        the bar and why: 0, because any one is the bug this sprint fixes: ARAIL said deep was fine,
+            or the work done, when it was not
+        out of range: 1 or more: the check lines of the row name the row and the surface that said
+            it. Any one is the bug this sprint fixes
+        the fault lives in: the code of the surface a failed check names, not QueueLLM
+
+W6  a fresh process on W5's state: every surface, then Check
+    deep calls attempted = 0
+        what it is: deep (QueueLLM) generation calls the row's consumers made in the row's own fresh
+            process, counted by ARAIL's per-process deep counters, not by this script
+        the bar and why: 0: a fresh process that only reads state and presses Check must not
+            generate. A call here would spend tokens on a build known to fail
+        out of range: more than the bar: ARAIL kept calling a build it already knew was failing, so
+            a gate did not close. fewer: a call that should have run did not, so the row did not
+            test what it claims
+        the fault lives in: ARAIL: the gate (deep_policy.explain) and the backend hook
+            (router/backends.py), not QueueLLM
+    deep calls failed = 0
+        what it is: of those calls, the ones that raised an error or returned no text
+        the bar and why: 0, for the same reason: no call, no failure
+        out of range: fewer than the bar: the wheel behaves differently from DAY1.json (re-baseline
+            it) or an error was swallowed before it was counted. more: a new fault, such as call 1
+            failing too
+        the fault lives in: the failures themselves live in the QueueLLM binary (DAY1.json:
+            mlx-native Qwen2 prefill, an rms_norm weight of 1 element); a failure that was not
+            counted lives in ARAIL's backend hook
+    silent outcomes = 0
+        what it is: places where ARAIL said deep was fine, or the work done, when it was not: a
+            surface that does not say failing, a reply or a log line that hides an error
+        the bar and why: 0, because any one is the bug this sprint fixes: ARAIL said deep was fine,
+            or the work done, when it was not
+        out of range: 1 or more: the check lines of the row name the row and the surface that said
+            it. Any one is the bug this sprint fixes
+        the fault lives in: the code of the surface a failed check names, not QueueLLM
+
+W7  deep status, and the build script's refusals (deep rebuild and auto)
+    deep calls attempted = -
+        what it is: not counted in this row
+        the bar and why: the build and status scripts make no deep call, and a call made in a
+            subprocess cannot be counted from here
+        out of range: not applicable: the cell shows - and there is nothing to range-check
+        the fault lives in: not applicable: nothing is measured here
+    deep calls failed = -
+        what it is: not counted in this row
+        the bar and why: the build and status scripts make no deep call, and a call made in a
+            subprocess cannot be counted from here
+        out of range: not applicable: the cell shows - and there is nothing to range-check
+        the fault lives in: not applicable: nothing is measured here
+    silent outcomes = 0
+        what it is: places where ARAIL said deep was fine, or the work done, when it was not: a
+            surface that does not say failing, a reply or a log line that hides an error
+        the bar and why: 0: none of five false claims may appear in the three outputs: the old 'No
+            QueueLLM sibling repo' and 'QueueLLM ready' lines, the two '(... channel)' guesses, and
+            a channel line that names release or dev without proof
+        out of range: 1 or more: the check lines of the row name the row and the surface that said
+            it. Any one is the bug this sprint fixes
+        the fault lives in: the code of the surface a failed check names, not QueueLLM
+
+W8  postflight: nothing of the operator's changed
+    deep calls attempted = -
+        what it is: not counted in this row
+        the bar and why: the postflight compares files and git state; it generates nothing
+        out of range: not applicable: the cell shows - and there is nothing to range-check
+        the fault lives in: not applicable: nothing is measured here
+    deep calls failed = -
+        what it is: not counted in this row
+        the bar and why: the postflight compares files and git state; it generates nothing
+        out of range: not applicable: the cell shows - and there is nothing to range-check
+        the fault lives in: not applicable: nothing is measured here
+    silent outcomes = -
+        what it is: not counted in this row
+        the bar and why: the postflight is a comparison with the preflight, not a statement about
+            deep
+        out of range: not applicable: the cell shows - and there is nothing to range-check
+        the fault lives in: not applicable: nothing is measured here
+
+RESULT
+9 of 9 rows passed. Every surface said failing and nothing said deep was fine.
+    what it is: rows that passed, out of the rows run
+    the bar and why: all of them: one row that does not pass means ARAIL still hides a failure, or
+        the check could not look
+    out of range: a FAIL names a row and a surface that said deep was fine or done. An INCONCLUSIVE
+        row could not test its claim and counts as not passed. NOT RUN means an earlier row stopped
+        the run
+    the fault lives in: the row's check lines say which surface; the code of that surface
+
+total time 55 s
+    what it is: wall time of the whole check, from the first row to the last
+    the bar and why: under 5 minutes: nine rows, and the longest are the model loads and the probe
+        (the first two live runs took 64 s and 141 s)
+    out of range: much longer: a row waited for a deadline, which means a call hung
+    the fault lives in: the slowest row; its log is in the scratch root when ARAIL_WIN_KEEP=1
