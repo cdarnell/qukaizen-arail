@@ -1032,6 +1032,19 @@ def _failing_detail(b: Optional[Binary], f: dict, lp: Optional[dict], changed: b
     return text
 
 
+def _passed_since(f: dict, lp: Any) -> bool:
+    """Did a stored passing probe start after failure ``f`` was last seen?
+
+    Strictly after: a failure stamped at the probe's start or later may have landed while it ran, and it
+    stands. With no usable stamp on either side the answer is no (the failure stands)."""
+    if not isinstance(lp, dict) or lp.get("outcome") != "pass":
+        return False
+    try:
+        return float(f["last_ts"]) < float(lp["started_ts"])
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
 def _assemble(b: Optional[Binary], doc: Optional[dict], store_err: Optional[str], changed: bool) -> Verdict:
     write_err = _P.write_error
     if store_err is not None:
@@ -1048,6 +1061,11 @@ def _assemble(b: Optional[Binary], doc: Optional[dict], store_err: Optional[str]
     persisted_f = entry.get("failure") if isinstance(entry, dict) else None
     mem_f = _P.mem.get(key)
     lp = copy.deepcopy(entry.get("last_probe")) if isinstance(entry, dict) else None
+    if mem_f is not None and _passed_since(mem_f, lp):
+        # This lab could not save that failure (F12) and kept it here. A probe, which always runs in another
+        # process and so cannot reach this copy, has since passed on this binary: the read applies the same
+        # rule the probe's write applies, and with the failure gone there is nothing left unsaved to report.
+        mem_f, write_err = None, None
     # "failure is not null" means failing (C2), so an empty object is a failure too.
     f = copy.deepcopy(persisted_f) if persisted_f is not None else None
     f = f if f is not None else mem_f

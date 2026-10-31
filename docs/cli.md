@@ -540,7 +540,10 @@ clear it: call 1 works on every build tested, so one answer proves nothing. A
 new build starts "never tested", not "passing". The probe clears a failure
 unless that failure could have landed while it ran, so a failure stamped in the
 future (the clock was stepped back after it) is cleared too, and so is one with
-no usable time. The record is written under a lock with an atomic replace; a
+no usable time. A failure a running lab could not save (it keeps that one in
+memory, and `deep status` says `NOT SAVED`) is cleared the same way: the lab
+reads the passing probe, and when that probe started after the failure the lab
+stops reporting it, with no restart. The record is written under a lock with an atomic replace; a
 corrupt file (one that does not parse, is nested too deeply, or has an entry
 the readers cannot use) reads as failing and is moved aside by the next writer.
 ARAIL checks the verdict folder before every write: if it is itself a symbolic

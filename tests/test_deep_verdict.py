@@ -617,6 +617,92 @@ def test_qa5_a_hand_edited_store_cannot_write_control_characters_to_the_terminal
     assert sum(1 for ln in lines if ln.lstrip().startswith("generation:")) == 1, "a name cannot forge a row"
 
 
+# ── QA-6 (fix pass 3): a failure this lab could not save is cleared by a passing probe it reads ────
+
+def _fail_while_the_lock_is_held(monkeypatch) -> None:
+    """A deep call fails while another process holds the verdict lock past the cap: the failure lives only in
+    this process's memory (F12), and `deep status` says NOT SAVED."""
+    import fcntl
+    monkeypatch.setattr(dv, "LOCK_TIMEOUT_S", 0.05)
+    state = dv.state_dir()
+    state.mkdir(parents=True, exist_ok=True, mode=0o700)
+    held = os.open(state / "verdict.lock", os.O_RDWR | os.O_CREAT, 0o600)
+    fcntl.flock(held, fcntl.LOCK_EX)
+    try:
+        dv.note_call(False, error="RuntimeError: rms_norm has 1 elements", consumer="agent:buddy")
+    finally:
+        fcntl.flock(held, fcntl.LOCK_UN)
+        os.close(held)
+    assert dv.current().state == "failing" and dv.current().store_error, "kept in this process, as designed"
+
+
+def _another_process_stores_a_probe(b: dv.Binary, outcome: str, started_ts: float) -> None:
+    """What `deep probe`, running in another process, leaves on disk. This process's memory is not touched
+    (record_probe would reset the write error here, which a separate process cannot)."""
+    lp = {"outcome": outcome, "started_ts": started_ts, "started_at": "x", "at": "2026-10-31T13:35:02Z",
+          "passed": 5 if outcome == "pass" else 1, "total": 5, "first_error": None}
+    store_path().parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    store_path().write_text(json.dumps(_entry_doc(b.sha256, last_probe=lp)), encoding="utf-8")
+
+
+def test_qa6_a_pass_that_started_after_the_unsaved_failure_clears_it_and_the_not_saved_line(fake_deep, monkeypatch):
+    fake_deep("pass")
+    b = dv.identity()
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(dv, "_now", lambda: clock["now"])
+    _fail_while_the_lock_is_held(monkeypatch)
+    assert any("NOT SAVED" in ln for ln in dv.status_lines())
+    clock["now"] = 1100.0
+    _another_process_stores_a_probe(b, "pass", started_ts=1050.0)
+    v = dv.current()
+    assert v.state == "passing", (v.state, v.detail)
+    assert v.store_error is None and not any("NOT SAVED" in ln for ln in dv.status_lines()), \
+        "nothing is left unsaved once the failure is gone"
+
+
+@pytest.mark.parametrize("started_ts,why", [(900.0, "the probe started before the failure: it landed during the run"),
+                                            (1000.0, "the same instant: it may have landed during the run")])
+def test_qa6_a_failure_noted_during_or_after_the_probe_stands(fake_deep, monkeypatch, started_ts, why):
+    fake_deep("pass")
+    b = dv.identity()
+    monkeypatch.setattr(dv, "_now", lambda: 1000.0)
+    _another_process_stores_a_probe(b, "pass", started_ts=started_ts)
+    assert dv.current().state == "passing"
+    _fail_while_the_lock_is_held(monkeypatch)           # the failure is stamped 1000.0
+    v = dv.current()
+    assert v.state == "failing" and v.store_error, why
+    assert any("NOT SAVED" in ln for ln in dv.status_lines())
+
+
+def test_qa6_a_failing_probe_on_disk_never_clears_an_unsaved_failure(fake_deep, monkeypatch):
+    fake_deep("pass")
+    b = dv.identity()
+    monkeypatch.setattr(dv, "_now", lambda: 1000.0)
+    _fail_while_the_lock_is_held(monkeypatch)
+    _another_process_stores_a_probe(b, "fail", started_ts=1050.0)       # no stored failure: only the outcome decides
+    v = dv.current()
+    assert v.state == "failing" and v.store_error and v.detail
+
+
+@pytest.mark.parametrize("f,lp", [
+    ({"last_ts": 1.0}, None),
+    ({"last_ts": 1.0}, "pass"),
+    ({"last_ts": 1.0}, {"outcome": "fail", "started_ts": 2.0}),
+    ({"last_ts": 1.0}, {"outcome": "pass"}),
+    ({"last_ts": 1.0}, {"outcome": "pass", "started_ts": "later"}),
+    ({}, {"outcome": "pass", "started_ts": 2.0}),
+    ({"last_ts": "soon"}, {"outcome": "pass", "started_ts": 2.0}),
+    ({"last_ts": 2.0}, {"outcome": "pass", "started_ts": 2.0}),
+    ({"last_ts": 3.0}, {"outcome": "pass", "started_ts": 2.0}),
+], ids=["no probe", "probe is not an object", "probe failed", "no start stamp", "start stamp is text",
+        "no failure stamp", "failure stamp is text", "same instant", "failure is later"])
+def test_qa6_passed_since_says_yes_only_for_a_passing_probe_that_started_strictly_later(f, lp):
+    assert dv._passed_since(f, lp) is False
+
+
+def test_qa6_passed_since_says_yes_for_a_passing_probe_that_started_later():
+    assert dv._passed_since({"last_ts": 1.0}, {"outcome": "pass", "started_ts": 2.0}) is True
+
 # ── U5: a failure persists, other processes see it, a later success does not clear ──
 
 def test_u5_a_failure_persists_and_another_process_sees_it(fake_deep):
