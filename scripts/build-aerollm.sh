@@ -132,11 +132,8 @@ aerollm_version() {
 
 clone_hint() {
     err "No QueueLLM checkout at ${BOLD}${AEROLLM_REPO}${RST}."
-    warn "For a source (dev) build, either:"
-    warn "  1) clone it next to arail:"
-    warn "       git clone https://github.com/cdarnell/qukaizen-queuellm \"${AEROLLM_REPO}\""
-    warn "  2) or point ARAIL_AEROLLM_REPO at your checkout."
-    warn "Or install the published wheel instead: ./arailctl deep update"
+    warn "A source build here needs a checkout that still has crates/aerollm-api; QueueLLM main has the renamed crates/queuellm-api, which this ARAIL refuses. Nothing was built or installed."
+    warn "For the prebuilt QueueLLM: ./arailctl deep install."
 }
 
 # arail.deep_verdict is stdlib only; PYTHONPATH makes it importable under any $PY.

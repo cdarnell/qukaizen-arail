@@ -2800,7 +2800,7 @@
           selectDeepModel({ id: deep.model_id, label: deep.display_name || deep.model_id, runtime: 'aerollm' });
           flashStatus('compare on · column B = deep model (QueueLLM)');
         } else if (!deep.installed) {
-          flashStatus('compare on, but QueueLLM isn’t built — run ./arailctl deep rebuild');
+          flashStatus('compare on, but QueueLLM isn’t installed — run ./arailctl deep install');
         } else {
           flashStatus('compare on, but the deep model isn’t downloaded yet — set AEROLLM_MODEL in .env, or pick one from the deep picker');
         }

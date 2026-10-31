@@ -130,7 +130,7 @@ if [[ "$TIER" == "maximus" ]]; then
     if [[ "$ARCH" == "arm64" ]]; then
         info "Deep mode: ${BOLD}QueueLLM (local, fast)${RESET} — Apple Silicon detected."
         info "To activate the deep (7B) model:"
-        info "  1. Build QueueLLM: ./arailctl deep rebuild"
+        info "  1. Install QueueLLM: ./arailctl deep install"
         info "  2. Download weights (~4 GB):"
         info "       huggingface-cli download mlx-community/Qwen2.5-7B-Instruct-4bit \\"
         info "         --local-dir lab/models/Qwen2.5-7B-Instruct-4bit"

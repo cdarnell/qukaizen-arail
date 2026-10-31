@@ -43,6 +43,46 @@ def test_the_import_error_hint_says_rebuild_needs_a_pre_rename_checkout():
     assert "build from the local sibling repo" not in msg
 
 
+# ── review B2 / TD13: a user with no checkout is sent to `deep install`, not `deep rebuild` ──────────────
+
+def test_the_portal_hints_for_a_missing_engine_say_deep_install(monkeypatch, tmp_path):
+    from fastapi.testclient import TestClient
+    import arail.chat as chat_mod
+    from arail.portal import app as appmod
+    from arail.portal import model_warmth
+
+    # the Chat error reply (it names the config's install_command)
+    assert appmod._OPTIONAL_CHAT_BACKEND_CONFIG["aerollm"]["install_command"] == "./arailctl deep install"
+    reply = appmod._optional_backend_error_result("aerollm", RuntimeError("boom"))["reply"]
+    assert "`./arailctl deep install`" in reply and "deep rebuild" not in reply
+
+    # the optional_backends entry the Chat tab reads
+    monkeypatch.setenv("ARAIL_MODELS_DIR", str(tmp_path / "models"))
+    monkeypatch.setattr(appmod, "_local_memory_snapshot", lambda: {
+        "label": "Apple M5", "gpu_label": None, "total_gb": 24.0, "used_gb": 6.0, "free_gb": 18.0})
+    monkeypatch.setattr(chat_mod, "gallery_view", lambda: {"installed": [], "catalog": [], "runtime_counts": {}})
+    monkeypatch.setattr(appmod, "_is_aerollm_installed", lambda: False)
+    monkeypatch.setattr(model_warmth, "_tier1_resident", lambda: False)
+    body = TestClient(appmod.app).get("/api/chat/models").json()
+    entry = next(b for b in body["optional_backends"] if b["id"] == "aerollm")
+    assert entry["installed"] is False and entry["install_command"] == "./arailctl deep install"
+
+
+def test_the_chat_page_hint_for_a_missing_engine_says_deep_install():
+    from arail.portal import app as appmod
+    html = (Path(appmod.__file__).parent / "templates" / "chat.html").read_text(encoding="utf-8")
+    assert "QueueLLM isn’t installed — run ./arailctl deep install" in html
+    assert "deep rebuild" not in html
+
+
+def test_the_upgrade_to_maximus_hint_says_deep_install():
+    """scripts/upgrade.sh prints the next steps to a user who has just moved to maximus; that user
+    has no checkout. Found by the wider grep for TD13; same class, same fix."""
+    text = (Path(__file__).resolve().parents[1] / "scripts" / "upgrade.sh").read_text(encoding="utf-8")
+    assert "1. Install QueueLLM: ./arailctl deep install" in text
+    assert "deep rebuild" not in text
+
+
 def test_the_wheel_missing_health_detail_points_at_deep_install():
     from arail.registry import health
     src = Path(health.__file__).read_text(encoding="utf-8")

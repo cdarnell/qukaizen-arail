@@ -2107,7 +2107,7 @@ async def providers_active(request: Request):
                 "error": "Airgapped mode — only local sources are active. Set LAB_MODE=hybrid to use cloud providers."}
     if provider == "aerollm" and not _is_aerollm_installed():
         return {"ok": False,
-                "error": "The QueueLLM engine isn't built on this machine. Run './arailctl deep rebuild' to enable it."}
+                "error": "The QueueLLM engine isn't installed on this machine. Run './arailctl deep install' to enable it."}
     os.environ["COMPUTE_SOURCE"] = provider
     activity_log.emit("chat", f"Compute source switched to '{provider}'.", "info")
     # Sprint 2: regenerate_config() THEN restart() — under a single lock.
@@ -8815,10 +8815,11 @@ _OPTIONAL_CHAT_BACKEND_CONFIG: dict[str, dict[str, str]] = {
     "aerollm": {
         "label": "QueueLLM",
         "class_name": "AeroLLMBackend",
-        # Built from the local sibling repo ($ARAIL_AEROLLM_REPO) — not pip.
-        # `deep rebuild` re-runs the cargo build + dylib copy so active local
-        # aerollm changes flow into the lab.
-        "install_command": "./arailctl deep rebuild",
+        # `deep install` fetches a checksummed prebuilt binary from ARAIL's own
+        # Releases: no source repo or credentials. (`deep rebuild` is the dev
+        # build from a local pre-rename checkout, for maintainers only, and
+        # refuses any checkout that has the renamed crate.)
+        "install_command": "./arailctl deep install",
         "model_env": "AEROLLM_MODEL",
         "default_model": "Qwen2.5-7B-Instruct-4bit",
     },
@@ -10131,7 +10132,7 @@ async def api_chat_models(provider: str = ""):
         "model_ready": _aerollm_model_ready(aero_model_name),
         "param_hint": _extract_param_hint(aero_model_name),
         "gated": aero_model_name.lower().startswith("meta-llama/"),
-        "install_command": "./arailctl deep rebuild",
+        "install_command": "./arailctl deep install",
         "description": "In-process Rust runtime — primary deep backend on Apple Silicon (Qwen2.5-7B-4bit default, ~4 GB resident; max tier ships Qwen2.5-72B-Instruct-4bit, ~40 GB resident, requires 48 GB+). Single Metal command buffer per generation; ~3× faster than mlx_lm baseline.",
         # C4/F-OVERSELL: aeroLLM keeps its model resident once loaded — it
         # does not stream (AERO_MOE_SELECT is off and absent from src/).
