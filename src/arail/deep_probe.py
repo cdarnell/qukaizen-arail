@@ -176,12 +176,40 @@ TEACHING: dict[str, dict[str, str]] = {
 }
 
 
+# How each number is labelled where a person reads it. The legend's headings are these labels, not the
+# JSON paths the teaching object uses. Each entry is (heading, the words printed on the line beside the
+# number). A test checks that every printed number sits on a line that carries one of its words, so a
+# heading can never name something the line does not say. Keys that only the JSON carries have no words.
+LABELS: dict[str, tuple[str, tuple[str, ...]]] = {
+    "passed": ("passed (the first number of 1/5 on the result line)", ("passed", "answered", "passes")),
+    "total": ("calls (the 5 on the first line, and the second number of 1/5)", ("calls", "planned", "passed", "passes")),
+    "median_ok_s": ("median (the median line)", ("median",)),
+    "calls[].seconds": ("seconds (the s column of each call line)", (" s",)),
+    "calls[].prompt_tokens": ("tokens in (each call line)", ("tokens in",)),
+    "calls[].words_out": ("words (each call line)", (" words",)),
+    "first_error.call": ("first error at call (the first line, and 'same error as call')", ("call",)),
+    "load.seconds": ("load time (the load line)", ("load",)),
+    "runtime.ring_depth": ("ring depth (the load line)", ("ring depth",)),
+    "runtime.max_tokens": ("new tokens per call (the load line)", ("new tokens",)),
+    "memory.available_gib": ("GiB available (the memory line)", ("available",)),
+    "memory.needed_gib": ("GiB needed (the not-run line)", ("needed",)),
+    "model.disk_gib": ("GiB on disk (the model line)", ("on disk", "second copy", "weights")),
+    "runtime.kv_budget_gib": ("KV budget GiB (JSON only)", ()),
+    "runtime.temperature": ("temperature (JSON only)", ()),
+    "duration_s": ("duration seconds (JSON only)", ()),
+    "exit_code": ("exit code (JSON only; the process exit status)", ()),
+}
+
+
 class _Nums:
-    """Every number a surface prints goes through here, so its key is recorded."""
+    """Every number a surface prints goes through here, so its key is recorded, and so is the line it
+    landed on (``by_line``), which is how a test checks the number sits beside its label."""
 
     def __init__(self) -> None:
         self.used: list[str] = []
         self.rendered: list[tuple[str, str]] = []
+        self.by_line: dict[int, list[tuple[str, str]]] = {}
+        self._pending: list[tuple[str, str]] = []
 
     def __call__(self, key: str, text: str) -> str:
         if key not in TEACHING:
@@ -189,7 +217,14 @@ class _Nums:
         if key not in self.used:
             self.used.append(key)
         self.rendered.append((key, text))
+        self._pending.append((key, text))
         return text
+
+    def mark(self, line_index: int) -> None:
+        """The line just printed carries the numbers rendered since the last one."""
+        if self._pending:
+            self.by_line[line_index] = self._pending
+            self._pending = []
 
 
 def legend_lines(keys: list[str]) -> list[str]:
@@ -197,7 +232,7 @@ def legend_lines(keys: list[str]) -> list[str]:
     out = ["", "What the numbers mean"]
     for key in keys:
         t = TEACHING[key]
-        out.append(f"  {key}")
+        out.append(f"  {LABELS[key][0]}")
         out.append(f"      meaning: {t['meaning']}")
         out.append(f"      bar and why: {t['threshold']}")
         out.append(f"      out of range: {t['out_of_range']}")
@@ -653,6 +688,7 @@ def execute(opts: dict, *, memory_reader: Optional[Callable[[], Optional[float]]
 
     def say(text: str) -> None:
         lines.append(text)
+        nums.mark(len(lines) - 1)
         if not json_mode:
             out.write(text + "\n")
             out.flush()
@@ -937,8 +973,8 @@ def _summary_lines(doc: dict, nums: _Nums, say: Callable[[str], None]) -> None:
     elif doc["outcome"] == "pass":
         say("recorded  passing · " + vs["path"] + " · deep is cleared for agents and the Curator")
     else:
-        say("recorded  failing · " + vs["path"] + " · agents and the Curator use the fast model until a probe of "
-            "a new build passes " + nums("passed", "5") + "/" + nums("total", "5"))
+        say("recorded  failing · " + vs["path"] + " · agents and the Curator use the fast model until "
+            "./arailctl deep probe passes " + nums("passed", "5") + "/" + nums("total", "5") + " on this build")
 
 
 def run(argv: list[str], *, memory_reader: Optional[Callable[[], Optional[float]]] = None,

@@ -11,6 +11,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -72,8 +73,13 @@ def test_tq4_the_bar_is_per_row_and_the_rest_is_shared():
     for num in w.NUMBERS:
         shown = [row for row in w.ROW_IDS if not isinstance(w.BARS[row][num], tuple)]
         assert shown, num
-        for part in ("meaning", "out_of_range", "failure_lives_in"):
+        for part in ("out_of_range", "failure_lives_in"):
             assert len({w.teaching_for(r)[num][part] for r in shown}) == 1, (num, part)
+        # the meaning is shared by the rows that count the same way; W5's numbers come from the probe
+        for source in ("counters", "probe"):
+            same = [r for r in shown if w.COUNT_SOURCE[r] == source or num == "silent"]
+            if same:
+                assert len({w.teaching_for(r)[num]["meaning"] for r in same}) == 1, (num, source)
 
 
 def test_tq4_a_number_that_is_not_counted_says_why_in_all_four_parts():
@@ -105,6 +111,46 @@ def test_tq4_the_verdict_and_the_total_time_are_taught_too():
     assert "the bar and why: all of them" in text
     for part in ("what it is", "the bar and why", "out of range", "the fault lives in"):
         assert text.count(part + ":") >= 2, part                    # once for the verdict, once for the time
+
+
+# ── review W4: where each count comes from, and no number without its label ──────────────────
+
+def test_tq4_each_row_says_where_its_counts_come_from():
+    assert set(w.COUNT_SOURCE) == set(w.ROW_IDS)
+    for row in w.ROW_IDS:
+        t = w.teaching_for(row)
+        if w.COUNT_SOURCE[row] == "probe":
+            for num in ("attempted", "failed"):
+                assert "probe" in t[num]["meaning"] and "JSON" in t[num]["meaning"], (row, num)
+                assert "per-process deep counters" not in t[num]["meaning"], (row, num, "W5 is not counted here")
+        elif w.COUNT_SOURCE[row] == "counters":
+            assert "per-process deep counters" in t["attempted"]["meaning"], row
+        else:
+            assert t["attempted"]["meaning"] == "not counted in this row", row
+    # and the declared source is what the row's code does, so the text cannot drift from the number
+    import inspect
+    for row, fn in w.ROW_FUNCS.items():
+        code = inspect.getsource(fn)
+        assert ("set_counts(" in code) == (w.COUNT_SOURCE[row] == "counters"), (row, "in-process counters")
+        assert ("res.attempted, res.failed = total, total - passed" in code) == (w.COUNT_SOURCE[row] == "probe"), \
+            (row, "the probe's JSON")
+
+
+def test_tq4_the_guard_catches_the_lines_the_review_found_and_lets_labelled_and_quoted_ones_through():
+    assert w.unlabelled_numbers("site-packages: /x (11 aerollm or queuellm files recorded, "
+                                "455 top-level entries)") == ["11", "455"]
+    assert w.RATIO.search("Curator 7/6, backend 7/6"), "7/6: which is attempted and which is failed?"
+    for fine in ("turn 2 (long): Inference failed: backend mlx-native failed at Qwen2 layer 3 of 28",
+                 "call 2, buddy: error then error [stamped deep_failing]; the agent got no text",
+                 "the Curator says: Curator review is partial: 1 of 6 terms judged.",
+                 "the probe said: fail; first error: RuntimeError: rms_norm 1 elements",
+                 "QueueLLM checkout: /p/q, HEAD e730d5fe3f6b, working tree clean",
+                 "aerollm_api resolves to /v/lib/python3.11/site-packages/aerollm_api/__init__.py"):
+        assert w.unlabelled_numbers(fine) == [], fine
+    assert not w.RATIO.search("the Curator said attempted 7, failed 6; the backend counted attempted 7, failed 6")
+    assert not w.RATIO.search("/private/tmp/12/34/path")
+    assert not w.RATIO.search("failing: Deep model loaded at boot (weights resident), but generation is failing: "
+                              "last probe 1/5, first error at call 2"), "a product line's own labelled ratio"
 
 
 # ── the exit rule and the counts ──────────────────────────────────────────────
@@ -388,6 +434,30 @@ def test_dry_run_a_broken_wheel_is_reported_honestly_on_every_row(dry):
     assert nums["W3"] == (6, 5) and nums["W5"] == (5, 4) and nums["W6"] == (0, 0)
     assert nums["W4"][0] >= 2 and nums["W4"][1] == nums["W4"][0] - 1
     assert nums["W7"] == (None, None) and nums["W8"] == (None, None)
+
+
+def test_dry_run_no_evidence_line_prints_a_bare_number_and_no_check_prints_an_unlabelled_ratio(dry):
+    """TQ4 for the live check's own lines. A number in a narrative line has no bar and no range; a ratio
+    does not say which side is which. Both fail the build."""
+    for row in dry.good.doc["rows"]:
+        for line in row["evidence"]:
+            assert w.unlabelled_numbers(line) == [], (row["row"], line)
+        for c in row["checks"]:
+            assert not w.RATIO.search(c["observed"]), (row["row"], c["name"], c["observed"])
+    w0 = " ".join(dry.good.rows["W0"]["evidence"])
+    assert "Recorded for W8 to compare" in w0 and "top-level entries" not in w0
+
+
+def test_dry_run_w4_labels_both_counts_and_w5_says_the_probe_counted(dry):
+    c = next(c for c in dry.good.rows["W4"]["checks"] if c["name"] == "its own call count matches the backend's")
+    assert re.fullmatch(r"the Curator said attempted \d+, failed \d+; the backend counted attempted \d+, "
+                        r"failed \d+", c["observed"]), c["observed"]
+    out = dry.good.p.stdout
+    w5 = out.split("W5  ./arailctl deep probe --json on a fresh state folder\n", 2)[-1].split("\nW6  ", 1)[0]
+    flat = " ".join(w5.split())
+    assert "as the probe reports them in its JSON" in flat and "this script copies that number" in flat
+    assert "per-process deep counters" not in flat
+    assert "per-process deep counters" in " ".join(out.split("W1  Chat, five turns on the deep backend\n", 2)[-1].split())
 
 
 def test_dry_run_prints_the_table_and_teaches_every_number(dry):

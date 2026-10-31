@@ -154,6 +154,17 @@ COMMON = {
         "failure_lives_in": "the code of the surface a failed check names, not QueueLLM",
     },
 }
+# Where a row's two call counts come from. The shared meaning above says "ARAIL's per-process deep
+# counters"; that is true for every row but W5, whose numbers are the probe's own, read from its JSON
+# (`total`, and `total` minus `passed`). A test holds each row's meaning to its source.
+COUNT_SOURCE = {"W0": "counters", "W1": "counters", "W2": "counters", "W3": "counters", "W4": "counters",
+                "W5": "probe", "W6": "counters", "W7": None, "W8": None}
+PROBE_MEANING = {
+    "attempted": "calls the probe made in its own fresh process, as the probe reports them in its JSON "
+                 "(total); this script copies that number, it does not count it",
+    "failed": "of those calls, the ones that did not answer, as the probe reports them in its JSON "
+              "(total minus passed)",
+}
 ZERO_BAR = ("0, because any one is the bug this sprint fixes: ARAIL said deep was fine, or the work done, "
             "when it was not")
 
@@ -239,7 +250,8 @@ def teaching_for(row: str) -> dict:
             }
         else:
             c = COMMON[num]
-            out[num] = {"meaning": c["meaning"], "threshold": bar, "out_of_range": c["out_of_range"],
+            meaning = PROBE_MEANING[num] if COUNT_SOURCE[row] == "probe" and num in PROBE_MEANING else c["meaning"]
+            out[num] = {"meaning": meaning, "threshold": bar, "out_of_range": c["out_of_range"],
                         "failure_lives_in": c["failure_lives_in"]}
     return out
 
@@ -312,6 +324,35 @@ def reap_strays(root: str) -> list:
             pids = [q for q in stray_pids(root) if q in pids]
         if not pids:
             break
+    return found
+
+
+# A narrative line (evidence) must not print a bare number. The numbers that mean something are the table's,
+# where each has four parts, and the check lines', where `expected` states the bar. The lines that quote a
+# product surface (the Curator's message, the probe's summary, the channel line, a Chat reply) carry that
+# surface's own teaching and are skipped. The first version of this check missed a W0 line that printed
+# "11 aerollm or queuellm files recorded, 455 top-level entries" (review W4).
+QUOTING_PREFIXES = ("the Curator says: ", "the probe said: ", "channel line: ")
+_ORDINAL = re.compile(r"^(?:turn|call) \d+")
+_BARE = re.compile(r"\d+(?:\.\d+)?")
+# "7/6": which is attempted and which is failed? A product surface's own "last probe 1/5" is labelled.
+RATIO = re.compile(r"(?<!last probe )(?<![\w./:-])\d+/\d+(?![\w/])")
+
+
+def unlabelled_numbers(line: str) -> list:
+    """The bare numbers in one evidence line (identifiers such as digests, paths and versions are not numbers)."""
+    if line.startswith(QUOTING_PREFIXES):
+        return []
+    m = _ORDINAL.match(line)
+    if m:
+        line = line[m.end():]
+        if m.group(0).startswith("turn") and "): " in line:        # "turn 2 (long): <the reply>"
+            line = line.split("): ", 1)[0]
+    found = []
+    for tok in line.split():
+        tok = tok.strip(",;:()[]'\"`")
+        if _BARE.fullmatch(tok):
+            found.append(tok)
     return found
 
 
@@ -887,8 +928,8 @@ def row_w0(cfg: dict, res: RowResult) -> None:
     site = Path(sysconfig.get_path("platlib"))
     manifest, listing = site_manifest(site)
     q = queuellm_state(cfg["queuellm"])
-    res.evidence.append("site-packages: %s (%d aerollm or queuellm files recorded, %d top-level entries)"
-                        % (site, len(manifest), len(listing)))
+    res.evidence.append("site-packages: %s. Recorded for W8 to compare: every aerollm or queuellm file in it "
+                        "(size, mtime and sha256) and the whole top-level listing" % site)
     res.evidence.append("QueueLLM checkout: %s, HEAD %s, working tree %s"
                         % (q["path"], short_head(q["head"]), "clean" if not q["status"].strip() else "has changes"))
     res.extra = {"site": str(site), "manifest": manifest, "listing": listing, "queuellm": q,
@@ -982,7 +1023,7 @@ def row_w2(cfg: dict, res: RowResult) -> None:
     res.check("the stamp carries a reason a reader can use", all(str(x.get("deep_reason_detail") or "").strip() for x in fast),
               clip(fast[0].get("deep_reason_detail"), 120), "a non-empty detail", silent=True)
     answered = [x for x in fast if x.get("outcome") == "ok"]
-    res.evidence.append("the fast model %s (%s). Tier 0 is pointed at a model name that does not exist, on purpose: "
+    res.evidence.append("the fast model %s (%s). The fast tier is pointed at a model name that does not exist, on purpose: "
                         "it answers nothing and Ollama never loads one of yours" % (
                             "answered" if answered else "did not answer",
                             "Ollama on this machine, token-free" if answered else clip(fast[0].get("error_class"), 60)))
@@ -1042,7 +1083,8 @@ def row_w4(cfg: dict, res: RowResult) -> None:
               "%d line(s) say it" % sum("evolved via" in m for m in msgs), "none", silent=True)
     calls = body.get("calls") or {}
     res.check("its own call count matches the backend's", (calls.get("attempted"), calls.get("failed")) == (attempted, failed),
-              "Curator %s/%s, backend %d/%d" % (calls.get("attempted"), calls.get("failed"), attempted, failed),
+              "the Curator said attempted %s, failed %s; the backend counted attempted %d, failed %d"
+              % (calls.get("attempted"), calls.get("failed"), attempted, failed),
               "the same numbers", silent=True)
     read_surfaces(cfg, portal, res)
 

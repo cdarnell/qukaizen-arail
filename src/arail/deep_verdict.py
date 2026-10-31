@@ -843,8 +843,7 @@ def _failing_detail(b: Optional[Binary], f: dict, lp: Optional[dict], changed: b
     who = (f"QueueLLM {b.version}, sha256 {b.sha256[:12]}" if b is not None else "binary not identified")
     since = f" — since {_utc_minute(f.get('since'))}" if f.get("since") else ""
     text = (f"deep generation is failing on this build ({who}): {_what_failed(f, lp)}{since}. "
-            "Agents and the Curator use the fast model. "
-            "Re-test with ./arailctl deep probe after installing a new build.")
+            "Agents and the Curator use the fast model until ./arailctl deep probe passes 5/5 on this build.")
     if changed:
         text += " The binary on disk changed after this process loaded it: restart the lab to load the new build."
     return text
@@ -856,8 +855,7 @@ def _assemble(b: Optional[Binary], doc: Optional[dict], store_err: Optional[str]
         detail = (f"deep generation is failing on this build"
                   f"{f' (QueueLLM {b.version}, sha256 {b.sha256[:12]})' if b is not None else ''}: "
                   f"the verdict file is unreadable ({store_err}). "
-                  "Agents and the Curator use the fast model. "
-                  "Re-test with ./arailctl deep probe after installing a new build.")
+                  "Agents and the Curator use the fast model until ./arailctl deep probe passes 5/5 on this build.")
         if changed:
             detail += " The binary on disk changed after this process loaded it: restart the lab to load the new build."
         return Verdict("failing", b, detail, None, "store_unreadable", None, None, changed, store_err)

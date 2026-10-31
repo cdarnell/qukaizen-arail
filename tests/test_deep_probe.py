@@ -99,6 +99,8 @@ def test_q2_the_text_names_the_first_error_and_collapses_repeats(fake_deep):
     assert re.search(r"^first     call 2 \(long\): RuntimeError: backend `mlx-native` failed", out, re.M)
     assert out.count("same error as call 2") == 3
     assert "recorded  failing" in out and "5/5" in out
+    assert "use the fast model until ./arailctl deep probe passes 5/5 on this build" in out
+    assert "new build" not in out, "a probe of the same build clears it too (review W4)"
 
 
 # ── Q3: the child crashes mid-call ─────────────────────────────────────────
@@ -606,6 +608,19 @@ def test_tq1_the_teaching_table_itself_is_complete():
     for key, entry in dp.TEACHING.items():
         assert set(entry) == {"meaning", "threshold", "out_of_range", "failure_lives_in"}, key
         assert all(v.strip() for v in entry.values()), key
+    assert set(dp.LABELS) == set(dp.TEACHING), "every taught number has a printed label"
+    for key, (heading, words) in dp.LABELS.items():
+        assert heading.strip() and isinstance(words, tuple), key
+
+
+def test_w4_the_legend_headings_are_the_labels_printed_on_the_lines_not_json_paths():
+    """Review W4: the legend headed its entries with calls[].seconds and first_error.call, names a reader
+    never sees on a line. The headings are the labels; the JSON teaching object keeps the paths."""
+    legend = "\n".join(dp.legend_lines(list(dp.TEACHING)))
+    for key, (heading, _words) in dp.LABELS.items():
+        assert f"\n  {heading}\n" in legend, key
+        assert f"\n  {key}\n" not in legend, (key, "a JSON path is not a heading")
+        assert not re.search(r"\[\]|[a-z]\.[a-z_]", heading), (key, heading)
 
 
 # ── TQ2: every number in the text is taught ────────────────────────────────
@@ -628,9 +643,17 @@ def test_tq2_every_numeric_token_on_a_number_line_maps_to_a_legend_entry(fake_de
     legend_text = "\n".join(legend)
     assert pr.nums.used and all(k in dp.TEACHING for k in pr.nums.used)
     for key in pr.nums.used:
-        block = re.split(r"\n  (?=\S)", legend_text.split(f"\n  {key}\n", 1)[1], maxsplit=1)[0]
+        heading = dp.LABELS[key][0]
+        block = re.split(r"\n  (?=\S)", legend_text.split(f"\n  {heading}\n", 1)[1], maxsplit=1)[0]
         assert all(lbl in block for lbl in FOUR_LABELS), key
         assert all(part.split(":", 1)[1].strip() for part in block.strip().splitlines()), (key, "an empty part")
+    # the legend names each number by a label that is printed on the line the number is on (review W4)
+    assert not pr.nums._pending, "every rendered number landed on a printed line"
+    for idx, items in pr.nums.by_line.items():
+        for key, text in items:
+            assert text in pr.lines[idx], (key, text, pr.lines[idx])
+            assert any(word in pr.lines[idx] for word in dp.LABELS[key][1]), \
+                f"{key}: none of {dp.LABELS[key][1]} is on the line {pr.lines[idx]!r}"
     rendered = [t for _k, t in pr.nums.rendered]
     identifiers = [fd.model_name, str(fd.models_dir), str(dv.state_dir()), "Token-free", "ring depth"]
     for ln in pr.lines:

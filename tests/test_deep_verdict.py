@@ -570,8 +570,9 @@ def test_details_say_what_is_known_and_what_to_run(fake_deep):
     assert failing.startswith("deep generation is failing on this build (QueueLLM 0.0.0-fake, sha256 ")
     assert b.sha256[:12] in failing
     assert "last probe 1/5, first error at call 2" in failing
-    assert "Agents and the Curator use the fast model." in failing
-    assert "Re-test with ./arailctl deep probe after installing a new build." in failing
+    # Review W4(d): a probe of the SAME build also clears a failure, so "after installing a new build" was wrong
+    assert "Agents and the Curator use the fast model until ./arailctl deep probe passes 5/5 on this build." in failing
+    assert "new build" not in failing
 
     hd = dv.health_detail(dv.current())
     assert hd.startswith(dv.HEALTH_PREFIX)
