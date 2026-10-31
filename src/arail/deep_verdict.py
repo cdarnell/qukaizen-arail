@@ -1045,6 +1045,16 @@ def _passed_since(f: dict, lp: Any) -> bool:
         return False
 
 
+def passed_after(v: "Verdict", stamp: Any) -> bool:
+    """True when ``v`` rests on a stored passing probe that started strictly after ``stamp`` (an epoch time).
+
+    The rule ``record_probe`` applies to a stored failure and ``_assemble`` to an in-memory one, for a caller
+    that keeps a record of its own (the model registry's stored health): what was recorded before a passing
+    probe started is superseded by it; what was recorded during or after the probe stands. A verdict that is
+    not ``passing`` supersedes nothing."""
+    return v.state == "passing" and _passed_since({"last_ts": stamp}, v.last_probe)
+
+
 def _assemble(b: Optional[Binary], doc: Optional[dict], store_err: Optional[str], changed: bool) -> Verdict:
     write_err = _P.write_error
     if store_err is not None:

@@ -703,6 +703,34 @@ def test_qa6_passed_since_says_yes_only_for_a_passing_probe_that_started_strictl
 def test_qa6_passed_since_says_yes_for_a_passing_probe_that_started_later():
     assert dv._passed_since({"last_ts": 1.0}, {"outcome": "pass", "started_ts": 2.0}) is True
 
+# ── QA-7 (fix pass 3): passed_after, the one rule a record kept elsewhere is judged by ─────────────
+
+def _verdict(state: str, last_probe) -> dv.Verdict:
+    return dv.Verdict(state=state, binary=None, detail="", since=None, source=None, failure=None,
+                      last_probe=last_probe, binary_changed_on_disk=False, store_error=None)
+
+
+PASS_AT_2000 = {"outcome": "pass", "started_ts": 2000.0}
+
+
+@pytest.mark.parametrize("stamp,want", [(1000.0, True), (1999.5, True), (2000.0, False), (2500.0, False),
+                                        (None, False), ("soon", False), (float("nan"), False)],
+                         ids=["older", "just older", "same instant", "newer", "none", "text", "NaN"])
+def test_qa7_passed_after_is_true_only_for_a_record_older_than_the_passing_probe(stamp, want):
+    assert dv.passed_after(_verdict("passing", PASS_AT_2000), stamp) is want
+
+
+@pytest.mark.parametrize("state", ["failing", "untested"])
+def test_qa7_a_verdict_that_is_not_passing_supersedes_nothing(state):
+    """A failing verdict can still carry a passing last_probe (a failure landed during the run and stands)."""
+    assert dv.passed_after(_verdict(state, PASS_AT_2000), 1000.0) is False
+
+
+def test_qa7_a_passing_verdict_without_a_usable_probe_supersedes_nothing():
+    assert dv.passed_after(_verdict("passing", None), 1000.0) is False
+    assert dv.passed_after(_verdict("passing", {"outcome": "pass"}), 1000.0) is False
+    assert dv.passed_after(_verdict("passing", {"outcome": "fail", "started_ts": 2000.0}), 1000.0) is False
+
 # ── U5: a failure persists, other processes see it, a later success does not clear ──
 
 def test_u5_a_failure_persists_and_another_process_sees_it(fake_deep):

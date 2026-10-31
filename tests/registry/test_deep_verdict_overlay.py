@@ -9,6 +9,7 @@ runtime whose weights are in memory.
 from __future__ import annotations
 
 import sys
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -291,3 +292,116 @@ def test_h12_a_genuinely_unhealthy_entry_is_not_touched_by_the_refresh(env):
     env.reg.report_failure(TIER1_ID, RuntimeError("some other failure"))
     st = tier1_state(env.reg)
     assert st["health"]["status"] == "unhealthy" and "some other failure" in st["health"]["detail"]
+
+
+# ── QA-7 (fix pass 3): a failed deep call's raw stored record does not outlive the probe that cleared deep ──
+# complete_preferring_deep, Resolution.router and the binding's two wrappers all store the raw
+# "unhealthy: RuntimeError: ..." through report_failure. It carries no overlay prefix, so the refresh used to
+# leave it until someone pressed Check. Fixed at the read, not at those four sources: the read covers every
+# source, and a source's own record (a visible degradation line) is not wrong, only stale after the pass.
+
+RAW = "RuntimeError: [rms_norm] has 1 elements"
+
+
+def stored_unhealthy(env, checked_at: float, detail: str = RAW, status: str = "unhealthy"):
+    env.tier1.health = reg_core.HealthState(status=status, checked_at=checked_at, detail=detail)
+
+
+def pass_started_at(env, started_ts: float) -> None:
+    ok, err = dv.record_probe(probe_result(env.b, "pass", passed=5, started_ts=started_ts))
+    assert ok, err
+    assert dv.current().state == "passing"
+
+
+@pytest.fixture
+def probes(monkeypatch):
+    """Count the residency probes the registry runs; each returns a fresh `cold` health stamped now."""
+    calls = []
+
+    def counting(entry):
+        calls.append(entry.id)
+        return reg_core.HealthState(status="cold", checked_at=time.time(), detail="ready to load on first deep call")
+
+    monkeypatch.setattr(health, "probe_entry", counting)
+    return calls
+
+
+def test_qa7_a_raw_failure_recorded_before_the_pass_is_re_probed_by_every_read_path(env):
+    fail(env)
+    env.reg.report_failure(TIER1_ID, RuntimeError("[rms_norm] has 1 elements"))     # what a failed deep call stores
+    env.reg.bind("reasoning", TIER1_ID)
+    assert env.reg.resolve("reasoning").entry.id != TIER1_ID, "while deep fails, reasoning falls back"
+    pass_started_at(env, dv._now() + 1)
+    res = env.reg.resolve("reasoning")                                  # the binding path (_gate_reason), no Check
+    assert res.entry.id == TIER1_ID and res.fallback is None, res.fallback
+    assert tier1_state(env.reg)["health"]["status"] == "cold"
+
+
+def test_qa7_the_re_probe_runs_once_per_clear_not_once_per_read(env, probes):
+    stored_unhealthy(env, checked_at=1000.0)
+    pass_started_at(env, 1050.0)
+    for _ in range(5):
+        assert tier1_state(env.reg)["health"]["status"] == "cold"
+    assert probes == [TIER1_ID], "one probe for the clear, none for the four reads after it"
+
+
+def test_qa7_a_re_probe_that_finds_another_problem_is_not_repeated_either(env, monkeypatch):
+    calls = []
+
+    def still_unhealthy(entry):
+        calls.append(1)
+        return reg_core.HealthState(status="unhealthy", checked_at=time.time(),
+                                    detail="aerollm_api wheel not installed (./arailctl deep install)")
+
+    monkeypatch.setattr(health, "probe_entry", still_unhealthy)
+    stored_unhealthy(env, checked_at=1000.0)
+    pass_started_at(env, 1050.0)
+    for _ in range(5):
+        assert "wheel not installed" in tier1_state(env.reg)["health"]["detail"]
+    assert len(calls) == 1, "whatever the one probe found, the next four reads leave it alone"
+
+
+@pytest.mark.parametrize("checked_at,why", [(2000.0, "recorded after the probe started"),
+                                            (1050.0, "recorded at the instant the probe started")])
+def test_qa7_a_failure_recorded_during_or_after_the_pass_is_left_alone(env, probes, checked_at, why):
+    stored_unhealthy(env, checked_at=checked_at, detail="RuntimeError: the model build failed")
+    pass_started_at(env, 1050.0)
+    for _ in range(3):
+        st = tier1_state(env.reg)["health"]
+        assert st["status"] == "unhealthy" and "the model build failed" in st["detail"], why
+    assert probes == []
+
+
+def test_qa7_an_unhealthy_entry_with_no_passing_probe_is_not_probed_on_reads(env, probes):
+    stored_unhealthy(env, checked_at=1000.0)
+    assert dv.current().state == "untested"
+    for _ in range(3):
+        assert tier1_state(env.reg)["health"]["status"] == "unhealthy"
+    assert probes == []
+
+
+def test_qa7_a_missing_model_dir_is_not_probed_on_every_read(env, probes):
+    stored_unhealthy(env, checked_at=1000.0, status="not_installed", detail="model dir missing: lab/models/x")
+    pass_started_at(env, 1050.0)
+    for _ in range(3):
+        assert tier1_state(env.reg)["health"]["status"] == "not_installed"
+    assert probes == []
+
+
+def test_qa7_only_the_in_process_deep_entry_is_refreshed(env, probes):
+    tier0 = env.reg.entries["tier0-local"]
+    tier0.health = reg_core.HealthState(status="unhealthy", checked_at=1000.0, detail="HTTP 500 from the server")
+    pass_started_at(env, 1050.0)
+    assert next(e for e in env.reg.to_state()["entries"] if e["id"] == "tier0-local")["health"]["status"] == "unhealthy"
+    env.tier1.enabled = False
+    stored_unhealthy(env, checked_at=1000.0)
+    env.reg.to_state()
+    assert probes == []
+
+
+def test_qa7_the_re_probe_is_a_residency_check_and_never_generates(env):
+    stored_unhealthy(env, checked_at=1000.0)
+    pass_started_at(env, 1050.0)
+    before = len(env.fd.gen_calls())
+    assert tier1_state(env.reg)["health"]["status"] == "cold"
+    assert len(env.fd.gen_calls()) == before

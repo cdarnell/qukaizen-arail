@@ -563,7 +563,13 @@ written as `\uXXXX` escapes, which a program reads back as the same characters.
 tier-1 health of the model registry (status bar dot, degradation banner,
 switcher), the background agents and the World Curator (they use the fast
 model while deep is failing, and say why), the "deep model loaded" lines at
-boot, and `deep status`.
+boot, and `deep status`. When a probe passes, a tier-1 `unhealthy` the registry
+stored *before that probe started* (a failed deep call's own record, or the
+text stored while deep was failing) is re-checked the next time the registry is
+read, so the status-bar dot turns green without pressing Check. The re-check
+asks whether the weights are resident and never generates. A tier-1 failure
+recorded during or after the probe, and a missing model folder, are left as
+they are.
 
 **What the Models "Check" button does.** It re-reads this record and whether
 the weights are resident. It never generates, and it never clears a failure.

@@ -147,14 +147,34 @@ def _deep_overlay(entry: ModelEntry) -> Optional[HealthState]:
 
 
 def _refresh_cleared_overlay(entry: ModelEntry) -> None:
-    """A stored ``unhealthy`` that carries the overlay's own text, once the verdict
-    no longer fails, is re-probed so the dot turns green without a Check."""
+    """Re-probe a stored ``unhealthy`` that a passing deep probe has superseded, so the dot turns green
+    without a Check. Called on a read, and only when the overlay is not in force (the verdict does not fail).
+
+    Two kinds of stored ``unhealthy`` go stale when the verdict clears:
+
+    - the overlay's own text (``HEALTH_PREFIX``), stored while the verdict failed (a Check, a warm, the
+      opt-in loop); and
+    - what a failed deep call stored raw through ``report_failure`` (``RuntimeError: ...``, from
+      ``complete_preferring_deep``, ``Resolution.router`` and the binding's two wrappers). That carries no
+      prefix, so it stayed until someone pressed Check while explain() and the probe already said deep was
+      cleared (QA-7). It is recognised by its age: recorded before the stored passing probe *started*, the
+      rule the verdict applies to a failure itself (``deep_verdict.passed_after``). An entry that went
+      unhealthy for another reason after the pass, or one that is ``not_installed`` (a missing model dir),
+      is not touched.
+
+    The re-probe stores a fresh health, stamped now, which is later than that probe's start, so it runs once
+    per clear and not once per read. It is a residency check and never generates (R5).
+    """
     if entry.provider_type != "aerollm" or not entry.enabled:
         return
     try:
+        if entry.health.status != "unhealthy":
+            return
         from arail import deep_verdict
-        if (entry.health.status == "unhealthy"
-                and entry.health.detail.startswith(deep_verdict.HEALTH_PREFIX)):
+        stale = (entry.health.detail.startswith(deep_verdict.HEALTH_PREFIX)
+                 or deep_verdict.passed_after(deep_verdict.current(import_if_needed=False),
+                                              entry.health.checked_at))
+        if stale:
             from arail.registry.health import probe_entry
             entry.health = probe_entry(entry)
     except Exception:  # noqa: BLE001
