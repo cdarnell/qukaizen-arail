@@ -691,8 +691,8 @@ install_accel_deps() {
             fi
         fi
     else
-        info "QueueLLM auto-build is Apple-Silicon-only today; on this host run"
-        info "  ./arailctl deep rebuild  once QueueLLM supports it (CUDA backend WIP)."
+        info "QueueLLM has no build for this host yet (it is Apple-Silicon-only today); the lab"
+        info "runs without the 2nd inference. AirLLM is opt-in: ARAIL_INSTALL_AIRLLM=1."
     fi
 }
 
