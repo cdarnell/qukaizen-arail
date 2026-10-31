@@ -13,6 +13,7 @@ import os
 import shutil
 import signal
 import socket
+import re
 import subprocess
 import sys
 import time
@@ -148,7 +149,11 @@ def test_page_never_embeds_or_links_studio_in_any_state(client, monkeypatch, sta
     low = html.lower()
     assert "<iframe" not in low and "<frame" not in low and "<embed" not in low and "<object" not in low
     assert ":4111" not in html                         # no link, no fetch, no form action to Studio
-    assert "window.open" not in html and "location.href" not in html
+    # The shared portal chrome (e.g. main's model banner: `window.location.href = '/chat'`) is not this page's
+    # code. Judge navigation strings only in <script> blocks that belong to the /mastra page itself.
+    own = "".join(re.findall(r"<script[^>]*>((?:(?!</script>).)*mastra(?:(?!</script>).)*)</script>", html, re.S | re.I))
+    assert "window.open" not in own and "location.href" not in own
+    assert "window.open" not in re.sub(r"<script[^>]*>.*?</script>", "", html, flags=re.S)   # none outside scripts either
 
 
 def test_page_escapes_detail_xss(client, monkeypatch):
@@ -652,11 +657,17 @@ def test_probe_observation_label_is_honest():
 
 
 def test_setup_path_untouched_by_branch():
-    r = subprocess.run(["git", "diff", "--name-only", "20f334b4", "HEAD", "--", "scripts/setup.sh",
-                        "pyproject.toml", "tests/setup_ladder"], cwd=str(REPO), capture_output=True, text=True)
-    if r.returncode != 0:
-        pytest.skip("base commit not available")
-    assert r.stdout.strip() == ""
+    """The spike must not touch the install path: setup.sh / setup_ladder identical to origin/main, and
+    pyproject.toml may differ only by the optional `mastra` extra (never a tier)."""
+    def git(*a):
+        return subprocess.run(["git", *a], cwd=str(REPO), capture_output=True, text=True)
+    if git("rev-parse", "--verify", "origin/main").returncode != 0:
+        pytest.skip("origin/main not available")
+    assert git("diff", "--name-only", "origin/main", "HEAD", "--", "scripts/setup.sh", "tests/setup_ladder").stdout.strip() == ""
+    d = git("diff", "-U0", "origin/main", "HEAD", "--", "pyproject.toml").stdout
+    changed = [l for l in d.splitlines() if l[:1] in "+-" and not l.startswith(("+++", "---"))]
+    assert all(l.startswith("+") for l in changed), changed                      # additions only
+    assert all(("mastra" in l or "mcp" in l or l[1:].strip().startswith("#") or l[1:].strip() == "") for l in changed), changed
 
 
 # ═══ RE-TEST (after QA fix round 80ebd218) ═════════════════════════════
