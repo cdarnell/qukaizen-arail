@@ -1,15 +1,15 @@
 Deep honest check. Token-free: local only, nothing installed, nothing downloaded.
 python /Users/netsushi/ProJects/qukaizen-arail/.venv/bin/python
 checkout /Users/netsushi/ProJects/.claude/worktrees/sprint-command-error-060a85/arail-deep-wt
-scratch /private/tmp/claude-501/-Users-netsushi-ProJects--claude-worktrees-sprint-command-error-060a85/b8dbbfe8-4399-41ee-b2d5-83e731cff931/scratchpad/build-deep/tmp/arail-deep-honest.TgbauI (removed at the end)
+scratch /private/tmp/claude-501/-Users-netsushi-ProJects--claude-worktrees-sprint-command-error-060a85/b8dbbfe8-4399-41ee-b2d5-83e731cff931/scratchpad/build-fix/tmp/arail-deep-honest.lZFpBi (removed at the end)
 
 running W0 preflight ...
 
 W0  preflight: what is installed and what the model folder holds  [PASS]
       scratch .env holds only: AEROLLM_KV_BUDGET_PCT, AEROLLM_MODEL, ARAIL_MODELS_DIR, LAB_TIER
       aerollm_api resolves to /Users/netsushi/ProJects/qukaizen-arail/.venv/lib/python3.11/site-packages/aerollm_api/__init__.py
-      site-packages: /Users/netsushi/ProJects/qukaizen-arail/.venv/lib/python3.11/site-packages (11 aerollm or queuellm files recorded, 455 top-level entries)
-      QueueLLM checkout: /Users/netsushi/ProJects/qukaizen-queuellm, HEAD e730d5fe3f6b, working tree clean
+      site-packages: /Users/netsushi/ProJects/qukaizen-arail/.venv/lib/python3.11/site-packages. Recorded for W8 to compare: every aerollm or queuellm file in it (size, mtime and sha256) and the whole top-level listing
+      QueueLLM checkout: /Users/netsushi/ProJects/qukaizen-queuellm, HEAD e6346967e537, working tree clean
       [ok  ] the code under test is this checkout: /Users/netsushi/ProJects/.claude/worktrees/sprint-command-error-060a85/arail-deep-wt/src/arail/__init__.py
       [ok  ] aerollm_api resolves, without importing it: /Users/netsushi/ProJects/qukaizen-arail/.venv/lib/python3.11/site-packages/aerollm_api/aerollm_api.abi3.so
       [ok  ] the model folder exists: /Users/Shared/models/Qwen2.5-7B-Instruct-4bit
@@ -51,7 +51,7 @@ W2  background agents, five calls (Buddy 2, debt advisor 2, consolidation analyz
       call 3, debt_advisor: error [stamped deep_failing] then error [stamped deep_failing]; the agent got no text
       call 4, debt_advisor: error [stamped deep_failing] then error [stamped deep_failing]; the agent got no text
       call 5, consolidation_analyzer: error [stamped deep_failing] then error [stamped deep_failing]; the agent got no text
-      the fast model did not answer (HTTPError). Tier 0 is pointed at a model name that does not exist, on purpose: it answers nothing and Ollama never loads one of yours
+      the fast model did not answer (HTTPError). The fast tier is pointed at a model name that does not exist, on purpose: it answers nothing and Ollama never loads one of yours
       [ok  ] deep calls: call 1 answered, call 2 failed, calls 3 to 5 did not try deep: attempted 2, failed 1
       [ok  ] call 1 was one deep call that answered: 1 trace record(s): ok
       [ok  ] call 2's first trace is the deep failure: error
@@ -96,7 +96,7 @@ W4  Curator grow of the same World  [PASS]
       [ok  ] the state is not_applied: not_applied
       [ok  ] terms.json, manifest.json and evolution.json are unchanged: changed: none
       [ok  ] no 'evolved via' line in the activity log: 0 line(s) say it
-      [ok  ] its own call count matches the backend's: Curator 7/6, backend 7/6
+      [ok  ] its own call count matches the backend's: the Curator said attempted 7, failed 6; the backend counted attempted 7, failed 6
       [ok  ] explain(foreground=True): deep_failing: deep generation is failing on this build (QueueLLM 0.1.0-rc.2, sha256 d62e1e16e93c): a ...
       [ok  ] explain(foreground=False): deep_failing: deep generation is failing on this build (QueueLLM 0.1.0-rc.2, sha256 d62e1e16e93c): a ...
       [ok  ] GET /api/research/status (truth strip): HTTP 200, reason_code=deep_failing, eligible_now=False
@@ -166,7 +166,7 @@ running W8 postflight ...
 W8  postflight: nothing of the operator's changed  [PASS]
       [ok  ] the aerollm and queuellm files in site-packages are identical to W0's: changed: none
       [ok  ] the top-level site-packages listing is identical: added or removed: none
-      [ok  ] the QueueLLM checkout (HEAD and working tree) is identical: e730d5fe3f6b, tree clean
+      [ok  ] the QueueLLM checkout (HEAD and working tree) is identical: e6346967e537, tree clean
       [ok  ] src/dac_world is byte-identical to 62d5ebdf: identical
       [ok  ] no probe child process is left: left: none
 
@@ -337,8 +337,8 @@ W4  Curator grow of the same World
 
 W5  ./arailctl deep probe --json on a fresh state folder
     deep calls attempted = 5
-        what it is: deep (QueueLLM) generation calls the row's consumers made in the row's own fresh
-            process, counted by ARAIL's per-process deep counters, not by this script
+        what it is: calls the probe made in its own fresh process, as the probe reports them in its
+            JSON (total); this script copies that number, it does not count it
         the bar and why: 5: the probe makes five sequential calls in one fresh process (its bar and
             its reason are in the probe's own output)
         out of range: more than the bar: ARAIL kept calling a build it already knew was failing, so
@@ -347,7 +347,8 @@ W5  ./arailctl deep probe --json on a fresh state folder
         the fault lives in: ARAIL: the gate (deep_policy.explain) and the backend hook
             (router/backends.py), not QueueLLM
     deep calls failed = 4
-        what it is: of those calls, the ones that raised an error or returned no text
+        what it is: of those calls, the ones that did not answer, as the probe reports them in its
+            JSON (total minus passed)
         the bar and why: 4: calls 2 to 5, as in DAY1.json. The probe must exit 1 and record it
         out of range: fewer than the bar: the wheel behaves differently from DAY1.json (re-baseline
             it) or an error was swallowed before it was counted. more: a new fault, such as call 1
@@ -444,7 +445,7 @@ RESULT
         the run
     the fault lives in: the row's check lines say which surface; the code of that surface
 
-total time 60 s
+total time 58 s
     what it is: wall time of the whole check, from the first row to the last
     the bar and why: under 5 minutes: nine rows, and the longest are the model loads and the probe
         (the first two live runs took 64 s and 141 s)
