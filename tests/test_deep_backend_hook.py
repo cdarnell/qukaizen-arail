@@ -14,7 +14,7 @@ import pytest
 
 from arail import agent_context
 from arail import deep_verdict as dv
-from arail.router.backends import _DeepBackendClosed
+from arail.router.backends import CLOSED_BY_ARAIL, _NOT_A_RUNTIME_FAULT, _DeepBackendClosed
 from tests.fakes.fake_deep_runtime import BUG_FRAGMENT, fake_deep  # noqa: F401  (fixture)
 from tests.test_deep_verdict import probe_result, read_store, store_path
 
@@ -115,7 +115,11 @@ def test_b6_a_call_after_close_is_arails_own_teardown_not_a_binary_failure(fake_
     with pytest.raises(_DeepBackendClosed) as ei:
         be.complete("two")
     assert isinstance(ei.value, RuntimeError), "a caller that caught the old RuntimeError still does"
-    assert "closed" in str(ei.value) and "Load it again" in str(ei.value)
+    # Review M2: "Load it again" was true only after an Eject. After a model switch the new model is already
+    # loaded, and at lab shutdown no step applies; "run it again once it is loaded" is true in all three.
+    assert "closed" in str(ei.value)
+    assert str(ei.value).endswith("Run it again once the deep model is loaded.")
+    assert "Load it again" not in str(ei.value)
     assert dv.current().state == "untested", "no false claim about the binary on any surface"
     assert dv.counters() == {"ok": 1, "failed": 0}
     assert not store_path().exists()
@@ -227,6 +231,13 @@ def test_b8_an_interruption_or_arails_own_teardown_is_not_filed_and_is_reraised_
     assert ei.value is boom, "the same object that was raised"
     assert dv.current().state == "untested" and dv.counters() == {"ok": 1, "failed": 0}
     assert not store_path().exists()
+
+
+def test_v1_the_hook_and_the_curator_share_one_definition_of_closed_by_arail():
+    """The Curator's counting wrapper reads CLOSED_BY_ARAIL (portal/world_routes.py) to say "the deep model
+    was closed during the pass" instead of blaming the runtime; the hook leaves the same two unfiled."""
+    assert set(CLOSED_BY_ARAIL) == {concurrent.futures.CancelledError, _DeepBackendClosed}
+    assert set(_NOT_A_RUNTIME_FAULT) == set(CLOSED_BY_ARAIL) | {KeyboardInterrupt, SystemExit, GeneratorExit}
 
 
 def test_b5_health_check_is_false_while_failing(fake_deep):

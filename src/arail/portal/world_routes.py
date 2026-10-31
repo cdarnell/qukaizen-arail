@@ -44,6 +44,7 @@ from arail import world_forge as wf
 from arail import world_mount as wm
 from arail.activity import activity_log
 from arail.portal import scheduler
+from arail.router.backends import CLOSED_BY_ARAIL
 from arail.world_theme import parse_world_theme
 
 _log = logging.getLogger(__name__)
@@ -165,6 +166,12 @@ class _CountedRouter:
     ``RuntimeError`` from the original, which ``dac_world`` does skip. An interruption
     (``KeyboardInterrupt``, ``SystemExit``, ``GeneratorExit``) is not a call that failed and passes
     through untouched (review B1 of sprint 2026-10-29-arail-deep-honest).
+
+    A call can also fail because ARAIL closed the model under it (Eject, a deep-model switch, lab
+    shutdown: ``CLOSED_BY_ARAIL``). It is still a failed call, so the pass is still partial or not
+    applied, but it is also counted in ``closed``, because the fault is not in the deep runtime and
+    the report must not say it is (review V1). ``first_error`` is the first failure that was not
+    one of those, so a report that blames the runtime quotes a real error.
     """
 
     def __init__(self, inner: Any) -> None:
@@ -172,13 +179,23 @@ class _CountedRouter:
         self._lock = threading.Lock()
         self.attempted = 0
         self.failed = 0
+        self.closed = 0
         self.first_error: Optional[str] = None
+        self._first_error_closed = False
 
-    def _note_failure(self, text: str) -> None:
+    def _note_failure(self, text: str, *, closed: bool = False) -> None:
         with self._lock:
             self.failed += 1
-            if self.first_error is None:
+            if closed:
+                self.closed += 1
+            if self.first_error is None or (self._first_error_closed and not closed):
                 self.first_error = text
+                self._first_error_closed = closed
+
+    @property
+    def all_closed(self) -> bool:
+        """True when at least one call failed and every call that failed was closed by ARAIL."""
+        return self.failed > 0 and self.closed == self.failed
 
     def complete(self, *args: Any, **kwargs: Any) -> Any:
         with self._lock:
@@ -186,7 +203,7 @@ class _CountedRouter:
         try:
             resp = self._inner.complete(*args, **kwargs)
         except Exception as e:  # noqa: BLE001 - counted here, then re-raised unchanged
-            self._note_failure(f"{type(e).__name__}: {str(e)[:160]}")
+            self._note_failure(f"{type(e).__name__}: {str(e)[:160]}", closed=isinstance(e, CLOSED_BY_ARAIL))
             raise
         except (KeyboardInterrupt, SystemExit, GeneratorExit):
             raise
@@ -220,6 +237,17 @@ def _plural(n: int, word: str) -> str:
     return f"{n} {word}{'' if n == 1 else 's'}"
 
 
+# What a report says when every call it lost ended because ARAIL closed the model. It does not say the
+# fault is in the deep runtime and it does not send the person to ./arailctl deep probe: neither is true,
+# and the verdict is untouched (review V1 of sprint 2026-10-29-arail-deep-honest).
+_CLOSED_PASS = "The deep model was closed during the pass (Eject or a model switch). Run the pass again."
+
+
+def _clip(error: "Optional[str]") -> str:
+    """An error text cut to 160 characters, without a closing full stop (a report adds its own)."""
+    return (error or "no error text")[:160].rstrip().rstrip(".")
+
+
 def _skip_note(skip: "Optional[tuple[str, str]]", label: str) -> str:
     if not skip:
         return ""
@@ -247,7 +275,9 @@ _CURATOR_TEACHING: dict = {
         "meaning": "judge calls that raised an error or returned no text",
         "threshold": "0, because every failed call is a term nobody judged",
         "out_of_range": "above 0: the review is partial or failed, and an old 'All clear' would have been false",
-        "failure_lives_in": "the model that judged, not the World; for QueueLLM run ./arailctl deep probe",
+        "failure_lives_in": "the model that judged, not the World; for QueueLLM run ./arailctl deep probe, "
+                            "unless the message says the deep model was closed during the pass (Eject or a "
+                            "model switch): then run the pass again",
     },
     "reviewed_count": {
         "meaning": "terms the review actually judged; equal to judged, kept for older readers",
@@ -269,7 +299,9 @@ _CURATOR_TEACHING: dict = {
                      "is complete only when every call answers",
         "out_of_range": "above 0: a growth pass is not applied (the World is unchanged: no reseal, no swap, "
                         "no evolution entry); a forge draft is still shown but is incomplete",
-        "failure_lives_in": "the model that ran it (the deep runtime when QueueLLM ran it), not the World",
+        "failure_lives_in": "the model that ran it (the deep runtime when QueueLLM ran it), not the World; "
+                            "or, when the message says the deep model was closed during the pass, the Eject or "
+                            "model switch that closed it",
     },
     "added": {
         "meaning": "new terms the last applied growth pass added",
@@ -311,7 +343,7 @@ def _with_teaching(doc: dict) -> dict:
 
 def _review_report(display: str, *, planned: int, judged: int, failed: int, flags: int, label: str,
                    deep: bool, error: "Optional[str]", cancelled: bool,
-                   skip: "Optional[tuple[str, str]]") -> "tuple[str, str, str]":
+                   skip: "Optional[tuple[str, str]]", all_closed: bool = False) -> "tuple[str, str, str]":
     """``(outcome, level, message)`` for one review. The wording is the architecture's C8."""
     complete = failed == 0 and judged == planned and not cancelled
     if complete:
@@ -327,8 +359,11 @@ def _review_report(display: str, *, planned: int, judged: int, failed: int, flag
     parts = [f"Curator review of '{display}' {verb}: {judged} of {planned} terms judged.",
              f"A full review judges all {planned}; the {unjudged} unjudged "
              f"term{'' if unjudged == 1 else 's'} have no flags, so their silence means nothing."]
-    if failed:
-        parts.append(f"{label} failed on {_plural(failed, 'call')}: {(error or 'no error text')[:160]}.")
+    if failed and all_closed:
+        parts.append(f"{label} failed on {_plural(failed, 'call')}.")
+        parts.append(_CLOSED_PASS)
+    elif failed:
+        parts.append(f"{label} failed on {_plural(failed, 'call')}: {_clip(error)}.")
         parts.append("The fault is in the deep runtime, not the World: run ./arailctl deep probe."
                      if deep else "The fault is in the model that judged, not the World.")
     if cancelled:
@@ -337,11 +372,14 @@ def _review_report(display: str, *, planned: int, judged: int, failed: int, flag
 
 
 def _grow_report_not_applied(display: str, *, attempted: int, failed: int, label: str, deep: bool,
-                             error: "Optional[str]", skip: "Optional[tuple[str, str]]") -> str:
-    return (f"Growth pass on '{display}' not applied: {label} failed on {failed} of {attempted} calls "
-            f"({(error or 'no error text')[:160]}). A pass is applied only when every call answers, so the "
-            "World is unchanged: no reseal, no swap, no evolution entry. "
-            + ("Run ./arailctl deep probe." if deep else "Check the model and run it again.")
+                             error: "Optional[str]", skip: "Optional[tuple[str, str]]",
+                             all_closed: bool = False) -> str:
+    cause = "" if all_closed else f" ({_clip(error)})"
+    advice = (_CLOSED_PASS if all_closed
+              else "Run ./arailctl deep probe." if deep else "Check the model and run it again.")
+    return (f"Growth pass on '{display}' not applied: {label} failed on {failed} of {attempted} calls"
+            f"{cause}. A pass is applied only when every call answers, so the "
+            f"World is unchanged: no reseal, no swap, no evolution entry. {advice}"
             + _skip_note(skip, label))
 
 
@@ -1158,7 +1196,7 @@ async def _run_review(bundle_dir: Path, spec: dict, terms: list[dict]) -> None:
         outcome, level, message = _review_report(
             display, planned=planned, judged=judged, failed=counted.failed, flags=len(flags), label=label,
             deep=_is_deep(router_), error=counted.first_error, cancelled=_review_cancel.is_set(),
-            skip=skip)
+            skip=skip, all_closed=counted.all_closed)
         doc = {
             "schema": REVIEW_SCHEMA,
             "world": world,
@@ -1312,7 +1350,7 @@ async def _run_grow(bundle_dir: Path, spec: dict, terms: list[dict], brain: str)
         if counted.failed:
             message = _grow_report_not_applied(
                 display, attempted=counted.attempted, failed=counted.failed, label=label,
-                deep=_is_deep(router_), error=counted.first_error, skip=skip)
+                deep=_is_deep(router_), error=counted.first_error, skip=skip, all_closed=counted.all_closed)
             _grow_state = {"state": "not_applied", "message": message, "calls": calls}
             activity_log.emit("curator", message, "warn")
             return

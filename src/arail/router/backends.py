@@ -1529,16 +1529,22 @@ class _DeepBackendClosed(RuntimeError):
     caller that handled the old "cannot schedule new futures" error handles this one too."""
 
 
+# "Run it again once the deep model is loaded" is true after an Eject (it is not loaded yet), after a
+# model switch (the new one is) and at lab shutdown (no step applies; the lab is going down).
 _CLOSED_MESSAGE = ("the deep model was closed (ejected from Chat, switched, or the lab is shutting "
-                   "down), so this call was not made. Load it again to use it.")
+                   "down), so this call was not made. Run it again once the deep model is loaded.")
 
-# What ends a deep call without saying anything about the binary: the caller was interrupted, ARAIL
-# closed the backend, or `_close()` cancelled a queued call. concurrent.futures.CancelledError is an
-# Exception on 3.11, which is why a cancelled call used to be filed as a failure. Everything else a
-# call raises, BaseException subclasses included (PyO3's PanicException derives from BaseException),
-# is the runtime failing and is filed.
-_NOT_A_RUNTIME_FAULT = (KeyboardInterrupt, SystemExit, GeneratorExit, _FuturesCancelledError,
-                        _DeepBackendClosed)
+# A call that ends because ARAIL closed the backend, not because the model failed: the backend's own
+# error, or a queued call that `_close()` cancelled. concurrent.futures.CancelledError is an Exception
+# on 3.11, which is why a cancelled call used to be filed as a failure. The Curator's counting wrapper
+# (portal/world_routes.py) reads the same tuple, so a pass that lost calls this way says so instead of
+# blaming the deep runtime.
+CLOSED_BY_ARAIL = (_FuturesCancelledError, _DeepBackendClosed)
+
+# What ends a deep call without saying anything about the binary: the caller was interrupted, or ARAIL
+# closed the backend. Everything else a call raises, BaseException subclasses included (PyO3's
+# PanicException derives from BaseException), is the runtime failing and is filed.
+_NOT_A_RUNTIME_FAULT = (KeyboardInterrupt, SystemExit, GeneratorExit) + CLOSED_BY_ARAIL
 
 
 def _note_deep_load(error: object, *, persist: bool) -> None:

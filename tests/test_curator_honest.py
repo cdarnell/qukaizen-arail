@@ -8,6 +8,7 @@ in for the model (the pattern of tests/test_world_growth.py).
 """
 from __future__ import annotations
 
+import concurrent.futures
 import hashlib
 import json
 import re
@@ -24,6 +25,7 @@ from arail import world_mount as wm
 from arail.activity import activity_log
 from arail.portal import world_routes as wr
 from arail.portal.app import app
+from arail.router.backends import _CLOSED_MESSAGE, _DeepBackendClosed
 from tests.fakes.fake_deep_runtime import fake_deep  # noqa: F401  (fixture)
 from tests.world_bundle_builder import make_bundle
 
@@ -52,15 +54,26 @@ class Scripted:
     """A router whose answers are scripted by call number and prompt."""
 
     def __init__(self, *, name: str = "fake-deep", fail_from: int = 0, empty_from: int = 0,
-                 cancel_after: int = 0, cancel_event=None, flag_term: str = "", panic_from: int = 0) -> None:
+                 cancel_after: int = 0, cancel_event=None, flag_term: str = "", panic_from: int = 0,
+                 closed_from: int = 0, cancelled_from: int = 0, closed_calls: tuple = (),
+                 fail_calls: tuple = ()) -> None:
         self.backend_name = name
         self.fail_from, self.empty_from, self.panic_from = fail_from, empty_from, panic_from
+        self.closed_from, self.cancelled_from = closed_from, cancelled_from
+        self.closed_calls, self.fail_calls = closed_calls, fail_calls
         self.cancel_after, self.cancel_event, self.flag_term = cancel_after, cancel_event, flag_term
         self.calls = 0
 
     def complete(self, prompt, max_tokens=0, temperature=0, **kw):
         self.calls += 1
         n = self.calls
+        # ARAIL closed the model under this call (Eject or a model switch), or cancelled it while queued.
+        if n in self.closed_calls or (self.closed_from and n >= self.closed_from):
+            raise _DeepBackendClosed(_CLOSED_MESSAGE)
+        if self.cancelled_from and n >= self.cancelled_from:
+            raise concurrent.futures.CancelledError()
+        if n in self.fail_calls:
+            raise RuntimeError(BUG)
         if self.fail_from and n >= self.fail_from:
             raise RuntimeError(BUG)
         if self.panic_from and n >= self.panic_from:
@@ -490,6 +503,134 @@ def test_c8_counted_router_is_thread_safe():
     [t.start() for t in threads]
     [t.join() for t in threads]
     assert (c.attempted, c.failed) == (800, 800)
+
+
+# ── V1: a pass whose calls ARAIL closed does not blame the deep runtime (review V1) ──────────
+#
+# Eject and a deep-model switch close the backend under a running pass. Those calls fail, so the pass is
+# still partial or not applied, but the verdict is untouched and the deep runtime is not at fault: the
+# report must not say it is, and must not send the person to ./arailctl deep probe.
+
+CLOSED_PASS = "The deep model was closed during the pass (Eject or a model switch). Run the pass again."
+REAL_ERROR = "RuntimeError: backend `mlx-native` failed"
+
+
+def _assert_closed_report(msg: str) -> None:
+    assert CLOSED_PASS in msg
+    for blame in ("The fault is in", "deep probe", "deep runtime"):
+        assert blame not in msg, blame
+    assert ".." not in msg, "no double full stop"
+
+
+@pytest.mark.parametrize("router_kw,first", [({"closed_from": 3}, "_DeepBackendClosed: the deep model was closed"),
+                                             ({"cancelled_from": 3}, "CancelledError")],
+                         ids=["DeepBackendClosed", "CancelledError"])
+def test_v1_a_review_whose_calls_were_closed_by_arail_does_not_blame_the_runtime(world, monkeypatch, client,
+                                                                                 router_kw, first):
+    world.mount(6)
+    monkeypatch.setattr(wr, "_review_router", lambda: Scripted(name="aerollm", **router_kw))
+    st = _review(client)
+    assert st["state"] == "partial" and st["outcome"] == "partial", "still partial: four terms were not judged"
+    assert (st["planned"], st["judged"], st["failed"]) == (6, 2, 4)
+    assert st["deep_error"].startswith(first)
+    assert "Curator review of 'Math World' is partial: 2 of 6 terms judged. " in st["message"]
+    assert "QueueLLM failed on 4 calls. " in st["message"]
+    _assert_closed_report(st["message"])
+    assert _line_with(st["message"])["level"] == "warn"
+
+
+def test_v1_a_grow_pass_whose_calls_were_closed_by_arail_is_not_applied_and_does_not_blame_the_runtime(
+        world, monkeypatch, client):
+    catalog = world.mount(6)
+    before = _digest(catalog)
+    monkeypatch.setattr(wr, "_curation_router", lambda brain: Scripted(name="aerollm", closed_from=2))
+    st = _grow(client)
+    assert st["state"] == "not_applied" and st["calls"]["failed"] >= 1, "a failed call still stops the pass"
+    assert f"Growth pass on 'Math World' not applied: QueueLLM failed on {st['calls']['failed']} of " \
+           f"{st['calls']['attempted']} calls. A pass is applied only when every call answers" in st["message"]
+    assert "no evolution entry. " + CLOSED_PASS in st["message"]
+    _assert_closed_report(st["message"])
+    assert _digest(catalog) == before and not (catalog / "evolution.json").exists()
+
+
+def test_v1_one_real_failure_among_closed_calls_keeps_the_probe_advice_and_quotes_the_real_error(
+        world, monkeypatch, client):
+    """The closed call comes first. The report must still quote the failure that is the runtime's."""
+    world.mount(6)
+    monkeypatch.setattr(wr, "_review_router", lambda: Scripted(name="aerollm", closed_calls=(2,), fail_calls=(4,)))
+    st = _review(client)
+    assert st["state"] == "partial" and (st["planned"], st["judged"], st["failed"]) == (6, 4, 2)
+    assert st["deep_error"].startswith(REAL_ERROR)
+    assert f"QueueLLM failed on 2 calls: {REAL_ERROR}" in st["message"]
+    assert "The fault is in the deep runtime, not the World: run ./arailctl deep probe." in st["message"]
+    assert CLOSED_PASS not in st["message"]
+
+
+def test_v1_one_real_failure_among_closed_calls_keeps_the_probe_advice_in_a_grow_pass(world, monkeypatch, client):
+    catalog = world.mount(6)
+    before = _digest(catalog)
+    monkeypatch.setattr(wr, "_curation_router",
+                        lambda brain: Scripted(name="aerollm", closed_calls=(2,), fail_calls=(3,)))
+    st = _grow(client)
+    assert st["state"] == "not_applied" and st["calls"]["failed"] == 2
+    assert f"QueueLLM failed on 2 of {st['calls']['attempted']} calls ({REAL_ERROR}" in st["message"]
+    assert "no evolution entry. Run ./arailctl deep probe." in st["message"]
+    assert CLOSED_PASS not in st["message"]
+    assert _digest(catalog) == before and not (catalog / "evolution.json").exists()
+
+
+@pytest.mark.parametrize("exc", [_DeepBackendClosed(_CLOSED_MESSAGE), concurrent.futures.CancelledError()],
+                         ids=["DeepBackendClosed", "CancelledError"])
+def test_v1_counted_router_counts_a_call_closed_by_arail_as_failed_and_as_closed(exc):
+    class Inner:
+        backend_name = "aerollm"
+
+        def complete(self, *a, **k):
+            raise exc
+
+    counted = wr._CountedRouter(Inner())
+    with pytest.raises(type(exc)) as ei:
+        counted.complete("p")
+    assert ei.value is exc, "re-raised unchanged, so dac_world skips the call as before"
+    assert (counted.attempted, counted.failed, counted.closed, counted.judged) == (1, 1, 1, 0)
+    assert counted.all_closed is True
+
+
+def test_v1_counted_router_closed_is_not_a_real_failure_a_panic_or_an_answer():
+    c = wr._CountedRouter(Scripted(closed_calls=(1,), fail_calls=(2,), empty_from=3))
+    for _ in range(3):
+        try:
+            c.complete("Judge it")
+        except RuntimeError:
+            pass
+    assert (c.attempted, c.failed, c.closed) == (3, 3, 1), "closed, real, and an empty answer"
+    assert c.all_closed is False
+    assert c.first_error.startswith(REAL_ERROR), "the first failure that was not closed"
+    assert wr._CountedRouter(Scripted()).all_closed is False, "no failed call: nothing was closed"
+
+    class Panics:
+        def complete(self, *a, **k):
+            raise Panic("native")
+
+    p = wr._CountedRouter(Panics())
+    with pytest.raises(RuntimeError):
+        p.complete("x")
+    assert (p.failed, p.closed, p.all_closed) == (1, 0, False), "a panic is the runtime failing"
+
+
+def test_v1_a_report_does_not_double_the_full_stop_of_an_error_that_ends_with_one():
+    _o, _l, review = wr._review_report("W", planned=6, judged=2, failed=4, flags=0, label="QueueLLM", deep=True,
+                                       error="RuntimeError: it broke. ", cancelled=False, skip=None)
+    assert "QueueLLM failed on 4 calls: RuntimeError: it broke. The fault is in the deep runtime" in review
+    assert ".." not in review
+    grow = wr._grow_report_not_applied("W", attempted=7, failed=3, label="QueueLLM", deep=True,
+                                       error="RuntimeError: it broke.", skip=None)
+    assert "failed on 3 of 7 calls (RuntimeError: it broke). A pass is applied" in grow and ".." not in grow
+
+
+def test_v1_the_teaching_for_failed_calls_names_the_closed_case():
+    for key in ("failed", "calls.failed"):
+        assert "closed during the pass" in wr._CURATOR_TEACHING[key]["failure_lives_in"], key
 
 
 # ── C9 / TQ3: every number is taught ───────────────────────────────────────
