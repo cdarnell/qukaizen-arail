@@ -335,19 +335,59 @@ def test_u8_unwritable_store_is_failing_in_process_with_store_error(fake_deep, t
 # ── U9: concurrent writers keep an exact count ─────────────────────────────
 
 def test_u9_eight_processes_fifty_writes_each_keep_an_exact_count(fake_deep):
+    """The claim is the lock: every write by every process lands, so the count is exactly 400.
+
+    The store gives up on the lock after LOCK_TIMEOUT_S (2 s) and keeps that failure in memory, by design
+    (test_u9b). On a loaded machine that cap is not the thing under test: it lost 31 of 400 writes at load
+    average 13 (review M7), and 117 and 124 of 400 in two runs with 150 busy processes and this test at
+    background priority. So the writers here wait as long as the machine needs; a lost write can then only
+    be a defect of the lock, and the test still fails if the lock is removed."""
     fd = fake_deep()
     code = ("import aerollm_api\nfrom arail import deep_verdict as dv\n"
+            "dv.LOCK_TIMEOUT_S = 240.0\n"
             "for _ in range(50):\n    dv.note_call(False, error='p', consumer='agent:t')\n")
     procs = [subprocess.Popen([sys.executable, "-c", code], env=fd.env(),
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
              for _ in range(8)]
-    for p in procs:
-        out, err = p.communicate(timeout=180)
-        assert p.returncode == 0, err
+    try:
+        for p in procs:
+            out, err = p.communicate(timeout=300)
+            assert p.returncode == 0, err
+    finally:
+        for p in procs:                     # a writer left running would outlive a failed test
+            if p.poll() is None:
+                p.kill()
     doc = read_store()
     entry = doc["binaries"][fd.sha256]
     assert entry["failure"]["count"] == 400
     assert doc["schema"] == "arail.deep-verdict/v1"
+
+
+def test_u9b_a_lock_held_past_the_cap_keeps_the_failure_in_memory_and_says_so(fake_deep, monkeypatch):
+    """The cap U9 raises, pinned directly: a writer does not wait for ever on a lock another process holds. The
+    failure is kept in this process, the verdict says failing, and store_error says why; nothing is written. The
+    next write after the lock is released lands. (Before review M7 only a loaded machine exercised this.)"""
+    import fcntl
+    import os
+    fake_deep()
+    b = dv.identity()
+    state = dv.state_dir()
+    state.mkdir(parents=True, exist_ok=True, mode=0o700)
+    monkeypatch.setattr(dv, "LOCK_TIMEOUT_S", 0.3)
+    held = os.open(state / "verdict.lock", os.O_RDWR | os.O_CREAT, 0o600)
+    fcntl.flock(held, fcntl.LOCK_EX)
+    try:
+        dv.note_call(False, error="while the lock is held", consumer="agent:t")
+        v = dv.current()
+        assert v.state == "failing", "the failure is not lost: it is in this process"
+        assert v.store_error and "the verdict lock was busy" in v.store_error
+        assert not store_path().exists(), "nothing could be written"
+    finally:
+        fcntl.flock(held, fcntl.LOCK_UN)
+        os.close(held)
+    dv.note_call(False, error="after the lock is released", consumer="agent:t")
+    assert read_store()["binaries"][b.sha256]["failure"]["count"] >= 1
+    assert dv.current().store_error is None
 
 
 # ── U10: binaries are independent ──────────────────────────────────────────
