@@ -1061,7 +1061,8 @@ def channel(b: Binary, site_dir: Path) -> str:
     build = _read_json(site_dir / "aerollm_api.build.json")
     if build is not None:
         if build.get("artifact_sha256") == b.sha256:
-            dirty = ", dirty tree" if build.get("queuellm_dirty") else ""
+            state = build.get("queuellm_dirty")
+            dirty = ", dirty tree" if state is True else (", tree state unknown" if state is None else "")
             return (f"source build — QueueLLM commit {str(build.get('queuellm_commit') or '?')[:7]}{dirty}, "
                     f"built {build.get('built_at', 'unknown')}")
         reasons.append(f"a source-build marker is present but names a different binary "

@@ -131,6 +131,15 @@ def test_the_channel_is_source_build_only_when_the_build_marker_names_this_file(
                                   "queuellm_dirty": True, "built_at": "2026-10-29T14:00:00Z"}))
     ch = _find(_lines(live_site.site), "channel")
     assert "source build — QueueLLM commit e730d5f, dirty tree, built 2026-10-29T14:00:00Z" in ch
+    marker.write_text(json.dumps({"artifact_sha256": _sha(LIVE_BYTES), "queuellm_commit": "e730d5fe" + "0" * 32,
+                                  "queuellm_dirty": False, "built_at": "2026-10-29T14:00:00Z"}))
+    ch = _find(_lines(live_site.site), "channel")
+    assert "source build — QueueLLM commit e730d5f, built 2026-10-29T14:00:00Z" in ch, "clean says nothing extra"
+    marker.write_text(json.dumps({"artifact_sha256": _sha(LIVE_BYTES), "queuellm_commit": "unknown",
+                                  "queuellm_dirty": None, "built_at": "2026-10-29T14:00:00Z"}))
+    ch = _find(_lines(live_site.site), "channel")
+    assert "source build — QueueLLM commit unknown, tree state unknown, built 2026-10-29T14:00:00Z" in ch, \
+        "a build whose tree state was never known is not shown as clean"
     marker.write_text(json.dumps({"artifact_sha256": "a" * 64}))
     ch = _find(_lines(live_site.site), "channel")
     assert "source-build marker is present but names a different binary" in ch

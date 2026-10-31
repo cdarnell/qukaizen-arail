@@ -269,14 +269,20 @@ cargo_build() {
 
 # The same role as THIRD-PARTY-LICENSES/aerollm/BUNDLE.json: where this binary came from.
 write_build_marker() {  # $1 = site dir, $2 = artifact sha256, $3 = artifact path
-    local commit dirty
+    local commit dirty status
     commit="$(git -C "$AEROLLM_REPO" rev-parse HEAD 2>/dev/null || echo unknown)"
-    if [[ -n "$(git -C "$AEROLLM_REPO" status --porcelain 2>/dev/null)" ]]; then dirty=true; else dirty=false; fi
+    # "clean" is a claim, and a git that fails (not a repository, no git) is no evidence of it: write unknown.
+    if status="$(git -C "$AEROLLM_REPO" status --porcelain 2>/dev/null)"; then
+        if [[ -n "$status" ]]; then dirty=true; else dirty=false; fi
+    else
+        dirty=unknown
+    fi
     "$PY" - "$1/aerollm_api.build.json" "$commit" "$dirty" "$2" "$(wc -c < "$3" | tr -d ' ')" <<'PYMARK'
 import json, sys, time
 path, commit, dirty, sha, size = sys.argv[1:6]
 json.dump({
-    "schema": "arail.aerollm-build/v1", "queuellm_commit": commit, "queuellm_dirty": dirty == "true",
+    "schema": "arail.aerollm-build/v1", "queuellm_commit": commit,
+    "queuellm_dirty": None if dirty == "unknown" else dirty == "true",
     "crate": "crates/aerollm-api", "artifact_sha256": sha, "artifact_bytes": int(size),
     "built_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "built_by": "scripts/build-aerollm.sh",
 }, open(path, "w"), indent=2)

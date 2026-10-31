@@ -143,7 +143,7 @@ class Env:
     def run(self, mode: str, *args: str, **extra) -> subprocess.CompletedProcess:
         env = {**os.environ, "NO_COLOR": "1", "PYTHON": str(self.py), "HOME": str(self.tmp),
                "ARAIL_AEROLLM_REPO": str(self.repo), "ARAIL_DEEP_STATE_DIR": str(self.tmp / "state"),
-               "TMPDIR": str(self.tmpdir),
+               "TMPDIR": str(self.tmpdir), "GIT_CEILING_DIRECTORIES": str(self.tmp),    # a folder is not a repo
                "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}", "FAKE_CARGO_LOG": str(self.cargo_log),
                "FAKE_CARGO_ARTIFACT": str(self.artifact)}
         for k in ("AEROLLM_CHANNEL", "PIP_INDEX_URL", "PIP_EXTRA_INDEX_URL", "AEROLLM_BUNDLE_FILE",
@@ -255,6 +255,16 @@ def test_s5_an_artifact_with_the_metal_error_marker_is_refused(env):
             "Not installed. See QueueLLM docs/self-hosted-runner-setup.md.") in out(r)
     assert env.cargo_ran()
     assert env.listing() == before and not (env.site / "aerollm_api.abi3.so").exists()
+
+
+def test_n4_a_checkout_git_cannot_read_is_not_written_as_clean(env):
+    """Review N4. queuellm_dirty was false when git status failed, which claims a clean tree on no evidence."""
+    env.checkout("aerollm-api", git=False)              # a folder, not a repository
+    env.fake_importer()
+    r = env.run("build")
+    assert r.returncode == 0, out(r)
+    marker = json.loads((env.site / "aerollm_api.build.json").read_text())
+    assert marker["queuellm_commit"] == "unknown" and marker["queuellm_dirty"] is None
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root can read a mode-000 file")
