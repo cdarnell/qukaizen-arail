@@ -269,6 +269,52 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
+_OWN_PROCESS = re.compile(r"deep_honest_win\.py\s+--(?:child|root)\b")      # this driver and its row processes
+
+
+def stray_pids(root: str) -> list:
+    """pids of processes started for this scratch root that are still running. Every row's environment
+    holds ARAIL_DEEP_STATE_DIR=<root>/..., and ps can print the environment of the user's own processes
+    (`-E` on macOS, `e` elsewhere), so that is the marker. A row killed by its deadline leaves its
+    subprocesses in sessions of their own. macOS hides the environment of system binaries such as
+    /bin/bash, so this finds the Python processes (the probe, the portal), which are the ones that hold
+    a model."""
+    flags = "-axEww" if sys.platform == "darwin" else "axeww"
+    try:
+        p = subprocess.run(["ps", flags, "-o", "pid=,command="], capture_output=True, text=True,
+                           errors="replace", timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    marker = "ARAIL_DEEP_STATE_DIR=" + root
+    me = {os.getpid(), os.getppid()}
+    out = []
+    for line in p.stdout.splitlines():
+        parts = line.strip().split(None, 1)
+        if (len(parts) == 2 and parts[0].isdigit() and int(parts[0]) not in me and marker in parts[1]
+                and not _OWN_PROCESS.search(parts[1])):
+            out.append(int(parts[0]))
+    return sorted(out)
+
+
+def reap_strays(root: str) -> list:
+    """End every process stray_pids finds. Returns the pids that were found."""
+    found = stray_pids(root)
+    pids = list(found)
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        for pid in pids:
+            try:
+                os.kill(pid, sig)
+            except (ProcessLookupError, PermissionError):
+                pass
+        deadline = time.monotonic() + 3.0
+        while pids and time.monotonic() < deadline:
+            time.sleep(0.2)
+            pids = [q for q in stray_pids(root) if q in pids]
+        if not pids:
+            break
+    return found
+
+
 def line_with(text: str, needle: str) -> str:
     """The first line that holds ``needle``, else the last line, clipped: what a check saw."""
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
@@ -432,6 +478,8 @@ def run_row(cfg: dict, a: argparse.Namespace, row: str, password: str) -> RowRes
     cmd = [cfg["python"], str(Path(__file__).resolve()), "--child", row, "--config", str(root / "config.json")]
     t0 = time.monotonic()
     rc, out, err, timed_out = run(cmd, env=row_env(cfg, a, row, password), timeout=cfg["row_timeout"], cwd=str(d))
+    if timed_out:
+        reap_strays(str(root))
     (d / "row.log").write_text(out + "\n--- stderr ---\n" + err, encoding="utf-8")
     rp = d / "result.json"
     res: Optional[RowResult] = None
@@ -565,6 +613,7 @@ def orchestrate(a: argparse.Namespace) -> int:
     def _stop(signum: int, _frame: Any) -> None:
         for p in list(_CURRENT):
             kill_group(p)
+        reap_strays(cfg["root"])
         sys.stderr.write("\ninterrupted: the running row was stopped\n")
         raise SystemExit(130)
 
@@ -590,7 +639,13 @@ def orchestrate(a: argparse.Namespace) -> int:
         results.append(res)
         print_row(res)
     total = time.monotonic() - started
+    strays = reap_strays(cfg["root"])
     code, verdict = render_verdict(results, total)
+    if strays:
+        code = 1
+        say("")
+        say("A row left processes running (pid %s). They were ended, and the run counts as failed: a row that "
+            "leaves a process behind has not cleaned up after itself." % ", ".join(str(q) for q in strays))
     for line in render_table(results) + render_teaching(results) + verdict:
         say(line)
     if a.json_out:

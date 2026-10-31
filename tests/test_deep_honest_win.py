@@ -200,6 +200,25 @@ def test_the_manifest_sees_a_changed_byte_a_new_file_and_a_touch(tmp_path):
     assert w.site_manifest(site)[1] != base_l, "a new top-level entry shows in the listing"
 
 
+def test_a_process_started_for_the_scratch_root_is_found_and_ended_and_others_are_spared(tmp_path):
+    root = str(tmp_path / "root")
+    sleeper = [sys.executable, "-c", "import time; time.sleep(60)"]       # macOS hides the env of /bin/sleep
+    marked = subprocess.Popen(sleeper, env=dict(os.environ, ARAIL_DEEP_STATE_DIR=root + "/W5/deep"))
+    other = subprocess.Popen(sleeper, env=dict(os.environ, ARAIL_DEEP_STATE_DIR=str(tmp_path / "other") + "/W5/deep"))
+    try:
+        found = w.stray_pids(root)
+        assert marked.pid in found and other.pid not in found
+        assert marked.pid in w.reap_strays(root)
+        marked.wait(timeout=10)
+        assert other.poll() is None, "a process that belongs to another root is left alone"
+        assert w.stray_pids(root) == []
+    finally:
+        marked.kill()
+        other.kill()
+        marked.wait()
+        other.wait()
+
+
 # ── the wrapper: isolation, the four keys, clean-up, exit codes ───────────────
 
 HELPER = '''
@@ -443,6 +462,15 @@ def test_dry_run_w6_and_w7_need_w5_and_say_so(dry):
     assert run.p.returncode == 1
     for row in ("W6", "W7"):
         assert run.rows[row]["status"] == "INCONCLUSIVE" and "W5 left no verdict" in run.rows[row]["reason"]
+
+
+def test_dry_run_a_row_that_hits_its_deadline_fails_and_leaves_no_process_behind(dry):
+    """hang2: call 2 never returns. The row is stopped at its deadline; the probe it started lives in
+    a session of its own and would run for up to 300 s more if nothing reaped it."""
+    run = run_driver(dry.tree, dry.tmp, "hang", "hang2", "--only", "W5", "--row-timeout", "8")
+    assert run.p.returncode == 1
+    assert run.rows["W5"]["status"] == "FAIL" and "did not finish in 8 s" in run.rows["W5"]["reason"]
+    assert w.stray_pids(str(dry.tmp / "hang")) == [], "a probe or its child is still running"
 
 
 def test_dry_run_a_stopped_w0_stops_the_wheel_rows_but_not_the_postflight(dry, tmp_path):
