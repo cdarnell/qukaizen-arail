@@ -13,9 +13,9 @@ Embed Mastra Studio as an ARAIL surface (like terminal/notebook), not a merge. E
 |---|---|---|---|---|---|---|
 | think | visionary | VISION.md | done | 2026-10-13 | 2026-10-13 | proceed (time-boxed; D1/D2 kill gates first) |
 | plan | architect (design) | ARCHITECTURE.md | done | 2026-10-13 | 2026-10-13 | gates-first design; ledger (a) ExperimentTracker; stdio MCP |
-| build | builder | BUILD_LOG.md | built; one gate open (D1 browser leg INCONCLUSIVE, owner pcap) | 2026-10-13 | — | D1 server PASS; D1 browser INCONCLUSIVE; D2 PASS; ee accepted w/ guard |
+| build | builder | BUILD_LOG.md | done | 2026-10-13 | 2026-10-31 | All gates PASS: D1 server 2026-10-21, D1 browser 2026-10-31 (gates/D1-browser-attribution.md), B0.1 ee guard, D2 |
 | review | architect (review) | REVIEW.md | done | 2026-10-21 | 2026-10-21 | WEAK_PASS, conditional on clean owner D1 browser pcap (else BLOCK); ASKs 1,2,3,4,12 before QA |
-| test | qa | TEST_REPORT.md | done (re-test 2 at f58e2d37) | 2026-10-21 | 2026-10-21 | Re-test 2 FAIL (strict; LOW only): R-1/R-2 fixed live; new R2-1 LOW (CLI stop rc 0 on cannot_verify_identity), R2-2 LOW (reset.sh aborts 127 without lsof); fix or ticket+xfail -> WEAK_PASS; D1 browser pcap owner-pending |
+| test | qa | TEST_REPORT.md | done | 2026-10-21 | 2026-10-31 | WEAK_PASS: QA re-test 2 LOWs R2-1/R2-2 fixed in 8b1c7838 (all 261 spike tests pass, wider suite = 10 known base failures); open follow-ups: uv.lock re-lock (F-8), idle baseline, enterprise-policy proxy assumption |
 | ship | — | PR | pending | — | — | — |
 
 ## Decisions log
