@@ -194,3 +194,145 @@ Reuse the scratch venv at `/private/tmp/claude-501/-Users-netsushi-ProJects--cla
 3. **W1**, in the same pass if possible (delete one block, add one test). If not, file it.
 4. Re-run the new test files. QA compares the full suite with the 127-id baseline.
 5. Re-review covers only the diff of actions 1-3.
+
+## Re-review of the fix pass (2026-10-31)
+
+**Diff reviewed:** `0f2f8d25..d071dc6c` (13 commits, 27 files). `5d79d565` changes only SPRINT.md; I did not review it.
+**How:** I read the code for every finding. I broke each fixed product line in a scratch copy of `d071dc6c` (23 mutations). I ran the 13 test files the pass touched, and 30 test files that reference the changed paths, compared by id with a base copy of `0f2f8d25`. Same scratch venv and pins as the first review. I did not run the live check.
+
+### Verdict: WEAK_PASS
+
+Both blockers are fixed. B1: the verdict now hears runtime faults only, and it hears a native panic. B2: no build-script line tells a user to clone QueueLLM. Every first-review finding in scope is resolved. All 23 mutations fail a new test. There is no new blocker. Four weak points remain (V1 to V4). File them, or fix them in one small commit (each is a few lines).
+
+### Item 1: the first-review findings
+
+| Finding | State | Where, at `d071dc6c` | Evidence |
+|---|---|---|---|
+| B1, the verdict | resolved | `src/arail/router/backends.py:1523-1541` (`_DeepBackendClosed`, `_NOT_A_RUNTIME_FAULT`); `:1910-1915` (worker); `:1922-1925` (closed check); `:1943-1952` (`submit()` outside the `try`, `except BaseException` with the filter) | Mutations 1-6. Scenario 3 (interpreter exit) is covered by the `submit()` move; its test shuts the executor down by hand. |
+| B1, the Curator | resolved, with V1 | `src/arail/portal/world_routes.py:188-196` | Mutations 7, 8. Every `dac_world` call site catches `Exception` (`src/dac_world/reconcile.py:114`, `:140`, `:170`, `:215`; `src/dac_world/forge.py:141`), so the new `RuntimeError` is skipped. My first review named the Curator's blame sentence in scenario 1 but left it out of the fix list; V1 is that sentence. |
+| B2 | resolved | `scripts/build-aerollm.sh:133-137` | Mutation 13. |
+| TD13 | resolved | `src/arail/portal/app.py:2110`, `:8825`, `:10138`; `templates/chat.html:2803`; also `scripts/upgrade.sh:133` (a good extra catch) | Mutations 20, 21. Two more hints remain: V2, V3. |
+| W1 | resolved | `scripts/build-aerollm.sh:510-515` | `verify_loaded` (`:200-219`) puts back both the `.so` and the marker when there was a previous install, and removes both when there was not. The bundle tests are real (a fake importer that refuses a marked `.so`, a tarball the script accepts). Mutation 9. The F5 quarantine hint is gone. That is acceptable: the quarantine strip still runs first, and the generic "import fails" message stays. |
+| W3(a) | resolved | `src/arail/deep_probe.py:514` | Mutation 16. Q8 still passes without the tag check; the new test does not. |
+| W3(b) | resolved | `src/arail/deep_probe.py:407` | Mutation 17. The test holds the pipe's read end open, so EPIPE cannot end the child. |
+| W3(c) | not resolved | `tests/test_no_user_visible_aerollm.py` | Out of the pass's scope. It is still red on base and branch. |
+| W4(a) | resolved | `scripts/deep_honest_win.py:160-167`, `:253` | Mutation 22. |
+| W4(b) | resolved | `scripts/deep_honest_win.py:931-932` | Mutation 23. |
+| W4(c) | resolved | `scripts/deep_honest_win.py:1086-1087` | The dry-run guard checks it. |
+| W4(d) | resolved | `src/arail/deep_verdict.py:846`, `:858`; `src/arail/deep_probe.py:977` | |
+| Legend headings | resolved | `src/arail/deep_probe.py:183-201`, `:235` | Mutation 18 (6 tests fail). |
+| W5 | resolved | `src/arail/portal/app.py:4565` | Mutation 19. |
+| N3 | resolved | `scripts/build-aerollm.sh:249-258` | Mutation 10. Under `set -euo pipefail` the empty check is safe: `poison` is always assigned, and `|| true` keeps the substitution from failing. |
+| N4 | resolved | `scripts/build-aerollm.sh:271-285`; reader `src/arail/deep_verdict.py:1063` | Mutations 11, 12. The `if status="$(…)"` form does not trip `set -e`. `channel()` is the only reader of `queuellm_dirty`, and it no longer treats it as a bool. See M4. |
+| N8 | resolved | `src/arail/deep_probe.py:936-943`, `:969`; `docs/cli.md:501`; the `exit_code` teaching and the usage line | Mutations 14, 15. JSON keeps `outcome: "pass"` with `exit_code: 1` and `verdict_store.written: false`, as the docs say. Nothing else reads the probe's exit code except W5 of the live check, which expects 1 on today's wheel. |
+
+### New findings
+
+**No R (blocker).**
+
+**V1. After an Eject or a model switch mid-pass, the Curator still blames the deep runtime.** `src/arail/portal/world_routes.py:188` counts `_DeepBackendClosed` and `CancelledError` as failed calls (both are `Exception`s). Then `:332` and `:344` add the probe advice. Reproduced: a review whose judge raises `_DeepBackendClosed` from call 3 reports "QueueLLM failed on 4 calls: _DeepBackendClosed: the deep model was closed … Load it again to use it.. The fault is in the deep runtime, not the World: run ./arailctl deep probe." Grow says "not applied … Run ./arailctl deep probe." The verdict is untouched, so nothing is locked. "partial" is correct. The blame sentence and the advice are false, and the operator may run a probe for nothing. Smallest fix: `_CountedRouter` also counts a `_DeepBackendClosed` or `CancelledError` as `closed`. When every failed call is closed, the report says "The deep model was closed during the pass (Eject or a model switch). Run the pass again." Also remove the double period.
+
+**V2. `scripts/setup.sh:695` still sends a user with no checkout to `deep rebuild`.** On every non-Apple host at tier maximus, setup prints "run ./arailctl deep rebuild once QueueLLM supports it (CUDA backend WIP)". A CUDA build would land in the renamed crate, which this ARAIL refuses, and that user has no checkout. This is the TD13 class. Smallest fix: "QueueLLM has no build for this host yet; the lab runs without the 2nd inference (AirLLM is opt-in: ARAIL_INSTALL_AIRLLM=1)." `scripts/upgrade.sh:140-150` already says this well.
+
+**V3. `src/arail/deep_verdict.py:1185` offers "(or: deep rebuild / deep update)" to a user who has nothing installed.** `build-aerollm.sh status` prints it. It names `deep install` first, so it is not false the way B2 was. But neither alternative works for that user today: there is no checkout, or the checkout has the renamed crate, and `deep update` needs private-index credentials. Smallest fix: "(maintainers: deep rebuild needs a pre-rename checkout; deep update needs the private index)". `scripts/setup.sh:689` can take the same words.
+
+**V4. `docs/cli.md` still describes the old `auto` and the old channel line.** `:410-412` says "`auto` picks DEV if the sibling repo is present". Since this sprint, `auto` refuses a renamed or unrecognised checkout and never switches channel. `:426-428` lists `dev | release | bundled | none` for the channel line of `deep status`. It now prints `bundled …`, `source build …`, `pip (…)` or `unknown — <reason>`. `:407` and `README.md:106` are maintainer-scoped and acceptable, but should say "a pre-rename checkout". This staleness comes from the original build; my first review missed it.
+
+**M1.** `src/arail/router/backends.py:1914`: when the runtime is `None` and the backend is not closed, the hook files a binary failure. Production cannot reach this branch: `__new__` hands out only initialised instances, and only `_close()` (which sets `_closed` first) empties `_runtime`. If it were reached, the cause would be ARAIL, not the binary. Low risk. Prefer an error that is not filed, or keep this note.
+
+**M2.** `_CLOSED_MESSAGE` (`src/arail/router/backends.py:1532-1533`) ends "Load it again to use it." That is true after an Eject. After a model switch the new model is already loaded, and the right step is to run the call again. At lab shutdown no step applies. "Run it again once the deep model is loaded" is true in all three cases.
+
+**M3.** `src/arail/agents/deep_policy.py:343-352`: for a `_DeepBackendClosed` or `CancelledError`, `complete_preferring_deep` still stamps the fast call `deep_failing` and calls `report_failure`. The trace says `deep_failing` while the verdict says untested. That is one record per raced call, plus registry state that the next probe erases. Fix with TD10 (for example a `deep_closed` code).
+
+**M4.** `scripts/build-aerollm.sh:271-279`: if `$AEROLLM_REPO` is a plain folder inside another git repo, `rev-parse` and `status` succeed against the parent repo. The marker then records the parent's commit and tree state. The default path is under `~/ProJects`, which is a git repo. The commit half predates the fix pass, and N4 does not cover it. The new test sets `GIT_CEILING_DIRECTORIES`, which hides it. Fix: accept git's answer only when `git -C "$AEROLLM_REPO" rev-parse --show-toplevel` equals the checkout's real path; else write unknown.
+
+**M5. Frozen-name counts against `0f2f8d25` (item 5).** Three occurrences went down. All are display text or comments, and no machine-read name changed:
+- `scripts/build-aerollm.sh` `AEROLLM_`: 73 to 71. The removed clone line held `${AEROLLM_REPO}`, and the removed hint held `ARAIL_AEROLLM_REPO`. The variable is still read at `:54`.
+- `scripts/build-aerollm.sh` `aerollm_api`: 38 to 37 (the removed import-failure message).
+- `src/arail/portal/app.py` lowercase `aerollm`: 131 to 130. The rewritten comment at `:8820-8824` dropped "aerollm changes". The builder did not disclose this one, and it is also one below main (131).
+
+Against main, every other count is equal or higher. If the letter of the rule matters, put back "(set ARAIL_AEROLLM_REPO to use a checkout elsewhere)" in `clone_hint`, which maintainers need anyway, and put the word back in the comment.
+
+**M6. The W4 guard.** It runs only in tests, over dry-run output (`tests/test_deep_honest_win.py:441-446`). The live script never runs it, so a false positive cannot fail a live run.
+- False negatives: a ratio in an evidence line (RATIO is checked on check lines only); a number with a unit attached ("58s", "4GiB"); anything after a quoting prefix (by design).
+- False positives: an all-digit identifier, such as a pid, a two-part version ("3.11"), or a 12-character commit prefix that happens to be all digits. The dry run cannot hit the last one, because its QueueLLM folder is not a repo.
+
+Both errors fail toward a red test. Acceptable.
+
+**M7. U9 is load-sensitive.** `tests/test_deep_verdict.py::test_u9_eight_processes_fifty_writes_each_keep_an_exact_count` failed once in my run (369 of 400) at load average 13. It then passed three times alone. Under contention, the 2-second lock cap keeps a failure in memory by design, so the exact count is not guaranteed. The fix pass did not touch this code. Fix: assert at most 400 and that every lost write set `store_error`, or raise `LOCK_TIMEOUT_S` inside the test. QA should expect it under load.
+
+**M8.** `CancelledError()` has no text, so a Chat turn cancelled by an Eject replies "Inference failed: " with no reason (`src/arail/portal/app.py:8134`). Cosmetic.
+
+### Item 2: the attack on the new code, in short
+
+- **The `_closed` discriminator is correct.** A call already running when `_close()` starts finishes and is filed by its real outcome. A queued call either runs before the drop, or is cancelled after the 10 s wait (`CancelledError`, not filed). A call that passed the closed check just before `_close()` either runs after the drop (the worker raises `_DeepBackendClosed`, not filed), is cancelled (not filed), or is refused by `submit()` (outside the `try`, not filed). A test covers each outcome; no test forces the interleaving itself.
+- **The not-filed tuple is right.** `asyncio.CancelledError` cannot come out of a blocking `.result()`. `MemoryError` and every other runtime error are still filed (D1).
+- **Callers.** `_DeepBackendClosed` is a `RuntimeError`, so every `except Exception` caller behaves as before, with a clearer message: Chat (`src/arail/portal/app.py:8128`, `:8254`), `complete_preferring_deep`, the registry binding (`src/arail/registry/binding.py:40-46`) and the researcher. No code matched the old executor message text. A panic is now filed and re-raised as the same object. Callers that catch only `Exception` still see it propagate (item 4).
+- **The B2 grep.** The only hints left that send a user with no checkout to a refused build are V2 and V3. `README.md:106`, `docs/cli.md:407`, `scripts/setup.sh:689`, the docstring at `src/arail/router/backends.py:1558`, the `pyproject.toml` comments and `CHANGELOG.md:136` are maintainer-scoped, comments or history. `src/arail/router/backends.py:1616` is already qualified correctly. The `scripts/upgrade.sh:133` fix is right.
+- **`rm -f -- ""`.** The success path runs it when there was no previous install. A local safety rule blocked my direct check of that command, so I rely on the existing fresh-install tests (S6, and the test that no temp backup is left), which pass.
+
+### Item 3: mutations and test runs
+
+Each mutation was made in a scratch copy of `d071dc6c` and reverted after its run. All 23 were caught by the matching new test.
+
+| # | Product line broken | Caught by |
+|---|---|---|
+| 1 | no closed check in `complete()` | B6, call after `_close()` |
+| 2 | `submit()` back inside the `try` | B6, an error from `submit()` |
+| 3 | `except Exception` instead of `BaseException` | B7, panic filed |
+| 4 | `CancelledError` filed | B6 cancelled, B8 CancelledError |
+| 5 | `_DeepBackendClosed` filed | B8 DeepBackendClosed |
+| 6 | worker without the `_closed` discriminator | B6, a call queued behind the drop |
+| 7 | `_CountedRouter` panic branch removed | 3 C8 tests (unit, review, grow) |
+| 8 | `_CountedRouter` converts the interruptions | 3 C8 interruption cases |
+| 9 | old "import failed, delete both" block put back | both W1 tests (3 cases) |
+| 10 | N3 fail-open put back | N3 |
+| 11 | marker writes `false` when git fails | N4 |
+| 12 | `channel()` reads the marker as a bool | the N4 channel test |
+| 13 | clone advice put back | S1 |
+| 14 | 5/5 NOT SAVED exits 0 | N8 |
+| 15 | 5/5 NOT SAVED says "cleared" | N8 |
+| 16 | tag check removed | W3 tag test (Q8 still passes) |
+| 17 | getppid check removed | W3 child test (Q19 still passes) |
+| 18 | legend headed by JSON paths | 6 W4, TQ1, TQ2 tests |
+| 19 | toggle hides `deep_failing` | T1 failing-outranks-toggle |
+| 20 | compute-source hint back to `deep rebuild` | `test_aerollm_compute_source.py::test_select_aerollm_refused_when_not_built` |
+| 21 | upgrade hint back to `deep rebuild` | `test_install_hints_honest.py::test_the_upgrade_to_maximus_hint_says_deep_install` |
+| 22 | W5 counts taught as in-process | TQ4 count source |
+| 23 | W0 bare counts put back | dry-run bare-number guard |
+
+Test runs:
+- **The 13 test files the pass touched:** 296 tests, 295 passed, 1 failed (U9, load; M7).
+- **The referencing set.** The BUILD_LOG names only one of the "8 files", so I ran a wider set of 30: swap and eject (`test_deep_swap`, `test_qa6_swap_path`, `test_model_ux_phase0_*`), `tests/router/test_aerollm_*`, the bundle tests, the research toggle tests, the Curator neighbours (`test_world_forge_api`, `test_world_growth`, `test_librarian_scout`), the deep callers, the registry overlay tests, the frozen-name tests, `test_host_contract_vendor` and `test_cli_qa_edge`.
+  - New tree: 386 passed, 3 failed, 6 skipped, 1 xfailed.
+  - Base copy of `0f2f8d25`: 385 passed, 1 failed, 9 skipped, 1 xfailed.
+  - The shared failure is `test_no_user_visible_aerollm` (`model_resolve.py:290`, pre-existing).
+  - The 2 new-only failures are `test_queuellm_rename_frozen_surface.py`. These tests need git history, so they skip in the archive copy, and they fail on main too. Their base `5f775f1c` is stale. Main dropped `AEROLLM_MODEL` 17 to 14 and `AeroLLMBackend` 21 to 20 in `app.py` and changed `pyproject.toml` before this sprint. The original build dropped `aerollm_version` 5 to 3 in `build-aerollm.sh`; the function and the marker key are still read. The fix pass changed none of these counts.
+  - **New failures from the fix pass: 0.**
+
+### Item 4: the two panic gaps the builder left
+
+Neither is a BLOCK today. Today's wheel cannot panic (its failures are `RuntimeError`s). Neither gap is a regression either: before this sprint the same panic did the same thing and also left every surface green. Now the verdict records it, so every surface says failing and every other consumer stops calling deep.
+
+But (b) is worse than the BUILD_LOG says. A panic in a background call is caught by none of `complete_preferring_deep` (`src/arail/agents/deep_policy.py:343`), `ArailHost.llm_complete` (`except Exception`), `_dream_once` (`src/arail/agents/dream_daemon.py:102`) or the loops (`dream_daemon.py:158`; debt advisor `:682`). The asyncio task dies. That agent's loop, or the dream daemon, stops until the lab restarts, and no activity line says so.
+
+**Backlog both. Trigger for both: before the first QueueLLM build that passes `./arailctl deep probe` 5/5 is installed in a lab (TD5's sprint).**
+- **TD24 (a):** `ModelRouter.complete` (`src/arail/router/core.py:306`) and its streaming twin record an error trace for a `BaseException` too, then re-raise. Exclude `KeyboardInterrupt`, `SystemExit` and `GeneratorExit`.
+- **TD25 (b):** `complete_preferring_deep` treats a non-`Exception` `BaseException` (same exclusions) as a failed deep call: `report_failure`, the stamp, the fast fallback.
+- A one-site alternative: after filing a panic, `AeroLLMBackend.complete` re-raises it as `RuntimeError(...) from exc`, as `_CountedRouter` does. That closes (a), (b) and the Chat 500 at once, but it changes B7's "same object" contract. Decide when TD24/TD25 are pulled.
+
+### Item 5: the frozen surface
+
+- **Names:** see M5. No machine-read name changed.
+- `src/dac_world/` is byte-identical to `62d5ebdf`.
+- `src/arail/buddy_host/`, including `contract/buddy.host.v1.json`, is byte-identical to `62d5ebdf`, and `test_host_contract_vendor.py` passes.
+- No path of the QueueLLM checkout is in the diff.
+
+### Required before merge
+
+None. Fix V1 to V4 in one small commit, or file them with these triggers:
+- V1: the next Curator change.
+- V2 and V3: the next setup or status change.
+- V4: the next `docs/cli.md` edit.
+
+File TD24 and TD25 with the trigger above.
