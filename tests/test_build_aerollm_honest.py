@@ -484,6 +484,8 @@ def test_s9_status_with_nothing_installed(env):
     text = env.run("status").stdout
     assert "crate:        crates/aerollm-api, the pre-rename crate; deep rebuild can build it" in text
     assert re.search(r"import:\s+aerollm_api is not importable by .* — run: ./arailctl deep install", text)
+    assert ("(maintainers: deep rebuild needs a pre-rename checkout; deep update needs the private index)") in text
+    assert "(or: deep rebuild" not in text
     assert re.search(r"channel:\s+none", text) and "not applicable — nothing is installed" in text
 
 

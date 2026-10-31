@@ -128,6 +128,17 @@ def test_setup_on_a_host_with_no_queuellm_build_does_not_send_the_user_to_deep_r
     assert "deep rebuild" not in out and "once QueueLLM supports it" not in out and "WIP" not in out
 
 
+def test_setup_failure_message_says_who_can_use_the_maintainer_routes(tmp_path):
+    """Review V3. When the build fails on Apple Silicon, setup names `deep install` for everyone and says
+    that `deep rebuild` needs a pre-rename checkout and `deep update` needs the private index, instead of
+    offering both as alternatives to a user who has neither."""
+    out = _setup_queuellm_block(tmp_path, uname_s="Darwin", uname_m="arm64")
+    assert ("QueueLLM not installed (see above). The lab runs without the 2nd inference until you run: "
+            "./arailctl deep install (bundled binary, no source repo or credentials needed). "
+            "Maintainers: deep rebuild needs a pre-rename checkout; deep update needs the private index.") in out
+    assert "or: deep rebuild / deep update" not in out and "if you're a maintainer" not in out
+
+
 def test_the_wheel_missing_health_detail_points_at_deep_install():
     from arail.registry import health
     src = Path(health.__file__).read_text(encoding="utf-8")

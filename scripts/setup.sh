@@ -686,8 +686,8 @@ install_accel_deps() {
             else
                 warn "QueueLLM not installed (see above). The lab runs without the"
                 warn "2nd inference until you run: ./arailctl deep install (bundled binary,"
-                warn "no source repo or credentials needed — or: deep rebuild / deep update"
-                warn "if you're a maintainer with the QueueLLM source or private-index access)"
+                warn "no source repo or credentials needed). Maintainers: deep rebuild needs a"
+                warn "pre-rename checkout; deep update needs the private index."
             fi
         fi
     else

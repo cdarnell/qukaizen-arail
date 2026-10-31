@@ -288,6 +288,11 @@ def test_cli_status_when_the_runtime_is_not_importable(tmp_path):
     assert r.returncode == 0, r.stderr
     out = r.stdout.splitlines()
     assert "is not importable by" in _find(out, "import") and "./arailctl deep install" in _find(out, "import")
+    # Review V3: neither alternative works for a user with nothing installed, so each says who can use it
+    assert _find(out, "import").endswith(
+        "run: ./arailctl deep install (maintainers: deep rebuild needs a pre-rename checkout; "
+        "deep update needs the private index)")
+    assert "(or: deep rebuild" not in _find(out, "import")
     assert _find(out, "generation").endswith("not applicable — nothing is installed")
 
 

@@ -1182,7 +1182,8 @@ def status_lines(*, site_dir: Optional[Path] = None, quiet_import: bool = True) 
     py = sys.executable or "python"
     if FROZEN_MODULE not in sys.modules and _find_spec_safe() is None:
         out.append(row("import", f"{FROZEN_MODULE} is not importable by {py} — run: ./arailctl deep install "
-                                 "(or: deep rebuild / deep update)"))
+                                 "(maintainers: deep rebuild needs a pre-rename checkout; "
+                                 "deep update needs the private index)"))
         out.append(row("channel", "none"))
         out.append(row("generation", "not applicable — nothing is installed"))
         return out
