@@ -17,7 +17,7 @@ Make ARAIL's deep mode report failure the way it reports success, and make the r
 |---|---|---|---|---|---|---|
 | think | visionary | VISION.md | done | 2026-10-29 | 2026-10-29 | proceed (`942cbda8`): `deep probe` through ARAIL's own backend, a failure that stays visible until a probe passes, Curator never says "All clear" after a failed call, honest build script; cut the opt-in fall-back switch; building main only if a half-day scratch check gets 5 of 5; revisit 2026-11-19 |
 | plan | architect (design) | ARCHITECTURE.md | done | 2026-10-29 | 2026-10-29 | complete (`e3f47816`). Day-1 check run in scratch: main `e730d5fe` builds (1 min 57 s) but answers 1 of 5; the 2026-10-11 build 1/5; bundle v1.1.0 1/5; live wheel 1/5. So the build-main item is cut; only the honest refusal ships. Curator grow already lied 20 times across 3 Worlds (18 in `ai`, 1 `debt-finance`, 1 `sophie-school`: "+0 terms" then reseal) and hid 496 failed deep calls since 2026-08-15. Deviation D1: failure stored per binary in one checkout-wide file, cleared only by a 5/5 `deep probe`. DAY1.json and ISSUE.md are builder step 0 (Appendix A, B). |
-| build | builder | BUILD_LOG.md | pending | | | |
+| build | builder | BUILD_LOG.md | done | 2026-10-29 | 2026-10-31 | complete (code at `ebdbaa23`; not pushed). 29 builder commits for steps 0 to 9. Full suite against the untouched-main baseline: 0 new failures (the same 127 failing ids; 8,085 passed, +288 new tests). Live check on today's broken wheel (QueueLLM 0.1.0-rc.2, sha256 d62e1e16): 9 of 9 rows pass, exit 0, the probe says 1 of 5 (exit 1), 0 silent outcomes, four runs, the live venv unchanged. Six product mutations all caught. Nothing needs a redesign; six notes for the architect in BUILD_LOG (the fast-tier environment, W7 against the no-`deep rebuild` rule, an ASGI client instead of `TestClient`, two traces per failed fast call). TD1 to TD13 filed in `sprints/BACKLOG.md`. |
 | review | architect (review) | REVIEW.md | pending | | | |
 | test | qa | TEST_REPORT.md | pending | | | |
 | ship | — | PR | pending | | | |
@@ -28,6 +28,7 @@ Make ARAIL's deep mode report failure the way it reports success, and make the r
 |---|---|---|
 | 2026-10-29 | Architect: item 2 (build QueueLLM main) cut by the day-1 evidence; items 1, 3, 4 ship. | No binary passes call 2, so a rebuild cannot help; the honest refusal can. |
 | 2026-10-29 | Operator: "complete the development and integration and instruct me on what to do". The orchestrator runs the pipeline to merge; the operator-only steps are listed at the end. | Standing instruction to keep going. |
+| 2026-10-31 | Builder: three things the architecture left open were settled inside the live check, not in the product: an ASGI client instead of `TestClient`, a non-existent model name for the fast tier, and `build-aerollm.sh build` instead of `./arailctl deep rebuild`. | The Curator's background task needs one event loop with no lifespan; a four-key `.env` leaves no fast router; this build's rules forbid running `deep rebuild`. See BUILD_LOG, Deltas 5 and Architect feedback 1 to 3. |
 
 ## Notes
 
