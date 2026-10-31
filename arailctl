@@ -794,21 +794,32 @@ case "$cmd" in
         # `python3` here is macOS system Python, whose site-packages is
         # missing/unwritable and is not the interpreter ARAIL runs anyway.
         # An explicit $PYTHON from the caller still wins (tests, power users).
+        #
+        # The op is read first, so the message can name it and `probe` can have its own exit code.
+        op="${1:-status}"; shift || true
+        case "$op" in
+            install|rebuild|update|status|probe) ;;
+            *) die "deep op must be one of: install | rebuild | update | status | probe" ;;
+        esac
         if [[ -z "${PYTHON:-}" ]]; then
             if [[ -x "$REPO_ROOT/.venv/bin/python" ]]; then
                 export PYTHON="$REPO_ROOT/.venv/bin/python"
+            elif [[ "$op" == probe ]]; then
+                # Exit 5 is the probe's "not run, nothing recorded" (docs/cli.md). Exit 1 means "the probe ran and
+                # deep generation is failing", and a script or CI step must not be told that on a machine where
+                # nothing ran (QA-13). No JSON is printed: there is no interpreter to build the document with.
+                echo -e "${RED}[${LAB_SHORT_NAME}]${RESET} not run: missing .venv — run ./arailctl setup first (deep probe tests the lab's own venv, not system Python). Nothing was recorded." >&2
+                exit 5
             else
-                die "missing .venv — run ./arailctl setup first (deep install targets the lab's venv, not system Python)"
+                die "missing .venv — run ./arailctl setup first (deep $op targets the lab's venv, not system Python)"
             fi
         fi
-        op="${1:-status}"; shift || true
         case "$op" in
             install) exec bash "$REPO_ROOT/scripts/build-aerollm.sh" bundle "$@" ;;
             rebuild) exec bash "$REPO_ROOT/scripts/build-aerollm.sh" build ;;
             update)  exec bash "$REPO_ROOT/scripts/build-aerollm.sh" update ;;
             status)  exec bash "$REPO_ROOT/scripts/build-aerollm.sh" status ;;
             probe)   exec "$PYTHON" -m arail.deep_probe "$@" ;;
-            *) die "deep op must be one of: install | rebuild | update | status | probe" ;;
         esac
         ;;
     install)
