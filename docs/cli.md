@@ -557,7 +557,7 @@ carriage return) becomes `?`, in the text, in the stored record and in `--json`
 alike. A runtime's error message, or a hand-edited `verdict.json`, cannot move
 the cursor or erase the `FAILING` line. The other strings in `--json` (paths,
 names) are kept exactly; the characters a terminal could act on in them are
-written as `\uXXXX` escapes, which a program reads back as the same characters.
+written as `\u00XX` escapes, which a program reads back as the same characters.
 
 **Who reads it.** The research truth strip (`reason_code: deep_failing`), the
 tier-1 health of the model registry (status bar dot, degradation banner,
