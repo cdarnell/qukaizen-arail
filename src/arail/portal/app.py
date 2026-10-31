@@ -8820,8 +8820,9 @@ _OPTIONAL_CHAT_BACKEND_CONFIG: dict[str, dict[str, str]] = {
         # `deep install` fetches a checksummed prebuilt binary from ARAIL's own
         # Releases: no source repo or credentials. (`deep rebuild` is the dev
         # build from the pre-rename checkout at $ARAIL_AEROLLM_REPO, for
-        # maintainers only, and refuses any checkout that has the renamed
-        # crate.)
+        # maintainers only: it re-runs the cargo build so local aerollm
+        # changes flow into the lab, and it refuses any checkout that has the
+        # renamed crate.)
         "install_command": "./arailctl deep install",
         "model_env": "AEROLLM_MODEL",
         "default_model": "Qwen2.5-7B-Instruct-4bit",

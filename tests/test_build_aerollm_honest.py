@@ -180,6 +180,8 @@ def test_s1_no_checkout_gets_the_true_message(env):
     assert r.returncode == 1
     text = out(r)
     assert f"No QueueLLM checkout at {env.repo}." in text
+    # Review M5: a checkout that is somewhere else is still a route, and ARAIL_AEROLLM_REPO is how it is named.
+    assert "A checkout elsewhere: set ARAIL_AEROLLM_REPO." in text
     # Review B2: a clone of QueueLLM has only the renamed crate, which this ARAIL refuses, so the hint
     # must not send anyone to clone it. The route that works without a checkout is the prebuilt one.
     assert ("A source build here needs a checkout that still has crates/aerollm-api; QueueLLM main has the "

@@ -132,6 +132,7 @@ aerollm_version() {
 
 clone_hint() {
     err "No QueueLLM checkout at ${BOLD}${AEROLLM_REPO}${RST}."
+    warn "A checkout elsewhere: set ARAIL_AEROLLM_REPO."
     warn "A source build here needs a checkout that still has crates/aerollm-api; QueueLLM main has the renamed crates/queuellm-api, which this ARAIL refuses. Nothing was built or installed."
     warn "For the prebuilt QueueLLM: ./arailctl deep install."
 }
