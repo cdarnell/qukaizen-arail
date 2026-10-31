@@ -1,7 +1,7 @@
 Deep honest check. Token-free: local only, nothing installed, nothing downloaded.
 python /Users/netsushi/ProJects/qukaizen-arail/.venv/bin/python
 checkout /Users/netsushi/ProJects/.claude/worktrees/sprint-command-error-060a85/arail-deep-wt
-scratch /private/tmp/claude-501/-Users-netsushi-ProJects--claude-worktrees-sprint-command-error-060a85/b8dbbfe8-4399-41ee-b2d5-83e731cff931/scratchpad/build-deep/tmp/arail-deep-honest.FVfNVT (removed at the end)
+scratch /private/tmp/claude-501/-Users-netsushi-ProJects--claude-worktrees-sprint-command-error-060a85/b8dbbfe8-4399-41ee-b2d5-83e731cff931/scratchpad/build-deep/tmp/arail-deep-honest.TgbauI (removed at the end)
 
 running W0 preflight ...
 
@@ -444,7 +444,7 @@ RESULT
         the run
     the fault lives in: the row's check lines say which surface; the code of that surface
 
-total time 55 s
+total time 60 s
     what it is: wall time of the whole check, from the first row to the last
     the bar and why: under 5 minutes: nine rows, and the longest are the model loads and the probe
         (the first two live runs took 64 s and 141 s)
