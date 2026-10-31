@@ -149,7 +149,11 @@ class Env:
         for k in ("AEROLLM_CHANNEL", "PIP_INDEX_URL", "PIP_EXTRA_INDEX_URL", "AEROLLM_BUNDLE_FILE",
                   "AEROLLM_BUNDLE_SHA256", "PYTHONPATH"):
             env.pop(k, None)
-        env.update({k: str(v) for k, v in extra.items()})
+        for k, v in extra.items():
+            if v is None:
+                env.pop(k, None)        # None removes a variable (the default environment sets GIT_CEILING_DIRECTORIES)
+            else:
+                env[k] = str(v)
         return subprocess.run(["bash", str(BUILD), mode, *args], env=env, capture_output=True, text=True,
                               timeout=180)
 
@@ -265,6 +269,46 @@ def test_n4_a_checkout_git_cannot_read_is_not_written_as_clean(env):
     assert r.returncode == 0, out(r)
     marker = json.loads((env.site / "aerollm_api.build.json").read_text())
     assert marker["queuellm_commit"] == "unknown" and marker["queuellm_dirty"] is None
+
+
+def test_m4_a_plain_folder_inside_another_repository_does_not_get_that_repositorys_commit(env):
+    """Review M4. git answers for the repository that contains the folder it is asked about. The default
+    checkout path sits under ~/ProJects, which is a repository, so a checkout that is only a folder was
+    recorded with the PARENT's commit and tree state. This runs with git able to find the parent (the
+    default environment of these tests sets GIT_CEILING_DIRECTORIES, which hides the case)."""
+    outer = env.tmp / "outer"
+    outer.mkdir()
+    for cmd in (["init", "-q"], ["-c", "user.email=t@t.test", "-c", "user.name=t", "commit", "-q", "--allow-empty",
+                                 "-m", "the outer repository"]):
+        subprocess.run(["git", *cmd], cwd=outer, check=True, capture_output=True)
+    outer_head = subprocess.check_output(["git", "-C", str(outer), "rev-parse", "HEAD"], text=True).strip()
+    env.repo = outer / "queuellm"
+    env.checkout("aerollm-api", git=False)              # a plain folder, inside a repository
+    env.fake_importer()
+    r = env.run("build", GIT_CEILING_DIRECTORIES=None)
+    assert r.returncode == 0, out(r)
+    marker = json.loads((env.site / "aerollm_api.build.json").read_text())
+    assert marker["queuellm_commit"] == "unknown" and marker["queuellm_dirty"] is None
+    assert outer_head not in json.dumps(marker)
+    st = env.run("status", GIT_CEILING_DIRECTORIES=None)
+    assert re.search(r"channel:\s+source build — QueueLLM commit unknown, tree state unknown", st.stdout), st.stdout
+
+
+def test_m4_a_symlink_to_a_checkout_still_records_the_real_repositorys_commit(env):
+    """The compat symlink qukaizen-aerollm points at qukaizen-queuellm. git reports the real path of the
+    repository, so the folder it is compared with must be the real path too."""
+    env.checkout("aerollm-api")
+    link = env.tmp / "qukaizen-aerollm"
+    link.symlink_to(env.repo, target_is_directory=True)
+    env.fake_importer()
+    r = env.run("build", ARAIL_AEROLLM_REPO=link, GIT_CEILING_DIRECTORIES=None)
+    assert r.returncode == 0, out(r)
+    marker = json.loads((env.site / "aerollm_api.build.json").read_text())
+    assert marker["queuellm_commit"] == env.head() and marker["queuellm_dirty"] is False
+    (env.repo / "uncommitted.txt").write_text("x\n")
+    env.fake_importer()
+    assert env.run("build", ARAIL_AEROLLM_REPO=link, GIT_CEILING_DIRECTORIES=None).returncode == 0
+    assert json.loads((env.site / "aerollm_api.build.json").read_text())["queuellm_dirty"] is True
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root can read a mode-000 file")

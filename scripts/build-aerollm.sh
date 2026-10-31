@@ -269,13 +269,20 @@ cargo_build() {
 
 # The same role as THIRD-PARTY-LICENSES/aerollm/BUNDLE.json: where this binary came from.
 write_build_marker() {  # $1 = site dir, $2 = artifact sha256, $3 = artifact path
-    local commit dirty status
-    commit="$(git -C "$AEROLLM_REPO" rev-parse HEAD 2>/dev/null || echo unknown)"
-    # "clean" is a claim, and a git that fails (not a repository, no git) is no evidence of it: write unknown.
-    if status="$(git -C "$AEROLLM_REPO" status --porcelain 2>/dev/null)"; then
-        if [[ -n "$status" ]]; then dirty=true; else dirty=false; fi
-    else
-        dirty=unknown
+    local commit=unknown dirty=unknown status real top
+    # git answers for the repository that CONTAINS the folder it is asked about. When $AEROLLM_REPO is a plain
+    # folder inside another repository (the default path sits under ~/ProJects, which is one), that is the
+    # parent's commit and the parent's tree state, and neither is this checkout's. Take git's answer only when
+    # the repository's top level is this folder. pwd -P resolves a symlink (the compat symlink qukaizen-aerollm
+    # points at qukaizen-queuellm), and git reports the real path too, so a symlink to a checkout still counts.
+    real="$(cd "$AEROLLM_REPO" 2>/dev/null && pwd -P)" || real=""
+    top="$(git -C "$AEROLLM_REPO" rev-parse --show-toplevel 2>/dev/null)" || top=""
+    if [[ -n "$real" && "$top" == "$real" ]]; then
+        commit="$(git -C "$AEROLLM_REPO" rev-parse HEAD 2>/dev/null || echo unknown)"
+        # "clean" is a claim, and a git that fails (no git, an unreadable repository) is no evidence of it: unknown.
+        if status="$(git -C "$AEROLLM_REPO" status --porcelain 2>/dev/null)"; then
+            if [[ -n "$status" ]]; then dirty=true; else dirty=false; fi
+        fi
     fi
     "$PY" - "$1/aerollm_api.build.json" "$commit" "$dirty" "$2" "$(wc -c < "$3" | tr -d ' ')" <<'PYMARK'
 import json, sys, time
