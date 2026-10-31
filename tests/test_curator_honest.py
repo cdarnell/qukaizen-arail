@@ -137,8 +137,26 @@ def _grow(client, brain="auto"):
     return _wait(client, "/api/worlds/grow")
 
 
-def _curator_lines() -> list[dict]:
-    return [e for e in activity_log.recent(200) if e["source"] == "curator"]
+def _line_where(pred, *, source: str = "curator", secs: float = 5.0) -> dict:
+    """The newest activity line from ``source`` that ``pred`` accepts, waiting for it to appear.
+
+    The log is one ring per process. A test names its line by what it says, never by its position
+    in the ring (the full-suite run of 2026-10-31 found the first "Curator reviewed" line was not
+    this test's), and it waits for that line before asserting that some other line is absent: an
+    absence checked before the line exists proves nothing."""
+    end = time.monotonic() + secs
+    while True:
+        hit = [e for e in activity_log.recent(200) if e["source"] == source and pred(e)]
+        if hit:
+            return hit[-1]
+        if time.monotonic() > end:
+            held = [e["message"][:70] for e in activity_log.recent(200) if e["source"] == source][-5:]
+            raise AssertionError("no %s activity line matched; the newest lines from that source are %r" % (source, held))
+        time.sleep(0.02)
+
+
+def _line_with(message: str, *, source: str = "curator") -> dict:
+    return _line_where(lambda e: e["message"] == message, source=source)
 
 
 def _digest(root: Path) -> dict:
@@ -158,9 +176,9 @@ def test_c1_a_review_that_loses_calls_is_partial_and_never_all_clear(world, monk
     assert st["reviewed_count"] == 1, "what the judge answered, never min(16, len(terms))"
     assert st["judge_model"] == "fake-deep" and st["deep_skip"] is None
     assert "[rms_norm]" in st["deep_error"] and len(st["deep_error"]) <= 160
-    lines = [e for e in _curator_lines() if e["message"].startswith("Curator review of")]
-    assert len(lines) == 1 and lines[0]["level"] == "warn"
-    msg = lines[0]["message"]
+    line = _line_with(st["message"])
+    assert line["level"] == "warn"
+    msg = line["message"]
     assert msg.startswith("Curator review of 'Math World' is partial: 1 of 6 terms judged. ")
     assert "A full review judges all 6; the 5 unjudged terms have no flags, so their silence means nothing." in msg
     assert "fake-deep failed on 5 calls: RuntimeError:" in msg
@@ -189,6 +207,7 @@ def test_c1b_a_review_cancelled_mid_pass_is_partial_not_all_clear(world, monkeyp
     assert st["outcome"] == "partial" and (st["judged"], st["failed"]) == (2, 0)
     assert "The review was stopped before it finished." in st["message"]
     assert "failed on" not in st["message"], "nothing failed; it was stopped"
+    _line_with(st["message"])
     assert not any("All clear" in e["message"] for e in activity_log.recent(200))
 
 
@@ -224,8 +243,7 @@ def test_c3_a_complete_review_with_no_flags_says_all_clear_with_the_full_review_
                 "(6 of 6 is a full review; fewer is reported as partial. "
                 "A flag is a term the judge wants changed: Knowledge → World Terms.)")
     assert st["message"] == expected
-    line = [e for e in _curator_lines() if e["message"].startswith("Curator reviewed")]
-    assert line and line[0]["level"] == "success" and line[0]["message"] == expected
+    assert _line_with(expected)["level"] == "success"
 
 
 def test_c3_a_complete_review_with_a_flag_is_a_warning_without_all_clear(world, monkeypatch, client):
@@ -234,8 +252,7 @@ def test_c3_a_complete_review_with_a_flag_is_a_warning_without_all_clear(world, 
     st = _review(client)
     assert st["outcome"] == "complete" and len(st["flags"]) == 1 and st["flags"][0]["slug"] == "term-2"
     assert "— 1 flag. (6 of 6 is a full review" in st["message"] and "All clear" not in st["message"]
-    line = [e for e in _curator_lines() if e["message"].startswith("Curator reviewed")][0]
-    assert line["level"] == "warn"
+    assert _line_with(st["message"])["level"] == "warn"
 
 
 def test_c3_a_big_world_plans_sixteen(world, monkeypatch, client):
@@ -270,8 +287,7 @@ def test_c4_a_grow_pass_with_a_failed_call_is_not_applied_and_the_world_is_uncha
     assert "A pass is applied only when every call answers, so the World is unchanged: " \
            "no reseal, no swap, no evolution entry." in msg
     assert "Check the model and run it again." in msg
-    line = [e for e in _curator_lines() if "not applied" in e["message"]]
-    assert len(line) == 1 and line[0]["level"] == "warn" and line[0]["message"] == msg
+    assert _line_with(msg)["level"] == "warn"
     assert not any("evolved via" in e["message"] for e in activity_log.recent(200))
 
 
@@ -292,10 +308,10 @@ def test_c5_a_clean_grow_is_applied_and_says_every_call_answered(world, monkeypa
     assert st["state"] == "done" and st["added"] == 1
     assert st["calls"] == {"attempted": router.calls, "failed": 0}
     assert (catalog / "evolution.json").exists() and wm.verify_seal(wm.load_bundle(catalog)).ok
-    line = [e for e in _curator_lines() if "evolved via" in e["message"]]
-    assert len(line) == 1 and line[0]["level"] == "success"
-    assert line[0]["message"].endswith(f"Reversible in the term editor. (all {router.calls} model calls answered)")
-    assert "evolved via fake-deep: +1 new term, 0 corrections." in line[0]["message"]
+    line = _line_where(lambda e: "evolved via" in e["message"])
+    assert line["level"] == "success"
+    assert line["message"].endswith(f"Reversible in the term editor. (all {router.calls} model calls answered)")
+    assert "evolved via fake-deep: +1 new term, 0 corrections." in line["message"]
 
 
 # ── C6: deep already failing before the pass ───────────────────────────────
@@ -326,7 +342,7 @@ def test_c6_a_cloud_brain_grow_does_not_blame_deep(world, fake_deep, monkeypatch
     monkeypatch.setattr(wr, "_curation_router", lambda brain: Scripted(name="claude"))
     st = _grow(client, brain="claude")
     assert st["state"] == "done"
-    line = [e for e in _curator_lines() if "evolved via" in e["message"]][0]["message"]
+    line = _line_where(lambda e: "evolved via" in e["message"])["message"]
     assert "deep failing" not in line
 
 
@@ -345,10 +361,10 @@ def test_c7_a_forge_that_lost_calls_still_shows_the_draft_and_says_so(world, mon
     assert st["state"] == "done", st
     assert st["calls"]["failed"] >= 1
     assert re.search(r"· \d+ of \d+ model calls failed \(RuntimeError: .*\); the draft is incomplete", st["message"])
-    line = [e for e in activity_log.recent(200) if e["source"] == "forge" and "model calls failed" in e["message"]]
-    assert len(line) == 1 and line[0]["level"] == "warn"
+    line = _line_where(lambda e: "model calls failed" in e["message"], source="forge")
+    assert line["level"] == "warn"
     assert re.match(r"Forge of 'Algebra' finished with \d+ of \d+ model calls failed \(.*\); the draft is "
-                    r"incomplete\. Review it before mounting\.", line[0]["message"])
+                    r"incomplete\. Review it before mounting\.", line["message"])
     prev = client.get("/api/worlds/forge/preview").json()
     assert prev["failed_calls"] == st["calls"]["failed"] and prev["terms"], "the draft is still shown"
     assert any("model call" in w and "failed while this World was forged" in w for w in prev["warnings"])
@@ -362,9 +378,8 @@ def test_c7_a_forge_that_produced_nothing_blames_the_calls_not_the_subject(world
     assert re.fullmatch(r"nothing usable produced: \d+ of \d+ model calls failed \(RuntimeError: .*\)",
                         st["message"])
     assert "try a richer model" not in st["message"], "the old advice was wrong when the calls failed"
-    line = [e for e in activity_log.recent(200) if e["source"] == "forge" and "produced nothing usable" in e["message"]]
-    assert line and re.match(r"Forge of 'Algebra' produced nothing usable: \d+ of \d+ model calls failed",
-                             line[0]["message"])
+    line = _line_where(lambda e: "produced nothing usable" in e["message"], source="forge")
+    assert re.match(r"Forge of 'Algebra' produced nothing usable: \d+ of \d+ model calls failed", line["message"])
 
 
 def test_c7_a_clean_forge_is_as_before(world, monkeypatch, client):
@@ -372,7 +387,7 @@ def test_c7_a_clean_forge_is_as_before(world, monkeypatch, client):
     st = _forge(client)
     assert st["state"] == "done" and st["calls"]["failed"] == 0 and "failed" not in st["message"]
     assert client.get("/api/worlds/forge/preview").json()["failed_calls"] == 0
-    assert any(e["message"].startswith("Forged 'Algebra'") for e in activity_log.recent(200))
+    assert _line_where(lambda e: e["message"].startswith("Forged 'Algebra'"), source="forge")
 
 
 # ── C8: the counting wrapper ───────────────────────────────────────────────
@@ -470,10 +485,10 @@ def test_tq3_an_idle_endpoint_has_nothing_to_teach_and_no_bare_numbers(world, cl
 def test_tq3_every_curator_line_carries_its_clause(world, monkeypatch, client):
     world.mount(6)
     monkeypatch.setattr(wr, "_review_router", lambda: Scripted())
-    _review(client)
+    first = _review(client)["message"]
     monkeypatch.setattr(wr, "_review_router", lambda: Scripted(fail_from=2))
-    _review(client)
-    lines = " \n".join(e["message"] for e in _curator_lines())
+    second = _review(client)["message"]
+    lines = " \n".join(_line_with(m)["message"] for m in (first, second))
     for clause in ("is a full review; fewer is reported as partial", "A flag is a term the judge wants changed",
                    "A full review judges all 6", "so their silence means nothing"):
         assert clause in lines, clause
