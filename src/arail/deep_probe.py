@@ -425,8 +425,17 @@ def _child_main() -> int:
 # ---------------------------------------------------------------------------
 # The SUPERVISOR
 # ---------------------------------------------------------------------------
+class ProbeLockUnavailable(OSError):
+    """``flock`` itself failed on ``probe.lock``: nobody can take the lock here, which is not the same as another
+    probe holding it. ``errno`` and ``strerror`` are the operating system's."""
+
+
 def _take_probe_lock(state: Path) -> tuple[Optional[int], Optional[dict]]:
-    """``(fd, None)`` when taken, else ``(None, holder)``. flock, non-blocking."""
+    """``(fd, None)`` when taken, ``(None, holder)`` when another probe holds it, else ``ProbeLockUnavailable``.
+
+    flock, non-blocking. Only EAGAIN, EWOULDBLOCK and EACCES say "someone else has it". Any other error (ENOTSUP
+    or ENOLCK on a mount without lock support, EOPNOTSUPP for a FIFO named probe.lock) means no probe can ever take
+    it here, and calling that "another probe is running" sent the operator to wait for nothing (QA-15)."""
     import fcntl
     dir_fd = dv._open_state_dir(state)       # refuses a link or a folder that is not yours (QA-4)
     try:
@@ -436,12 +445,14 @@ def _take_probe_lock(state: Path) -> tuple[Optional[int], Optional[dict]]:
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError as e:
+        if e.errno not in (errno.EAGAIN, errno.EACCES, errno.EWOULDBLOCK):
+            os.close(fd)
+            raise ProbeLockUnavailable(e.errno, e.strerror or os.strerror(e.errno or 0)) from e
         holder: dict = {}
-        if e.errno in (errno.EAGAIN, errno.EACCES, errno.EWOULDBLOCK):
-            try:
-                holder = json.loads(os.pread(fd, 4096, 0).decode("utf-8") or "{}")
-            except Exception:  # noqa: BLE001 - unreadable, not JSON, or nested too deeply (RecursionError)
-                holder = {}
+        try:
+            holder = json.loads(os.pread(fd, 4096, 0).decode("utf-8") or "{}")
+        except Exception:  # noqa: BLE001 - unreadable, not JSON, or nested too deeply (RecursionError)
+            holder = {}
         os.close(fd)
         return None, holder
     os.ftruncate(fd, 0)
@@ -784,6 +795,11 @@ def execute(opts: dict, *, memory_reader: Optional[Callable[[], Optional[float]]
         lock_fd, holder = _take_probe_lock(state)
     except dv.StateDirRefused as e:
         return not_run("the probe lock could not be taken: " + str(e.strerror))
+    except ProbeLockUnavailable as e:
+        return not_run("the probe lock could not be taken (flock: " + str(e.strerror) + ") on "
+                       + str(state / "probe.lock") + ": that filesystem probably does not support locks, or probe.lock "
+                       "is not a regular file; set ARAIL_DEEP_STATE_DIR to a folder on a local disk, or remove "
+                       "probe.lock")
     except OSError as e:
         return not_run("the probe lock could not be taken (" + str(state) + ": " + str(e.strerror or e)
                        + ") — check the permissions of that folder")

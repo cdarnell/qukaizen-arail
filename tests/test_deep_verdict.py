@@ -6,6 +6,7 @@ and never imports the real runtime, so everything here runs on a fixture.
 """
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
@@ -832,6 +833,45 @@ def test_qa7_a_passing_verdict_without_a_usable_probe_supersedes_nothing():
     assert dv.passed_after(_verdict("passing", None), 1000.0) is False
     assert dv.passed_after(_verdict("passing", {"outcome": "pass"}), 1000.0) is False
     assert dv.passed_after(_verdict("passing", {"outcome": "fail", "started_ts": 2000.0}), 1000.0) is False
+
+# ── QA-15 (fix pass 4): the writer's lock, when it cannot be taken at all, does not wait out the 2 s cap ──
+
+@pytest.mark.parametrize("code", [errno.ENOTSUP, errno.ENOLCK], ids=["ENOTSUP", "ENOLCK"])
+def test_qa15_a_lock_that_cannot_be_taken_is_reported_at_once_not_after_the_cap(fake_deep, monkeypatch, code):
+    import fcntl
+    import time
+    fake_deep()
+    dv.identity()
+
+    def refuse(fd, op):
+        raise OSError(code, os.strerror(code))
+
+    monkeypatch.setattr(fcntl, "flock", refuse)
+    monkeypatch.setattr(dv, "LOCK_TIMEOUT_S", 30.0)
+    t0 = time.monotonic()
+    problem = dv._locked_update(lambda doc: None)
+    assert problem == f"flock: {os.strerror(code)}", problem
+    assert time.monotonic() - t0 < 1.5, "a lock that cannot be taken is not waited for"
+    dv.note_call(False, error="RuntimeError: kept", consumer="agent:buddy")
+    v = dv.current()
+    assert v.state == "failing" and f"flock: {os.strerror(code)}" in v.store_error
+
+
+@pytest.mark.parametrize("code", [errno.EAGAIN, errno.EACCES], ids=["EAGAIN", "EACCES"])
+def test_qa15_a_busy_lock_is_still_waited_for_up_to_the_cap(fake_deep, monkeypatch, code):
+    import fcntl
+    import time
+    fake_deep()
+    dv.identity()
+
+    def busy(fd, op):
+        raise OSError(code, os.strerror(code))
+
+    monkeypatch.setattr(fcntl, "flock", busy)
+    monkeypatch.setattr(dv, "LOCK_TIMEOUT_S", 0.3)
+    t0 = time.monotonic()
+    problem = dv._locked_update(lambda doc: None)
+    assert "the verdict lock was busy" in problem and time.monotonic() - t0 >= 0.25
 
 # ── QA-14 (fix pass 4): a verdict.json that is not a regular file never hangs a reader or a writer ──────
 # Opening a FIFO for reading waits for a process that opens it for writing, and nobody will. _read_store used to

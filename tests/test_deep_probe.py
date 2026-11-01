@@ -7,6 +7,7 @@ the child run as real subprocesses over the fake runtime.
 """
 from __future__ import annotations
 
+import errno
 import io
 import json
 import os
@@ -526,6 +527,80 @@ def test_qa4_a_state_folder_another_user_owns_is_not_run_in_json_too(fake_deep, 
     doc = json.loads(buf.getvalue())
     assert rc == 5 and doc["outcome"] == "not_run" and "owned by another user" in doc["not_run_reason"]
     assert list(shared.iterdir()) == []
+
+
+# ── QA-15 (fix pass 4): a lock that cannot be taken is not "another probe is running" ───────────────
+# _take_probe_lock called every flock error "held". Only EAGAIN, EWOULDBLOCK and EACCES mean another process has
+# the lock; anything else (ENOTSUP or ENOLCK on a network mount, EOPNOTSUPP for a FIFO named probe.lock) means
+# nobody can take it, and the operator was told to wait for a probe that does not exist.
+
+NO_LOCKS = [errno.ENOTSUP, errno.ENOLCK, errno.EINVAL]
+
+
+def _flock_raises(monkeypatch, code: int) -> None:
+    import fcntl
+
+    def refuse(fd, op):
+        raise OSError(code, os.strerror(code))
+
+    monkeypatch.setattr(fcntl, "flock", refuse)
+
+
+def _open_fds() -> int:
+    return len(os.listdir("/dev/fd"))
+
+
+@pytest.mark.parametrize("code", NO_LOCKS, ids=[errno.errorcode[c] for c in NO_LOCKS])
+def test_qa15_a_flock_error_that_is_not_busy_is_raised_and_leaks_nothing(tmp_path, monkeypatch, code):
+    _flock_raises(monkeypatch, code)
+    before = _open_fds()
+    with pytest.raises(dp.ProbeLockUnavailable) as ei:
+        dp._take_probe_lock(tmp_path / "deep")
+    assert ei.value.errno == code and ei.value.strerror == os.strerror(code)
+    assert _open_fds() == before, "the lock file's descriptor was closed"
+
+
+@pytest.mark.parametrize("code", [errno.EAGAIN, errno.EACCES], ids=["EAGAIN", "EACCES"])
+def test_qa15_busy_still_means_another_probe_holds_it(tmp_path, monkeypatch, code):
+    state = tmp_path / "deep"
+    state.mkdir(mode=0o700)
+    (state / "probe.lock").write_text(json.dumps({"pid": 4242, "since": "2026-10-31T12:34:56Z"}))
+    _flock_raises(monkeypatch, code)
+    fd, holder = dp._take_probe_lock(state)
+    assert fd is None and holder == {"pid": 4242, "since": "2026-10-31T12:34:56Z"}
+
+
+def test_qa15_the_not_run_line_says_what_failed_why_and_what_to_do_and_records_nothing(fake_deep, monkeypatch):
+    fd = fake_deep("pass")
+    _flock_raises(monkeypatch, errno.ENOTSUP)
+    pr = dp.execute({"json": False}, out=io.StringIO())
+    line = next(ln for ln in pr.lines if ln.startswith("not run"))
+    assert pr.exit_code == 5
+    assert "the probe lock could not be taken (flock: Operation not supported)" in line, line
+    assert "does not support locks" in line and "ARAIL_DEEP_STATE_DIR" in line and str(dv.state_dir()) in line, line
+    assert "another deep probe" not in line and "wait for it" not in line
+    assert not (dv.state_dir() / "verdict.json").exists(), "nothing was recorded"
+    assert fd.gen_calls() == [], "nothing was generated"
+
+
+def test_qa15_the_json_document_carries_the_same_reason(fake_deep, monkeypatch):
+    fake_deep("pass")
+    _flock_raises(monkeypatch, errno.ENOLCK)
+    pr = dp.execute({"json": True}, out=io.StringIO())
+    assert pr.exit_code == 5 and pr.doc["outcome"] == "not_run"
+    assert "flock: No locks available" in pr.doc["not_run_reason"] and "ARAIL_DEEP_STATE_DIR" in pr.doc["not_run_reason"]
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="flock on a FIFO answers EOPNOTSUPP on macOS; Linux accepts it")
+def test_qa15_a_fifo_named_probe_lock_is_not_another_probe(fake_deep):
+    fd = fake_deep("pass")
+    state = dv.state_dir()
+    state.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.mkfifo(state / "probe.lock")
+    r = run_probe(fd, timeout=30)
+    assert r.returncode == 5, r.stdout + r.stderr
+    assert "the probe lock could not be taken (flock: " in r.stdout, r.stdout
+    assert "another deep probe" not in r.stdout
 
 
 # ── QA-5 (fix pass 3): nothing the probe prints carries a control character ────────────────────────

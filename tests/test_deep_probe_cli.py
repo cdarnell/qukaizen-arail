@@ -156,3 +156,8 @@ def test_qa13_with_a_venv_the_probe_runs_through_it(tmp_path):
 def test_qa13_the_docs_name_the_case_in_the_exit_5_row():
     row = next(ln for ln in CLI_DOC.splitlines() if ln.startswith("| `5` |"))
     assert "setup" in row and ".venv" in row, row
+
+
+def test_qa15_the_docs_name_the_lock_that_cannot_be_taken_in_the_exit_5_row():
+    row = next(ln for ln in CLI_DOC.splitlines() if ln.startswith("| `5` |"))
+    assert "another probe is running" in row and "cannot be taken at all" in row and "probe.lock" in row, row
