@@ -745,3 +745,122 @@ These are the same numbers as the first two live runs: on today's wheel it answe
 ### Cleanup of fix pass 3
 
 Removed after this commit: my scratch folder (`fix3`, with the snapshots of earlier commits, the mutation copy, the lint venv, the instrumented copy, the reproductions, every output and helper) and the git-ignored files the runs wrote into the worktree (`lab/`, `logs/`, `__pycache__`), without touching `src/arail.egg-info/`, and the five `__KMP_REGISTERED_LIB_<pid>` files in `/tmp` that this pass's live run left (TD34; the 29 older ones are not from this pass and were left). Kept: the reviewer's scratch venv. The waiters and runners of this pass were stopped; none is left. The operator's `.venv`, `.env`, `lab/` and Worlds and the QueueLLM and Buddy checkouts were not touched.
+
+## Fix pass 4 (after the QA re-test)
+
+QA's re-test of fix pass 3 (`TEST_REPORT.md`, "Re-test after fix pass 3") kept the verdict at **WEAK_PASS**: all 11 first-pass defects are fixed, and attacking the fixes found six new ones (QA-14 to QA-19; four MINOR, two NOTE) plus a widening of filed debt (TD36). The coordinator decided: fix QA-14 to QA-18, file QA-19, the TD36 widening and two more rows. This pass does that and nothing else. It starts at `d0547e72` (QA's tests at `2f78a9e9`, QA's report at `9d9a36b8`, the coordinator's ledger on top). Each fix is its own commit, tests first, with a mutation check. Nothing was pushed. QueueLLM, Buddy, the operator's `.venv`, `.env` and `lab/` were not touched, and no `deep rebuild`, `deep install` or `deep update` was run. `TEST_REPORT.md`, `SPRINT.md` and `REVIEW.md` were not edited. **The one edit to a QA test file** is the one the coordinator allowed: `test_qa19_a_folder_swapped_at_the_writers_read_does_not_cost_the_stored_record` is now `xfail(strict=True)` with a reason that names TD43 (the project's rule: a strict xfail marks filed debt only). Three added lines, nothing else in `tests/test_qa_deep_honest_retest.py`; `git diff --numstat` says `3 0`.
+
+| # | Finding | Commit | Tests of mine (collected) | Mutations |
+|---|---|---|---|---|
+| QA-14 | A `verdict.json` that is not a regular file never hangs a reader or a writer | `fcdc726f` | 12 | 5 |
+| QA-15 | A lock that cannot be taken is not reported as another probe running | `469272ec` | 13 | 8 |
+| QA-16 | Control characters are cleaned where each sprint string is made | `65dbbfbb` | 16 | 12 |
+| QA-17 | `deep probe` with an interpreter that cannot run it exits 5, not 1 | `37874ae3` | 8 | 9 |
+| QA-18 | After a pass, the next failure that could not be saved starts a record of its own | `2f0cacdb` | 6 | 5 |
+| - | Filed: QA-19 as TD43, TD36 widened, TD44, TD45; QA-19 a strict xfail | `05908920` | none (3 added lines in a QA file) | |
+| - | This section | the commit that adds it | none | |
+
+That is 55 new tests in 7 existing test files, with no new test file (`test_deep_verdict.py` 30, `test_deep_probe_cli.py` 11, `test_deep_probe.py` 8, `test_curator_honest.py` 3, and one each in `registry/test_deep_verdict_overlay.py`, `registry/test_deep_loaded_lines.py` and `test_deep_policy_failing.py`), and 39 mutations. The counts come from `pytest --collect-only -k` over those files. Before each fix the new tests were run against the unfixed code and were red for the reason they state: QA-14 8 red (four of them timing out in `open()`), QA-15 6 red, QA-16 16 red, QA-17 7 red, QA-18 3 red (QA's own tests are in each number).
+
+### One of QA's tests contradicts the design it belongs to: architect feedback required
+
+`test_qa14_a_fifo_named_verdict_json_does_not_hang_readers_or_writers[write]` still fails, and I did not bend the product to make it pass. The hang is gone: the test now returns in **0.02 s** (it timed out at 15 s). What fails is its last assertion. After `note_call(False, ...)` has run (the writer), it asserts `source == "store_unreadable"`. A writer that meets an unreadable store moves it aside and writes a fresh record, as it does for every unreadable store since QA-2 and as QA-14's own "smallest fix" says ("fail closed; the next writer moves it aside"). So after the writer the store is readable again and the verdict is `failing` with source `call`, which is what the run printed: `0.02 failing call`. `store_unreadable` after a write is only true if the writer does **not** repair, and a symbolic link named `verdict.json` is repaired (moved aside) today, so leaving a FIFO alone would be an inconsistent rule. I ran that case to be sure: a symbolic link named `verdict.json` reads `failing`/`store_unreadable`; one write later it reads `failing`/`call`, `verdict.json` is a regular file, the link has been moved aside and is still a link, and its target is untouched.
+
+- **Evidence:** `tests/test_deep_verdict.py::test_qa14_the_next_writer_moves_a_non_regular_verdict_aside_and_records_the_failure[fifo]` and `[dir]` pass: the writer returns in under 5 s, the verdict reads `failing`/`call`, `verdict.json` is a regular file again, the FIFO is the single `verdict.json.corrupt-*` entry and a FIFO still, and the stored count is 1.
+- **If QA agrees:** change that one assertion to accept the repaired state (for `[write]`: `source == "call"`, or `source in ("store_unreadable", "call")`). The read variant needs nothing.
+- **If you want the other design** (a writer never touches a special file, so the store stays unreadable until a person removes it): about six lines in `_locked_update`, and the FIFO case would then differ from the symbolic-link case. I did not choose it because a stuck-failing store is a worse default than a repaired one, and because it makes one kind of odd file sticky and another not.
+
+The full-suite comparison below therefore has exactly one id beyond the 151: this one.
+
+### Choices the message left to me
+
+1. **QA-14, the order of the checks.** `lstat` refuses anything that is not a regular file *before* the open ("opening a device can have effects of its own"; a test makes `os.open` fail the test if it is called), then the open is `O_RDONLY|O_NOFOLLOW|O_NONBLOCK`, and a `with os.fdopen(fd)` block owns the descriptor from the moment it exists, so every way out closes it, and `fstat`s it. The `fstat` is for the swap between the lstat and the open: a FIFO that already holds a valid passing record is not believed (a test does exactly that). A swapped-in **folder** or **socket** is refused by the OS before our check (`fdopen` of a folder, `open` of a socket), so the reason carries the OS's words; the realistic case, one that is already there, has ours. I first wrote the open with a hand-rolled `try/except ... os.close(fd)` around the `fstat`; a mutation showed that branch no test could reach, which is why the `with` form replaced it.
+2. **QA-14, the lock files, checked and not changed.** The message asked me to fix them in the same commit if they hang. Six cases, each in a child with a timeout, on the code before the fix: `verdict.lock` as a FIFO, a folder and a socket, and `probe.lock` as the same three. **None hangs.** The lock opens read-write, which does not wait on a FIFO, and `flock` on a FIFO answers at once ("Operation not supported"), so the writer reports it in 0.0 s and does not wait out the 2 s cap. A folder or a socket fails at the open. The one wrong answer was `probe.lock` as a FIFO, which the probe called "another probe is running": that is QA-15. Two guards pin the `verdict.lock` cases.
+3. **QA-15, what the line says.** "...cannot be taken (flock: <reason>) on <state>/probe.lock: that filesystem probably does not support locks, or probe.lock is not a regular file; set ARAIL_DEEP_STATE_DIR to a folder on a local disk, or remove probe.lock". The message said "this folder's filesystem does not support locks". A FIFO named `probe.lock`, QA's other input, is the file's type and not the filesystem, so the line names both causes and the file, and says "probably". `_flock_acquire` (the writer's lock) needed no change: it already returns `flock: <reason>` at once for anything that is not busy, and still waits for a busy lock up to the cap. Both halves are now pinned.
+4. **QA-16, at the source of each string.** The runtime's error in `_CountedRouter._note_failure`; the stored lab, consumer and the probe's call number in `_what_failed`; the whole sentence in `_failing_detail`; the slice of a stored stamp in `_utc_minute` (which also covers `health_detail`, the dot's text and the warm-up line); the wheel's version where the binary is made; the lab's name where it is read; the stored key and the OS's words where the unreadable-store reason is made and where the Verdict hands it out; and the exception text in `deep_policy._failed_detail`, the plain sentence a trace carries. The router's cap is now 160 for the whole line (type name included); it used to be 160 for the message after the type name. Left raw on purpose: the research block's `since`, `consumer` and `lab`, returned as JSON over HTTP (the encoder escapes C0 and the page escapes HTML; a browser is not a terminal sink).
+5. **QA-17, find_spec.** `command -v` first (a missing path, a folder and a non-executable file all fail it, checked under bash 3.2), then `find_spec("arail.deep_probe")` under that interpreter. A module that counts its own imports proves the check does not run it. Not covered: an interpreter that finds the module but cannot run it (too old, a broken dependency); `find_spec` cannot see that and running it would be the probe.
+6. **QA-18, the read's own test.** `_mem_note` asks `_passed_since` against the stored probe, so the writer and the read cannot disagree about what a pass superseded. The new record is a new transition and announces itself, as the saved path does.
+
+### What I found that QA did not
+
+1. **The QA-16 harm is still reachable through the registry, and I did not change it.** `registry.report_failure` stores `f"{type(exc).__name__}: {str(exc)[:160]}"` raw in the tier-1 health and emits it to the activity log under source `registry` (`Model '...' failed: ...`). I measured it with a runtime error holding ESC and BEL: both reach `health.detail` and an activity line. It is pre-existing code (`report_failure` is not in the sprint's diff; the call from `complete_preferring_deep` is from `49419057`) and it is called from four places, one of them the registry-built router that chat calls go through (`binding.py`, on a failed call). It is the same runtime error text QA-16 is about, so the Curator and `explain()` are clean and the Agents and Chat path is not. Fix: one `deep_verdict._clip` in `report_failure`. I am reporting it because the message said not to fix what my change did not cause; it needs a TD row or a go-ahead.
+2. **A FIFO where the provenance records are read hangs `deep status`, the same way QA-14 did.** `_read_json` (the build and bundle records in site-packages) uses `Path.read_text`; a FIFO named `aerollm_api.build.json` did not return in 8 s. The precondition is write access to the venv's site-packages, which is much stronger than write access to `lab/data`, so I left it. The fix is QA-14's (`O_NONBLOCK`, `fstat`).
+3. **The lock-file question, answered with measurements** (Choices, point 2): none of the six cases hangs.
+4. **QA-16 had more sources than the two tests reach.** The wheel's version string (three details and every status row), the lab's name (stored and quoted in an activity line), the stored key quoted in the reason a store is unreadable, the reasons as the Verdict hands them out, and the exception text in `deep_policy._failed_detail` (a trace's plain sentence). Each has a test and a mutation.
+5. **The `[write]` contradiction** above: found by running the prototype fix before writing my own tests, and kept visible instead of bent.
+6. **Corrected along the way, all before the commit that would have carried them.** My mutation tool called a mutant that did not compile "NOT CAUGHT" (a deleted `if` left an empty `except`); it now rejects such a mutant as invalid. A mutation I wrote for a descriptor leak was not a leak on CPython (the file object closes itself by refcount); the real one is a rewrite on the raw descriptor, and the other mutation exposed a branch no test could reach, so the code was simplified. Three test files ended with a literal backslash and `n` from a heredoc and were repaired and compiled before commit. A commit message went in with an unexpanded `$(echo 16)` and was amended. A shell variable named `path` shadowed zsh's `PATH` and broke one command. None of these reached the tree.
+
+### Mutations
+
+| Finding | Mutations | What they break |
+|---|---|---|
+| QA-14 | 5 | no `O_NONBLOCK`; no `fstat` (a FIFO that holds a valid record is believed); no `lstat` type check (the file is opened to find out); no reason in the message; a rewrite on the raw descriptor that forgets to close it |
+| QA-15 | 8 | every flock error "held" again; `EACCES` and `EAGAIN` each no longer "held"; a descriptor leak; no special catch (the generic text); no way out; no reason; the writer's lock waiting out the cap |
+| QA-16 | 12 | one per place a string is made: `_utc_minute`, the lab and consumer in `_what_failed`, the call number, `_failing_detail`, the binary's version, the stored key, both reasons in `_assemble`, `_lab()`, the Curator's error text (kept raw, and cleaned but uncapped), the trace's fallback sentence |
+| QA-17 | 9 | the check ignored; only half of it (each half); exit 1; stdout; no "nothing was recorded"; the whole traceback; an import instead of `find_spec`; no way out |
+| QA-18 | 5 | the old behaviour; the test inverted; any later probe, a failed one too; the wrong binary's probe; a restart that is not announced |
+
+Every test of mine was checked this way: the product line was broken (or the old code put back) in a scratch copy of the worktree, the named tests were run, they had to fail, and the copy was discarded. The worktree was never mutated. **All 39 were caught on the final tree**, run again after the last product commit: 0 not caught, 0 invalid.
+
+### Running the tests
+
+- **Environment.** QA's runner configuration: the reviewer's pinned scratch venv (not rebuilt or upgraded) called by absolute path, `env -i`, a scratch `HOME` and `TMPDIR`, `ARAIL_SKIP_OLLAMA=1`, `PYTHONDONTWRITEBYTECODE=1`, `-p no:cacheprovider`, `--continue-on-collection-errors`, a junit XML, the venv's `bin` **not** on `PATH`, `~/.cargo/bin` on it. Nothing was written into the checkout while the full suite ran. **The order of `PATH` matters, and my first full run had it wrong:** with `/usr/bin` before `/opt/homebrew/bin`, `python3` is Apple's 3.9.6, which has no `tomllib`, and `test_shell_source_safety::test_shell_sourced_configs_are_injection_safe` failed (153 ids: the 151, `[write]`, and this one). Proof that it is the runner and not the code: the same test fails identically on an untouched `git archive` of `d0547e72` with that `PATH` (1 failed) and passes on my tip with Homebrew first (1 passed). The second full run has Homebrew first, as QA's evidently had it (their 151 do not include this test).
+- **`tests/test_qa_deep_honest_retest.py`: 20 passed, 4 xfailed, 1 failed.** The eight red tests that can be satisfied now pass (QA-14 `[read]`, QA-15 x2, QA-16 x2, QA-17 x2, QA-18); the twelve guards pass; QA-19 and the three TD36 cases are strict xfails; the one failure is `[write]` (see the section above). *Teaching:* Measures: outcomes of QA's own file. Bar: nine formerly red tests green, four xfails, twelve guards green, because that is the re-test's definition of fixed. Outside: a different split would be a regression in a guard or an xfail that flipped to XPASS. Fault lives in: the test id.
+- **QA's four first-pass files: 81 passed, 8 xfailed**, as before the pass. The same eight xfails; none flipped to XPASS.
+- **The full suite** (second run, on `05908920`): 8,608 testcases, 8,389 passed, 126 failed, 26 errors, 29 skipped, 38 xfailed, in 12 min 27 s. Compared by id with the 151 of `TEST_REPORT.md`: **152 failing ids = the 151 exactly, plus `[write]`. 0 missing, 0 other new.** *Teaching:* Measures: ids that fail now and are not in QA's list, and the other way round. Bar: 0 and 0 apart from the one id explained above, because a new red id is a regression of the pass and a missing one means a baseline test changed. Outside: the id names the test and the test names the code. Fault lives in: the cause code per id in `TEST_REPORT.md`; the one extra id's cause is the contradiction above. The wall time (12 min 27 s, against 11 min 30 s in pass 3) is context, not a gate: this tree has 81 more testcases, 25 of them QA's.
+- **Concurrency.** U9 (`test_u9_eight_processes_fifty_writes_each_keep_an_exact_count`) ran **45 times with 0 failures** (the bar is 40). The 120-round cold-start reproduction (8 processes, 50 writes each, a fresh state folder per round) **lost no write: 0 of 120 rounds**. *Teaching:* Measures: runs that lost a write out of 400, and rounds out of 120 with a count short of 400. Bar: 0 each, because the claim is that every write lands and pass 3 lost one in 20. Outside: any loss is a writer that reported a failure it did not have; none of this pass's changes touches the lock open, and it still holds. Fault lives in: `_open_in_dir` and its callers.
+- **The system Python.** `/usr/bin/python3` 3.9.6 imports `arail.deep_verdict` (stdlib only: no third-party module is loaded) and `python -m arail.deep_verdict status` runs. QA's guard test for it passes.
+
+### Frozen names
+
+The rule is the one in fix passes 2 and 3: no occurrence count of `aerollm_api`, `AERO_`, `AEROLLM_`, `tier1-aerollm`, `AeroLLMBackend`, `build-aerollm.sh` or `backend="aerollm"` goes down in a modified file, and lowercase `aerollm` is counted too. A script reads each modified file at the base and at HEAD from git objects (files the pass adds have no base; `sprints/` is left out):
+
+| Base | Modified files checked | Counts that rose | Counts that fell |
+|---|---|---|---|
+| `d0547e72`, the head this pass started from | 14 | 2 | **0** |
+| `5bc1f920`, QA's build | 13 | 2 | **0** |
+| `62d5ebdf`, `origin/main` | 25 | 15 | **0** |
+
+`src/dac_world/` and `src/arail/buddy_host/` (the Buddy contract bytes) are byte-identical to `62d5ebdf`. No QueueLLM file changed: the checkout is clean at `87ff5005` before and after, and no path of this pass is under it.
+
+### The fourth live run
+
+The check was run once at the end, under the same rules as before: the operator's venv interpreter read only (`PYTHONDONTWRITEBYTECODE=1`), four non-secret keys copied from the operator's `.env`, a scratch root, one fresh child process per row. **9 of 9 rows pass**, exit 0, total time 56 s (the bar is under 5 minutes).
+
+| Row | Deep calls attempted | Deep calls failed | Silent outcomes |
+|---|---|---|---|
+| W1 Chat, five turns | 5 | 4 | 0 |
+| W2 background agents | 2 | 1 | 0 |
+| W3 Curator review | 6 | 5 | 0 |
+| W4 Curator grow | 7 | 6 | 0 |
+| W5 deep probe | 5 | 4 | 0 |
+| W6 fresh process | 0 | 0 | 0 |
+
+The same numbers as every earlier live run: on today's wheel it answers call 1 and fails calls 2 to 5, and the fixes of this pass change what is filed and said in cases the live check does not create (a FIFO, a lock, an escape sequence, an unusable interpreter). A silent outcome is a deep failure that some surface reported as fine or done; the bar is 0 in every row.
+
+- **The operator's systems did not change.** A manifest taken outside the harness just before and just after is identical, line for line: a digest of every file's path, size and mtime under the operator's `.venv` (45,054 files) and `lab/` (34,340 files), the sha256 of `.env` (not printed), the sha256 of the `aerollm` native files in site-packages (the live binary is `d62e1e16e93c...`), the QueueLLM checkout (HEAD `87ff5005`, clean), the operator's arail checkout status and HEAD, the crash-report folder (31 reports, one digest) and the process list. No file under `.venv`, `lab/` or `.env` is newer than the run's start, no crash report appeared, and no probe or harness process or scratch root was left.
+- **`LIVE_RUN.txt` is unchanged.** After normalising numbers, this run's output differs from it only in the QueueLLM checkout's HEAD (`e6346967e537` then, `87ff50053bb5` now; this build does not write to that checkout, and the before and after of this run agree) and one second of runtime.
+
+### Seen and not changed
+
+- **`registry.report_failure`** and **`_read_json`**: found item 1 and 2 above, measured, not changed.
+- **`world_routes`'s own error states** (`_review_state`, `_forge_state` and `_grow_state` with `str(e)[:200]`, and the lines `Curator review of '...' failed: {e}` and `Forge of '...' failed: {e}`): pre-existing, not in the sprint's diff, raw exception text for an exception that escaped a pass. Same class as TD45; not changed.
+- **The research block's `since`, `consumer` and `lab`** go out as JSON over HTTP, raw: the encoder escapes C0 and the page escapes HTML, so a browser is not a terminal sink. If a command line ever prints that block it must go through `_printable`.
+- **A swapped-in folder or socket** is refused by the OS before the `fstat`, so its reason carries the OS's words, not ours. Fail-closed and fast; the realistic case has our words.
+- **QA-17's limit:** an interpreter that finds `arail.deep_probe` but cannot run it (too old a Python, a broken dependency) still ends in Python's own exit 1. `find_spec` cannot see that and running the module would be the probe.
+- **`deep probe --json` before setup** prints nothing on stdout (documented since QA-13): there is no interpreter yet to build the document with.
+- **TD16 stays open** (a clock stepped back during a probe), and **TD36, TD43, TD44 and TD45** are filed, not fixed, as asked.
+
+### Pre-handoff checks for fix pass 4 (`d0547e72..HEAD`)
+
+- Every item in the table has a commit, and every commit is atomic: one finding each, tests first and in the same commit, with a mutation check. Each message names what it fixed and ends with the `Co-Authored-By` line.
+- `git diff --check` is clean for `d0547e72..HEAD` and for `62d5ebdf..HEAD`. No TODO, FIXME, XXX or HACK in the added lines outside `sprints/`, no commented-out code (a scan of added comment lines that look like code found none), no use of SIGABRT or abort, and the word "free" does not appear in the added lines.
+- `pyflakes` (a scratch venv, not the reviewer's): no new warning in any product file (`deep_verdict.py` 0, `deep_probe.py` 1, `deep_policy.py` 1, `world_routes.py` 0, each equal to the count at the start of the pass). In tests the only increase is the fixture-import pattern ("redefinition of unused 'fake_deep'"): 124 to 140 across the changed files; the count of "imported but unused" is 17 before and after.
+- `shellcheck -S warning` on `arailctl`: 2 findings before and after (the unused `CYAN`, and `SC2155` on a line this pass did not touch). It parses under the macOS `/bin/bash` (3.2.57). All 18 scripts are mode 755 in git.
+- `deep_verdict.py` is stdlib only and runs under `/usr/bin/python3` 3.9.6. Frozen names: see the table above. `src/dac_world/` and `src/arail/buddy_host/` are byte-identical to `62d5ebdf`. `TEST_REPORT.md`, `SPRINT.md` and `REVIEW.md` are unchanged; the only edit to a QA test file is the three-line marker on QA-19.
+- Every `docs/cli.md` change has a test that pins it (the exit-5 row three times, the "What it prints" paragraph, the clearing paragraph).
+- Nothing was pushed.
+
+### Cleanup of fix pass 4
+
+Removed after this commit: my scratch folder (`fix4`, with the untouched copy of `d0547e72`, the mutation copy, the lint venv, the reproductions, both full-suite logs and junit files, every output and helper), the git-ignored files the runs wrote into the worktree (`lab/`, `logs/`, `__pycache__`) without touching `src/arail.egg-info/`, and the five `__KMP_REGISTERED_LIB_<pid>` files in `/tmp` that this pass's live run left (TD34; the 29 older ones are not from this pass and were left). Kept: the reviewer's scratch venv. The waiters and runners of this pass were stopped; none is left. The operator's `.venv`, `.env`, `lab/` and Worlds and the QueueLLM and Buddy checkouts were not touched.
