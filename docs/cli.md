@@ -544,8 +544,9 @@ no usable time. A failure a running lab could not save (it keeps that one in
 memory, and `deep status` says `NOT SAVED`) is cleared the same way: the lab
 reads the passing probe, and when that probe started after the failure the lab
 stops reporting it, with no restart. The record is written under a lock with an atomic replace; a
-corrupt file (one that does not parse, is nested too deeply, or has an entry
-the readers cannot use) reads as failing and is moved aside by the next writer.
+corrupt file (one that does not parse, is nested too deeply, has an entry the
+readers cannot use, or is not a regular file at all, such as a FIFO) reads as
+failing and is moved aside by the next writer.
 ARAIL checks the verdict folder before every write: if it is itself a symbolic
 link, or belongs to another user, nothing is written there (the failure is kept
 in memory and `deep status` says `NOT SAVED` and why; the probe exits `5`). A

@@ -833,6 +833,160 @@ def test_qa7_a_passing_verdict_without_a_usable_probe_supersedes_nothing():
     assert dv.passed_after(_verdict("passing", {"outcome": "pass"}), 1000.0) is False
     assert dv.passed_after(_verdict("passing", {"outcome": "fail", "started_ts": 2000.0}), 1000.0) is False
 
+# ── QA-14 (fix pass 4): a verdict.json that is not a regular file never hangs a reader or a writer ──────
+# Opening a FIFO for reading waits for a process that opens it for writing, and nobody will. _read_store used to
+# refuse only a symbolic link and then open verdict.json with O_RDONLY, so a FIFO there hung current() while it
+# held the module lock, and every reader and writer behind it, and so the portal's status poll. Everything that
+# can hang runs in a child with a timeout, so a regression fails in seconds and cannot hang the suite.
+
+_SPECIAL_CHILD = r"""
+import json, os, socket, stat, sys, time, types
+root, scenario, kind, name = sys.argv[1:5]
+so = os.path.join(root, "pkg", "_native.abi3.so"); os.makedirs(os.path.dirname(so), exist_ok=True)
+open(so, "wb").write(b"NATIVE" * 100)
+top = types.ModuleType("aerollm_api"); top.__file__ = os.path.join(root, "pkg", "__init__.py")
+nat = types.ModuleType("aerollm_api._native"); nat.__file__ = so
+sys.modules["aerollm_api"] = top; sys.modules["aerollm_api._native"] = nat
+from arail import deep_verdict as dv
+b = dv.identity()
+d = os.environ["ARAIL_DEEP_STATE_DIR"]; os.makedirs(d, mode=0o700, exist_ok=True)
+path = os.path.join(d, name)
+passing = {"schema": dv.SCHEMA, "updated_at": "x", "binaries": {b.sha256: {
+    "module": "aerollm_api", "native_path": so, "bytes": 1, "version": "v", "failure": None,
+    "last_pass_at": "2026-10-31T00:00:00Z",
+    "last_probe": {"outcome": "pass", "started_ts": 1.0, "started_at": "x", "at": "2026-10-31T00:00:00Z",
+                   "passed": 5, "total": 5, "first_error": None}}}}
+DOC = json.dumps(passing).encode()
+keep = []
+
+
+def make(kind):
+    # put a `kind` at `path`; the old file is gone before this runs
+    if kind in ("fifo", "fifo-with-doc"):
+        os.mkfifo(path)
+        if kind == "fifo-with-doc":                       # a writer is already attached and has sent a valid record
+            fd = os.open(path, os.O_RDWR | os.O_NONBLOCK); os.write(fd, DOC); keep.append(fd)
+    elif kind == "dir":
+        os.mkdir(path)
+    elif kind == "socket":
+        here = os.getcwd(); os.chdir(d)                   # the path of a socket is short: bind by a relative name
+        s = socket.socket(socket.AF_UNIX); s.bind(name); keep.append(s); os.chdir(here)
+
+
+def secs(t):
+    return round(time.monotonic() - t, 2)
+
+
+if scenario == "swap":                                   # a regular file at the lstat, something else at the open
+    open(path, "w").write(DOC.decode())
+    state = {"swapped": False}
+    real = os.lstat
+
+    def swapping(p, *a, **k):
+        r = real(p, *a, **k)
+        if str(p).endswith(name) and not state["swapped"]:
+            state["swapped"] = True
+            os.unlink(path)
+            make(kind)
+        return r
+
+    os.lstat = swapping
+    t = time.monotonic(); v = dv.current()
+    out = {"secs": secs(t), "state": v.state, "source": v.source, "err": v.store_error, "swapped": state["swapped"]}
+elif scenario == "never-opened":                         # what lstat says is not a regular file is not opened
+    make(kind)
+    opened = []
+    real_open = os.open
+
+    def spy(p, *a, **k):
+        if str(p).endswith(name):
+            opened.append(1)
+        return real_open(p, *a, **k)
+
+    os.open = spy
+    t = time.monotonic(); doc, err = dv._read_store(use_cache=False)
+    out = {"secs": secs(t), "opened": bool(opened), "doc_is_none": doc is None, "err": err}
+elif scenario == "write":                                # the next writer moves it aside and records the failure
+    make(kind)
+    t = time.monotonic(); dv.note_call(False, error="boom"); took = secs(t)
+    v = dv.current()
+    aside = [n for n in os.listdir(d) if n.startswith("verdict.json.corrupt-")]
+    out = {"secs": took, "state": v.state, "source": v.source, "regular": stat.S_ISREG(os.lstat(path).st_mode),
+           "aside": len(aside), "aside_is_fifo": [stat.S_ISFIFO(os.lstat(os.path.join(d, n)).st_mode) for n in aside],
+           "count": json.load(open(path))["binaries"][b.sha256]["failure"]["count"]}
+elif scenario == "leak":                                 # the refusal after the open closes what it opened
+    make(kind)
+    real = os.lstat
+    os.lstat = lambda p, *a, **k: real(so) if str(p).endswith(name) else real(p, *a, **k)    # lstat says "regular"
+    before = len(os.listdir("/dev/fd"))
+    for _ in range(300):
+        doc, err = dv._read_store(use_cache=False)
+    out = {"leaked": len(os.listdir("/dev/fd")) - before, "doc_is_none": doc is None, "err": err}
+elif scenario == "lock":                                 # verdict.lock is not a regular file
+    make(kind)
+    t = time.monotonic(); problem = dv._locked_update(lambda doc: None)
+    out = {"secs": secs(t), "problem": problem}
+print(json.dumps(out))
+"""
+
+
+def _special(tmp_path, scenario: str, kind: str, name: str = "verdict.json") -> dict:
+    env = {**os.environ, "PYTHONPATH": str(Path(dv.__file__).resolve().parents[1]), "PYTHONDONTWRITEBYTECODE": "1",
+           "ARAIL_DEEP_STATE_DIR": str(tmp_path / "deep")}
+    try:
+        r = subprocess.run([sys.executable, "-c", _SPECIAL_CHILD, str(tmp_path), scenario, kind, name], env=env,
+                           capture_output=True, text=True, timeout=12)
+    except subprocess.TimeoutExpired:
+        pytest.fail(f"{scenario}/{kind}: deep_verdict did not return in 12 s (it blocks in open())")
+    assert r.returncode == 0, r.stderr
+    return json.loads(r.stdout.strip().splitlines()[-1])
+
+
+@pytest.mark.parametrize("kind", ["fifo", "dir", "socket", "fifo-with-doc"])
+def test_qa14_a_regular_verdict_swapped_for_something_else_after_the_lstat_is_unreadable_not_a_hang(tmp_path, kind):
+    got = _special(tmp_path, "swap", kind)
+    assert got["swapped"], "the swap happened between the lstat and the open"
+    assert got["secs"] < 5 and got["state"] == "failing" and got["source"] == "store_unreadable", got
+    if kind in ("dir", "socket"):
+        # The OS refuses these before the fstat is reached (open() a socket, fdopen() a folder): its words, not
+        # ours. The realistic case, a folder or socket already there, is the lstat check and has our words.
+        assert got["err"], got
+    else:
+        assert "not a regular file" in got["err"], got    # a FIFO that already holds a valid record is not believed either
+
+
+@pytest.mark.parametrize("kind", ["fifo", "dir", "socket"])
+def test_qa14_what_lstat_says_is_not_a_regular_file_is_never_opened(tmp_path, kind):
+    got = _special(tmp_path, "never-opened", kind)
+    assert got["opened"] is False and got["doc_is_none"] and "not a regular file" in got["err"], got
+
+
+def test_qa14_the_refusal_after_the_open_does_not_leak_the_descriptor(tmp_path):
+    got = _special(tmp_path, "leak", "fifo")
+    assert got["doc_is_none"] and "not a regular file" in got["err"], got
+    assert got["leaked"] == 0, f"{got['leaked']} descriptors left open after 300 refusals"
+
+
+@pytest.mark.parametrize("kind", ["fifo", "dir"])
+def test_qa14_the_next_writer_moves_a_non_regular_verdict_aside_and_records_the_failure(tmp_path, kind):
+    got = _special(tmp_path, "write", kind)
+    assert got["secs"] < 5 and got["state"] == "failing" and got["source"] == "call", got
+    assert got["regular"] and got["count"] == 1 and got["aside"] == 1, got
+    if kind == "fifo":
+        assert got["aside_is_fifo"] == [True], "the FIFO itself was renamed, not read"
+
+
+@pytest.mark.parametrize("kind", ["fifo", "dir"])
+def test_qa14_a_fifo_or_a_folder_named_verdict_lock_fails_fast_and_says_why(tmp_path, kind):
+    """Checked, not assumed: the lock file does not hang the way a FIFO verdict.json did. opening it read-write
+    does not wait, and flock on a FIFO answers at once, so the writer reports the problem and does not wait out
+    the 2 s lock cap."""
+    got = _special(tmp_path, "lock", kind, name="verdict.lock")
+    assert got["problem"], got
+    assert got["secs"] < 1.5, got
+    if kind == "fifo":
+        assert "flock" in got["problem"], got
+
 # ── U5: a failure persists, other processes see it, a later success does not clear ──
 
 def test_u5_a_failure_persists_and_another_process_sees_it(fake_deep):

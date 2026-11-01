@@ -505,6 +505,16 @@ def _validate_doc(doc: Any) -> Optional[str]:
     return None
 
 
+def _not_regular(path: Any, mode: int) -> str:
+    """Why a verdict file that is not a regular file is unreadable, in one line (QA-14)."""
+    kind = next((name for test, name in ((stat.S_ISFIFO, "a FIFO"), (stat.S_ISDIR, "a folder"),
+                                         (stat.S_ISSOCK, "a socket"), (stat.S_ISCHR, "a character device"),
+                                         (stat.S_ISBLK, "a block device")) if test(mode)),
+                "an unusual kind of file")
+    return (f"{path}: is {kind}, not a regular file; the verdict is only ever read from a regular file, "
+            "and the next write moves this aside")
+
+
 def _read_store(*, use_cache: bool = True) -> tuple[Optional[dict], Optional[str]]:
     """``(doc, error)``. Missing is ``(None, None)``. Cached by stat; never locks.
 
@@ -523,6 +533,9 @@ def _read_store(*, use_cache: bool = True) -> tuple[Optional[dict], Optional[str
     if stat.S_ISLNK(lst.st_mode):
         _P.read_cache = None
         return None, f"{path}: is a symbolic link; the verdict file is never followed through one"
+    if not stat.S_ISREG(lst.st_mode):
+        _P.read_cache = None
+        return None, _not_regular(path, lst.st_mode)
     sig = (lst.st_mtime_ns, lst.st_size, lst.st_ino)
     cached = _P.read_cache
     if use_cache and cached is not None and cached[0] == str(path) and cached[1] == sig:
@@ -530,8 +543,14 @@ def _read_store(*, use_cache: bool = True) -> tuple[Optional[dict], Optional[str
     doc: Optional[dict] = None
     err: Optional[str] = None
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
-        with os.fdopen(fd, "rb") as fh:
+        # O_NONBLOCK: opening a FIFO for reading waits for a writer that never comes, and every reader and
+        # writer of the store would wait behind it (QA-14). It does nothing to a regular file.
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(fd, "rb") as fh:        # owns the descriptor from here: every way out closes it
+            fst = os.fstat(fh.fileno())
+            if not stat.S_ISREG(fst.st_mode):  # swapped for something else between the lstat and the open
+                _P.read_cache = None
+                return None, _not_regular(path, fst.st_mode)
             raw = fh.read()
         parsed = json.loads(raw.decode("utf-8"))
         bad = _validate_doc(parsed)
