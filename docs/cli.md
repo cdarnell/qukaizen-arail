@@ -543,7 +543,7 @@ future (the clock was stepped back after it) is cleared too, and so is one with
 no usable time. A failure a running lab could not save (it keeps that one in
 memory, and `deep status` says `NOT SAVED`) is cleared the same way: the lab
 reads the passing probe, and when that probe started after the failure the lab
-stops reporting it, with no restart. The record is written under a lock with an atomic replace; a
+stops reporting it, with no restart. The next failure after that pass starts a record of its own, with its own time and count. The record is written under a lock with an atomic replace; a
 corrupt file (one that does not parse, is nested too deeply, has an entry the
 readers cannot use, or is not a regular file at all, such as a FIFO) reads as
 failing and is moved aside by the next writer.

@@ -246,3 +246,7 @@ def test_qa17_arailctl_parses_under_the_system_bash():
 def test_qa17_the_docs_name_the_interpreter_case_in_the_exit_5_row():
     row = next(ln for ln in CLI_DOC.splitlines() if ln.startswith("| `5` |"))
     assert "cannot run the probe" in row and "PYTHON" in row, row
+
+
+def test_qa18_the_docs_say_the_next_failure_after_a_pass_starts_a_record_of_its_own():
+    assert "starts a record of its own, with its own time and count" in CLI_DOC

@@ -845,9 +845,16 @@ def counters() -> dict[str, int]:
 
 
 def _mem_note(key: str, source: str, consumer: str, lab: str, err: str, now: float) -> bool:
-    """Record a process-local failure. True when it is a new transition."""
+    """Record a process-local failure. True when it is a new transition.
+
+    A failure that follows a passing probe starts a record of its own. The read already hides an in-memory
+    failure the pass superseded (``_assemble``, QA-6) and leaves ``_P.mem`` alone, so the old record is still
+    here: bumping it would date the new failure from before the pass and count the ones the pass cleared
+    (QA-18). The saved path does the same: ``record_probe`` sets the failure to null and the next one is new."""
     f = _P.mem.get(key)
     _P.mem_version += 1
+    if f is not None and _passed_since(f, _stored_last_probe(key)):
+        f = None
     if f is None:
         _P.mem[key] = _new_failure(source, consumer, lab, err, now)
         return True
@@ -899,6 +906,15 @@ def _note_failure(source: str, error: Any, consumer: Optional[str], persist: boo
         _P.verdict_cache = None
     if transition and not child:
         _emit_transition(source, persist and not (b is None), consumer, lab, err, b)
+
+
+def _stored_last_probe(key: str) -> Optional[dict]:
+    """The stored last probe of one binary, or None (no store, an unreadable one, or no probe yet)."""
+    doc, _err = _read_store()
+    if not doc:
+        return None
+    e = doc["binaries"].get(key)
+    return e.get("last_probe") if isinstance(e, dict) else None
 
 
 def _persisted_failure(key: str) -> Optional[dict]:

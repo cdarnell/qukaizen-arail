@@ -834,6 +834,88 @@ def test_qa7_a_passing_verdict_without_a_usable_probe_supersedes_nothing():
     assert dv.passed_after(_verdict("passing", {"outcome": "pass"}), 1000.0) is False
     assert dv.passed_after(_verdict("passing", {"outcome": "fail", "started_ts": 2000.0}), 1000.0) is False
 
+# ── QA-18 (fix pass 4): after a pass, the next unsaved failure starts a record of its own ───────────────────
+# QA-6 hides a superseded in-memory failure at read time and leaves _P.mem alone. _mem_note then bumped that old
+# record for the next failure whose write also failed, so the verdict said "since <a time before the pass>" and
+# counted failures the pass had cleared. The persisted path starts fresh; so does this now.
+
+def test_qa18_a_failure_after_the_pass_that_could_not_be_saved_either_starts_a_fresh_record(fake_deep, monkeypatch):
+    fake_deep()
+    b = dv.identity()
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(dv, "_now", lambda: clock["now"])
+    _fail_while_the_lock_is_held(monkeypatch)
+    clock["now"] = 1010.0
+    _fail_while_the_lock_is_held(monkeypatch)
+    assert dv.current().failure["count"] == 2
+    clock["now"] = 1100.0
+    _another_process_stores_a_probe(b, "pass", started_ts=1050.0)
+    assert dv.current().state == "passing"
+    clock["now"] = 1200.0
+    _fail_while_the_lock_is_held(monkeypatch)
+    v = dv.current()
+    assert v.state == "failing" and v.store_error
+    assert v.failure["count"] == 1 and v.failure["since_ts"] == 1200.0 and v.since == dv._iso(1200.0), v.failure
+
+
+def test_qa18_a_failure_that_lands_after_the_pass_started_goes_on_counting_the_same_record(fake_deep, monkeypatch):
+    fake_deep()
+    b = dv.identity()
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(dv, "_now", lambda: clock["now"])
+    _fail_while_the_lock_is_held(monkeypatch)
+    _another_process_stores_a_probe(b, "pass", started_ts=900.0)          # it started BEFORE the failure
+    assert dv.current().state == "failing", "the failure landed during the probe, so it stands"
+    clock["now"] = 1100.0
+    _fail_while_the_lock_is_held(monkeypatch)
+    f = dv.current().failure
+    assert f["count"] == 2 and f["since_ts"] == 1000.0, f
+
+
+def test_qa18_a_failing_probe_on_disk_does_not_restart_the_record(fake_deep, monkeypatch):
+    fake_deep()
+    b = dv.identity()
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(dv, "_now", lambda: clock["now"])
+    _fail_while_the_lock_is_held(monkeypatch)
+    _another_process_stores_a_probe(b, "fail", started_ts=1050.0)
+    clock["now"] = 1100.0
+    _fail_while_the_lock_is_held(monkeypatch)
+    f = dv.current().failure
+    assert f["count"] == 2 and f["since_ts"] == 1000.0, "only a PASS ends a failure's record"
+
+
+def test_qa18_an_unreadable_store_changes_nothing_the_record_keeps_counting(fake_deep, monkeypatch):
+    fake_deep()
+    b = dv.identity()
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(dv, "_now", lambda: clock["now"])
+    _fail_while_the_lock_is_held(monkeypatch)
+    store_path().write_text("{ not json", encoding="utf-8")
+    clock["now"] = 1100.0
+    _fail_while_the_lock_is_held(monkeypatch)
+    assert dv._P.mem[b.sha256]["count"] == 2
+
+
+def test_qa18_the_fresh_record_announces_itself_as_a_new_failure_like_the_saved_path_does(fake_deep, monkeypatch):
+    from arail import activity
+    lines = []
+    monkeypatch.setattr(activity.activity_log, "emit", lambda *a, **k: lines.append(a))
+    fake_deep()
+    b = dv.identity()
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(dv, "_now", lambda: clock["now"])
+    _fail_while_the_lock_is_held(monkeypatch)
+    clock["now"] = 1010.0
+    _fail_while_the_lock_is_held(monkeypatch)
+    said = [a for a in lines if a[0] == "deep" and a[1].startswith("Deep model failed")]
+    assert len(said) == 1, "the second failure of one record is not announced again"
+    _another_process_stores_a_probe(b, "pass", started_ts=1050.0)
+    clock["now"] = 1200.0
+    _fail_while_the_lock_is_held(monkeypatch)
+    said = [a for a in lines if a[0] == "deep" and a[1].startswith("Deep model failed")]
+    assert len(said) == 2, "a failure after a pass is a new failure and says so"
+
 # ── QA-16 (fix pass 4): QA-5's rule, applied to the sinks it missed ─────────────────────────────────────
 # QA-5 cleaned what `deep status`, `channel` and the probe print. The same stored and runtime text also reaches the
 # activity log, agent traces, the truth strip and the Curator's notes through explain()'s detail, the registry's
