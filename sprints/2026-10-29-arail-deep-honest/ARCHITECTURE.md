@@ -28,7 +28,7 @@ This sprint adds `./arailctl deep probe`: a generation test through ARAIL's own 
 | V4 | "Which agent is not verified." | Most likely Buddy's nightly dream. On all three days the failure line comes 3.1, 78.0 and 198.4 ms after "buddy entering dream window". Then "buddy dream failed: NameError" follows 1.9 to 2.2 s later. That NameError was raised after the dream's model call returned (`agents/_builtin_buddy.py:1446-1453`), so the dream's model call ran between the two lines: a deep failure, then about 2 s of fast answer. Path: `agents/dream_daemon.py:86-101` → `_builtin_buddy.py:1591-1596` → `ArailHost.llm_complete` `:175-188`. The grow pass that started in the same second cannot report (V2). Still inference, not proof. | `lab/instances/ai/data/activity.jsonl`, 2026-09-09, 09-11 and 09-21: dream line, failure line, NameError line. |
 | V5 | Every deep warm re-probes (`portal/model_warmth.py:111`, `:251`, `:452`). | `:251` is the tier-0 keep-watch, not deep. The deep re-probes are `:111` (preload) and `:452` (boot warm). | `portal/model_warmth.py:190-251`. |
 | V6 | The probe prints "the file `import aerollm_api` resolves to, and that file's sha256". | In this venv the import resolves to a 127-byte package `__init__.py`. Its hash says nothing about the binary. The probe prints the resolved file and the native file it loads. It keys everything by the native file's sha256 (`d62e1e16…`). | `find_spec` origin and a `sys.modules` diff, both run today. |
-| V7 | Fact 5: provenance of the live `.so` is unknown. | Narrowed. The dist is an **editable** install from `file:///Users/netsushi/ProJects/aerollm/crates/aerollm-api`. Its RECORD hash for the `.so` is `80bfe0f0…` (20 260 240 bytes). The file is `d62e1e16…` (21 894 128 bytes). Who built the replacement is still not recorded. | `aerollm_api-0.1.0.dist-info/RECORD`, `direct_url.json`. |
+| V7 | Fact 5: provenance of the live `.so` is unknown. | Narrowed. The dist is an **editable** install from `file://<home>/ProJects/aerollm/crates/aerollm-api`. Its RECORD hash for the `.so` is `80bfe0f0…` (20 260 240 bytes). The file is `d62e1e16…` (21 894 128 bytes). Who built the replacement is still not recorded. | `aerollm_api-0.1.0.dist-info/RECORD`, `direct_url.json`. |
 
 The vision's other facts check out. Fact 1: Metal works today (exit 0, 32023.921). Fact 2: 52 commits ahead of main, install name `@rpath/queuellm_api.abi3.so`, exports only `PyInit_queuellm_api`; its preamble count is 0. Fact 3: the tarball sha256 `57f30364…` matches `pyproject.toml:282`; the `.so` is `7c77aa85…`. Fact 4: three lines in `ai`. Fact 5: the shadowing. The Chat correction holds.
 
@@ -94,7 +94,7 @@ V = verified today (code read or measured). N = not verified.
 |---|---|---|---|
 | A1 | Every build on this Mac answers call 1 and fails calls 2-5 in one process. | V | Day-1 table; S6 `DAY1.json`. |
 | A2 | `import aerollm_api` in the live venv resolves to the package `site-packages/aerollm_api/__init__.py`. It loads `aerollm_api/aerollm_api.abi3.so` (`d62e1e16…`). The top-level `site-packages/aerollm_api.abi3.so` (17 411 888 bytes, 2026-05-02, `b780d724…`) is shadowed and never loaded. | V | `find_spec` (no import); `sys.modules` diff in scratch. |
-| A3 | The live dist is editable from `file:///Users/netsushi/ProJects/aerollm/crates/aerollm-api`. Its RECORD hash for the `.so` (`80bfe0f0…`) does not match the file. No bundle marker exists. | V | `aerollm_api-0.1.0.dist-info/RECORD`, `direct_url.json`; no `aerollm_api.bundle.json`. |
+| A3 | The live dist is editable from `file://<home>/ProJects/aerollm/crates/aerollm-api`. Its RECORD hash for the `.so` (`80bfe0f0…`) does not match the file. No bundle marker exists. | V | `aerollm_api-0.1.0.dist-info/RECORD`, `direct_url.json`; no `aerollm_api.bundle.json`. |
 | A4 | Every in-process deep generation goes through `AeroLLMBackend.complete` (`router/backends.py:1847-1890`): Chat (`portal/app.py:7974-7984`, `:8161-8169`, backend from `:9584-9631`); agents and Curator (`agents/deep_policy.py:187`); registry routers (`registry/binding.py:103-121` wraps `deep._backend`); the researcher (`agents/researcher.py:212-229`). | V | Code read. |
 | A5 | Nucleus builds its own `Runtime` and does not use `AeroLLMBackend`. | N | Docstring only: `nucleus/runtime_names.py:10-15`. |
 | A6 | A generation cannot be cancelled. `.result()` has no timeout (`router/backends.py:1866-1868`). A probe timeout must kill a process. | V | Code; S6 A3. |
@@ -397,7 +397,7 @@ python -m arail.deep_probe [--json] [--force]           the same thing
 **Text output** for the live wheel today (`<site>` is the venv's site-packages):
 ```
 QueueLLM deep probe: 5 calls in a fresh process, through ARAIL's own deep backend. Token-free, no network.
-python    /Users/netsushi/ProJects/qukaizen-arail/.venv/bin/python
+python    ~/ProJects/qukaizen-arail/.venv/bin/python
 import    aerollm_api -> <site>/aerollm_api/__init__.py (package)
 binary    <site>/aerollm_api/aerollm_api.abi3.so
 sha256    d62e1e16e93c264b79eae35e5766a84f56091ed8e4cc66a89e18791effc7579e · 21894128 bytes · modified 2026-06-28 · version 0.1.0-rc.2
@@ -546,7 +546,7 @@ Messages that must exist (the builder may tighten wording, not facts):
     binary:       <site>/aerollm_api/aerollm_api.abi3.so
     sha256:       d62e1e16e93c… · 21894128 bytes · modified 2026-06-28 · version 0.1.0-rc.2
     shadowed:     <site>/aerollm_api.abi3.so · sha256 b780d7240e73… · modified 2026-05-02 · never loaded
-    channel:      unknown — pip package aerollm-api 0.1.0 (editable, file:///Users/netsushi/ProJects/aerollm/crates/aerollm-api), but its binary was replaced outside pip (RECORD 80bfe0f033fa…, file d62e1e16e93c…)
+    channel:      unknown — pip package aerollm-api 0.1.0 (editable, file://<home>/ProJects/aerollm/crates/aerollm-api), but its binary was replaced outside pip (RECORD 80bfe0f033fa…, file d62e1e16e93c…)
     generation:   FAILING — 1/5 at the last probe (2026-10-29 13:35 UTC); first error at call 2: RuntimeError: …
                   5/5 is the bar: a deep answer must work every time, not once per process. The fault is in the binary above, not in ARAIL.
     bg pressure:  0.60 (default)
@@ -834,7 +834,7 @@ Commit verbatim as `sprints/2026-10-29-arail-deep-honest/DAY1.json`.
    "bytes": 21894128,
    "version": "0.1.0-rc.2",
    "pip_record_sha256": "80bfe0f033fa6341c8e951af81924c2cfb2539e2fc5945e8b4f2debac54c4465",
-   "pip_direct_url": "file:///Users/netsushi/ProJects/aerollm/crates/aerollm-api (editable)",
+   "pip_direct_url": "file://<home>/ProJects/aerollm/crates/aerollm-api (editable)",
    "shadowed": "site-packages/aerollm_api.abi3.so, 17411888 bytes, 2026-05-02, sha256 b780d7240e7383586a7860349ad9aa02435870cd70f47a05ee6a3c494e9500a3",
    "load_s": 2.21,
    "calls_ok": 1,

@@ -185,7 +185,7 @@ TD1-TD12 as the architecture predicted. TD13 added by the builder; ruled "fix no
 
 ## Environment note for QA
 
-Reuse the scratch venv at `/private/tmp/claude-501/-Users-netsushi-ProJects--claude-worktrees-sprint-command-error-060a85/b8dbbfe8-4399-41ee-b2d5-83e731cff931/scratchpad/arail-review-venv`. I pinned it to the operator venv's web stack: `fastapi==0.140.7`, `starlette==1.3.1`, `httpx==0.28.1`, `httpcore==1.0.9`, and removed `httpx2`. Without that, `tests/conftest.py`'s bearer patch does nothing and hundreds of portal tests get 401 (N12). `src/arail.egg-info/` in the worktree belongs to that venv's editable install.
+Reuse the scratch venv at `<scratchpad>/arail-review-venv`. I pinned it to the operator venv's web stack: `fastapi==0.140.7`, `starlette==1.3.1`, `httpx==0.28.1`, `httpcore==1.0.9`, and removed `httpx2`. Without that, `tests/conftest.py`'s bearer patch does nothing and hundreds of portal tests get 401 (N12). `src/arail.egg-info/` in the worktree belongs to that venv's editable install.
 
 ## Required actions before merge
 

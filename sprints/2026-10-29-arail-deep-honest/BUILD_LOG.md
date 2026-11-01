@@ -166,9 +166,9 @@ Each number has four parts. The bar changes by row (next section); the other thr
 **W0. preflight: what is installed and what the model folder holds** (PASS)
 
 - scratch .env holds only: AEROLLM_KV_BUDGET_PCT, AEROLLM_MODEL, ARAIL_MODELS_DIR, LAB_TIER
-- aerollm_api resolves to /Users/netsushi/ProJects/qukaizen-arail/.venv/lib/python3.11/site-packages/aerollm_api/__init__.py
-- site-packages: /Users/netsushi/ProJects/qukaizen-arail/.venv/lib/python3.11/site-packages (11 aerollm or queuellm files recorded, 455 top-level entries)
-- QueueLLM checkout: /Users/netsushi/ProJects/qukaizen-queuellm, HEAD e730d5fe3f6b, working tree clean
+- aerollm_api resolves to ~/ProJects/qukaizen-arail/.venv/lib/python3.11/site-packages/aerollm_api/__init__.py
+- site-packages: ~/ProJects/qukaizen-arail/.venv/lib/python3.11/site-packages (11 aerollm or queuellm files recorded, 455 top-level entries)
+- QueueLLM checkout: ~/ProJects/qukaizen-queuellm, HEAD e730d5fe3f6b, working tree clean
 - 4 checks, all ok.
 - deep calls attempted = 0. Bar and why: 0: the preflight reads files and git state only. A deep call here would be recorded as a failure and spoil the rows after it.
 - deep calls failed = 0. Bar and why: 0, for the same reason: no call, no failure.
@@ -233,7 +233,7 @@ Each number has four parts. The bar changes by row (next section); the other thr
 
 **W7. deep status, and the build script's refusals (deep rebuild and auto)** (PASS)
 
-- channel line: unknown — pip package aerollm-api 0.1.0 (editable, file:///Users/netsushi/ProJects/aerollm/crates/aerollm-api), but its binary was replaced outside pip (RECORD 80bfe0f...
+- channel line: unknown — pip package aerollm-api 0.1.0 (editable, file://<home>/ProJects/aerollm/crates/aerollm-api), but its binary was replaced outside pip (RECORD 80bfe0f...
 - ./arailctl deep rebuild is only `exec bash scripts/build-aerollm.sh build`, so this row runs that line; the rule for this build is not to run ./arailctl deep rebuild itself
 - 20 checks, all ok.
 - deep calls attempted = -. Bar and why: the build and status scripts make no deep call, and a call made in a subprocess cannot be counted from here.

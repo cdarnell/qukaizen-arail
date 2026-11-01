@@ -1,17 +1,17 @@
 Deep honest check. Token-free: local only, nothing installed, nothing downloaded.
-python /Users/netsushi/ProJects/qukaizen-arail/.venv/bin/python
-checkout /Users/netsushi/ProJects/.claude/worktrees/sprint-command-error-060a85/arail-deep-wt
-scratch /private/tmp/claude-501/-Users-netsushi-ProJects--claude-worktrees-sprint-command-error-060a85/b8dbbfe8-4399-41ee-b2d5-83e731cff931/scratchpad/build-fix/tmp/arail-deep-honest.lZFpBi (removed at the end)
+python ~/ProJects/qukaizen-arail/.venv/bin/python
+checkout <worktree>
+scratch <scratchpad>/build-fix/tmp/arail-deep-honest.lZFpBi (removed at the end)
 
 running W0 preflight ...
 
 W0  preflight: what is installed and what the model folder holds  [PASS]
       scratch .env holds only: AEROLLM_KV_BUDGET_PCT, AEROLLM_MODEL, ARAIL_MODELS_DIR, LAB_TIER
-      aerollm_api resolves to /Users/netsushi/ProJects/qukaizen-arail/.venv/lib/python3.11/site-packages/aerollm_api/__init__.py
-      site-packages: /Users/netsushi/ProJects/qukaizen-arail/.venv/lib/python3.11/site-packages. Recorded for W8 to compare: every aerollm or queuellm file in it (size, mtime and sha256) and the whole top-level listing
-      QueueLLM checkout: /Users/netsushi/ProJects/qukaizen-queuellm, HEAD e6346967e537, working tree clean
-      [ok  ] the code under test is this checkout: /Users/netsushi/ProJects/.claude/worktrees/sprint-command-error-060a85/arail-deep-wt/src/arail/__init__.py
-      [ok  ] aerollm_api resolves, without importing it: /Users/netsushi/ProJects/qukaizen-arail/.venv/lib/python3.11/site-packages/aerollm_api/aerollm_api.abi3.so
+      aerollm_api resolves to ~/ProJects/qukaizen-arail/.venv/lib/python3.11/site-packages/aerollm_api/__init__.py
+      site-packages: ~/ProJects/qukaizen-arail/.venv/lib/python3.11/site-packages. Recorded for W8 to compare: every aerollm or queuellm file in it (size, mtime and sha256) and the whole top-level listing
+      QueueLLM checkout: ~/ProJects/qukaizen-queuellm, HEAD e6346967e537, working tree clean
+      [ok  ] the code under test is this checkout: <worktree>/src/arail/__init__.py
+      [ok  ] aerollm_api resolves, without importing it: ~/ProJects/qukaizen-arail/.venv/lib/python3.11/site-packages/aerollm_api/aerollm_api.abi3.so
       [ok  ] the model folder exists: /Users/Shared/models/Qwen2.5-7B-Instruct-4bit
       [ok  ] the preflight made no deep call: attempted 0, failed 0
 
@@ -115,7 +115,7 @@ W5  ./arailctl deep probe --json on a fresh state folder  [PASS]
       [ok  ] exit code 1: the probe ran and deep is failing: exit 1
       [ok  ] passed 1 of 5: passed 1 of 5
       [ok  ] the first error is at call 2 and names rms_norm: call 2: RuntimeError: backend `mlx-native` failed: apply_pre_block: Qwen2Model::forwa...
-      [ok  ] the import resolves to a package's __init__.py: /Users/netsushi/ProJects/qukaizen-arail/.venv/lib/python3.11/site-packages/aerollm_api/__init__.py
+      [ok  ] the import resolves to a package's __init__.py: ~/ProJects/qukaizen-arail/.venv/lib/python3.11/site-packages/aerollm_api/__init__.py
       [ok  ] the binary is the day-1 wheel (sha256): d62e1e16e93c264b...
       [ok  ] the version is the day-1 version: 0.1.0-rc.2
       [ok  ] the failure was written to the verdict file: written=True error=None
@@ -138,7 +138,7 @@ W6  a fresh process on W5's state: every surface, then Check  [PASS]
 running W7 build script ...
 
 W7  deep status, and the build script's refusals (deep rebuild and auto)  [PASS]
-      channel line: unknown — pip package aerollm-api 0.1.0 (editable, file:///Users/netsushi/ProJects/aerollm/crates/aerollm-api), but its binary was replaced outside pip (RECORD 80bfe0f...
+      channel line: unknown — pip package aerollm-api 0.1.0 (editable, file://<home>/ProJects/aerollm/crates/aerollm-api), but its binary was replaced outside pip (RECORD 80bfe0f...
       ./arailctl deep rebuild is only `exec bash scripts/build-aerollm.sh build`, so this row runs that line; the rule for this build is not to run ./arailctl deep rebuild itself
       [ok  ] deep status prints the import line: present
       [ok  ] deep status prints the binary line: present
@@ -151,9 +151,9 @@ W7  deep status, and the build script's refusals (deep rebuild and auto)  [PASS]
       [ok  ] the sha256 line names the day-1 wheel: found
       [ok  ] deep rebuild dispatches to build-aerollm.sh build: yes
       [ok  ] build-aerollm.sh build refuses with exit 1: exit 1
-      [ok  ] build-aerollm.sh build says nothing was built or installed: ✗ /Users/netsushi/ProJects/qukaizen-queuellm has the renamed crate crates/queuellm-api (module queuellm_api...
+      [ok  ] build-aerollm.sh build says nothing was built or installed: ✗ ~/ProJects/qukaizen-queuellm has the renamed crate crates/queuellm-api (module queuellm_api...
       [ok  ] build-aerollm.sh auto refuses with exit 1: exit 1
-      [ok  ] build-aerollm.sh auto says nothing was built or installed: ✗ /Users/netsushi/ProJects/qukaizen-queuellm has the renamed crate crates/queuellm-api (module queuellm_api...
+      [ok  ] build-aerollm.sh auto says nothing was built or installed: ✗ ~/ProJects/qukaizen-queuellm has the renamed crate crates/queuellm-api (module queuellm_api...
       [ok  ] cargo was never started (a stub stood in its place): 0 call(s)
       [ok  ] the old false claim is gone: No QueueLLM sibling repo: 0 time(s) in the three outputs
       [ok  ] the old false claim is gone: QueueLLM ready: 0 time(s) in the three outputs

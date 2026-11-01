@@ -34,7 +34,7 @@
    "bytes": 21894128,
    "version": "0.1.0-rc.2",
    "pip_record_sha256": "80bfe0f033fa6341c8e951af81924c2cfb2539e2fc5945e8b4f2debac54c4465",
-   "pip_direct_url": "file:///Users/netsushi/ProJects/aerollm/crates/aerollm-api (editable)",
+   "pip_direct_url": "file://<home>/ProJects/aerollm/crates/aerollm-api (editable)",
    "shadowed": "site-packages/aerollm_api.abi3.so, 17411888 bytes, 2026-05-02, sha256 b780d7240e7383586a7860349ad9aa02435870cd70f47a05ee6a3c494e9500a3",
    "load_s": 2.21,
    "calls_ok": 1,
