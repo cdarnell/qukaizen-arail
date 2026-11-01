@@ -359,8 +359,10 @@ def complete_preferring_deep(
 
 def _failed_detail(what: str) -> str:
     """Detail for a fast call made because this call's deep attempt just failed:
-    the verdict's own sentence if it is failing now, else a plain one."""
-    return _deep_failing_detail() or f"deep generation failed: {what[:160]}"
+    the verdict's own sentence if it is failing now, else a plain one. The plain one quotes the exception as
+    raised, and it lands in an agent's trace, so it is one printable line (QA-16)."""
+    from arail import deep_verdict
+    return _deep_failing_detail() or f"deep generation failed: {deep_verdict._clip(what, 160)}"
 
 
 def _complete_on_fast(

@@ -174,7 +174,7 @@ def _utc_minute(iso: Optional[str]) -> str:
     """'2026-10-29T13:35:02Z' -> '2026-10-29 13:35 UTC'."""
     if not iso or len(iso) < 16:
         return "an unknown time"
-    return f"{iso[:10]} {iso[11:16]} UTC"
+    return _printable(f"{iso[:10]} {iso[11:16]} UTC")      # a stored stamp is a slice of whatever the file holds
 
 
 # What a terminal acts on: the C0 controls (NUL, BEL, BS, ESC ...), DEL, and the C1 range U+0080-U+009F
@@ -234,7 +234,8 @@ def _sha256_file(path: str) -> str:
 
 
 def _lab() -> str:
-    return os.environ.get("ARAIL_INSTANCE", "").strip() or "root"
+    """This lab's name. It is stored with a failure and quoted in activity lines, so it is cleaned here (QA-16)."""
+    return _clip(os.environ.get("ARAIL_INSTANCE", ""), 80) or "root"
 
 
 def _is_probe_child() -> bool:
@@ -305,7 +306,7 @@ def _make_binary(native_path: str, resolves_to: Optional[str], version: str, pin
         sha256=_sha256_file(native_path),
         bytes=st.st_size,
         mtime=_iso(st.st_mtime),
-        version=version,
+        version=_clip(version, 80),             # the wheel supplies it; it lands in three details (QA-16)
         pinned=pinned,
     )
 
@@ -456,7 +457,7 @@ def _bad_field(obj: dict, where: str, name: str, ok: Callable[[Any], bool], what
 
 def _validate_entry(sha: str, e: dict) -> Optional[str]:
     """What the readers rely on in one binary's record, and nothing more. An unknown extra key is kept."""
-    where = f"binaries[{sha[:12]}]"
+    where = f"binaries[{_printable(sha[:12])}]"       # a key is whatever the file holds
     f = e.get("failure")
     if f is not None:
         if not isinstance(f, dict):
@@ -1037,13 +1038,15 @@ def record_for(sha256: str) -> Optional[dict]:
 # Readers (C1): current, is_failing, and the user-facing text (C8)
 # ---------------------------------------------------------------------------
 def _what_failed(f: dict, lp: Optional[dict]) -> str:
+    """Why deep is failing, in one printable line. The lab, the consumer and the probe's call number are stored
+    strings, and this text goes to the truth strip, traces, activity lines and the Curator's notes (QA-16)."""
     source = f.get("source")
-    lab, consumer = f.get("lab") or "root", f.get("consumer") or "unattributed"
+    lab, consumer = _printable(f.get("lab") or "root"), _printable(f.get("consumer") or "unattributed")
     err = _clip(f.get("last_error") or f.get("error"), 120) or "no error text was recorded"
     if source == "probe":
         fe = (lp or {}).get("first_error") or {}
         if lp and lp.get("outcome") == "fail":
-            where = f", first error at call {fe['call']}" if fe.get("call") else ""
+            where = f", first error at call {_printable(fe['call'])}" if fe.get("call") else ""
             return (f"last probe {lp.get('passed')}/{lp.get('total')}{where}: "
                     f"{_clip(fe.get('error') or err, 120)}")
         return f"the last probe failed: {err}"
@@ -1070,7 +1073,7 @@ def _failing_detail(b: Optional[Binary], f: dict, lp: Optional[dict], changed: b
             "Agents and the Curator use the fast model until ./arailctl deep probe passes 5/5 on this build.")
     if changed:
         text += " The binary on disk changed after this process loaded it: restart the lab to load the new build."
-    return text
+    return _printable(text)                            # the one sentence explain() hands to every surface
 
 
 def _passed_since(f: dict, lp: Any) -> bool:
@@ -1098,6 +1101,8 @@ def passed_after(v: "Verdict", stamp: Any) -> bool:
 
 def _assemble(b: Optional[Binary], doc: Optional[dict], store_err: Optional[str], changed: bool) -> Verdict:
     write_err = _P.write_error
+    store_err = _printable(store_err) if store_err is not None else None    # paths and OS words, and a stored key
+    write_err = _printable(write_err) if write_err is not None else None
     if store_err is not None:
         detail = (f"deep generation is failing on this build"
                   f"{f' (QueueLLM {b.version}, sha256 {b.sha256[:12]})' if b is not None else ''}: "

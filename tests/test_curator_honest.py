@@ -454,6 +454,45 @@ def test_c8_counted_router_counts_a_native_panic_and_raises_a_runtimeerror_from_
     assert counted.first_error.startswith("Panic: native panic")
 
 
+# QA-16 (fix pass 4): the first error a report quotes is the runtime's text as raised. It goes into the activity
+# log, review.json and the portal's state, and `./arailctl logs` prints activity messages raw.
+QA16_ESC = "\x1b[2K\x1b[1Ainjected\x1b[0m\x07\x9b2K\x7f"
+
+
+@pytest.mark.parametrize("make", [lambda: RuntimeError("backend failed: " + QA16_ESC + "\nsecond line"),
+                                  lambda: Panic("native panic: " + QA16_ESC)],
+                         ids=["an exception", "a native panic"])
+def test_qa16_counted_router_keeps_only_printable_one_line_error_text(make):
+    exc = make()
+
+    class Inner:
+        backend_name = "fake-deep"
+
+        def complete(self, *a, **k):
+            raise exc
+
+    counted = wr._CountedRouter(Inner())
+    with pytest.raises((RuntimeError, Panic)):
+        counted.complete("p")
+    got = counted.first_error
+    bad = sorted({hex(ord(ch)) for ch in got if ord(ch) < 0x20 or 0x7F <= ord(ch) <= 0x9F})
+    assert not bad, f"first_error carries {bad}: {got!r}"
+    assert got.startswith(("RuntimeError: backend failed: ?[2K", "Panic: native panic: ?[2K")), got
+
+
+def test_qa16_counted_router_caps_a_long_error_at_160_characters():
+    class Inner:
+        backend_name = "fake-deep"
+
+        def complete(self, *a, **k):
+            raise RuntimeError("x" * 400)
+
+    counted = wr._CountedRouter(Inner())
+    with pytest.raises(RuntimeError):
+        counted.complete("p")
+    assert len(counted.first_error) <= 160 and counted.first_error.startswith("RuntimeError: xxx")
+
+
 @pytest.mark.parametrize("exc", [KeyboardInterrupt("ctrl-c"), SystemExit(3), GeneratorExit()],
                          ids=["KeyboardInterrupt", "SystemExit", "GeneratorExit"])
 def test_c8_counted_router_lets_an_interruption_through_untouched(exc):

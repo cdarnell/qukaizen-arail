@@ -40,6 +40,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from arail import agent_context
+from arail import deep_verdict
 from arail import world_forge as wf
 from arail import world_mount as wm
 from arail.activity import activity_log
@@ -184,6 +185,9 @@ class _CountedRouter:
         self._first_error_closed = False
 
     def _note_failure(self, text: str, *, closed: bool = False) -> None:
+        # The runtime's words as raised go into the activity log, review.json and the portal's state, and
+        # `./arailctl logs` prints activity messages raw: one printable line, cut at 160 (QA-16).
+        text = deep_verdict._clip(text, 160)
         with self._lock:
             self.failed += 1
             if closed:

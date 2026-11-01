@@ -405,3 +405,23 @@ def test_qa7_the_re_probe_is_a_residency_check_and_never_generates(env):
     before = len(env.fd.gen_calls())
     assert tier1_state(env.reg)["health"]["status"] == "cold"
     assert len(env.fd.gen_calls()) == before
+
+
+
+# ── QA-16 (fix pass 4): the dot's text, the degradation banner and the fallback lines come from health_detail ──
+
+def test_qa16_the_status_bar_dot_text_is_printable_for_a_hostile_stored_failure(env):
+    nasty = "\x1b[2K\x1b[1A\x9b2K\x07\x7f"
+    store = dv.state_dir() / "verdict.json"
+    store.parent.mkdir(parents=True, exist_ok=True)
+    store.write_text(__import__("json").dumps({
+        "schema": dv.SCHEMA, "updated_at": "x",
+        "binaries": {env.b.sha256: {"failure": {"since": "2026-10-31T" + nasty + "13:35:02Z", "since_ts": 1.0,
+                                                "last_at": "x", "last_ts": 1.0, "source": "call",
+                                                "consumer": "agent:" + nasty, "lab": "ai" + nasty,
+                                                "error": "e" + nasty, "last_error": "e" + nasty, "count": 1},
+                                    "last_probe": None}}}))
+    st = tier1_state(env.reg)["health"]
+    assert st["status"] == "unhealthy" and st["detail"].startswith(dv.HEALTH_PREFIX)
+    bad = sorted({hex(ord(c)) for c in st["detail"] if ord(c) < 0x20 or 0x7F <= ord(c) <= 0x9F})
+    assert not bad, f"the dot's text carries {bad}: {st['detail']!r}"

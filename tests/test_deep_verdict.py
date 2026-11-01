@@ -834,6 +834,92 @@ def test_qa7_a_passing_verdict_without_a_usable_probe_supersedes_nothing():
     assert dv.passed_after(_verdict("passing", {"outcome": "pass"}), 1000.0) is False
     assert dv.passed_after(_verdict("passing", {"outcome": "fail", "started_ts": 2000.0}), 1000.0) is False
 
+# ── QA-16 (fix pass 4): QA-5's rule, applied to the sinks it missed ─────────────────────────────────────
+# QA-5 cleaned what `deep status`, `channel` and the probe print. The same stored and runtime text also reaches the
+# activity log, agent traces, the truth strip and the Curator's notes through explain()'s detail, the registry's
+# health text and the warm-up line, and `./arailctl logs` prints activity messages raw. So it is cleaned where each
+# string is made, not where one sink shows it.
+
+NASTY16 = "\x1b[2K\x1b[1A\x9b2K\x07\x7f"
+
+
+def test_qa16_utc_minute_is_printable_whatever_the_stored_stamp_holds():
+    assert controls_in(dv._utc_minute("2026-10-31T\x1b[2K:00Z")) == []
+    assert controls_in(dv._utc_minute("\x9b" * 20)) == []
+    assert dv._utc_minute("2026-10-31T13:35:02Z") == "2026-10-31 13:35 UTC", "a good stamp is untouched"
+    assert dv._utc_minute(None) == "an unknown time"
+
+
+@pytest.mark.parametrize("source", ["call", "load", "probe"])
+def test_qa16_what_failed_cleans_every_stored_name_it_embeds(source):
+    f = {"source": source, "lab": "ai" + NASTY16, "consumer": "agent:" + NASTY16, "last_error": "e" + NASTY16}
+    lp = {"outcome": "fail", "passed": 1, "total": 5,
+          "first_error": {"call": "2" + NASTY16, "error": "boom" + NASTY16}}
+    out = dv._what_failed(f, lp)
+    assert controls_in(out) == [], out
+    assert "ai" in out or source == "probe"
+
+
+def test_qa16_failing_detail_cleans_the_version_the_since_and_the_names(fake_deep):
+    import dataclasses
+    fake_deep()
+    b = dataclasses.replace(dv.identity(), version="9.9" + NASTY16)
+    f = {"source": "call", "lab": "ai" + NASTY16, "consumer": "agent:" + NASTY16, "last_error": "e",
+         "since": "2026-10-31T" + NASTY16 + "T13:35:02Z"}
+    text = dv._failing_detail(b, f, None, False)
+    assert controls_in(text) == [], text
+    assert "9.9" in text and "since 2026-10-31" in text, "and it still says what it said"
+
+
+def test_qa16_a_hostile_version_string_is_cleaned_where_the_binary_is_made(tmp_path):
+    so = tmp_path / "x.so"
+    so.write_bytes(b"NATIVE" * 10)
+    b = dv._make_binary(str(so), None, "1.0" + NASTY16 + " rc", pinned=False)
+    assert controls_in(b.version) == [] and b.version.startswith("1.0") and b.version.endswith("rc")
+    assert dv._make_binary(str(so), None, "0.1.0-rc.2", pinned=False).version == "0.1.0-rc.2"
+
+
+def test_qa16_a_hostile_key_in_the_store_does_not_reach_the_reason_it_is_unreadable(fake_deep):
+    fake_deep()
+    dv.identity()
+    store_path().parent.mkdir(parents=True, exist_ok=True)
+    store_path().write_text(json.dumps(_entry_doc("k" + NASTY16 + "x", failure=_good_failure(last_ts="soon"))),
+                            encoding="utf-8")
+    v = dv.current()
+    assert v.source == "store_unreadable" and v.store_error
+    for name, text in (("detail", v.detail), ("store_error", v.store_error), ("what_failed", dv.what_failed(v)),
+                       ("health_detail", dv.health_detail(v))):
+        assert controls_in(text) == [], (name, text)
+    _doc, raw_err = dv._read_store(use_cache=False)
+    assert controls_in(raw_err) == [], f"and the reason is clean where it is made, for the probe and the writers: {raw_err!r}"
+
+
+def test_qa16_the_verdict_hands_out_a_printable_reason_whatever_it_was_given(fake_deep):
+    """_assemble is where the reason a store is unreadable, and a write that failed, become the Verdict's text."""
+    fake_deep()
+    b = dv.identity()
+    v = dv._assemble(b, None, "unreadable: " + NASTY16, False)
+    assert v.source == "store_unreadable" and controls_in(v.detail) == [] and controls_in(v.store_error) == []
+    dv._P.write_error = "disk full: " + NASTY16
+    v = dv._assemble(b, None, None, False)
+    assert v.store_error.startswith("disk full: ") and controls_in(v.store_error) == [], v.store_error
+
+
+def test_qa16_the_lab_name_is_cleaned_where_it_is_read_so_the_activity_line_and_the_store_are_too(fake_deep, monkeypatch):
+    from arail import activity
+    lines = []
+    monkeypatch.setattr(activity.activity_log, "emit", lambda *a, **k: lines.append(a))
+    monkeypatch.setenv("ARAIL_INSTANCE", "ai" + NASTY16)
+    fake_deep()
+    b = dv.identity()
+    assert controls_in(dv._lab()) == [] and dv._lab().startswith("ai")
+    dv.note_call(False, error="RuntimeError: " + NASTY16 + " boom", consumer="agent:" + NASTY16)
+    said = [a[1] for a in lines if a[0] == "deep"]
+    assert said, "a new failure writes an activity line"
+    assert all(controls_in(m) == [] for m in said), said
+    stored = read_store()["binaries"][b.sha256]["failure"]
+    assert all(controls_in(str(stored[k])) == [] for k in ("lab", "consumer", "error", "last_error")), stored
+
 # ── QA-15 (fix pass 4): the writer's lock, when it cannot be taken at all, does not wait out the 2 s cap ──
 
 @pytest.mark.parametrize("code", [errno.ENOTSUP, errno.ENOLCK], ids=["ENOTSUP", "ENOLCK"])

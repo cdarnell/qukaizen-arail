@@ -55,3 +55,19 @@ def test_h7_boot_warm_and_preload_emit_the_honest_line(env, monkeypatch, tmp_pat
     assert asyncio.run(mw._preload_once()) == "loaded"
     pre = [a for a in got if a[1].startswith("Deep model preloaded")]
     assert pre and pre[-1][2] == "warn" and "ready" not in pre[-1][1].lower()
+
+
+
+def test_qa16_the_loaded_line_is_printable_whatever_the_stored_probe_and_failure_say(env):
+    nasty = "\x1b[2K\x1b[1A\x9b2K\x07\x7f"
+
+    def bad(text):
+        return sorted({hex(ord(c)) for c in text if ord(c) < 0x20 or 0x7F <= ord(c) <= 0x9F})
+
+    dv.record_probe(probe_result(env.b, "pass", passed=5, started_ts=dv._now(), at="2026-10-29T" + nasty + "15:00:00Z"))
+    _level, text, gen = mw._deep_loaded_line("Deep model loaded at boot")
+    assert gen == "passing" and not bad(text), (bad(text), text)
+    dv.record_probe(probe_result(env.b, "fail", passed=1, started_ts=dv._now() + 1,
+                                 first_error={"call": "2" + nasty, "kind": "long", "error": "boom" + nasty}))
+    _level, text, gen = mw._deep_loaded_line("Deep model loaded at boot")
+    assert gen == "failing" and not bad(text), (bad(text), text)

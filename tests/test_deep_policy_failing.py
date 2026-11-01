@@ -238,3 +238,17 @@ def test_p5_a_system_call_can_be_stamped_too():
         with agent_context.with_deep_reason("deep_failing", "d") as inner:
             assert inner.kind == "system" and inner.label == "world-review"
             assert inner.trace_id == outer.trace_id
+
+
+
+# QA-16 (fix pass 4): when the verdict is not failing, a fast call made because a deep attempt just raised carries a
+# plain sentence in its trace, built from the exception text as raised.
+
+def test_qa16_the_plain_fallback_detail_is_printable_and_one_line(fake_deep, monkeypatch):
+    fake_deep()
+    monkeypatch.setattr(deep_policy, "_deep_failing_detail", lambda: None)
+    detail = deep_policy._failed_detail("RuntimeError: \x1b[2K\x1b[1Ainjected\x07\x9b2K\x7f\nsecond line")
+    bad = sorted({hex(ord(c)) for c in detail if ord(c) < 0x20 or 0x7F <= ord(c) <= 0x9F})
+    assert not bad, f"{bad}: {detail!r}"
+    assert detail.startswith("deep generation failed: RuntimeError: ?[2K") and "second line" in detail
+    assert len(detail) <= len("deep generation failed: ") + 160

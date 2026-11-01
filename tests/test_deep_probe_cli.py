@@ -161,3 +161,8 @@ def test_qa13_the_docs_name_the_case_in_the_exit_5_row():
 def test_qa15_the_docs_name_the_lock_that_cannot_be_taken_in_the_exit_5_row():
     row = next(ln for ln in CLI_DOC.splitlines() if ln.startswith("| `5` |"))
     assert "another probe is running" in row and "cannot be taken at all" in row and "probe.lock" in row, row
+
+
+def test_qa16_the_docs_say_the_other_surfaces_are_cleaned_where_the_text_is_made():
+    section = CLI_DOC.split("**What it prints.**", 1)[1].split("**Who reads it.**", 1)[0]
+    assert "activity log" in section and "Curator's reports" in section and "where they are made" in section, section
