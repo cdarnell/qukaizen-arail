@@ -268,9 +268,11 @@ jobs:
         run: |
           set -euo pipefail
           python - <<'PY'
+          import hashlib
           import json
           import time
           import urllib.error
+          import urllib.parse
           import urllib.request
           from pathlib import Path
 
@@ -303,6 +305,84 @@ jobs:
                           lance_port = int(line.split('=', 1)[1].strip().strip('"'))
                           return lance_port
               return 7414  # fallback while the pack file hasn't landed yet
+
+          # Portal auth (sprints/2026-10-25-buddy-s4-gateway-in-box, ARAIL D3, #205):
+          # every portal route needs a credential except a short anonymous list --
+          # /login, /static/, /health, /healthz, /api/system/health, /api/instance. A
+          # program presents the per-instance bearer in <ARAIL_DATA_DIR>/portal.token,
+          # which the portal's own startup hook mints for an onboarded lab
+          # (`./arailctl auth token` prints its id and path, never its value). This
+          # script predated that and sent no credential, so from #205 on `/api/jobs/state`
+          # answered 401 for the whole window below -- and because urllib's HTTPError is an
+          # OSError, the loop below retried that deterministic refusal for ten minutes.
+          #
+          # Like the lance port, the token is read lazily: the file exists once the
+          # portal is up, not before. It is sent ONLY to the portal's protected routes --
+          # never to the anonymous probes (that they stay anonymous is part of what this
+          # checks; the SRE watcher depends on /api/system/health) and never to the
+          # memory service (another listener, with no use for it). It is masked in this
+          # log, scrubbed from the diagnostics dump, and never printed.
+          default_data_dir = Path('lab/instances/ai/data')
+          token_file = default_data_dir / 'portal.token'
+          token = None
+          PROTECTED = {'dashboard-root', 'jobs-state'}
+
+          def _resolve_token() -> str | None:
+              global token, token_file
+              if token is not None:
+                  return token
+              # The pack's own ARAIL_DATA_DIR first (bare, or single/double quoted when the path needs it),
+              # then the layout `inst_data_dir` builds, which is where CI's portal.token has been seen.
+              data_dirs = [default_data_dir]
+              if pack_file.exists():
+                  for line in pack_file.read_text().splitlines():
+                      if line.startswith('ARAIL_DATA_DIR='):
+                          data_dirs.insert(0, Path(line.split('=', 1)[1].strip().strip('"\'')))
+                          break
+              token_file = data_dirs[0] / 'portal.token'  # named in messages if no candidate has one
+              for data_dir in data_dirs:
+                  if (data_dir / 'portal.token').exists():
+                      token_file = data_dir / 'portal.token'
+                      value = token_file.read_text().strip()
+                      if value:
+                          token = value
+                          print(f'::add-mask::{token}')
+                      break
+              return token
+
+          def _token_id() -> str:
+              return hashlib.sha256(token.encode('utf-8')).hexdigest()[:8] if token else '-'  # what `auth token` prints
+
+          class _Refused(Exception):
+              """The portal refused a request that carried the bearer: a verdict, not a boot race."""
+
+          def _get(name: str, url: str) -> str:
+              headers = {}
+              if name in PROTECTED and _resolve_token():
+                  headers['Authorization'] = f'Bearer {token}'
+              try:
+                  with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=5) as response:
+                      body = response.read().decode('utf-8', 'replace')
+                      if response.status != 200:
+                          raise RuntimeError(f'{name} returned HTTP {response.status}')
+                      final_path = urllib.parse.urlparse(response.geturl()).path
+              except urllib.error.HTTPError as exc:
+                  if exc.code in (401, 403) and headers:
+                      try:
+                          why = json.loads(exc.read().decode('utf-8', 'replace')).get('error', '?')
+                      except (ValueError, AttributeError):
+                          why = '?'
+                      raise _Refused(
+                          f'{name}: HTTP {exc.code} ({why}) to the bearer with id {_token_id()} read from {token_file}'
+                      ) from None
+                  raise  # 401 with no bearer yet, 5xx, ...: still booting, the loop retries
+              if name == 'dashboard-root' and final_path.startswith('/login'):
+                  # An unauthenticated GET / is a 302 to the login page, which urllib follows to a
+                  # 200: without this the dashboard check would pass on the login form.
+                  if headers:
+                      raise _Refused(f'{name}: sent to {final_path} although the bearer with id {_token_id()} was presented')
+                  raise urllib.error.URLError(f'{name} is still the login page: no portal.token yet')
+              return body
 
           def _endpoints() -> dict[str, str]:
               return {
@@ -358,6 +438,7 @@ jobs:
 
           deadline = time.time() + 600
           last_error: str | None = None
+          refused: str | None = None
           responses: dict[str, str] = {}
 
           while time.time() < deadline:
@@ -375,11 +456,7 @@ jobs:
               try:
                   current: dict[str, str] = {}
                   for name, url in _endpoints().items():
-                      with urllib.request.urlopen(url, timeout=5) as response:
-                          body = response.read().decode('utf-8', 'replace')
-                          if response.status != 200:
-                              raise RuntimeError(f'{name} returned HTTP {response.status}')
-                          current[name] = body
+                      current[name] = _get(name, url)
 
                   jobs_state = json.loads(current['jobs-state'])
                   system_health = json.loads(current['system-health'])
@@ -394,6 +471,11 @@ jobs:
 
                   responses = current
                   break
+              except _Refused as exc:
+                  # Waiting longer cannot change a refusal. Expire the deadline so this falls
+                  # straight into the failure path below, the same diagnostics dump a timeout gets.
+                  refused = str(exc)
+                  deadline = 0.0
               except (OSError, ValueError, urllib.error.URLError) as exc:
                   last_error = str(exc)
                   time.sleep(2)
@@ -432,6 +514,7 @@ jobs:
                       ('ss -tlnp (listening sockets)', ['ss', '-tlnp']),
                       ('start.pid + is it alive', ['bash', '-c', 'p=$(cat ci-artifacts/start.pid 2>/dev/null); echo "pid=$p"; kill -0 "$p" 2>&1 && echo alive || echo dead']),
                       ('lab/instances tree', ['find', 'lab/instances', '-maxdepth', '4']),
+                      ('portal.token (mode and owner only)', ['bash', '-c', 'ls -l lab/instances/*/data/portal.token 2>&1']),
                       ('portal.log (tail)', ['bash', '-c', 'tail -n 80 lab/instances/*/log/portal.log 2>&1']),
                       ('memory.log (tail)', ['bash', '-c', 'tail -n 40 lab/instances/*/log/memory.log 2>&1']),
                   ):
@@ -441,10 +524,32 @@ jobs:
                           text = out.stdout + out.stderr
                       except Exception as diag_exc:  # noqa: BLE001
                           text = f'(diagnostic command failed: {diag_exc})\n'
-                      if secret:
-                          text = text.replace(secret, '[REDACTED]')
+                      for scrub in (secret, token):
+                          if scrub:
+                              text = text.replace(scrub, '[REDACTED]')
                       f.write(text)
-              raise SystemExit(f'health checks timed out: {last_error} -- see ci-artifacts/diagnostics.txt')
+              if refused:
+                  raise SystemExit(f'health check refused: {refused} -- see ci-artifacts/diagnostics.txt')
+              no_token = '' if token else f' (no portal.token ever appeared at {token_file})'
+              raise SystemExit(f'health checks timed out: {last_error}{no_token} -- see ci-artifacts/diagnostics.txt')
+
+          # The bearer above only proves something if auth is actually ON. The same protected
+          # route, with no credential at all, must be refused; a portal that answers it 200 has
+          # default-deny off, and every green check above would be vacuous.
+          try:
+              with urllib.request.urlopen(_endpoints()['jobs-state'], timeout=5):
+                  anonymous_status = 200
+          except urllib.error.HTTPError as exc:
+              anonymous_status = exc.code
+          if anonymous_status != 401:
+              raise SystemExit(
+                  f'auth is not enforced: GET /api/jobs/state with no credential answered HTTP {anonymous_status}, '
+                  'expected 401'
+              )
+
+          # ci-artifacts/ is uploaded, so make sure no response body carries the bearer before writing any.
+          if token and any(token in body for body in responses.values()):
+              raise SystemExit('a portal response body contains the bearer token; not writing ci-artifacts/http')
 
           output_dir = Path('ci-artifacts/http')
           output_dir.mkdir(parents=True, exist_ok=True)
@@ -453,6 +558,12 @@ jobs:
               (output_dir / f'{name}.{suffix}').write_text(body)
 
           print('local health surfaces responded successfully')
+          print('  dashboard-root  200 bearer     the dashboard renders for a program holding portal.token (not the login page)')
+          print('  jobs-state      200 bearer     a protected API answers when the bearer is presented')
+          print('  system-health   200 anonymous  the health probe stays anonymous; the SRE watcher and orchestrators rely on it')
+          print('  memory-health   200 anonymous  the memory service (a separate listener) is up')
+          print('  auth enforced   401 no cred    the protected API refuses a request that carries no credential')
+          print(f'  bearer: token id {_token_id()} (the id only), read from {token_file}')
           PY
 
       - name: Stop lab services
