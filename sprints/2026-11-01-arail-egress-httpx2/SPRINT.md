@@ -27,7 +27,7 @@ Constraints: never relax the airgapped default; no `aerollm` / `AERO_*` rename; 
 |---|---|---|---|---|
 | think | none | none | skipped, on purpose | The win condition is stated by the operator's brief. |
 | baseline | none (the orchestrating session) | this file | done | Reproduced in three venvs before any change: see Baseline. |
-| plan | architect (design) | ARCHITECTURE.md | pending | |
+| plan | architect (design) | ARCHITECTURE.md | done | The design is the build contract. 13 of its claims were run against the real libraries (V1 to V13). The six open questions are answered in the Decisions log. |
 | build | builder | BUILD_LOG.md | pending | |
 | review | architect (review) | REVIEW.md | pending | |
 | test | qa | TEST_REPORT.md | pending | |
@@ -80,10 +80,32 @@ Three venvs, all editable installs of this worktree, built in the session's scra
 
 **B8. TD51 inventory.** `src/arail/open_notebook_seed.py:19` (`import httpx` at module level; every call targets localhost), `src/arail/doctor.py:278` (lists `httpx` among component versions, so it prints "not installed" in a CI-style venv), `tests/test_host_edge.py:22`, `tests/test_host_edge_brain.py:18` (also needs `openai`), `tests/portal/test_opencode_routes.py:22`, `tests/buddy_conformance.py:346` (lazy, inside a helper), `tests/conftest.py:284` (rewritten by #211; leave to it). `core/knowledge-canvas/` is a separate app with its own `requirements.txt`.
 
+**B9. The full suite on untouched `origin/main` (`5997363e`), the "before" for the final comparison.** One pytest process per test file (510 files), 3 at a time, 420 s cap per file, a scratch `HOME` and `TMPDIR`, one venv after the other.
+
+| Venv | Files with a failure or error | Failed | Errors | Timeouts | Wall time |
+|---|---|---|---|---|---|
+| Lock (`uv sync --frozen --extra dev --extra maximus`) | 31 | 78 | 8 | 0 | 566 s |
+| CI-style (`.[dev]`, versions held at the 2026-11-01 resolution) | 156 | 1207 | 17 | 0 | 479 s |
+
+- *Means:* the set of failing ids on each side is what the "after" run is compared with. The CI-style count is large because main still carries TD48 (portal tests reach the portal with no credential and get 401, repaired by #211) and TD52's test files, and because `dev` alone has no `maximus` extras.
+- *Bar and why:* the same failing ids after the change, in the same venv. This PR changes the guard in every process that boots the portal, and in a CI-style venv `httpx2` is now patched there for the first time, so a test that boots the portal and then calls a public host through `httpx2` is the regression to look for.
+- *Out of range:* an id that fails only after the change is a regression until a serial re-run on both trees says otherwise (the sibling repair cleared 4 such ids that way). If #211 merges and main moves, the "before" is re-run on the new main.
+- *Where:* session scratch (`results/full-before-lock`, `results/full-before-ci`, junit per file); not committed. Reproduce with one pytest process per file in a venv built as described in Baseline.
+
 ## Decisions log
 
 | Date | Decision | Why |
 |---|---|---|
+| 2026-11-01 | Plan to build gate: passed. `ARCHITECTURE.md` (`ec2a12be`) is the contract; the builder works from the file, not from a summary. | All sections populated; the load-bearing claims were run, not assumed. |
+| 2026-11-01 | Open question 1, TD55 (hybrid mode's audit claim is false): file it, do not fix it here. | A third debt in different docs; the brief asks for a focused PR. |
+| 2026-11-01 | Open question 2, required checks: not changed here. The PR says the five "Egress guard" legs can be marked required after two green runs, and that their names then become a contract. | A GitHub repository setting is the operator's. |
+| 2026-11-01 | Open question 3, cadence: daily, as designed, and flagged in the PR as a choice the operator can change in one line. | The repo is public (checked: `gh repo view` says PUBLIC), so minutes cost nothing; Blueprint Smoke already runs daily at 09:17; the dependency state can change on PyPI with no commit here. |
+| 2026-11-01 | Open question 4, numbering: TD52 to TD55 are confirmed at the BACKLOG commit, after #211 merges. | Another PR may take TD52 first. |
+| 2026-11-01 | Open question 5, the nucleus worker exits non-zero on an incomplete guard even in hybrid: accepted. | Fail closed; the toggle can flip to airgapped in-process, and the worker has no handler. |
+| 2026-11-01 | Open question 6: the PR description states the behaviour change (a fresh install now refuses `httpx2` traffic when airgapped, as a lock install already refused `httpx`). | It is the point of the fix, and the operator should not meet it first as a surprise. |
+| 2026-11-01 | The build runs as two builder passes, commits 1 to 4 (the guard and its proof) and then 5 to 7 (consumers, docs, CI). Commit 8 (BACKLOG) is made by the orchestrator after #211 merges. | A checkpoint after the security-critical core, where the orchestrator re-runs the probe and the targeted tests in every venv before the rest is built. |
+| 2026-11-01 | New tests are written and seen failing against the unmodified guard before the fix is applied (recorded in BUILD_LOG). | A test that never failed proves nothing. |
+| 2026-11-01 | Commit trailers name the model that wrote the commit: the architect's commit says Opus 5.5, the orchestrator's and the builder's say Sonnet 5.5. | Attribution should be true. |
 | 2026-11-01 | Skip the visionary. | The brief states the win condition. |
 | 2026-11-01 | Cut from `origin/main` as told, not from #211's branch. | The brief says so; it keeps this PR's diff to this PR's work. Consequence: until #211 merges, this PR's DB-Ensure, DaC and Blueprint Smoke checks are red for TD48's reason and are compared with main's, not read as green. |
 | 2026-11-01 | The BACKLOG closure of TD50 and TD51 is the last commit, made after #211 merges. | TD49 to TD51 exist only on #211's branch. Rewriting rows that main does not have yet would conflict with #211 in either merge order. |
