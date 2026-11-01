@@ -257,20 +257,18 @@ def test_chat_html_state_models_sources_from_compact_local_models_items():
 
 
 def test_chat_html_rail_and_active_fit_fallback_to_unknown_not_good():
+    """C2, closed out (sprints/2026-08-11-two-slot-chat-models Phase 5):
+    renderModelRail and renderActiveCard — the two sites this test
+    originally pinned — are gone (both collapsed onto the picker system).
+    That leaves makeOpt() as the ONLY row renderer and thus the only
+    remaining site for this fallback; the 'known survivor' BUILD_LOG.md
+    flagged for follow-up is fixed here, closing the last F-FAKEFIT gap."""
     text = _chat_html_text()
     honest_fallback = "const verdict = m.fit && m.fit.verdict ? m.fit.verdict : 'Unknown';"
     lying_fallback = "const verdict = m.fit && m.fit.verdict ? m.fit.verdict : 'good';"
 
-    # There must be exactly two occurrences of the honest fallback:
-    # renderModelRail (was line 3296) + renderActiveCard's active-mini-fit
-    # twin (was line 3375) — both named explicitly by C2.
-    assert text.count(honest_fallback) == 2
-
-    # The lying fallback must be gone from both of those two sites. A third,
-    # out-of-scope site (chat.html's makeOpt() picker-popup renderer, not
-    # named by C2) still has it — see BUILD_LOG.md "Findings for follow-up"
-    # — so this asserts count==1 (the known survivor), not count==0.
-    assert text.count(lying_fallback) == 1
+    assert text.count(honest_fallback) == 1
+    assert text.count(lying_fallback) == 0
 
 
 # ---------------------------------------------------------------------------

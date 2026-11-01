@@ -81,6 +81,11 @@ def fake_forge(monkeypatch):
                 progress_cb(stage, 1, 1, "")
         return _fake_result(params.slug, params.subject.title())
     monkeypatch.setattr(wr.wf, "forge_world", _forge)
+    # The router seam must be faked too: _run_forge builds the brain's router
+    # before calling forge_world, and a real ModelRouter() loads actual model
+    # weights — or, absent a local copy, calls out to the HF hub, which the
+    # airgapped test default egress-blocks into a forge "error" state.
+    monkeypatch.setattr(wr, "_curation_router", lambda brain: object())
 
 
 def _wait_state(c, want, timeout=10.0):
@@ -216,6 +221,7 @@ def test_forge_error_state_on_gate_refusal(lab, monkeypatch):
     def _boom(params, **kw):
         raise wf.GateRefused(wf.GateResult(ok=False))
     monkeypatch.setattr(wr.wf, "forge_world", _boom)
+    monkeypatch.setattr(wr, "_curation_router", lambda brain: object())
     with _client() as c:
         c.post("/api/worlds/forge", json={"subject": "junk"}, headers=CSRF_HEADERS)
         s = _wait_state(c, "error")

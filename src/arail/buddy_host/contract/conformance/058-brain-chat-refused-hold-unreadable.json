@@ -1,0 +1,54 @@
+{
+  "name": "brain-chat-refused-hold-unreadable",
+  "method": "brain.chat",
+  "setup": {
+    "hold_readable": false
+  },
+  "request": {
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer $CREDENTIAL",
+      "X-Buddy-Contract": "sha256:$CONTRACT_SHA256"
+    },
+    "body": {
+      "model": "buddy-fast",
+      "messages": [
+        {
+          "role": "system",
+          "content": "BUDDY-TURN/1 {\"trace_id\":\"0123456789abcdef\",\"channel\":\"telegram\",\"identity\":{\"pseudonym\":\"p_0123456789\",\"role\":\"talker\"},\"response_schema\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"kind\",\"answer\",\"cite\",\"propose\"],\"properties\":{\"kind\":{\"enum\":[\"answer\",\"abstain\",\"refuse\",\"escalate\"]},\"answer\":{\"type\":\"string\",\"maxLength\":600},\"cite\":{\"type\":\"array\",\"maxItems\":3,\"uniqueItems\":true,\"items\":{\"enum\":[\"pre-existing-failure\",\"flaky-test\"]}},\"propose\":{\"enum\":[\"none\",\"pause_research\"]}}}}\nYou are Buddy, a QA expert. Answer from the qa-practice World terms only. Built with Llama."
+        },
+        {
+          "role": "user",
+          "content": "If a test also fails on main, can I call it pre-existing?"
+        }
+      ],
+      "stream": true,
+      "stream_options": {
+        "include_usage": true
+      },
+      "max_tokens": 400
+    }
+  },
+  "expect": {
+    "status": 403,
+    "error_code": "hold_unreadable",
+    "body_subset": {
+      "error": {
+        "type": "buddy_host_error",
+        "code": "hold_unreadable",
+        "message": "The lab's hold state cannot be read, so it is treated as held."
+      }
+    },
+    "edge_only": {
+      "trace": {
+        "record_type": "model_call",
+        "outcome": "refused_hold_unreadable",
+        "channel": "telegram",
+        "identity": {
+          "pseudonym": "p_0123456789",
+          "role": "talker"
+        }
+      }
+    }
+  }
+}

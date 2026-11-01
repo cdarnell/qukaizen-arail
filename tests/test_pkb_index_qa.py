@@ -72,7 +72,7 @@ def test_merge_insert_absent_falls_back_to_delete_add(isolated_pkb: Path):
     db.create_table("pkb_pages", data=[{
         "path": "_seed.md",
         "name": "_seed.md",
-        "vector": hash_embedding("seed"),
+        "vector": hash_embedding("seed", dim=768),
         "mtime": 0.0,
         "source_kind": "user",
     }], mode="overwrite")
@@ -126,7 +126,7 @@ def test_merge_insert_absent_idempotent_on_repeat(isolated_pkb: Path):
     db.create_table("pkb_pages", data=[{
         "path": "_seed.md",
         "name": "_seed.md",
-        "vector": hash_embedding("seed"),
+        "vector": hash_embedding("seed", dim=768),
         "mtime": 0.0,
         "source_kind": "user",
     }], mode="overwrite")
@@ -178,6 +178,12 @@ def test_staleness_sweep_cap_exceeded_falls_back_to_index_all(
     import arail.pkb as pkb_mod
     from arail.vector_index import hash_embedding
     import lancedb  # type: ignore[import-not-found]
+
+    # This test is about the staleness-sweep cap, not the embedding
+    # provider or provenance (C2/C4) — see test_ensure_ready_staleness_sweep
+    # in test_pkb_index.py for the same pattern.
+    monkeypatch.setattr(pki, "_vector_dim", lambda: 128)
+    monkeypatch.setattr("arail.pkb_provenance.agrees_with_spec", lambda *a, **k: True)
 
     # Lower the cap so the test is fast.
     monkeypatch.setattr(pki, "_STALENESS_CAP", 3)
@@ -284,7 +290,7 @@ def test_debouncer_coalesces_two_writes_10ms_apart(isolated_pkb: Path):
     db.create_table("pkb_pages", data=[{
         "path": "_seed.md",
         "name": "_seed.md",
-        "vector": hash_embedding("seed"),
+        "vector": hash_embedding("seed", dim=768),
         "mtime": 0.0,
         "source_kind": "user",
     }], mode="overwrite")
@@ -326,13 +332,20 @@ def test_debouncer_coalesces_two_writes_10ms_apart(isolated_pkb: Path):
 # ── SIGTERM-style: pending write lost, next boot recovers via sweep ──────
 
 @pytest.mark.qa
-def test_pending_write_recovered_by_next_boot_sweep(isolated_pkb: Path):
+def test_pending_write_recovered_by_next_boot_sweep(isolated_pkb: Path, monkeypatch):
     """Simulate: schedule_upsert fires, debounce timer is pending, process
     is killed before flush. Next process boot's ensure_ready staleness
     sweep must catch the un-indexed file and queue it."""
     import arail.pkb_index as pki
     from arail.vector_index import hash_embedding
     import lancedb  # type: ignore[import-not-found]
+
+    # This test is about the debounce/sweep recovery path, not the
+    # embedding provider or provenance (C2/C4). The seed vector's
+    # dimension must match what the (stubbed) embedder actually produces
+    # (768) since this test's sweep incrementally upserts a NEW row into
+    # this SAME table.
+    monkeypatch.setattr("arail.pkb_provenance.agrees_with_spec", lambda *a, **k: True)
 
     # Pre-populate a schema-correct table that is empty of agent files.
     db_path = isolated_pkb / ".cache" / "lancedb"
@@ -341,7 +354,7 @@ def test_pending_write_recovered_by_next_boot_sweep(isolated_pkb: Path):
     db.create_table("pkb_pages", data=[{
         "path": "_seed.md",
         "name": "_seed.md",
-        "vector": hash_embedding("seed"),
+        "vector": hash_embedding("seed", dim=768),
         "mtime": 0.0,  # very old; on-disk file will be newer
         "source_kind": "user",
     }], mode="overwrite")
@@ -381,13 +394,18 @@ def test_pending_write_recovered_by_next_boot_sweep(isolated_pkb: Path):
 # ── File deleted between upsert and the next sweep — no ghost row ────────
 
 @pytest.mark.qa
-def test_file_deleted_after_upsert_then_sweep_drops_row(isolated_pkb: Path):
+def test_file_deleted_after_upsert_then_sweep_drops_row(isolated_pkb: Path, monkeypatch):
     """File is upserted (row exists), then unlinked from disk. The next
     cold-start ensure_ready sweep must DELETE the orphan row — not leave it
     around forever."""
     import arail.pkb_index as pki
     from arail.vector_index import hash_embedding
     import lancedb  # type: ignore[import-not-found]
+
+    # This test is about the delete-on-sweep path, not the embedding
+    # provider or provenance (C2/C4).
+    monkeypatch.setattr(pki, "_vector_dim", lambda: 128)
+    monkeypatch.setattr("arail.pkb_provenance.agrees_with_spec", lambda *a, **k: True)
 
     db_path = isolated_pkb / ".cache" / "lancedb"
     db_path.mkdir(parents=True, exist_ok=True)
@@ -493,7 +511,7 @@ def test_unicode_filename_round_trips_through_upsert(isolated_pkb: Path):
     db.create_table("pkb_pages", data=[{
         "path": "_seed.md",
         "name": "_seed.md",
-        "vector": hash_embedding("seed"),
+        "vector": hash_embedding("seed", dim=768),
         "mtime": 0.0,
         "source_kind": "user",
     }], mode="overwrite")
@@ -531,7 +549,7 @@ def test_filename_with_spaces_round_trips(isolated_pkb: Path):
     db.create_table("pkb_pages", data=[{
         "path": "_seed.md",
         "name": "_seed.md",
-        "vector": hash_embedding("seed"),
+        "vector": hash_embedding("seed", dim=768),
         "mtime": 0.0,
         "source_kind": "user",
     }], mode="overwrite")
@@ -828,7 +846,7 @@ def test_deeply_nested_path_round_trips(isolated_pkb: Path):
     db.create_table("pkb_pages", data=[{
         "path": "_seed.md",
         "name": "_seed.md",
-        "vector": hash_embedding("seed"),
+        "vector": hash_embedding("seed", dim=768),
         "mtime": 0.0,
         "source_kind": "user",
     }], mode="overwrite")
@@ -1107,9 +1125,14 @@ def test_corrupted_lancedb_dir_does_not_crash_ensure_ready(isolated_pkb: Path):
 # ── Wrong vector dim with otherwise correct schema ───────────────────────
 
 @pytest.mark.qa
-def test_wrong_vector_dim_triggers_rebuild(isolated_pkb: Path, monkeypatch):
-    """A table with all required columns but the WRONG vector dimension
-    (e.g., 64 instead of 128) must trigger a rebuild."""
+def test_wrong_vector_dim_never_drops_table(isolated_pkb: Path, monkeypatch):
+    """C2/FM12: a table with all required columns but a vector dimension
+    that disagrees with the current spec (e.g. 128-dim hash vectors vs a
+    768-dim spec) must NEVER be dropped and rebuilt automatically — that is
+    exactly how a 128->768 embedder change would silently empty every
+    existing lab's index. It must degrade with an actionable message and
+    leave the rows exactly as they are; only an explicit
+    ``./arailctl pkb reembed`` may rewrite them."""
     import arail.pkb_index as pki
     import arail.pkb as pkb_mod
     import lancedb  # type: ignore[import-not-found]
@@ -1118,7 +1141,8 @@ def test_wrong_vector_dim_triggers_rebuild(isolated_pkb: Path, monkeypatch):
     db_path.mkdir(parents=True, exist_ok=True)
     db = lancedb.connect(str(db_path))
 
-    # Wrong-dim vectors (64 instead of 128). All columns present.
+    # Wrong-dim vectors (64) — all required columns present, dim disagrees
+    # with the current spec's declared dimension (768).
     bad_vec = [0.1] * 64
     db.create_table("pkb_pages", data=[{
         "path": "notes/wrong.md",
@@ -1128,7 +1152,6 @@ def test_wrong_vector_dim_triggers_rebuild(isolated_pkb: Path, monkeypatch):
         "source_kind": "user",
     }], mode="overwrite")
 
-    # Provide a real file so the rebuild has something to index.
     (isolated_pkb / "notes").mkdir(parents=True, exist_ok=True)
     (isolated_pkb / "notes" / "wrong.md").write_text("# wrong dim\n")
 
@@ -1143,7 +1166,20 @@ def test_wrong_vector_dim_triggers_rebuild(isolated_pkb: Path, monkeypatch):
 
     pki.ensure_ready(isolated_pkb)
 
-    assert rebuild_calls, "wrong vector dim must trigger a schema rebuild"
+    assert not rebuild_calls, (
+        "a vector-dimension mismatch must NEVER trigger an automatic "
+        "drop-and-rebuild (C2/FM12)")
+
+    # The table itself must be untouched — same row, same (wrong) vector.
+    db2 = lancedb.connect(str(db_path))
+    table = db2.open_table("pkb_pages")
+    rows = table.to_pandas()
+    assert len(rows) == 1
+    assert rows.iloc[0]["path"] == "notes/wrong.md"
+
+    ok, reason = pki.embedding_status()
+    assert ok is False
+    assert "pkb reembed" in reason
 
 
 # ── Two LanceDB connections to same db (MVCC sanity) ─────────────────────
@@ -1164,7 +1200,7 @@ def test_two_connections_to_same_db_can_both_query(isolated_pkb: Path):
     db1.create_table("pkb_pages", data=[{
         "path": "_seed.md",
         "name": "_seed.md",
-        "vector": hash_embedding("seed"),
+        "vector": hash_embedding("seed", dim=768),
         "mtime": 0.0,
         "source_kind": "user",
     }], mode="overwrite")
@@ -1209,7 +1245,7 @@ def test_pkb_root_with_spaces_and_unicode_works(tmp_path: Path):
     db.create_table("pkb_pages", data=[{
         "path": "_seed.md",
         "name": "_seed.md",
-        "vector": hash_embedding("seed"),
+        "vector": hash_embedding("seed", dim=768),
         "mtime": 0.0,
         "source_kind": "user",
     }], mode="overwrite")
@@ -1296,6 +1332,27 @@ def test_dotenv_under_pkb_root_not_indexed_by_iter(isolated_pkb: Path):
             f".key file leaked into index iter: {p}"
 
 
+@pytest.mark.qa
+def test_cache_dir_contents_never_indexed_by_iter(isolated_pkb: Path):
+    """.cache/ holds the vector index plus (C2) the reembed checkpoint and
+    provenance sidecars, both .json — machine state, never PKB content.
+    Without this exclusion, pkb_reembed's own checkpoint/provenance files
+    would be picked up and re-embedded as if they were user content on the
+    very next reembed run (a self-referential bug C2 surfaced)."""
+    import arail.pkb as pkb
+
+    cache_dir = isolated_pkb / ".cache"
+    (cache_dir / "lancedb").mkdir(parents=True, exist_ok=True)
+    (cache_dir / "lancedb" / "pkb_pages.provenance.json").write_text('{"schema": "x"}')
+    (cache_dir / "reembed-state.json").write_text('{"schema": "x"}')
+
+    found_paths = [
+        p.as_posix() for p, _ in pkb._iter_pkb_files(isolated_pkb)
+    ]
+    for p in found_paths:
+        assert ".cache/" not in p, f".cache/ content leaked into index iter: {p}"
+
+
 # ── Failed flush: failed paths persist in _pending for retry ─────────────
 
 @pytest.mark.qa
@@ -1379,7 +1436,7 @@ def test_schedule_upsert_from_non_main_thread(isolated_pkb: Path):
     db.create_table("pkb_pages", data=[{
         "path": "_seed.md",
         "name": "_seed.md",
-        "vector": hash_embedding("seed"),
+        "vector": hash_embedding("seed", dim=768),
         "mtime": 0.0,
         "source_kind": "user",
     }], mode="overwrite")

@@ -1,0 +1,44 @@
+{
+  "schema": "dac.world-capabilities/v1",
+  "world": "golden-capped",
+  "capabilities": [
+    {
+      "id": "knowledge.ground.golden-capped",
+      "purpose": "Ground claims about Golden Capped Fixture in the World's gated glossary.",
+      "desired": true,
+      "interface": {
+        "kind": "knowledge-grounding",
+        "world": "golden-capped",
+        "world_sha256": "f456246d4fad23187782e1dbf91eea74dba9fe5fb5cd330936c780b9bd1b498e",
+        "categories": [
+          "alpha",
+          "beta"
+        ],
+        "term_count": 300,
+        "provenance_tier": "model-asserted"
+      }
+    },
+    {
+      "id": "knowledge.ground.golden-capped.alpha",
+      "purpose": "Ground claims about Alpha in Golden Capped Fixture.",
+      "desired": true,
+      "interface": {
+        "kind": "knowledge-grounding",
+        "world": "golden-capped",
+        "category": "alpha",
+        "term_count": 150
+      }
+    },
+    {
+      "id": "knowledge.ground.golden-capped.beta",
+      "purpose": "Ground claims about Beta in Golden Capped Fixture.",
+      "desired": true,
+      "interface": {
+        "kind": "knowledge-grounding",
+        "world": "golden-capped",
+        "category": "beta",
+        "term_count": 150
+      }
+    }
+  ]
+}

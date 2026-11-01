@@ -76,11 +76,23 @@ warn() { echo -e "${YELLOW}[${LAB_SHORT_NAME}]${RESET} $*"; }
 # installed, which fails a second, more confusing way even once the
 # daemon answers.
 _check_default_ollama_model() {
-    local model="llama-ai-eng"
-    if ! ollama list 2>/dev/null | awk 'NR>1{print $1}' | cut -d: -f1 | grep -qx "$model"; then
+    # Read the ACTUAL configured slot-A model (model_defaults.yaml, else
+    # .env's MODEL_NAME, else the llama-ai-eng builtin) rather than
+    # hardcoding llama-ai-eng — a lab settled onto a different primary
+    # model used to get either a false "not installed" warning about a
+    # model it doesn't even use, or silence about the one it does.
+    # python3 here resolves through the venv activated above (line 233).
+    local model
+    model="$(python3 -m arail.model_defaults --get default_a 2>/dev/null)"
+    [[ -n "$model" ]] || model="llama-ai-eng"
+    if ! ollama list 2>/dev/null | awk 'NR>1{print $1}' | cut -d: -f1 | grep -qx "${model%%:*}"; then
         warn "Ollama     → model '${model}' isn't installed yet — chat's default model won't"
         warn "             work until you run:"
-        warn "             ollama pull llama3.2:1b && ollama create ${model} -f models/ai-eng/Modelfile.default"
+        if [[ "$model" == "llama-ai-eng" ]]; then
+            warn "             ollama pull llama3.2:1b && ollama create ${model} -f models/ai-eng/Modelfile.default"
+        else
+            warn "             ollama pull ${model}"
+        fi
     fi
 }
 
@@ -739,6 +751,22 @@ _instance_validate_port_override() {
     return 0
 }
 
+# _instance_db_ensure <data_dir> — readiness-gate the relational store for
+# exactly one data_dir, quietly if already ok, one line if it acted, one
+# warning (never fatal) if it can't act. Shared by the World-instance path
+# (_instance_start) and the root-lab boot path further down.
+# sprints/2026-08-10-arail2-persistence-instantiated §4.5/§4.1.
+_instance_db_ensure() {
+    local data_dir="$1"
+    [[ -n "$data_dir" ]] || return 0
+    [[ -f "$REPO_ROOT/.venv/bin/activate" ]] || return 0
+    local line rc=0
+    line="$(cd "$REPO_ROOT" && source .venv/bin/activate && \
+        python -m arail.dbspec.ensure "$data_dir" --apply --quiet-ok 2>&1)" || rc=$?
+    [[ -n "$line" ]] && echo "  $line"
+    return 0
+}
+
 # The 8-stage instance launch. ARCHITECTURE.md §3.5.
 _instance_start() {
     local slug="$1"
@@ -971,6 +999,16 @@ _instance_start() {
     source "$pack_file"
     set +a
 
+    # ── Dependent service: relational store readiness ───────────────
+    # sprints/2026-08-10-arail2-persistence-instantiated §4.5. THIS
+    # instance's data_dir only — never a sibling's. SAFE-FORWARD applies
+    # and is reported; anything lossy/ahead/diverged warns, names the
+    # exact verb, and start continues (nothing reads arail.db at runtime
+    # yet — refusing to boot a working World over an inert store would
+    # trade a real outage for a theoretical one; see BACKLOG.md for the
+    # promotion-to-hard-gate follow-up once a runtime reader lands).
+    _instance_db_ensure "${ARAIL_DATA_DIR:-$(inst_data_dir "$slug")}"
+
     # ── [5/8] Bind ports ─────────────────────────────────────────────
     printf '[5/8] Bind ports… '
     inst_load_port_helpers
@@ -1173,6 +1211,8 @@ print(json.dumps({
     echo ""
     echo -e "  Dashboard:  ${BOLD}${url}${RESET}"
     echo -e "  Data root:  ${BOLD}${instance_root}${RESET}"
+    echo ""
+    python3 -m arail.model_defaults --banner 2>/dev/null || true
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 
     # ARCHITECTURE.md §11.1: after the record is written and the URL banner
@@ -1261,6 +1301,10 @@ if declare -F _port_in_use >/dev/null 2>&1 && _port_in_use "${PORTAL_PORT:-8080}
     echo "  (or a foreign process is on :${PORTAL_PORT:-8080} — lsof -iTCP:${PORTAL_PORT:-8080} -sTCP:LISTEN)" >&2
     exit 1
 fi
+
+# Dependent service: relational store readiness, root lab's own data_dir
+# only. sprints/2026-08-10-arail2-persistence-instantiated §4.5.
+_instance_db_ensure "${ARAIL_DATA_DIR:-$REPO_ROOT/lab/data}"
 
 echo ""
 echo -e "${CYAN}${BOLD}${LAB_LOGO} Starting lab services…${RESET}"
@@ -1454,7 +1498,8 @@ JLTHEME
         --port="${NOTEBOOK_PORT:-8888}" \
         --NotebookApp.token="" \
         --NotebookApp.password="" \
-        --ServerApp.tornado_settings='{"headers":{"Content-Security-Policy":"frame-ancestors '\''self'\'' http://127.0.0.1:* http://localhost:*"}}' &
+        --ServerApp.tornado_settings='{"headers":{"Content-Security-Policy":"frame-ancestors '\''self'\'' http://127.0.0.1:* http://localhost:*"}}' \
+        >"$ROOT_LOG_DIR/notebook.out.log" 2>"$ROOT_LOG_DIR/notebook.err.log" &
     _ROOT_NOTEBOOK_PID=$!
     PIDS+=("$_ROOT_NOTEBOOK_PID")
 else
@@ -1568,7 +1613,7 @@ _root_notebook_ok=1
 if command -v jupyter &>/dev/null; then
     _root_notebook_ok=0
     if _root_wait_listen_degrade "Notebook" "${NOTEBOOK_PORT:-8888}" 100 "${_ROOT_NOTEBOOK_PID:-}" \
-        ":${NOTEBOOK_PORT:-8888} did not answer in 10s — the Notebook tab will show help" \
+        ":${NOTEBOOK_PORT:-8888} did not answer in 10s — the Notebook tab will show help. Check ${ROOT_LOG_DIR}/notebook.err.log (e.g. a stale venv interpreter after a Python upgrade)." \
         "http://${BIND}:${NOTEBOOK_PORT:-8888}"; then
         _root_notebook_ok=1
     fi
@@ -1626,6 +1671,8 @@ fi
 if command -v code-server &>/dev/null && [[ "$_root_ide_ok" == "1" ]]; then
     echo -e "  IDE:        ${BOLD}http://${BIND}:${IDE_PORT:-8443}${RESET}  (password in ${BOLD}lab.conf${RESET})"
 fi
+echo ""
+python3 -m arail.model_defaults --banner 2>/dev/null || true
 echo ""
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 

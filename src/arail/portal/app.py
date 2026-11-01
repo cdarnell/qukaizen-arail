@@ -25,6 +25,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Red
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from arail import activity
 from arail.activity import activity_log
 from arail.agent_redirects import clear_agent_redirect, get_agent_redirect, set_agent_redirect
 from arail.agent_workflows import get_agent_workflow, list_agent_workflows
@@ -46,6 +47,7 @@ from arail.portal import scheduler
 
 from arail.brand import load_brand
 from arail.identity import effective_identity
+from arail.airgap import AIRGAPPED_NOTICE
 from arail.experiments import branch_browser as _branch_browser
 from arail.router.backends import ModelResponse
 from arail.ui_theme import list_ui_themes, load_ui_theme, theme_css
@@ -189,10 +191,10 @@ _METRICS_LOCK = _threading.Lock()
 # Two tiers: minimalist (everyday) and maximus (full bench). Upgrade with
 # ./arailctl upgrade maximus.
 _TIER_SURFACES: dict[str, set[str]] = {
-    "minimalist": {"dashboard", "chat", "research", "dac", "agents", "docs"},
+    "minimalist": {"dashboard", "chat", "research", "dac", "agents", "docs", "study", "forge"},
     "maximus": {"dashboard", "chat", "research", "dac", "agents",
                 "admin", "docs", "notebooks", "terminal", "tuning", "plugins",
-                "build"},
+                "study", "forge"},
 }
 
 # v1.0.0 tier rename + the LAB_TIER lookup now live in arail.tier, the single
@@ -681,6 +683,18 @@ def _host_is_trusted(hostname: str) -> bool:
 
 
 @app.middleware("http")
+async def portal_auth(request, call_next):
+    """Credential check for every route (ARAIL D3; ARCHITECTURE.md C2/C3).
+
+    Registered immediately BEFORE ``local_trust_boundary`` so that, with Starlette's reverse
+    registration order, the Host allowlist and CSRF checks (403) run first, then this (401/302),
+    then everything else. The decision logic lives in ``arail.portal.auth``.
+    """
+    from arail.portal import auth as _portal_auth
+    return await _portal_auth.authenticate(request, call_next, onboarded=_lab_password_set())
+
+
+@app.middleware("http")
 async def local_trust_boundary(request, call_next):
     from fastapi.responses import JSONResponse
 
@@ -717,11 +731,14 @@ app.include_router(librarian_router)
 from arail.portal.models_api import models_router  # noqa: E402
 app.include_router(models_router)
 
-from arail.portal.build_api import build_router  # noqa: E402
-app.include_router(build_router)
+from arail.portal.forge_api import forge_router  # noqa: E402
+app.include_router(forge_router)
 
 from arail.portal.chat_sessions_api import chat_sessions_router  # noqa: E402
 app.include_router(chat_sessions_router)
+
+from arail.portal.study_routes import router as study_router  # noqa: E402
+app.include_router(study_router)
 
 PORTAL_DIR = Path(__file__).parent
 app.mount("/static", StaticFiles(directory=PORTAL_DIR / "static"), name="static")
@@ -888,24 +905,45 @@ async def _startup():
         activity_log.emit("system",
             f"Egress guard install failed: {_eg_err}", "warn")
 
-    global _MODEL_WARM
     from arail import autochecks
     _autochecks_on = autochecks.enabled()
 
-    # Loud warning when the portal is bound off loopback: the dashboard has no
-    # login, so a non-loopback bind exposes an unauthenticated, code-execution-
-    # capable surface to the LAN (a wildcard bind also disables the Host
-    # allowlist). This is a deliberate operator choice — surface it clearly.
+    # Non-loopback bind: auth now applies to every route, but exposure is still the operator's
+    # choice (a wildcard bind also disables the Host allowlist) - say so clearly.
     if not _toggle_bind_is_loopback():
         _bind = os.getenv("BIND_ADDR", "127.0.0.1")
-        _msg = (f"Portal is bound to {_bind} (not loopback). The dashboard has "
-                "NO login — anyone who can reach this address can run code, flip "
-                "egress, and read tokens. Bind to 127.0.0.1 unless you intend LAN "
-                "exposure.")
+        _msg = (f"Portal is bound to {_bind} (not loopback). Login is required, but anyone who "
+                "can reach this address can try the passphrase and, once in, run code, flip "
+                "egress, and read tokens. Bind to 127.0.0.1 unless you intend LAN exposure.")
         _log.warning(_msg)
         activity_log.emit("security", _msg, "warn",
                           {"security_event": {"kind": "non_loopback_bind",
                                               "bind": _bind}})
+
+    # Portal auth: an onboarded lab always has a bearer token. Upgrades mint it here; the first
+    # dashboard visit then asks for the passphrase once per browser.
+    if _lab_password_set():
+        try:
+            from arail.portal import auth as _portal_auth
+            _portal_auth.ensure_token()
+            _portal_auth.ensure_shim_token()
+            _log.info("The dashboard now asks for your lab passphrase once per browser.")
+        except OSError as _tok_err:
+            activity_log.emit("security",
+                f"portal.token could not be created ({type(_tok_err).__name__}); "
+                "programs cannot authenticate until it exists.", "warn")
+
+    # Buddy's edge-only listener (127.0.0.1:$ARAIL_EDGE_PORT, root lab only). A failure here is a
+    # state to report, never a reason for the portal not to start.
+    try:
+        from arail.portal import edge_app as _edge_app
+        _edge_state = _edge_app.listener.start()
+        activity_log.emit("system",
+            f"Buddy edge: {_edge_state}"
+            + (f" on {_edge_app.EDGE_HOST}:{_edge_app.listener.port}" if _edge_state == "listening" else ""),
+            "info")
+    except Exception as _edge_err:  # noqa: BLE001
+        _log.warning("Buddy edge listener not started: %s", type(_edge_err).__name__)
 
     _boot_ident = effective_identity()
     intent_name = _boot_ident.intent_name
@@ -932,6 +970,17 @@ async def _startup():
         try:
             from arail.portal.model_warmth import aerollm_preload_loop
             asyncio.create_task(aerollm_preload_loop())
+        except Exception:  # noqa: BLE001
+            pass
+
+    # Tier-0 (resident) keep-watch (sprints/2026-08-11-two-slot-chat-models
+    # Part 3; ARAIL_TIER0_KEEPWATCH=0 to disable). Same autochecks gate as
+    # the tier-1 preload above — its ticks probe Ollama's /api/ps, which is
+    # exactly the remote-probe class a quiet boot skips. Fire-and-forget.
+    if _autochecks_on:
+        try:
+            from arail.portal.model_warmth import tier0_keepwatch_loop
+            asyncio.create_task(tier0_keepwatch_loop())
         except Exception:  # noqa: BLE001
             pass
 
@@ -1007,21 +1056,13 @@ async def _startup():
             _log.warning("Shipped-World seal check skipped: %s", e)
 
     asyncio.create_task(_check_shipped_worlds())
-    # Boot model-warm issues a real 1-token completion (loads weights) — a
-    # probe/warmer, so it's gated behind the autochecks master switch. When
-    # skipped, flip _MODEL_WARM now so the /api/ready overlay dismisses
-    # instantly instead of waiting for a warm that will never run.
-    #
-    # `or _boot_warm_explicit()` (sprints/2026-07-29-elite-cli ARCHITECTURE.md
-    # §11.1): `./arailctl start --warm` sets ARAIL_TIER0_BOOT_WARM=1 on this
-    # process's own env specifically to ask for a warm-up report even on an
-    # otherwise-quiet boot (autochecks off). Quiet boot is preserved exactly
-    # for everyone else: unset + autochecks off ⇒ _boot_warm_explicit() is
-    # False ⇒ this branch is unchanged from before.
-    if _autochecks_on or _boot_warm_explicit():
-        asyncio.create_task(_warm_primary_router())
-    else:
-        _MODEL_WARM = True
+    # Boot model resolution + warm (sprints/2026-10-20-boot-model-autoresolve):
+    # resolve slots A/B from what is installed and what fits, persist the
+    # cache, stamp env + registry, then warm A. Local-only work (loopback
+    # Ollama + disk), so it is NOT gated by ARAIL_AUTOCHECKS (which is about
+    # remote probes); opt out with ARAIL_BOOT_WARM=0. Runs as a task so boot
+    # never waits on it; _MODEL_WARM flips when it finishes either way.
+    asyncio.create_task(_boot_models())
     asyncio.create_task(_inbox_watcher_loop())
     # 'Grows while you sleep' now lives inside the Librarian agent (started
     # with the other agents via start_all_auto) — it owns the whole compiled-
@@ -1212,6 +1253,17 @@ async def _startup():
                 f"Dream daemon failed to start: {type(e).__name__}: {e}",
                 "warn")
 
+    # Job daemon — the admin Scheduler section's clock. Same on/off
+    # convention as dream_daemon: LAB_SCHEDULER=off disables it.
+    if os.getenv("LAB_SCHEDULER", "on").lower() not in ("off", "0", "false", "no"):
+        try:
+            from arail.agents.job_daemon import job_daemon
+            job_daemon.start()
+        except Exception as e:  # noqa: BLE001
+            activity_log.emit("scheduler",
+                f"Job daemon failed to start: {type(e).__name__}: {e}",
+                "warn")
+
     # Boot security scan — hybrid mode only (LAB_MODE=airgapped stays default;
     # no involuntary outbound calls) AND behind the autochecks master switch
     # (pip-audit is a subprocess package probe — off unless the user opts in;
@@ -1343,6 +1395,11 @@ def _register_canvas_goal_listener(store: Any) -> None:
 @app.on_event("shutdown")
 async def _shutdown():
     global _knowledge_canvas_store
+    try:
+        from arail.portal import edge_app as _edge_app
+        await _edge_app.listener.stop()
+    except Exception:  # noqa: BLE001 - shutting down; nothing useful to do with it
+        pass
     if _knowledge_canvas_store is not None:
         try:
             await _knowledge_canvas_store.close()
@@ -1356,6 +1413,12 @@ async def _shutdown():
 
 from arail.portal.openai_compat import register_routes as _register_openai_compat
 _register_openai_compat(app)
+
+
+# ── Buddy host edge — NOT mounted here since S5 (sprint 2026-10-26-buddy-s5-gateway-in-box) ──
+# `/api/host/v1/*` is served only by the edge-only app on 127.0.0.1:$ARAIL_EDGE_PORT (arail.portal.edge_app), which has no portal route behind it. The
+# portal no longer answers that prefix, so a request for it on :8080 is a plain 404. `auth.EDGE_PREFIX` still defers to the edge's own bhc1_ credential, which
+# keeps this harmless if a later sprint re-mounts it.
 
 
 # ── First-run welcome / passphrase setup ─────────────────────────────────
@@ -1390,6 +1453,123 @@ async def welcome_page(request: Request):
     })
 
 
+# ── Portal login (ARAIL D3; ARCHITECTURE.md C4/C5) ───────────────────────
+
+def _refresh_passphrase_from_file() -> None:
+    """Adopt the passphrase on disk if another process changed it (``arailctl auth reset``).
+
+    The running portal otherwise keeps the value it cached into ``os.environ``, so the OLD passphrase
+    would keep working until a restart. Only a real (non-placeholder) value is adopted. Login
+    attempts are rare, so reading the small env file each time costs nothing that matters.
+    """
+    try:
+        text = _env_file_path().read_text()
+    except OSError:
+        return
+    for line in text.splitlines():
+        if line.startswith("ARAIL_PASSWORD="):
+            val = line.split("=", 1)[1].strip()
+            if val and val not in _PASSWORD_PLACEHOLDERS:
+                os.environ["ARAIL_PASSWORD"] = val
+            return
+
+
+def _login_page(request: Request, *, next_url: str, error: str = "", status: int = 200, headers=None):
+    return templates.TemplateResponse(request, "login.html", {
+        **_identity_ctx(), "next": next_url, "error": error,
+    }, status_code=status, headers=headers)
+
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    from arail.portal import auth as _auth
+    from fastapi.responses import RedirectResponse
+    if not _lab_password_set():
+        return RedirectResponse(url="/welcome", status_code=302)
+    nxt = _auth.safe_next(request.query_params.get("next"))
+    if _auth.get_store().touch(request.cookies.get(_auth.cookie_name(), "")):
+        return RedirectResponse(url=nxt, status_code=302)
+    return _login_page(request, next_url=nxt)
+
+
+@app.post("/login")
+async def login_submit(request: Request):
+    """Passphrase -> a fresh session. The incoming cookie is ignored (no session fixation), the
+    candidate is never logged, and after 5 consecutive failures attempts are rate limited."""
+    import math
+    from fastapi.responses import JSONResponse, RedirectResponse
+    from arail.portal import auth as _auth
+    if not _lab_password_set():
+        return RedirectResponse(url="/welcome", status_code=302)
+    wants_json = "application/json" in request.headers.get("content-type", "")
+    try:
+        if wants_json:
+            body = await request.json()
+            body = body if isinstance(body, dict) else {}
+        else:
+            body = dict(await request.form())
+    except Exception:  # noqa: BLE001
+        body = {}
+    candidate = body.get("passphrase")
+    candidate = candidate if isinstance(candidate, str) else ""
+    nxt = _auth.safe_next(body.get("next") if isinstance(body.get("next"), str) else None)
+
+    # Trusted-device lane (see arail.portal.auth, "Design"): a browser that has logged in before has
+    # a bucket of its own and is not held by the global lock that guards unknown clients.
+    dev_sid = request.cookies.get(_auth.device_cookie_name(), "")
+    known_device = bool(dev_sid) and _auth.get_devices().touch(dev_sid)
+    lim = _auth.device_limiter(dev_sid) if known_device else _auth.limiter
+
+    wait = lim.wait_s()
+    if wait > 0:   # over the limit: the attempt is NOT evaluated, even a correct passphrase
+        retry = {"Retry-After": str(max(1, math.ceil(wait)))}
+        if wants_json:
+            return JSONResponse({"error": "rate_limited", "retry_after": retry["Retry-After"]},
+                                status_code=429, headers=retry)
+        return _login_page(request, next_url=nxt, status=429, headers=retry,
+                           error=(f"There were too many wrong tries, so logging in is paused for {retry['Retry-After']} seconds. "
+                                 "Wait, then try again. If you cannot wait, run ./arailctl auth unlock in a terminal on "
+                                 "the computer that runs this lab."))
+
+    _refresh_passphrase_from_file()
+    if not _auth.check_password(candidate):
+        n = lim.failure()
+        activity_log.emit("security", f"Failed portal login ({n} in a row).", "warn",
+                          {"security_event": {"kind": "login_failed", "consecutive": n,
+                                              "trusted_device": known_device}})
+        if wants_json:
+            return JSONResponse({"error": "login_failed"}, status_code=401)
+        return _login_page(request, next_url=nxt, status=401, error="That passphrase is not right. Check for typing mistakes and try again.")
+
+    lim.success()
+    _auth.ensure_token()
+    sid = _auth.get_store().create()
+    resp = (JSONResponse({"ok": True, "next": nxt}) if wants_json
+            else RedirectResponse(url=nxt, status_code=303))
+    _auth.set_session_cookie(resp, request, sid)
+    if not known_device:     # remember this browser: its next login is never held by someone else's failures
+        _auth.set_device_cookie(resp, request, _auth.get_devices().create())
+    return resp
+
+
+@app.post("/logout")
+async def logout(request: Request):
+    from fastapi.responses import RedirectResponse
+    from arail.portal import auth as _auth
+    sid = request.cookies.get(_auth.cookie_name(), "")
+    if sid:
+        _auth.get_store().revoke(sid)
+    resp = RedirectResponse(url="/login", status_code=303)
+    _auth.clear_session_cookie(resp, request)
+    return resp
+
+
+@app.get("/api/auth/whoami")
+async def auth_whoami(request: Request):
+    """Who the portal thinks you are (the base-page SSE recovery hook calls this; 401 if no one)."""
+    return {"principal": getattr(request.state, "principal", "none")}
+
+
 @app.post("/api/welcome/setup")
 async def api_welcome_setup(request: Request):
     """Accept the first-run passphrase, write it everywhere it's needed.
@@ -1405,6 +1585,17 @@ async def api_welcome_setup(request: Request):
             {"ok": False,
              "error": "lab is already onboarded; rotate via .env or dashboard settings"},
             status_code=409,
+        )
+
+    # A LAN-bound portal must not let a LAN host claim an unonboarded lab: the first passphrase
+    # is set from this machine.
+    _peer = request.client.host if request.client else ""
+    if not _toggle_bind_is_loopback() and _peer not in ("127.0.0.1", "::1"):
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            {"ok": False, "error": "setup_local_only",
+             "detail": "Finish /welcome on the computer that runs the lab."},
+            status_code=403,
         )
 
     body = await request.json()
@@ -1457,7 +1648,14 @@ async def api_welcome_setup(request: Request):
         f"{' and lab renamed to ' + lab_name if lab_name else ''}.",
         "success")
 
-    return {"ok": True, "ide_written": ide_written}
+    # Log this browser in: closes the window where a freshly onboarded lab had no door at all.
+    from fastapi.responses import JSONResponse
+    from arail.portal import auth as _auth
+    _auth.ensure_token()
+    _auth.ensure_shim_token()
+    resp = JSONResponse({"ok": True, "ide_written": ide_written})
+    _auth.set_session_cookie(resp, request, _auth.get_store().create())
+    return resp
 
 
 def _chmod_600(p: Path) -> None:
@@ -1829,10 +2027,7 @@ async def providers_status():
         "available": known,
         "lab_mode": mode,
         "cloud_enabled": not _is_airgapped(),
-        "airgapped_notice": (
-            "Lab is in airgapped mode. Only My Machine is usable. "
-            "To enable cloud providers, set LAB_MODE=hybrid in .env and restart."
-        ) if _is_airgapped() else "",
+        "airgapped_notice": AIRGAPPED_NOTICE if _is_airgapped() else "",
         "providers": [
             {
                 "id": pid,
@@ -1912,7 +2107,7 @@ async def providers_active(request: Request):
                 "error": "Airgapped mode — only local sources are active. Set LAB_MODE=hybrid to use cloud providers."}
     if provider == "aerollm" and not _is_aerollm_installed():
         return {"ok": False,
-                "error": "The AeroLLM engine isn't built on this machine. Run './arailctl deep rebuild' to enable it."}
+                "error": "The QueueLLM engine isn't built on this machine. Run './arailctl deep rebuild' to enable it."}
     os.environ["COMPUTE_SOURCE"] = provider
     activity_log.emit("chat", f"Compute source switched to '{provider}'.", "info")
     # Sprint 2: regenerate_config() THEN restart() — under a single lock.
@@ -2576,6 +2771,22 @@ async def worlds_page(request: Request):
     })
 
 
+@app.get("/study", response_class=HTMLResponse)
+async def study_page(request: Request):
+    """The study bench — the tutor team's quiz surface.
+
+    Every-tier (like /worlds and /dac): a lab shared with a student is one of
+    the reasons this project exists, so the bench is not a maximus perk.
+
+    The page is a shell. The roster, the cards, and the sourced explanations
+    all arrive from /api/study/* (see portal/study_routes.py) — which reads
+    hand-authored decks and sealed World bundles and calls no model.
+    """
+    return templates.TemplateResponse(request, "study.html", {
+        **_identity_ctx(),
+    })
+
+
 @app.get("/skills", response_class=HTMLResponse)
 async def skills_redirect(request: Request):
     """Redirect legacy /skills URL to /agents?view=skills.
@@ -2732,6 +2943,28 @@ def _slugify(text: str) -> str:
     return s or "heading"
 
 
+def _strip_frontmatter(text: str) -> str:
+    """Strip a leading YAML frontmatter block (``---`` … ``---``) before
+    markdown rendering.
+
+    Without this, MarkdownIt has no notion of frontmatter and renders the
+    block as literal prose/bullets at the top of the page — every doc's
+    ``title:``/``tags:`` block leaking into the reader's view. docs_registry
+    parses frontmatter separately (via python-frontmatter) for sidebar
+    metadata; this only strips it for the rendered body, no dependency on
+    that registry entry existing.
+    """
+    if not text.startswith("---"):
+        return text
+    lines = text.split("\n")
+    if lines[0].strip() != "---":
+        return text
+    for i in range(1, len(lines)):
+        if lines[i].strip() == "---":
+            return "\n".join(lines[i + 1:]).lstrip("\n")
+    return text
+
+
 def _render_with_toc(markdown_text: str) -> tuple[str, list[dict]]:
     """Render markdown to HTML and extract H2/H3 TOC entries.
 
@@ -2798,14 +3031,15 @@ def _render_markdown_page(request: Request, target: Path, *, doc_path: str,
     """Render a markdown file.  Legacy callers (design, blueprints, etc.) use this
     directly and get the simple single-column viewer without registry context.
     The /docs/{path} route uses a widened version that adds TOC + registry context."""
+    raw_text = _strip_frontmatter(target.read_text(errors="replace"))
     try:
         from markdown_it import MarkdownIt  # type: ignore[import-untyped]
     except ImportError:
-        return HTMLResponse(target.read_text(errors="replace"), status_code=200)
+        return HTMLResponse(raw_text, status_code=200)
 
     md = MarkdownIt("commonmark", {"html": False, "linkify": True, "typographer": True})
     md.enable(["table", "strikethrough"])
-    body_html = md.render(target.read_text(errors="replace"))
+    body_html = md.render(raw_text)
     return templates.TemplateResponse(request, "doc_viewer.html", {
         **_identity_ctx(),
         "doc_path": doc_path,
@@ -2947,7 +3181,7 @@ async def serve_local_doc(path: str, request: Request):
                 "tier_blocked": True,
             })
 
-    body_html, toc = _render_with_toc(target.read_text(errors="replace"))
+    body_html, toc = _render_with_toc(_strip_frontmatter(target.read_text(errors="replace")))
 
     siblings_prev, siblings_next = _docs_registry.siblings(slug) if doc else (None, None)
     related_docs = _docs_registry.related(slug, limit=3) if doc else ()
@@ -3411,6 +3645,10 @@ async def api_instance():
         "warm_ms": _MODEL_WARM_MS,
         "warm_skipped": _MODEL_WARM_SKIP_REASON,
         "backend": _MODEL_WARM_BACKEND,
+        # Additive, closed vocabulary ok|skipped|failed|deferred|disabled
+        # (None while the boot warm is still pending); no model ids.
+        "warm_a": _BOOT_WARM.get("a"),
+        "warm_b": _BOOT_WARM.get("b"),
     }
     slug = os.getenv("ARAIL_INSTANCE", "").strip()
     if not slug:
@@ -4223,6 +4461,140 @@ async def research_reset():
     return {"status": "idle"}
 
 
+@app.post("/api/research/deep")
+async def post_research_deep(request: Request):
+    """Flip deep (aeroLLM) research passes on/off — persisted to ``.env``.
+
+    Same rails as the airgap toggle: loopback-bind + Sec-Fetch-Site +
+    Origin/Host CSRF gates, atomic ``.env`` write, then an ``os.environ``
+    write-through so the very next research pass sees the change without a
+    restart (the researcher reads AEROLLM_RESEARCH at call time).
+    Tier-honest: minimalist gets a 403 with the upgrade hint instead of a
+    dead switch. The env is only mutated after a successful file write so
+    live and persisted state cannot diverge.
+    """
+    from arail.env_writer import EnvWriterError, set_env_var
+    from arail.tier import is_maximus
+
+    gate_error = _check_local_mutation_request(request)
+    if gate_error is not None:
+        return gate_error
+    if not is_maximus():
+        return JSONResponse(status_code=403, content={
+            "error": "tier_locked",
+            "message": "Deep research passes need the maximus tier — run "
+                       "./arailctl upgrade maximus.",
+        })
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    enabled = body.get("enabled") if isinstance(body, dict) else None
+    if not isinstance(enabled, bool):
+        return JSONResponse(status_code=400, content={"error": "invalid_enabled"})
+
+    value = "true" if enabled else "false"
+    try:
+        set_env_var(_toggle_env_path(), "AEROLLM_RESEARCH", value)
+    except EnvWriterError as exc:
+        _log.error("research deep toggle: env write failed: %s", exc)
+        return JSONResponse(status_code=500, content={"error": "env_write_failed"})
+    except Exception as exc:  # noqa: BLE001
+        _log.error("research deep toggle: unexpected error: %s", exc)
+        return JSONResponse(status_code=500, content={"error": "env_write_failed"})
+    os.environ["AEROLLM_RESEARCH"] = value
+    activity_log.emit(
+        "researcher",
+        ("Deep research passes turned on — planning and interpretation may "
+         "use the QueueLLM deep model." if enabled else
+         "Deep research passes turned off — research runs on the fast "
+         "model only."),
+        "info")
+    return {"ok": True, "enabled": enabled, "models": _research_models_block()}
+
+
+def _research_models_block() -> dict | None:
+    """What research actually runs on, with honest deep eligibility.
+
+    ``fast`` is the model the experiment engine and most planning calls
+    use (a dry-run of the same resolve the researcher does); ``deep`` is
+    the aeroLLM slot with a reason code the truth strip can render:
+    tier_locked | wheel_missing | disabled | deferred_now | ok.
+    Availability (tier/wheel) outranks the operator's toggle so a
+    minimalist user sees a locked control, not a dead one. Never raises —
+    returns None and the strip hides.
+    """
+    try:
+        from arail.agents import deep_policy
+        from arail.agents.researcher import research_deep_enabled
+        from arail.registry import get_registry
+        from arail.registry.store import TIER1_ID
+        from arail.tier import get_current_tier
+
+        reg = get_registry()
+        fast = None
+        try:
+            entry = reg.resolve("fast", tab="research").entry
+            if entry is not None:
+                fast = {
+                    "entry_id": entry.id,
+                    "display_name": entry.display_name or entry.model_id,
+                    "backend": entry.backend,
+                    "provider_type": entry.provider_type,
+                    "health": getattr(entry.health, "status", "unknown"),
+                }
+        except Exception:  # noqa: BLE001
+            fast = None
+
+        tier1 = None
+        try:
+            tier1 = reg.entries.get(TIER1_ID)
+        except Exception:  # noqa: BLE001
+            pass
+        deep_name = (tier1.display_name if tier1 is not None else
+                     os.getenv("AEROLLM_MODEL", "Qwen2.5-7B-Instruct-4bit"))
+
+        enabled_by_user = research_deep_enabled()
+        eligible, code, detail = deep_policy.explain(foreground=False)
+        if not enabled_by_user and code not in ("tier_locked", "wheel_missing"):
+            eligible = False
+            code = "disabled"
+            detail = ("deep passes are switched off — flip the toggle to use "
+                      "the QueueLLM deep model for planning and interpretation")
+
+        return {
+            "tier": get_current_tier(),
+            "fast": fast,
+            "deep": {
+                "entry_id": TIER1_ID,
+                "display_name": deep_name,
+                "available": code not in ("tier_locked", "wheel_missing"),
+                "enabled_by_user": enabled_by_user,
+                "eligible_now": eligible,
+                "reason_code": code,
+                "reason": detail,
+            },
+        }
+    except Exception as e:  # noqa: BLE001 — status must never break on this
+        _log.debug("research models block unavailable: %s", e)
+        return None
+
+
+@app.get("/api/research/options")
+async def research_options():
+    """World-aligned research directions for the Autoresearch tab.
+
+    Derived generically from whatever World is mounted (spec categories,
+    roster/drift gaps, agenda watches) with generic archetype-grounded
+    seeds when unmounted — see arail.research.options. Pure and cheap;
+    no cache.
+    """
+    from arail.airgap import is_airgapped
+    from arail.research.options import options_payload
+    return options_payload(airgapped=is_airgapped())
+
+
 @app.get("/api/research/status")
 async def research_status():
     current = goal_store.get_current()
@@ -4233,6 +4605,7 @@ async def research_status():
         "report": current.get("report") if current else None,
         "redirect": get_agent_redirect("researcher"),
         "run_state": goals_mod.load_run_state(),
+        "models": _research_models_block(),
     }
 
 
@@ -4870,19 +5243,25 @@ async def agents_status():
     workflow_rows = {row.get("agent_id"): row for row in list_agent_workflows()}
     researcher_redirect = get_agent_redirect("researcher")
 
-    # Walk the activity log once and bucket per-agent tokens + recent
-    # action snippets. Keeping it to a single pass means adding new
-    # agents later doesn't multiply the log scans.
+    # Walk the activity log once and bucket recent action snippets. Keeping
+    # it to a single pass means adding new agents later doesn't multiply
+    # the log scans. Token usage (V7, ARCHITECTURE.md contract #8) sources
+    # from the trace ring instead — real usage, not the requested ceiling
+    # activity_log's prompt_trace.max_tokens used to report — with a
+    # fallback to the legacy activity_log field for compatibility on a lab
+    # that has traces predating this sprint's chokepoint change.
+    from arail import agent_trace
     recent = activity_log.recent(200)
-    per_agent_tokens: dict[str, int] = {}
+    per_agent_tokens: dict[str, int] = dict(agent_trace.tokens_out_by_agent())
     per_agent_recent: dict[str, list[dict]] = {}
     for ev in recent:
         src = ev.get("source")
         if not src:
             continue
-        trace = ev.get("data", {}).get("prompt_trace")
-        if trace:
-            per_agent_tokens[src] = per_agent_tokens.get(src, 0) + int(trace.get("max_tokens", 0) or 0)
+        if src not in per_agent_tokens:
+            trace = ev.get("data", {}).get("prompt_trace")
+            if trace and trace.get("tokens_out"):
+                per_agent_tokens[src] = per_agent_tokens.get(src, 0) + int(trace.get("tokens_out") or 0)
         per_agent_recent.setdefault(src, []).append({
             "ts": ev.get("ts"),
             "level": ev.get("level", "info"),
@@ -4909,6 +5288,10 @@ async def agents_status():
         "workflow": researcher_workflow,
         "redirect": researcher_redirect,
         "has_goal": bool(goal and goal.get("goal_text")),
+        # V7: tokens_out is real usage; tokens is a deprecated alias now
+        # carrying the *corrected* value for one release (agents.html
+        # still reads "tokens" — filed to sprints/BACKLOG.md for removal).
+        "tokens_out": per_agent_tokens.get("researcher", 0),
         "tokens": per_agent_tokens.get("researcher", 0),
         "recent_actions": per_agent_recent.get("researcher", []),
     }
@@ -4922,14 +5305,17 @@ async def agents_status():
     c_status = {
         "pending": len(consent_store.list_pending()),
         "allowed": len(consent_store.list_allowed()),
+        "tokens_out": per_agent_tokens.get("curator", 0),
         "tokens": per_agent_tokens.get("curator", 0),
         "recent_actions": per_agent_recent.get("curator", []),
     }
 
     buddy_workflow = dict(workflow_rows.get("buddy") or {})
+    buddy_workflow["tokens_out"] = per_agent_tokens.get("buddy", 0)
     buddy_workflow["tokens"] = per_agent_tokens.get("buddy", 0)
     buddy_workflow["recent_actions"] = per_agent_recent.get("buddy", [])
     sre_workflow = dict(workflow_rows.get("sre") or {})
+    sre_workflow["tokens_out"] = per_agent_tokens.get("sre", 0)
     sre_workflow["tokens"] = per_agent_tokens.get("sre", 0)
     sre_workflow["recent_actions"] = per_agent_recent.get("sre", [])
 
@@ -4943,6 +5329,7 @@ async def agents_status():
     b_status = {
         "captures": captures,
         "last_task": last_task,
+        "tokens_out": per_agent_tokens.get("browser", 0),
         "tokens": per_agent_tokens.get("browser", 0),
         "recent_actions": per_agent_recent.get("browser", []),
     }
@@ -4958,16 +5345,56 @@ async def agents_status():
 
 @app.get("/api/agents/prompts")
 async def agents_prompts(agent: str = "", limit: int = 30):
-    """Return recent prompt-trace events for the Prompt Inspector."""
-    traces = []
-    for ev in reversed(activity_log.recent(200)):
-        if agent and ev.get("source") != agent:
+    """Recent model-call traces for the Prompt Inspector.
+
+    CHANGED SHAPE (sprint 2026-09-20-buddy-front-and-center, contract #7,
+    breaking): sourced from the agent_trace ring, not activity_log's
+    prompt_trace convention — bodies only appear when the flight recorder
+    is on, and even then only ``prompt``/``response`` keys are added, never
+    present-but-empty. This is a strict reduction in exposure: every tier,
+    unauthenticated, up to 5000 chars of unredacted body before this
+    sprint; metadata-only (admin-toggle-gated for bodies) after it.
+    """
+    from arail import agent_trace
+
+    recorder = agent_trace.recorder_state()
+    traces: list[dict] = []
+    for rec in reversed(agent_trace.ring(200)):
+        if rec.get("kind") not in ("agent", "system"):
             continue
-        if ev.get("data", {}).get("prompt_trace"):
-            traces.append(ev)
-            if len(traces) >= limit:
-                break
-    return list(reversed(traces))
+        source = rec.get("agent_id") or rec.get("label")
+        if agent and source != agent:
+            continue
+        entry = {
+            "ts": rec.get("iso"),
+            "source": source,
+            "trace_id": rec.get("trace_id"),
+            "model": rec.get("model"),
+            "backend": rec.get("backend"),
+            "tokens_out": rec.get("tokens_out"),
+            "latency_ms": rec.get("latency_ms"),
+            "ttft_ms": rec.get("ttft_ms"),
+            "ttft_status": rec.get("ttft_status"),
+        }
+        bodies = rec.get("bodies")
+        if recorder["enabled"] and isinstance(bodies, dict):
+            entry["prompt"] = bodies.get("prompt")
+            entry["response"] = bodies.get("response")
+        traces.append(entry)
+        if len(traces) >= limit:
+            break
+    return {
+        "recorder": {
+            "enabled": recorder["enabled"],
+            "reason": "off_by_default" if not recorder["enabled"] else "on",
+        },
+        "empty_state": (
+            "flight recorder off — flip to capture prompt bodies"
+            if not recorder["enabled"] else
+            "no prompt traces yet — run the researcher or a browser task"
+        ),
+        "traces": list(reversed(traces)),
+    }
 
 
 @app.post("/api/agents/instruct")
@@ -5964,6 +6391,153 @@ async def admin_security_run_scan():
     return {"ok": True, "status": result, "started_at": started_at}
 
 
+# -- Legacy bodies (F12, sprint 2026-09-20-buddy-front-and-center) ---------
+# Disclosed, never auto-purged. Explicitly _require_surface("admin")-gated —
+# unlike the pre-existing /api/admin/* endpoints above, which (verified
+# while wiring these) do not call _require_surface at all despite
+# ARCHITECTURE.md's citation that they do. Not fixed here (a pre-existing
+# gap, out of this sprint's scope); these three new endpoints are gated
+# correctly regardless.
+
+@app.get("/api/admin/legacy-bodies")
+async def admin_legacy_bodies_status():
+    """How many activity.jsonl lines still carry a pre-flight-recorder
+    body, and whether the operator already dismissed the notice."""
+    if (gate := _require_surface("admin")) is not None:
+        return gate
+    return activity.scan_for_legacy_bodies()
+
+
+@app.post("/api/admin/legacy-bodies/purge")
+async def admin_legacy_bodies_purge():
+    """Operator-initiated only — strips bodies, stamps body_purged=true,
+    preserves everything else. Never called automatically."""
+    if (gate := _require_surface("admin")) is not None:
+        return gate
+    return activity.purge_legacy_bodies()
+
+
+@app.post("/api/admin/legacy-bodies/dismiss")
+async def admin_legacy_bodies_dismiss():
+    """[Keep] — remembered so the notice does not return every boot."""
+    if (gate := _require_surface("admin")) is not None:
+        return gate
+    activity.dismiss_legacy_notice()
+    return {"dismissed": True}
+
+
+# -- Agent lanes (S6, sprint 2026-09-20-buddy-front-and-center) ------------
+# The four endpoints contract #6 names, each explicitly
+# _require_surface("admin")-gated. GET /api/admin/agent-lanes is in
+# FAST_PATH_PREFIXES (portal/scheduler.py) so it never queues behind an
+# inference; GET /api/admin/agent-trace-stream deliberately is NOT — see
+# that route's own docstring for why.
+
+@app.get("/api/admin/agent-lanes")
+async def admin_agent_lanes():
+    """Every agent as a living lane. Schema ``arail.agent_lanes/v1``."""
+    if (gate := _require_surface("admin")) is not None:
+        return gate
+    from arail import agent_trace
+    return agent_trace.lanes_snapshot()
+
+
+@app.get("/api/admin/agent-trace-stream")
+async def admin_agent_trace_stream():
+    """SSE, one frame per new trace record.
+
+    Deliberately a different route prefix from ``/api/admin/agent-lanes``:
+    ``FAST_PATH_PREFIXES`` matches with ``startswith``, so nesting this
+    under that prefix (e.g. ``/api/admin/agent-lanes/stream``) would make
+    the fast-path meter time this long-lived stream and inflate
+    ``fast_path_ms`` p95 — the exact bug ``_METRICS_EXCLUDED_PREFIXES``
+    already documents for a different endpoint. The awkward, unrelated-
+    looking name is the fix.
+    """
+    if (gate := _require_surface("admin")) is not None:
+        return gate
+    from arail import agent_trace
+
+    async def _generate():
+        async for rec in agent_trace.subscribe():
+            yield f"data: {json.dumps(rec, default=str)}\n\n"
+
+    return StreamingResponse(
+        _generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.get("/api/admin/agent-trace/{trace_id}")
+async def admin_agent_trace_detail(trace_id: str):
+    """One record, the "why?" drill-in. 404 on an unknown id. Bodies
+    present only if the flight recorder captured them. ``related`` (A2) is
+    up to 20 other ring records with the same trace id, bodies stripped."""
+    if (gate := _require_surface("admin")) is not None:
+        return gate
+    from arail import agent_trace
+    found = agent_trace.find_with_related(trace_id)
+    if found is None:
+        return JSONResponse(status_code=404, content={"error": "unknown_trace_id"})
+    rec, related = found
+    # A1/A2: one Buddy turn writes several records under one trace id.
+    return {**rec, "related": related}
+
+
+@app.post("/api/admin/agents/hold")
+async def admin_agents_hold(request: Request):
+    """{hold: bool} -> halt_all_jobs()/resume_all_jobs(). CSRF comes free
+    from local_trust_boundary (app.py's middleware, mutating methods only)
+    -- no new CSRF code."""
+    if (gate := _require_surface("admin")) is not None:
+        return gate
+    from arail import agent_context, scheduler as _job_scheduler
+    body = await request.json()
+    if bool(body.get("hold")):
+        _job_scheduler.halt_all_jobs()
+    else:
+        _job_scheduler.resume_all_jobs()
+    return agent_context.hold_state()
+
+
+@app.post("/api/admin/flight-recorder")
+async def admin_flight_recorder(request: Request):
+    """{enabled: bool, purge: bool} -> writes DATA_DIR/flight_recorder.json
+    and, when ``purge`` is true, also strips every captured body from disk
+    and the live ring (REVIEW.md S1 / operator decision (c): the same
+    purge mechanism as the legacy-bodies purge, not a second one).
+    Admin-only, so a minimalist lab can never turn bodies on."""
+    if (gate := _require_surface("admin")) is not None:
+        return gate
+    from arail import agent_trace
+    body = await request.json()
+    result = agent_trace.set_recorder_enabled(bool(body.get("enabled")))
+    if bool(body.get("purge")):
+        result["purge"] = agent_trace.purge_flight_recorder_bodies()
+    return result
+
+
+# -- Scheduler endpoints (admin Scheduler section) -------------------------
+
+@app.get("/api/admin/scheduler/status")
+async def admin_scheduler_status():
+    """Daemon on/off, plus every registered job's schedule and last run."""
+    from arail.agents.job_daemon import job_daemon, list_jobs_status
+    return {"daemon_status": job_daemon.status, "jobs": list_jobs_status()}
+
+
+@app.post("/api/admin/scheduler/jobs/{job_id}/run")
+async def admin_scheduler_run_job(job_id: str):
+    """Run one registered job immediately. Same shape as security's run-scan."""
+    from arail.agents.job_daemon import run_job_now
+    result = await run_job_now(job_id)
+    if not result.get("ok"):
+        from fastapi.responses import JSONResponse
+        return JSONResponse(result, status_code=404)
+    return result
+
+
 @app.get("/api/admin/security/run-scan/stream")
 async def admin_security_run_scan_stream():
     """Stream a pip-audit scan as SSE events matching the live-checks modal format."""
@@ -6553,7 +7127,7 @@ async def system_graph():
         "mlx": "MLX", "cuda": "CUDA", "cpu": "CPU",
         "openai_compat": "OpenAI-Compat", "huggingface": "HuggingFace",
         "openrouter": "OpenRouter", "claude": "Claude",
-        "airllm": "AirLLM", "aerollm": "AeroLLM",
+        "airllm": "AirLLM", "aerollm": "QueueLLM",
     }
     for name in BACKEND_MAP:
         is_active = name == active_backend
@@ -6647,23 +7221,113 @@ def _get_primary_router():
     return _ROUTER_CACHE
 
 
-def _boot_warm_explicit() -> bool:
-    """True only when ARAIL_TIER0_BOOT_WARM is EXPLICITLY set to a truthy
-    value in this process's environment (sprints/2026-07-29-elite-cli
-    ARCHITECTURE.md §11.1).
+_BOOT_WARM: dict[str, str | None] = {"a": None, "b": None}
+_WARM_VOCAB = ("ok", "skipped", "failed", "deferred", "disabled")
 
-    Deliberately distinct from _warm_primary_router()'s own read of the same
-    variable (which defaults to truthy when unset, so the completion fires
-    whenever warming runs at all) — this one answers a different question:
-    "did the caller explicitly ask to warm on an otherwise-quiet boot?".
-    Unset ⇒ False, so a plain quiet boot (no --warm, autochecks off) is
-    completely unaffected. An explicit "0"/"false"/"no" also answers False
-    (not-explicitly-true), matching autochecks.py's own _TRUTHY convention.
+
+def _boot_warm_enabled() -> bool:
+    """ARAIL_BOOT_WARM=0 turns off the boot warm for both slots."""
+    return os.getenv("ARAIL_BOOT_WARM", "1").strip().lower() not in ("0", "false", "no")
+
+
+def _record_warm(slot: str, status: str) -> None:
+    """Remember a slot's warm outcome (closed vocabulary) in memory and in
+    the yaml cache's ``resolved.warm``. Never raises."""
+    if status not in _WARM_VOCAB:
+        status = "failed"
+    _BOOT_WARM[slot] = status
+    try:
+        from arail import model_defaults as _md
+        from arail import model_resolve as _mr
+        _mr.last_resolution().setdefault("warm", {})[slot] = status
+        _md.update_warm(slot, status)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+async def _boot_models() -> None:
+    """Resolve both model slots, then warm A and B (_warm_slot_a / _warm_slot_b).
+
+    Replaces the old registry->env export + autochecks-gated warm: the
+    resolver (arail.model_resolve) is now the single source of truth and
+    stamps env + registry itself. Never raises; always flips _MODEL_WARM so
+    the cold-start overlay can't trap the user.
     """
-    raw = os.getenv("ARAIL_TIER0_BOOT_WARM")
-    if raw is None:
-        return False
-    return raw.strip().lower() in ("1", "true", "yes", "on")
+    global _MODEL_WARM, _MODEL_WARM_SKIP_REASON
+    b: dict = {}
+    try:
+        from arail import model_resolve as _mr
+        from arail.portal import model_warmth as _mw
+        skip_b = await asyncio.to_thread(_mw.crashed_model)
+        res = await asyncio.to_thread(_mr.resolve_and_apply, skip_b=skip_b)
+        a = (res.get("a") or {})
+        b = (res.get("b") or {})
+        activity_log.emit(
+            "registry",
+            f"Models resolved at boot: fast={a.get('model') or '(none)'} "
+            f"[{a.get('source')}], deep={b.get('model') or '(none)'} "
+            f"[{b.get('source')}].", "info",
+            {"model_event": {"kind": "boot_resolved", "a": a.get("model"),
+                             "b": b.get("model")}})
+        if res.get("migrated"):
+            activity_log.emit(
+                "registry", "model_defaults.yaml upgraded to v2 (old copy kept "
+                "as .model_defaults.v1.bak).", "info")
+        for d in res.get("degraded") or []:
+            activity_log.emit("registry", d.get("detail") or d.get("kind"), "warn")
+    except Exception as e:  # noqa: BLE001
+        a, b = {}, {}
+        activity_log.emit("registry",
+                          f"Model resolution skipped: {type(e).__name__}: {e}", "warn")
+
+    if not _boot_warm_enabled():
+        # Quiet opt-out: leave the skip-reason globals untouched (same as the
+        # old quiet boot) so /api/instance's closed vocabulary is unchanged.
+        _record_warm("a", "disabled")
+        _record_warm("b", "disabled")
+        _MODEL_WARM = True
+        return
+    if not a.get("model"):
+        _MODEL_WARM_SKIP_REASON = "no fast model resolved"
+        _record_warm("a", "skipped")
+        _MODEL_WARM = True
+    else:
+        await _warm_slot_a()
+    # Slot B after A, so a chat turn arriving at boot queues behind at most
+    # one warm. A crash in this load is caught by the sentinel next boot.
+    await _warm_slot_b(b.get("model"))
+
+
+async def _warm_slot_a() -> None:
+    """Warm slot A through the single warm path (_warm_primary_router) and
+    record its outcome in the closed vocabulary. Never raises."""
+    await _warm_primary_router()
+    if _MODEL_WARM_MS is not None:
+        _record_warm("a", "ok")
+    elif _MODEL_WARM_SKIP_REASON == _MODEL_WARM_SKIP_REASON_ON_EXCEPTION:
+        _record_warm("a", "failed")
+    elif _MODEL_WARM_SKIP_REASON == "ARAIL_TIER0_BOOT_WARM=0":
+        _record_warm("a", "disabled")
+    else:
+        _record_warm("a", "skipped")
+
+
+async def _warm_slot_b(model: "str | None") -> None:
+    """One-shot deep-model warm + outcome record. Never raises."""
+    try:
+        from arail.portal import model_warmth as _mw
+        status = await _mw.boot_warm_deep(model)
+        _record_warm("b", status)
+        if status == "deferred":
+            # Not just an activity line: say so in the boot strip too.
+            from arail import model_resolve as _mr
+            _mr.last_resolution().setdefault("degraded", []).append({
+                "slot": "b", "kind": "warm_deferred",
+                "detail": f"Deep model {model} was not loaded at boot (another "
+                          "ARAIL instance is loading it, or memory is busy). "
+                          "Pin it again to retry."})
+    except Exception:  # noqa: BLE001
+        _record_warm("b", "failed")
 
 
 async def _warm_primary_router() -> None:
@@ -6813,24 +7477,74 @@ def _clean_chat_reply(text: str) -> str:
     return reply
 
 
+def _resolve_chat_cost(response: ModelResponse, cost_record: Any = None) -> dict[str, Any]:
+    """Return the honest cost fields for one chat turn.
+
+    ``cost_record`` is what ``cost_tracker.track()`` returned for *this* call.
+    Without it (the router branch tracks internally) we fall back to the
+    tracker's most recent record, but only when its backend and model match
+    this response; otherwise the cost is reported as ``unattributed`` rather
+    than borrowed from another call.
+    """
+    fields: dict[str, Any] = {
+        "cloud_cost_usd": None,
+        "cloud_cost_source": "unattributed",
+        "cloud_equivalent_usd": None,
+        "cloud_equivalent_source": None,
+        "energy_cost_usd": None,
+        "energy_source": None,
+    }
+    try:
+        from arail.costs import cost_source, cost_tracker, record_to_fields
+
+        rec = record_to_fields(cost_record) if cost_record is not None else {}
+        if not rec:
+            last = record_to_fields(cost_tracker.get_last_record())
+            if (
+                last
+                and last.get("backend") == response.backend
+                and last.get("model") == response.model
+            ):
+                rec = last
+        source = cost_source(response.backend)
+        if rec:
+            fields["cloud_cost_usd"] = rec.get("cloud_cost_usd")
+            fields["cloud_cost_source"] = rec.get("cloud_cost_source") or source
+            fields["cloud_equivalent_usd"] = rec.get("cloud_equivalent_usd")
+            fields["cloud_equivalent_source"] = (
+                "simulated" if rec.get("cloud_equivalent_usd") is not None else None
+            )
+            fields["energy_cost_usd"] = rec.get("energy_cost_usd")
+            fields["energy_source"] = (
+                rec.get("energy_source") or "estimated"
+                if rec.get("energy_cost_usd") is not None
+                else None
+            )
+        # Belt and braces, independent of attribution: a backend that is not
+        # a billed cloud estimate never reports a cloud charge.
+        if source != "billed_estimate":
+            fields["cloud_cost_usd"] = None
+            if source == "local" or fields["cloud_cost_source"] != "unattributed":
+                fields["cloud_cost_source"] = source
+        elif fields["cloud_cost_source"] not in ("billed_estimate", "unattributed"):
+            fields["cloud_cost_usd"] = None
+    except Exception:
+        pass
+    return fields
+
+
 def _build_chat_result(
     response: ModelResponse,
     *,
     wants_deep: bool,
     sources: list[dict[str, Any]] | None = None,
+    provenance: Any = None,
+    cost_record: Any = None,
 ) -> dict[str, Any]:
     reply = _clean_chat_reply(response.text or "")
     latency_sec = max(response.latency_ms / 1000.0, 0.001)
     tokens_per_sec = round(response.tokens_used / latency_sec, 1)
-    cloud_cost_usd = None
-    energy_cost_usd = None
-    try:
-        from arail.costs import cost_tracker
-        last = cost_tracker.get_last_record() or {}
-        cloud_cost_usd = last.get("cloud_cost_usd")
-        energy_cost_usd = last.get("energy_cost_usd")
-    except Exception:
-        pass
+    cost_fields = _resolve_chat_cost(response, cost_record)
 
     activity_log.emit("chat",
                       f"Chat turn · {response.tokens_used} tokens · "
@@ -6844,11 +7558,27 @@ def _build_chat_result(
         "latency_ms": response.latency_ms,
         "tokens_used": response.tokens_used,
         "tokens_per_sec": tokens_per_sec,
-        "cloud_cost_usd": cloud_cost_usd,
-        "energy_cost_usd": energy_cost_usd,
+        **cost_fields,
         "deep": bool(wants_deep),
         "sources": list(sources or []),
         "error": None,
+        # Answering-model provenance (arail.registry.ceiling) — what
+        # actually generated this reply and how ARAIL verified its size.
+        # Phase 1 review finding: the served model could silently differ
+        # from what the UI displayed (deep-reroute mislabel, ids[0]
+        # fallbacks, singleton relabel). Render this in the stats line so
+        # substitution is visible, not just prevented.
+        "model_provenance": (
+            {
+                "model_id": provenance.model_id,
+                "params_b": provenance.params_b,
+                "param_source": provenance.param_source,
+                "role": provenance.role,
+                "backend": provenance.backend,
+            }
+            if provenance is not None
+            else None
+        ),
     }
 
 
@@ -6886,6 +7616,7 @@ def _prepare_chat_context(
     backend_override: str | None,
     model_override: str | None,
     runtime_override: str | None = None,
+    side: str = "A",
 ) -> dict[str, Any]:
     from arail import lab_brain
 
@@ -6902,41 +7633,99 @@ def _prepare_chat_context(
     optional_backend_name = str(backend_override or "").strip().lower() or None
     wants_deep = optional_backend_name in _OPTIONAL_CHAT_BACKEND_CONFIG
 
-    # ── Hard hardware-floor rule (30B total params) ────────────────────
-    # If the dispatch landed on a non-Deep backend (mlx/cuda/cpu/runtime
-    # override) AND the chosen model's total params exceed the hardware
-    # floor, route to the best available deep backend instead. This is
-    # SERVER-SIDE enforcement — clients can lie about their backend
-    # selection but the server still routes correctly.
-    # See ARCHITECTURE.md § Data flow D1.
-    if not wants_deep:
-        from arail.model_specs import must_stream as _must_stream
-        candidate_model = (model_override or "").strip() or os.getenv("MODEL_NAME", "")
-        if _must_stream(candidate_model):
-            _resolved = _resolve_default_deep_backend()
-            if _resolved is None:
-                activity_log.emit(
-                    "chat",
-                    f"30B+ model '{candidate_model}': no deep backend available "
-                    f"on this host — skipping hard-floor routing.",
-                    "warn",
-                )
-            else:
-                wants_deep = True
-                optional_backend_name = _resolved
-                activity_log.emit(
-                    "chat",
-                    f"30B+ model '{candidate_model}': routing to Deep ({_resolved}) "
-                    f"per hardware floor.",
-                    "info",
-                )
-    # ── End hard hardware-floor rule ───────────────────────────────────
+    # ── Cloud Compute Source pivot — was inert, now honest ──────────────
+    # Phase 1 review finding #1/#4: picking Claude/NIM/OpenRouter/HF/custom
+    # in the chat UI read into `optional_backend_name` here and then was
+    # never consulted again — dispatch fell through to the local
+    # MODEL_BACKEND router and answered locally with HTTP 200, labeled as
+    # if the pick had worked. Refuse loudly instead: the cloud dispatch
+    # path (registry/binding.py provider_type=="anthropic" etc.) isn't
+    # wired to this endpoint yet, so say so rather than silently
+    # substituting a local model for a cloud request.
+    if optional_backend_name and optional_backend_name in _CLOUD_PROVIDERS:
+        return {
+            "error_result": {
+                "reply": (
+                    f"'{optional_backend_name}' isn't wired to Chat's send "
+                    f"path yet — it silently answered locally before this "
+                    f"fix. Use Manage providers to verify your key, but "
+                    f"cloud-provider chat isn't available from this box "
+                    f"today."
+                ),
+                "backend": None,
+                "error": "cloud_backend_not_wired",
+            }
+        }
 
+    # ── Hardware-floor rule — SUPERSEDED 2026-08-04 ─────────────────────
+    # This used to silently re-route a >30B request to the deep backend,
+    # which meant the reply came from AEROLLM_MODEL while the UI still
+    # showed the originally-requested model name (Phase 1 review finding
+    # #6). It's replaced by the answering-model ceiling below: primary
+    # candidates >= 8B (or of unknown size) are refused outright, not
+    # silently substituted. Explicitly picking the deep backend (wants_deep)
+    # is still the only way to reach a bigger model, and that model is then
+    # checked as "secondary" against the discovered-hardware cap, not this
+    # 30B constant. See arail.registry.ceiling.
+    # ── End hardware-floor rule ─────────────────────────────────────────
+
+    # C6.3/F-SWITCH, wired up here 2026-08-11 (was only reachable from the
+    # explicit /model-load path — see _ChatBackendModelMismatch's
+    # docstring): AeroLLM/AirLLM are process-wide singletons cached by
+    # backend NAME in _OPTIONAL_CHAT_BACKEND_CACHE, independent of
+    # AeroLLMBackend's OWN model-keyed _shared cache. If AEROLLM_MODEL
+    # changes between requests, _get_optional_chat_backend("aerollm")
+    # without expected_model= silently hands back whatever model is
+    # ALREADY resident (the singleton can't hot-swap), and the
+    # override_model logic below only relabels active_backend.model_name
+    # — a cosmetic string, not a reload — so the system prompt (and the
+    # UI's own picker label) claimed one model while the resident weights
+    # that actually answered were a completely different one the operator
+    # had loaded earlier in the process's lifetime. Passing expected_model
+    # here makes that a loud, honest refusal instead.
     deep_backend = None
     if wants_deep:
         try:
             assert optional_backend_name is not None
-            deep_backend = _get_optional_chat_backend(optional_backend_name)
+            # Part 4 (sprints/2026-08-11-two-slot-chat-models) fix: pass
+            # the requested model through the SAME identity check the
+            # load path already enforces. Before this, a mismatch here
+            # fell through to the generic model_name relabel below —
+            # `active_backend.model_name = override_model` — which is
+            # cosmetic for the deep backend (unlike Ollama, where mutating
+            # model_name really does change what gets requested):
+            # generation would proceed against whatever checkpoint was
+            # ACTUALLY resident while the reply claimed to be from the
+            # requested model. Refusing here means that relabel block can
+            # never fire a mismatched rename for deep_backend again — by
+            # the time it runs, identity is already guaranteed to agree.
+            # (An independent, near-identical fix for this exact gap
+            # landed on main as abb0a72 while this branch was in flight —
+            # same call site, same exception; kept this branch's message
+            # since it points at the real fix, the Deep picker's in-
+            # process swap, rather than telling the operator to restart.)
+            deep_expected = (model_override or "").strip() or None
+            deep_backend = _get_optional_chat_backend(
+                optional_backend_name, expected_model=deep_expected)
+        except _ChatBackendModelMismatch as exc:
+            activity_log.emit(
+                "chat",
+                f"Deep send refused: requested {exc.requested_model!r}, "
+                f"{exc.backend_name} resident with {exc.resident_model!r}",
+                "warn",
+            )
+            return {"error_result": {
+                "reply": (
+                    f"'{exc.requested_model}' isn't the loaded deep model "
+                    f"(currently '{exc.resident_model}' is resident) — "
+                    f"load it from the Deep picker first."
+                ),
+                "backend": None,
+                # The resident model, never the mismatched request — the
+                # whole point of this refusal is no relabeling.
+                "model": exc.resident_model,
+                "error": str(exc),
+            }}
         except Exception as e:  # noqa: BLE001
             activity_log.emit(
                 "chat",
@@ -7012,6 +7801,35 @@ def _prepare_chat_context(
             previous_model = active_backend.model_name
             active_backend.model_name = override_model
 
+    # ── Answering-model ceiling — single chokepoint ─────────────────────
+    # See arail.registry.ceiling and ARCHITECTURE.md § Data flow D1 (revised
+    # 2026-08-04). Every model that could answer this message, on whatever
+    # path got it here (client override, runtime override, resolved
+    # default), is checked here before generation. This replaces the old
+    # 30B-only "force to deep" reroute — that reroute silently answered
+    # with a *different* model than the one requested; this refuses.
+    from arail.registry.ceiling import ModelCeilingViolation, resolve_answering_model
+    _ceiling_model = str(getattr(active_backend, "model_name", "") or "")
+    # Column B ("2nd inference") is never the sole answering model — whatever
+    # is loaded there (aerollm/airllm, or any other model a user drops in via
+    # "use as B") is checked against the hardware-cap secondary role, not the
+    # strict <8B primary ceiling. Without this, `branch: "B"` from the client
+    # (buildBody() in chat.html) was captured for conversation persistence but
+    # never reached here, so a >=8B model placed in the UI's own "2nd ·
+    # aeroLLM" slot got refused as if it were trying to answer as primary —
+    # the exact "cannot serve as the answering model... use it as the AeroLLM
+    # secondary instead" message the UI was already showing it as.
+    _ceiling_role = "secondary" if (wants_deep or str(side).strip().upper() == "B") else "primary"
+    _ceiling_backend_name = str(getattr(active_backend, "backend_name", "") or type(active_backend).__name__)
+    try:
+        model_provenance = resolve_answering_model(
+            _ceiling_model, role=_ceiling_role, backend=_ceiling_backend_name,
+        )
+    except ModelCeilingViolation as e:
+        activity_log.emit("chat", f"Model ceiling refused '{_ceiling_model}' ({_ceiling_role}): {e}", "warn")
+        return {"error_result": {"reply": str(e), "backend": None, "model": _ceiling_model, "error": str(e)}}
+    # ── End answering-model ceiling ─────────────────────────────────────
+
     # Now that the backend is resolved (and the model override applied),
     # build the chat messages so the system prompt's state block reflects
     # the actually-dispatched backend + model. Resolves the embarrassing
@@ -7072,6 +7890,7 @@ def _prepare_chat_context(
         "optional_backend_name": optional_backend_name,
         "wants_deep": wants_deep,
         "sources": chat_sources,
+        "model_provenance": model_provenance,
     }
 
 
@@ -7122,6 +7941,7 @@ async def _run_chat_completion_stream(
     max_tokens: int,
     runtime_override: str | None = None,
     think: bool | None = None,
+    side: str = "A",
 ) -> AsyncIterator[dict[str, Any]]:
     context = _prepare_chat_context(
         message=message,
@@ -7129,6 +7949,7 @@ async def _run_chat_completion_stream(
         backend_override=backend_override,
         model_override=model_override,
         runtime_override=runtime_override,
+        side=side,
     )
     error_result = context.get("error_result")
     if error_result is not None:
@@ -7162,7 +7983,7 @@ async def _run_chat_completion_stream(
                     messages=context.get("claude_messages"),
                 )
             from arail.costs import cost_tracker
-            cost_tracker.track(
+            cost_record = cost_tracker.track(
                 backend=response.backend,
                 model=response.model,
                 tokens_in=max(len(prompt) // 4, 1),
@@ -7183,7 +8004,7 @@ async def _run_chat_completion_stream(
             clean_reply = _clean_chat_reply(response.text)
             if clean_reply:
                 yield {"type": "delta", "delta": clean_reply}
-            yield {"type": "final", **_build_chat_result(response, wants_deep=wants_deep, sources=context.get("sources"))}
+            yield {"type": "final", **_build_chat_result(response, wants_deep=wants_deep, sources=context.get("sources"), provenance=context.get("model_provenance"), cost_record=cost_record)}
             return
 
         final_response: ModelResponse | None = None
@@ -7212,7 +8033,7 @@ async def _run_chat_completion_stream(
                     **think_kwargs,
                 )
             from arail.costs import cost_tracker
-            cost_tracker.track(
+            cost_record = cost_tracker.track(
                 backend=response.backend, model=response.model,
                 tokens_in=max(len(prompt) // 4, 1),
                 tokens_out=response.tokens_used,
@@ -7223,7 +8044,7 @@ async def _run_chat_completion_stream(
             clean_reply = _clean_chat_reply(response.text)
             if clean_reply:
                 yield {"type": "delta", "delta": clean_reply}
-            yield {"type": "final", **_build_chat_result(response, wants_deep=wants_deep, sources=context.get("sources"))}
+            yield {"type": "final", **_build_chat_result(response, wants_deep=wants_deep, sources=context.get("sources"), provenance=context.get("model_provenance"), cost_record=cost_record)}
             return
 
         if router is None:
@@ -7255,16 +8076,30 @@ async def _run_chat_completion_stream(
                 yield {"type": "delta", "delta": delta}
 
         if final_response is None:
-            final_response = ModelResponse(
-                text=accumulated,
-                model=str(getattr(active_backend, "model_name", "unknown")),
-                tokens_used=max(len(accumulated.split()), 0),
-                backend=str(getattr(router, "backend_name", "unknown")),
-                latency_ms=0.0,
-                cost_usd=0.0,
+            # Every backend's stream_complete is contracted to end with a
+            # ModelResponse (base fallback at backends.py:162, native
+            # streamers at :349/:1080/etc). Getting here means that
+            # contract broke — an early return, a truncated connection, a
+            # bug — not a normal completion. Surface it as the error it is
+            # instead of fabricating latency_ms=0 stats that look like a
+            # real, successful response (Phase 1 review finding #17).
+            activity_log.emit(
+                "chat",
+                "Stream ended without a completion sentinel from the "
+                f"backend ({getattr(router, 'backend_name', 'unknown')}) — "
+                "treating as a failed turn.",
+                "error",
             )
+            yield {
+                "type": "final",
+                "reply": accumulated or "(stream ended without completing)",
+                "backend": str(getattr(router, "backend_name", "unknown")),
+                "model": str(getattr(active_backend, "model_name", "unknown")),
+                "error": "stream ended without a completion response from the backend",
+            }
+            return
 
-        yield {"type": "final", **_build_chat_result(final_response, wants_deep=wants_deep, sources=context.get("sources"))}
+        yield {"type": "final", **_build_chat_result(final_response, wants_deep=wants_deep, sources=context.get("sources"), provenance=context.get("model_provenance"))}
     except Exception as e:  # noqa: BLE001
         activity_log.emit("chat",
                           f"Inference failed: {type(e).__name__}: {str(e)[:120]}",
@@ -7293,6 +8128,7 @@ async def _run_chat_completion(
     top_p: float | None,
     max_tokens: int,
     runtime_override: str | None = None,
+    side: str = "A",
 ) -> dict:
     """Core of the /api/chat non-streaming path.
 
@@ -7307,6 +8143,7 @@ async def _run_chat_completion(
         backend_override=backend_override,
         model_override=model_override,
         runtime_override=runtime_override,
+        side=side,
     )
     error_result = context.get("error_result")
     if error_result is not None:
@@ -7318,6 +8155,7 @@ async def _run_chat_completion(
     runtime_backend = context.get("runtime_backend")
     router = context.get("router")
     prompt = str(context["prompt"])
+    cost_record = None  # set by the branches that track the call themselves
 
     try:
         if deep_backend is not None:
@@ -7330,7 +8168,7 @@ async def _run_chat_completion(
                     messages=context.get("claude_messages"),
                 )
             from arail.costs import cost_tracker
-            cost_tracker.track(
+            cost_record = cost_tracker.track(
                 backend=response.backend,
                 model=response.model,
                 tokens_in=max(len(prompt) // 4, 1),
@@ -7362,7 +8200,7 @@ async def _run_chat_completion(
                     messages=context.get("claude_messages"),
                 )
             from arail.costs import cost_tracker
-            cost_tracker.track(
+            cost_record = cost_tracker.track(
                 backend=response.backend,
                 model=response.model,
                 tokens_in=max(len(prompt) // 4, 1),
@@ -7404,7 +8242,7 @@ async def _run_chat_completion(
     finally:
         _restore_chat_context(context)
 
-    return _build_chat_result(response, wants_deep=wants_deep, sources=context.get("sources"))
+    return _build_chat_result(response, wants_deep=wants_deep, sources=context.get("sources"), provenance=context.get("model_provenance"), cost_record=cost_record)
 
 
 def _apply_chat_defaults(
@@ -7460,12 +8298,16 @@ def _apply_chat_defaults(
 
 @app.post("/api/chat/default")
 async def chat_default(request: Request):
-    """Set or clear the chat-wide default provider+model (L4).
+    """Set or clear the chat-wide default provider+model (L4), or set one
+    of the two chat slots (sprints/2026-08-11-two-slot-chat-models).
 
-    Body to SET: {provider: str, model: str, runtime: str}
+    Body to SET (resident slot, back-compat default): {provider, model, runtime}
+    Body to SET (deep slot): {slot: "deep", model}
     Body to CLEAR: {clear: true}
 
-    Returns: {ok, provider, model, runtime} or {ok, cleared: true}
+    Returns: {ok, provider, model, runtime, registry_updated} (resident),
+             {ok, slot: "deep", model, registry_updated, requires_restart}
+             (deep), or {ok, cleared: true}.
 
     Airgap: refuses cloud defaults when airgapped (F-DEFAULT-LEAK guard at use
     time is in _apply_chat_defaults; guard at set time is here).
@@ -7477,7 +8319,8 @@ async def chat_default(request: Request):
     except Exception:
         return {"ok": False, "error": "invalid JSON body"}
 
-    # CLEAR path
+    # CLEAR path — scoped to the resident/chat-wide default; unaffected by
+    # `slot` (nothing today asks to clear the deep slot's pick).
     if body.get("clear"):
         secrets = _read_secrets()
         secrets.pop("ARAIL_CHAT_DEFAULT_MODEL", None)
@@ -7485,7 +8328,58 @@ async def chat_default(request: Request):
         os.environ.pop("ARAIL_CHAT_DEFAULT_MODEL", None)
         return {"ok": True, "cleared": True}
 
-    # SET path
+    slot = (body.get("slot") or "resident").strip().lower()
+    if slot not in ("resident", "deep"):
+        return {"ok": False, "error": f"unknown slot '{slot}' — must be 'resident' or 'deep'"}
+
+    # ── DEEP SLOT ─────────────────────────────────────────────────────
+    # Registry write-through only (Part 4) — this does not load the model;
+    # an in-process swap is Phase 4 (backends.py/AeroLLMBackend). Until
+    # then the picked model applies via the existing /api/chat/model-load
+    # flow or the next portal restart, same as any other AEROLLM_MODEL
+    # change has always required.
+    if slot == "deep":
+        model_id = (body.get("model") or "").strip()
+        if not model_id:
+            return {"ok": False, "error": "model is required for slot=deep"}
+
+        from arail.registry.ceiling import ModelCeilingViolation, resolve_answering_model
+        try:
+            resolve_answering_model(model_id, role="secondary", backend="aerollm")
+        except ModelCeilingViolation as exc:
+            return {"ok": False, "error": str(exc)}
+
+        if not _aerollm_model_ready(model_id):
+            return {
+                "ok": False,
+                "error": (
+                    f"'{model_id}' isn't on disk in ARAIL_MODELS_DIR yet — "
+                    f"install it before setting it as the deep slot."
+                ),
+            }
+
+        # A chip pick must survive a reboot: it is a pin (model_defaults.yaml),
+        # and the resolver stamps env + registry from it (one direction).
+        registry_updated = False
+        try:
+            from arail.portal import models_api as _models_api
+            out = await _models_api.apply_pin("b", model_id)
+            registry_updated = True
+            requires_restart = bool(out.get("restart_required"))
+        except Exception as e:  # noqa: BLE001
+            requires_restart = False
+            activity_log.emit("registry", f"Deep pin skipped: {e}", "warn")
+
+        activity_log.emit("chat", f"Deep slot default set: model={model_id}", "info")
+        return {
+            "ok": True,
+            "slot": "deep",
+            "model": model_id,
+            "registry_updated": registry_updated,
+            "requires_restart": requires_restart,
+        }
+
+    # ── RESIDENT SLOT (default) — original behavior, plus write-through ─
     provider = (body.get("provider") or "").strip().lower()
     model_id = (body.get("model") or "").strip()
     runtime = (body.get("runtime") or "").strip()
@@ -7510,8 +8404,33 @@ async def chat_default(request: Request):
         os.environ["ARAIL_CHAT_DEFAULT_MODEL"] = default_val
 
     _write_secrets(secrets)
+
+    # Registry write-through (Part 4): only for ollama-runtime picks that
+    # pass the primary ceiling. mlx/cloud picks persist as the chat
+    # default only — pinning (Phase 3) and the registry's tier0 identity
+    # apply to Ollama models; the honest story for anything else is "chat
+    # default set, lab-wide Tier 0 unchanged".
+    registry_updated = False
+    if model_id and runtime == "ollama":
+        from arail.registry.ceiling import ModelCeilingViolation, resolve_answering_model
+        try:
+            resolve_answering_model(model_id, role="primary", backend="ollama_native")
+            from arail.portal import models_api as _models_api
+            await _models_api.apply_pin("a", model_id)
+            registry_updated = True
+        except ModelCeilingViolation:
+            pass  # chat default still set; just not promoted to tier0
+        except Exception as e:  # noqa: BLE001 -- the chat default itself is already set
+            activity_log.emit("registry", f"Resident pin skipped: {e}", "warn")
+
     activity_log.emit("chat", f"Chat default set: provider={provider} model={model_id}", "info")
-    return {"ok": True, "provider": provider, "model": model_id, "runtime": runtime}
+    return {
+        "ok": True,
+        "provider": provider,
+        "model": model_id,
+        "runtime": runtime,
+        "registry_updated": registry_updated,
+    }
 
 
 @app.post("/api/chat")
@@ -7550,6 +8469,7 @@ async def api_chat(request: Request):
         body.get("model"),
         body.get("runtime"),
     )
+    branch = str(body.get("branch") or "A").strip() or "A"
 
     return await _run_chat_completion(
         message=message,
@@ -7560,6 +8480,7 @@ async def api_chat(request: Request):
         top_p=top_p,
         max_tokens=int(body.get("max_tokens") or 512),
         runtime_override=runtime_override,
+        side=branch,
     )
 
 
@@ -7576,12 +8497,20 @@ async def api_chat_eject(request: Request):
     happened — it is never an unconditional `{"ok": True}` (F-EJECTLIE,
     F-EJECT-OLLAMA-FALSE). Behavior per runtime:
 
-        airllm/aerollm — CANNOT be hot-freed this sprint (A3): the resident
-            weights live in `AeroLLMBackend._shared` / `deep_policy.
-            _deep_router`, not in the thin `_OPTIONAL_CHAT_BACKEND_CACHE`
-            wrapper this endpoint could drop. Always `ok=False,
-            requires_restart=True`; `freed` stays empty — dropping the
-            wrapper frees nothing real, so it is never reported as freed.
+        aerollm — REAL teardown (sprints/2026-08-11-two-slot-chat-models
+            Part 4): AeroLLMBackend._close() drops the Runtime on its own
+            pinned worker thread and the singleton is evicted from
+            AeroLLMBackend._shared — A3's old restriction (weights lived
+            outside the wrapper this endpoint could drop) is resolved.
+            `ok` tracks whether that actually succeeded; a quiesce
+            failure (a generation genuinely mid-flight) is `ok=False,
+            requires_restart=True` — never a false success. The auto-
+            preload loop re-warms within ~5 min unless
+            ARAIL_AEROLLM_PRELOAD=0, disclosed in `notes`.
+        airllm         — still CANNOT be hot-freed (A3, unchanged, out of
+                         scope for Part 4): subprocess-isolated with a
+                         different lifecycle shape. Always `ok=False,
+                         requires_restart=True`; `freed` stays empty.
         ollama         — invoke `ollama stop <model>`. `ok` tracks the real
                          subprocess result (`returncode == 0`, no exception)
                          — a failure is `ok=False`, never a false success.
@@ -7589,10 +8518,14 @@ async def api_chat_eject(request: Request):
                          freed in-process. `ok=False, requires_restart=True`.
         mlx/cpu/cuda   — in-process backend; restart required.
                          `ok=False, requires_restart=True`.
-        (blank/unknown) — clears every cached optional backend wrapper;
+        (blank/unknown) — clears every cached optional backend wrapper.
+                         Unlike the named `aerollm` case above, this path
+                         still only drops the thin wrapper (no _close()) —
                          `ok=bool(freed)`, plus a note that any cleared
                          deep backend still needs a portal restart to
-                         actually free memory.
+                         actually free memory. (The Chat tab's eject
+                         button always sends an explicit runtime; this
+                         catch-all is an operator/API convenience.)
 
     Returns: {ok, freed: [..], notes: [..], requires_restart}
     """
@@ -7606,16 +8539,50 @@ async def api_chat_eject(request: Request):
     ok = False
     requires_restart = False
 
-    if runtime in ("airllm", "aerollm"):
-        label = _OPTIONAL_CHAT_BACKEND_CONFIG.get(runtime, {}).get("label", runtime)
-        if runtime in _OPTIONAL_CHAT_BACKEND_CACHE:
-            restart_note = f"resident ({label}) · frees on next portal restart"
-            if runtime == "aerollm":
-                restart_note += (
-                    " (auto-preload re-warms within ~5 min unless "
-                    "ARAIL_AEROLLM_PRELOAD=0)"
+    if runtime == "aerollm":
+        # Part 4 (sprints/2026-08-11-two-slot-chat-models): real teardown
+        # — A3's restriction ("the wrapper cache isn't where the resident
+        # weights live") is resolved by AeroLLMBackend._close(), which
+        # drops the Runtime for real on its own pinned worker thread.
+        label = _OPTIONAL_CHAT_BACKEND_CONFIG.get("aerollm", {}).get("label", "aerollm")
+        if "aerollm" not in _OPTIONAL_CHAT_BACKEND_CACHE:
+            notes.append(f"{label} not loaded.")
+            ok = False
+            requires_restart = False
+        else:
+            try:
+                torn_down = _teardown_resident_aerollm()
+            except Exception as e:  # noqa: BLE001
+                notes.append(
+                    f"{label} couldn't be freed — it may be mid-generation; "
+                    f"retry once it finishes ({type(e).__name__}: {e})"
                 )
-            notes.append(restart_note)
+                ok = False
+                requires_restart = True
+            else:
+                if torn_down is not None:
+                    freed.append(f"aerollm:{getattr(torn_down, 'model_name', label)}")
+                    activity_log.emit(
+                        "chat",
+                        f"Ejected {label} ({getattr(torn_down, 'model_name', '')}).",
+                        "info",
+                    )
+                    notes.append(
+                        "auto-preload re-warms within ~5 min unless "
+                        "ARAIL_AEROLLM_PRELOAD=0"
+                    )
+                    ok = True
+                    requires_restart = False
+                else:
+                    notes.append(f"{label} not loaded.")
+                    ok = False
+                    requires_restart = False
+    elif runtime == "airllm":
+        # Subprocess-isolated, no real() teardown wired — A3 stays live
+        # for this provider (out of scope for the Part 4 swap/eject work).
+        label = _OPTIONAL_CHAT_BACKEND_CONFIG.get("airllm", {}).get("label", "airllm")
+        if "airllm" in _OPTIONAL_CHAT_BACKEND_CACHE:
+            notes.append(f"resident ({label}) · frees on next portal restart")
         else:
             notes.append(f"{label} not loaded.")
         # Never ok:True and never claim `freed` — the wrapper cache isn't
@@ -7638,6 +8605,19 @@ async def api_chat_eject(request: Request):
                 freed.append(f"ollama:{model}")
                 activity_log.emit("chat", f"Stopped ollama model {model}.", "info")
                 ok = True
+                # Part 3 (resident keep-watch): if the operator just
+                # deliberately froze the resident model, don't have the
+                # background loop immediately re-warm it right back —
+                # suppress for a short window. Scoped to the tier0 model
+                # specifically; ejecting some other installed model must
+                # not suppress keep-watch on tier0.
+                t0_name = (os.getenv("MODEL_NAME") or "").strip()
+                if t0_name and model in (t0_name, f"{t0_name}:latest"):
+                    try:
+                        from arail.portal.model_warmth import suppress_tier0_keepwatch
+                        suppress_tier0_keepwatch()
+                    except Exception:  # noqa: BLE001
+                        pass
             else:
                 notes.append(f"ollama stop returned {r.returncode}: {r.stderr.strip()[:200]}")
                 ok = False
@@ -7675,7 +8655,7 @@ async def api_chat_eject(request: Request):
         if names:
             freed.extend(f"{name} cache" for name in names)
             activity_log.emit("chat", "Ejected all optional chat backends.", "info")
-            notes.append("in-process deep backends (aeroLLM/AirLLM) still "
+            notes.append("in-process deep backends (QueueLLM/AirLLM) still "
                          "need a portal restart to actually free memory.")
         ok = bool(freed)
         requires_restart = bool(names)
@@ -7745,6 +8725,7 @@ async def api_chat_stream(request: Request):
             max_tokens=int(body.get("max_tokens") or 512),
             runtime_override=stream_runtime,
             think=think,
+            side=branch,
         ):
             if event.get("type") == "delta":
                 pieces.append(str(event.get("delta") or ""))
@@ -7809,7 +8790,7 @@ _CHAT_MODEL_LOAD_STATE: dict[str, Any] = {
 
 _OPTIONAL_CHAT_BACKEND_CONFIG: dict[str, dict[str, str]] = {
     "aerollm": {
-        "label": "AeroLLM",
+        "label": "QueueLLM",
         "class_name": "AeroLLMBackend",
         # Built from the local sibling repo ($ARAIL_AEROLLM_REPO) — not pip.
         # `deep rebuild` re-runs the cargo build + dylib copy so active local
@@ -7840,17 +8821,32 @@ def _resilient_chat_default(candidate: str | None) -> str | None:
     Handles name drift across versions without forcing operators to edit `.env`:
       - v1.1+ default: `llama-ai-eng` (Llama-3.2-1B + AI-engineer persona, Built with Llama)
       - v1.0.0 name: `ai-eng:latest`
-      - pre-v1.0.0 name: `ai-engineer:latest`
+    Both names above are the SAME ~1B persona, renamed once across releases.
 
-    Candidate list checked in preference order (back-compat):
-      ["llama-ai-eng", "ai-eng:latest", "ai-engineer:latest"]
-    Then any installed model matching the ai-eng-family regex.
+    `ai-engineer` / `ai-engineer:latest` is a DIFFERENT, larger model — the
+    maximus deep persona (Qwen2.5-7B-Instruct, ~7B params; see
+    models/ai-eng/Modelfile.deep and model_specs.MODEL_METADATA_OVERRIDES). It
+    was ARAIL's original, pre-two-tier default (based on qwen3:8b, then
+    qwen2.5:7b — never a ~1B model under any name) before the MODEL-TIERS-V2
+    split repositioned it as the deep persona. It is deliberately NOT treated
+    as a rename of llama-ai-eng/ai-eng below: scripts/setup.sh handles a
+    legacy ai-engineer:latest install the same way (adopts it as the deep
+    model, installs the 1B default separately, and explicitly does not alias
+    it to llama-ai-eng — "ai-engineer:latest is the 7B deep model").
 
-    Preference order when falling back:
-      1. any installed model matching the ai-eng-family regex (covers all three names)
-      2. `qwen2.5:7b` (documented preview base)
-      3. the first installed model (any runtime)
-      4. the original `candidate` (so we don't lose info if nothing installed yet)
+    Candidate list checked in preference order (back-compat, confident
+    same-model aliases only): ["llama-ai-eng", "ai-eng:latest"]
+    Then any installed model matching the llama-ai-eng/ai-eng family regex
+    (still excludes ai-engineer).
+
+    If no confident alias is installed, falls back to the first installed
+    model that the answering-model ceiling accepts as primary. That scan can
+    still land on ai-engineer:latest if it's the only thing installed — but
+    unlike the aliases above, that's a genuine guess across differently
+    sized models, not a known rename of `candidate`, so it's logged as a
+    warning rather than returned silently. If nothing installed passes the
+    ceiling either, returns the original `candidate` unchanged so the
+    ceiling can refuse it loudly downstream.
     """
     if not candidate:
         return candidate
@@ -7864,18 +8860,42 @@ def _resilient_chat_default(candidate: str | None) -> str | None:
         return candidate
     if not ids:
         return candidate
-    # Check the back-compat candidate list in preference order.
-    for preferred in ("llama-ai-eng", "ai-eng:latest", "ai-engineer:latest"):
+    # Check the back-compat candidate list in preference order. These are
+    # confident renames of the SAME model — ai-engineer is excluded on
+    # purpose, see docstring.
+    for preferred in ("llama-ai-eng", "ai-eng:latest"):
         if preferred in ids:
             return preferred
     import re as _re
-    _ai_eng_rx = _re.compile(r"^(?:llama-ai-eng|ai-eng(?:ineer)?)(?::|$)", _re.IGNORECASE)
+    _ai_eng_rx = _re.compile(r"^(?:llama-ai-eng|ai-eng)(?::|$)", _re.IGNORECASE)
     for mid in ids:
         if _ai_eng_rx.match(mid):
             return mid
-    if "qwen2.5:7b" in ids:
-        return "qwen2.5:7b"
-    return ids[0]
+    # Below this point there's no known-safe candidate installed. Rather
+    # than falling through to "qwen2.5:7b" (a 7B guess that may not even be
+    # installed) or `ids[0]` (whatever the first installed model happens to
+    # be — Phase 1 review finding: this is one of the paths a >=8B model
+    # can silently become the answering model), pick the first installed
+    # id that the answering-model ceiling actually accepts as primary. This
+    # can still resolve to ai-engineer:latest (7B) — that's fine as a last
+    # resort, but it must be visible rather than silent (see docstring).
+    from arail.registry.ceiling import resolve_answering_model, ModelCeilingViolation
+    for mid in ids:
+        try:
+            resolve_answering_model(mid, role="primary", backend="ollama_native")
+        except ModelCeilingViolation:
+            continue
+        _log.warning(
+            "_resilient_chat_default: %r not installed and no renamed alias "
+            "found; falling back to %r. It passes the primary-model ceiling "
+            "but is not a known rename of the requested model, so this may "
+            "be a different-sized model than intended.",
+            candidate, mid,
+        )
+        return mid
+    # Refuse (return the original candidate, which the ceiling will also
+    # refuse loudly downstream) rather than guess.
+    return candidate
 
 
 def _resolve_chat_deep_default() -> bool:
@@ -7995,6 +9015,13 @@ class _ChatBackendModelMismatch(Exception):
     is single-model per AEROLLM_MODEL/AIRLLM_MODEL and cannot hot-swap
     (A3) — this signals `_prepare_chat_model_load` to report an honest
     refusal instead of falsely claiming `ready` for the resident model.
+
+    Superseded for `aerollm` specifically by the in-process swap (Part 4,
+    sprints/2026-08-11-two-slot-chat-models) — `_do_load` now attempts
+    `_swap_optional_chat_backend` before ever raising this for that
+    provider. Still the live behavior for `airllm` (subprocess-isolated
+    lifecycle, out of scope for the swap) and as the degraded fallback
+    when an aerollm swap itself fails to quiesce.
     """
 
     def __init__(self, backend_name: str, resident_model: str, requested_model: str):
@@ -8005,6 +9032,140 @@ class _ChatBackendModelMismatch(Exception):
             f"{backend_name} already resident with {resident_model!r}; "
             f"requested {requested_model!r}"
         )
+
+
+class _ChatBackendSwapFailed(Exception):
+    """The in-process deep-model swap (Part 4) could not complete —
+    either the resident runtime wouldn't quiesce (a background generation
+    is genuinely mid-flight) or the new model failed to construct after
+    the old one was already torn down. Distinct from
+    _ChatBackendModelMismatch: this means a swap was ATTEMPTED and
+    failed, not merely refused outright.
+    """
+
+    def __init__(self, backend_name: str, reason: str):
+        self.backend_name = backend_name
+        self.reason = reason
+        super().__init__(f"{backend_name} swap failed: {reason}")
+
+
+def _teardown_resident_aerollm() -> Any:
+    """Quiesce and evict the resident AeroLLMBackend singleton, if any
+    (sprints/2026-08-11-two-slot-chat-models Part 4). Shared by the
+    in-process swap (below) and the real eject path
+    (`POST /api/chat/eject`), which used to be unable to free aerollm at
+    all (A3) — `_close()` now makes that possible.
+
+    Returns the torn-down instance, or None if nothing was resident.
+    Propagates any exception from `_close()` unchanged — callers decide
+    how to report a quiesce failure (a swap failure vs. an honest eject
+    refusal); this function never swallows one into a false success.
+    """
+    from arail.router.backends import AeroLLMBackend
+
+    with _OPTIONAL_CHAT_BACKEND_CACHE_LOCK:
+        old = _OPTIONAL_CHAT_BACKEND_CACHE.get("aerollm")
+    if old is None:
+        return None
+
+    old._close()  # let exceptions propagate — caller decides how to report
+
+    for key, inst in list(AeroLLMBackend._shared.items()):
+        if inst is old:
+            AeroLLMBackend._shared.pop(key, None)
+    with _OPTIONAL_CHAT_BACKEND_CACHE_LOCK:
+        if _OPTIONAL_CHAT_BACKEND_CACHE.get("aerollm") is old:
+            _OPTIONAL_CHAT_BACKEND_CACHE.pop("aerollm", None)
+    try:
+        from arail.agents import deep_policy
+        deep_policy.invalidate_deep_router()
+    except Exception:  # noqa: BLE001
+        pass
+    return old
+
+
+def _swap_optional_chat_backend(name: str, expected_model: str) -> Any:
+    """In-process teardown-and-swap of a resident optional backend to a
+    different model (sprints/2026-08-11-two-slot-chat-models Part 4).
+
+    Only supported for `aerollm` — AeroLLMBackend has a real `_close()`
+    that drops the Runtime on its own pinned worker thread. AirLLM is
+    subprocess-isolated with a different lifecycle shape; swapping it is
+    out of scope here, so callers must keep using
+    `_get_optional_chat_backend` (raises `_ChatBackendModelMismatch`,
+    i.e. "requires a portal restart") for that provider.
+
+    Must be called from a worker thread already inside the serialized
+    `chat-model-load` inference slot (i.e. from `_do_load`) — by the time
+    this runs, no other load or chat turn can be mid-flight on the old
+    runtime, because loads are single-flight (`_CHAT_MODEL_LOAD_INFLIGHT`)
+    and chat turns hold the same shared inference slot.
+
+    Sequence, and why the order matters:
+      1. Quiesce + evict the old instance (`_teardown_resident_aerollm`).
+         On failure, the OLD instance is left in the cache/singleton
+         untouched and this raises — the deep slot keeps answering with
+         what it had rather than landing in a torn-down, unusable state.
+      2. Persist the new model (env + registry) BEFORE constructing —
+         never the temporary-env-then-restore pattern: AeroLLMBackend
+         `__new__` recomputes its cache key from the CURRENT env on every
+         call, so restoring the old env after construction would make
+         the next bare `AeroLLMBackend()` (deep_policy, the preload loop)
+         recompute the OLD key and build a SECOND multi-GB copy — the
+         exact double-residency OOM the singleton exists to prevent.
+      3. Construct the new instance and cache it.
+
+    Close-before-construct bounds peak memory to max(old, new) rather
+    than old+new. Raises `_ChatBackendSwapFailed` on any failure — never
+    silently reports ready for the wrong (or no) model.
+    """
+    if name != "aerollm":
+        raise NotImplementedError(f"in-process swap not supported for {name!r}")
+
+    from arail.router.backends import AeroLLMBackend
+
+    try:
+        _teardown_resident_aerollm()
+    except Exception as exc:  # noqa: BLE001
+        raise _ChatBackendSwapFailed(
+            name,
+            f"couldn't quiesce the resident model — it may be mid-generation; "
+            f"retry once it finishes ({type(exc).__name__}: {exc})",
+        ) from exc
+
+    os.environ["AEROLLM_MODEL"] = expected_model
+    try:
+        from dataclasses import replace as _replace
+
+        from arail.model_specs import resolve_params_b as _resolve_params_b
+        from arail.registry import get_registry
+        from arail.registry.store import TIER1_ID
+
+        reg = get_registry()
+        reg._ensure_loaded()
+        existing_entry = reg.entries.get(TIER1_ID)
+        if existing_entry is not None:
+            params_b, _source = _resolve_params_b(expected_model)
+            reg.add_entry(_replace(
+                existing_entry,
+                model_id=expected_model,
+                display_name=_compact_model_label(expected_model) or expected_model,
+                params_b=params_b,
+                source="user",
+            ))
+    except Exception as e:  # noqa: BLE001
+        activity_log.emit("registry", f"Deep swap registry update skipped: {e}", "warn")
+
+    try:
+        new_backend = AeroLLMBackend()
+    except Exception as exc:  # noqa: BLE001
+        raise _ChatBackendSwapFailed(
+            name, f"the new model failed to load: {type(exc).__name__}: {exc}"
+        ) from exc
+    new_backend.backend_name = name
+    with _OPTIONAL_CHAT_BACKEND_CACHE_LOCK:
+        _OPTIONAL_CHAT_BACKEND_CACHE[name] = new_backend
+    return new_backend
 
 
 # C6.6: rolling median of observed load throughput, per runtime — the
@@ -8183,85 +9344,112 @@ async def _prepare_chat_model_load(
             released = True
             _CHAT_MODEL_LOAD_INFLIGHT.release()
 
-    # C6.7/F-REFIT: fit is a click-time precondition, not a stale render-
-    # time snapshot — re-read free memory now (the preload loop may have
-    # warmed something since the rail last rendered) and recompute the
-    # target's verdict. Still allowed to proceed even if "Requires
-    # streaming" (the operator's call) — but the message is honest about
-    # it instead of silently loading against a stale "Marginal" chip.
-    real_size_gb = _real_on_disk_gb(runtime, model)
-    fit_note = ""
-    if real_size_gb is not None:
-        fresh_snapshot = _local_memory_snapshot()
-        fresh_free_gb = float(fresh_snapshot.get("free_gb") or 0.0)
-        estimate_gb = _estimate_model_memory_gb(model, size_gb=real_size_gb)
-        fresh_verdict = _fit_verdict_label(estimate_gb, fresh_free_gb)
-        if fresh_verdict == "Requires streaming":
-            fit_note = f" (~{estimate_gb:.0f} GB needed, ~{fresh_free_gb:.0f} GB free — may swap or fail)"
+    # COR-1: everything from here through registering the done-callback
+    # must not leak the inflight lock on a synchronous raise (a bad
+    # on-disk read, a corrupt catalog entry, etc.) — without this guard a
+    # single exception here bricks every future chat model load until the
+    # portal restarts, because `_release_inflight_once` would never get
+    # wired to anything that could call it.
+    try:
+        # C6.7/F-REFIT: fit is a click-time precondition, not a stale render-
+        # time snapshot — re-read free memory now (the preload loop may have
+        # warmed something since the rail last rendered) and recompute the
+        # target's verdict. Still allowed to proceed even if "Requires
+        # streaming" (the operator's call) — but the message is honest about
+        # it instead of silently loading against a stale "Marginal" chip.
+        real_size_gb = _real_on_disk_gb(runtime, model)
+        fit_note = ""
+        if real_size_gb is not None:
+            fresh_snapshot = _local_memory_snapshot()
+            fresh_free_gb = float(fresh_snapshot.get("free_gb") or 0.0)
+            estimate_gb = _estimate_model_memory_gb(model, size_gb=real_size_gb)
+            fresh_verdict = _fit_verdict_label(estimate_gb, fresh_free_gb)
+            if fresh_verdict == "Requires streaming":
+                fit_note = f" (~{estimate_gb:.0f} GB needed, ~{fresh_free_gb:.0f} GB free — may swap or fail)"
 
-    # C6.6/F-FAKEETA, F-CORRUPT: real ETA from the fresh on-disk bytes, not
-    # a hardcoded constant. A size that disagrees with the catalog's
-    # declared value beyond tolerance (F-CORRUPT) degrades to no ETA
-    # rather than a plausible-looking but fabricated countdown.
-    eta_seconds: float | None = None
-    load_start = time.monotonic()
-    if real_size_gb is not None and not _model_looks_corrupt(model, real_size_gb):
-        eta_seconds = _estimate_load_eta_seconds(runtime, real_size_gb)
+        # C6.6/F-FAKEETA, F-CORRUPT: real ETA from the fresh on-disk bytes, not
+        # a hardcoded constant. A size that disagrees with the catalog's
+        # declared value beyond tolerance (F-CORRUPT) degrades to no ETA
+        # rather than a plausible-looking but fabricated countdown.
+        eta_seconds: float | None = None
+        load_start = time.monotonic()
+        if real_size_gb is not None and not _model_looks_corrupt(model, real_size_gb):
+            eta_seconds = _estimate_load_eta_seconds(runtime, real_size_gb)
 
-    state = _set_chat_model_load_state(
-        state="loading",
-        blocking=True,
-        message=f"Loading {label}…{fit_note}",
-        eta_seconds=eta_seconds,
-        # C6.6: a blocking asyncio.to_thread load exposes no incremental
-        # signal — progress is indeterminate (spinner + ETA countdown),
-        # never a fake filling bar.
-        progress=None,
-        model=model,
-        runtime=runtime,
-        provider=provider,
-    )
+        state = _set_chat_model_load_state(
+            state="loading",
+            blocking=True,
+            message=f"Loading {label}…{fit_note}",
+            eta_seconds=eta_seconds,
+            # C6.6: a blocking asyncio.to_thread load exposes no incremental
+            # signal — progress is indeterminate (spinner + ETA countdown),
+            # never a fake filling bar.
+            progress=None,
+            model=model,
+            runtime=runtime,
+            provider=provider,
+        )
 
-    def _do_load() -> None:
-        if provider in _OPTIONAL_CHAT_BACKEND_CONFIG:
-            # C6.3/F-SWITCH: identity-checked — a resident singleton on a
-            # different model raises _ChatBackendModelMismatch instead of
-            # silently reporting ready for the wrong model.
-            _get_optional_chat_backend(str(provider), expected_model=model)
-        elif runtime in ("ollama", "mlx-openai") and model:
-            # F-FAKEREADY: _get_runtime_backend only constructs the thin
-            # HTTP-client wrapper — it makes no network call, so the
-            # runtime (Ollama/MLX server) never actually reads the model's
-            # weights into memory. Without this warm-up call, this whole
-            # honest load-state machine would report "ready" in under
-            # 100ms for a model that is provably NOT resident (verified
-            # live: ollama ps showed nothing loaded after a "ready"
-            # response) — the exact class of lie this sprint exists to
-            # kill, just moved one level deeper. A real 1-token, capped,
-            # non-thinking call forces the runtime to actually load.
-            backend = _get_runtime_backend(str(runtime), str(model))
-            warm_kwargs = (
-                {"think": False}
-                if getattr(backend, "backend_name", "") == "ollama:native"
-                else {}
-            )
-            backend.complete("ok", 1, 0.0, 1.0, **warm_kwargs)
-        else:
-            _get_primary_router()
+        def _do_load() -> None:
+            if provider == "aerollm" and model:
+                # Part 4 (sprints/2026-08-11-two-slot-chat-models): a
+                # resident-with-different-model mismatch now attempts an
+                # in-process swap instead of an unconditional "requires a
+                # portal restart" refusal. _swap_optional_chat_backend
+                # raises _ChatBackendSwapFailed (a distinct, honest
+                # failure) if the swap itself can't complete.
+                try:
+                    _get_optional_chat_backend(str(provider), expected_model=model)
+                except _ChatBackendModelMismatch:
+                    _swap_optional_chat_backend("aerollm", str(model))
+            elif provider in _OPTIONAL_CHAT_BACKEND_CONFIG:
+                # C6.3/F-SWITCH: identity-checked — a resident singleton on a
+                # different model raises _ChatBackendModelMismatch instead of
+                # silently reporting ready for the wrong model. (airllm stays
+                # on this path — its subprocess-isolated lifecycle isn't
+                # swap-eligible; aerollm-with-no-model also lands here,
+                # matching the original no-identity-check "just get the
+                # default" behavior.)
+                _get_optional_chat_backend(str(provider), expected_model=model)
+            elif runtime in ("ollama", "mlx-openai") and model:
+                # F-FAKEREADY: _get_runtime_backend only constructs the thin
+                # HTTP-client wrapper — it makes no network call, so the
+                # runtime (Ollama/MLX server) never actually reads the model's
+                # weights into memory. Without this warm-up call, this whole
+                # honest load-state machine would report "ready" in under
+                # 100ms for a model that is provably NOT resident (verified
+                # live: ollama ps showed nothing loaded after a "ready"
+                # response) — the exact class of lie this sprint exists to
+                # kill, just moved one level deeper. A real 1-token, capped,
+                # non-thinking call forces the runtime to actually load.
+                backend = _get_runtime_backend(str(runtime), str(model))
+                warm_kwargs = (
+                    {"think": False}
+                    if getattr(backend, "backend_name", "") == "ollama:native"
+                    else {}
+                )
+                backend.complete("ok", 1, 0.0, 1.0, **warm_kwargs)
+            else:
+                _get_primary_router()
 
-    async def _run() -> None:
-        if _caller_holds_inference_slot:
-            # See the docstring above — the caller already holds the
-            # shared semaphore; acquiring it again here would deadlock.
-            await asyncio.to_thread(_do_load)
-        else:
-            # C6.2/F-LOADRACE: serialize against aerollm-preload/admin-model-load
-            # via the shared inference slot at default concurrency (A8).
-            async with scheduler.inference_slot("chat-model-load"):
+        async def _run() -> None:
+            if _caller_holds_inference_slot:
+                # See the docstring above — the caller already holds the
+                # shared semaphore; acquiring it again here would deadlock.
                 await asyncio.to_thread(_do_load)
+            else:
+                # C6.2/F-LOADRACE: serialize against aerollm-preload/admin-model-load
+                # via the shared inference slot at default concurrency (A8).
+                async with scheduler.inference_slot("chat-model-load"):
+                    await asyncio.to_thread(_do_load)
 
-    task = asyncio.ensure_future(_run())
-    task.add_done_callback(_release_inflight_once)
+        task = asyncio.ensure_future(_run())
+        task.add_done_callback(_release_inflight_once)
+    except BaseException:
+        # A synchronous raise anywhere above means the done-callback was
+        # never wired, so nothing else would ever release this permit.
+        _release_inflight_once()
+        raise
 
     try:
         # A4: the underlying to_thread work cannot be cancelled or killed
@@ -8287,7 +9475,10 @@ async def _prepare_chat_model_load(
         )
     except _ChatBackendModelMismatch as exc:
         # C6.3/F-SWITCH: honest refusal, never a false "ready" for the
-        # previously-loaded model.
+        # previously-loaded model. (Part 4: aerollm no longer reaches this
+        # branch on a mismatch — it attempts a swap instead; this stays
+        # live for airllm, whose subprocess-isolated lifecycle isn't
+        # swap-eligible.)
         state = _set_chat_model_load_state(
             state="error",
             blocking=False,
@@ -8295,6 +9486,22 @@ async def _prepare_chat_model_load(
                 f"{exc.backend_name} already resident with {exc.resident_model}; "
                 f"switching models requires a portal restart"
             ),
+            eta_seconds=None,
+            progress=None,
+            model=model,
+            runtime=runtime,
+            provider=provider,
+        )
+    except _ChatBackendSwapFailed as exc:
+        # Part 4: a swap was ATTEMPTED (unlike the mismatch case above,
+        # which never tried) and could not complete — the resident model
+        # may now be torn down. Honest about both the failure and, when
+        # it's a quiesce timeout, that the OLD model is still what's
+        # actually resident (construction never started in that case).
+        state = _set_chat_model_load_state(
+            state="error",
+            blocking=False,
+            message=f"Couldn't switch the deep model: {exc.reason}",
             eta_seconds=None,
             progress=None,
             model=model,
@@ -8892,7 +10099,7 @@ async def api_chat_models(provider: str = ""):
         })
     optional_backends.append({
         "id": "aerollm",
-        "label": "AeroLLM",
+        "label": "QueueLLM",
         "model": aero_model_name,
         "installed": _is_aerollm_installed(),
         # See deep_info's model_ready above — "installed" is package-level
@@ -8938,6 +10145,15 @@ async def api_chat_models(provider: str = ""):
     # not one per model — a short-timeout, cached-on-failure snapshot of
     # which Ollama-runtime rows are actually resident right now.
     ollama_warm_ids = _ollama_ps_resident_ids()
+    # C-CEILROW: family lookup for the "Built with Llama" attribution
+    # (NOTICE:36-46) — built once from the catalog gallery_view() already
+    # fetched above, keyed by the catalog's bare id (Ollama rows carry a
+    # tag, e.g. "llama-ai-eng:latest"; _build_local_model_entry strips it).
+    catalog_family_by_id = {
+        e["id"]: e.get("family")
+        for e in gallery.get("catalog", [])
+        if e.get("id")
+    }
     local_entries = [
         _build_local_model_entry(
             entry.get("id", ""),
@@ -8950,6 +10166,7 @@ async def api_chat_models(provider: str = ""):
             free_gb=float(memory_snapshot.get("free_gb") or 0.0),
             warm=(str(entry.get("runtime") or "") == "ollama"
                   and str(entry.get("id") or "") in ollama_warm_ids),
+            catalog_family=catalog_family_by_id,
         )
         for entry in gallery.get("installed", [])
         if entry.get("id")
@@ -8990,6 +10207,15 @@ async def api_chat_models(provider: str = ""):
                     source["id"] in _LOCAL_COMPUTE_SOURCES
                     or bool(_provider_token(source["id"]))
                 ),
+                # Honest-disable (sprints/2026-08-11-two-slot-chat-models):
+                # every non-local source reaches this list, but only
+                # my_machine/aerollm are actually wired to the send path —
+                # picking any other one refuses at send time today with
+                # cloud_backend_not_wired (see _prepare_chat_context). The
+                # Phase 5 picker disables unwired pills with this reason
+                # at click time instead of letting the user discover the
+                # refusal after sending.
+                "wired": source["id"] in _LOCAL_COMPUTE_SOURCES,
             }
             for source in _compact_compute_sources(active_provider)
         ],
@@ -9020,6 +10246,16 @@ async def api_chat_models(provider: str = ""):
         "status_path": "/api/chat/model-load",
     })
 
+    # The two-slot model (sprints/2026-08-11-two-slot-chat-models): resident
+    # (tier0-local) + deep (tier1-aerollm), read from the registry — the
+    # single source of truth the Phase 5 picker replaces five overlapping
+    # affordances with. Never let a registry hiccup break the whole
+    # endpoint; the rest of this payload is still useful without it.
+    try:
+        slots = _chat_slots_payload(ollama_warm_ids=ollama_warm_ids)
+    except Exception as e:  # noqa: BLE001
+        slots = {"resident": None, "deep": None, "error": f"{type(e).__name__}: {e}"}
+
     return {
         "backend": backend_name,
         "provider": active_provider,
@@ -9037,6 +10273,7 @@ async def api_chat_models(provider: str = ""):
         "onboarding": onboarding,
         "local_model_entries": local_entries,
         "fit": current_fit,
+        "slots": slots,
         # (§2.1 / BLOCK-1) top-level `hardware` deleted — the only reader was
         # the frontend, which now reads `compact.hardware` (nested above).
         # Do not re-add a second, unread copy of this field.
@@ -9254,7 +10491,7 @@ def _display_provider_name(provider: str) -> str:
     mapping = {
         "my_machine": "Local",
         "local": "Local",
-        "aerollm": "AeroLLM",
+        "aerollm": "QueueLLM",
         "claude": "Claude",
         "nvidia": "NVIDIA",
         "huggingface": "HF",
@@ -9493,6 +10730,7 @@ def _build_local_model_entry(
     detected_gb: float,
     free_gb: float,
     warm: bool = False,
+    catalog_family: "dict[str, str] | None" = None,
 ) -> dict[str, Any]:
     spec: dict[str, Any] | None = None
     try:
@@ -9513,6 +10751,31 @@ def _build_local_model_entry(
         _streamed = _ms(model_id)
     except Exception:  # noqa: BLE001
         _streamed = False
+
+    # C-CEILROW (sprints/2026-08-11-two-slot-chat-models): per-row ceiling
+    # eligibility for the Resident picker (Phase 5), computed the SAME way
+    # — same (model_id, role="primary", backend) shape, no model_path — as
+    # the live send-path enforcement in _prepare_chat_context. A row's
+    # displayed eligibility can therefore never promise something send-time
+    # will refuse. Never re-derive the threshold here; always go through
+    # the one chokepoint (arail.registry.ceiling).
+    from arail.model_specs import resolve_params_b as _resolve_params_b
+    from arail.registry.ceiling import ModelCeilingViolation, resolve_answering_model
+    try:
+        _prov = resolve_answering_model(model_id, role="primary", backend=runtime)
+        ceiling: dict[str, Any] = {"eligible": True, "role": "primary", "reason": None}
+        params_b, param_source = _prov.params_b, _prov.param_source
+    except ModelCeilingViolation as exc:
+        ceiling = {"eligible": False, "role": "primary", "reason": str(exc)}
+        params_b, param_source = _resolve_params_b(model_id)
+
+    # Llama 3.2 Community License §1.b.i requires "Built with Llama" to
+    # display wherever the model is named — including this picker row
+    # (NOTICE:36-46). Gemma carries no equivalent name-based requirement,
+    # so only the llama family gets an attribution string here.
+    _bare_id = model_id.split(":", 1)[0]
+    _family = (catalog_family or {}).get(_bare_id)
+    attribution = "Built with Llama" if _family == "llama" else None
 
     return {
         "id": model_id,
@@ -9551,6 +10814,14 @@ def _build_local_model_entry(
             f"Detected: {detected_gb:.0f}GB local memory · "
             f"Headroom: {_headroom_summary(estimate_gb, free_gb).replace('Fit: ', '')}"
         ) if detected_gb > 0 and estimate_gb > 0 else None,
+        "params_b": params_b,
+        "param_source": param_source,
+        "ceiling": ceiling,
+        # Resident-picker default filter (Phase 5, chat.html): rows at or
+        # under 3B render by default; "show larger" reveals the rest, up
+        # to whatever the ceiling itself allows (<8B — never further).
+        "slot_default_visible": params_b is not None and params_b <= 3.0,
+        "attribution": attribution,
         "overlay": {
             "compute_source": runtime,
             "gpu_used": "system default",
@@ -9563,6 +10834,141 @@ def _build_local_model_entry(
         "badge": badge,
         "spec": spec,
     }
+
+
+def _chat_slots_payload(*, ollama_warm_ids: "set[str]") -> dict[str, Any]:
+    """The two-slot model: `resident` (registry tier0-local — the small,
+    always-warm answering model) and `deep` (registry tier1-aerollm — the
+    AeroLLM-served secondary). Single source of truth is the registry; the
+    Chat tab's picker (Phase 5) reads this block instead of the five
+    overlapping affordances it replaces. See docs/chat-studio.spec.md §3
+    and sprints/2026-08-11-two-slot-chat-models/.
+
+    Both entries reuse the SAME ceiling chokepoint (resolve_answering_model)
+    the send path enforces in `_prepare_chat_context`, called with the
+    identical (model_id, role, backend) shape — no model_path — so a slot's
+    displayed eligibility can never promise something send-time will refuse.
+
+    AirLLM is intentionally NOT folded into `deep` — it stays the separate,
+    opt-in `optional_backends` entry it already is: a different backend
+    with a genuinely different (and honest) regime, real layer-streaming,
+    vs. aeroLLM's full residency once loaded (C4/F-OVERSELL above). `deep`
+    here is strictly the aeroLLM/tier1-aerollm mapping.
+
+    Several fields below are intentionally inert placeholders — `pinned`
+    reflects today's static, global ARAIL_OLLAMA_KEEP_ALIVE rather than a
+    real per-model pin, `keepwatch.enabled` is always False, and the deep
+    slot's `ring_depth`/`swap` describe mechanisms that don't exist yet.
+    Phase 3 (resident pin + keep-watch loop) and Phase 4 (ring-depth
+    wiring + in-process swap) replace these with the real thing; the
+    schema is stable now so the frontend (Phase 5) can be built against it
+    without another payload-shape churn.
+    """
+    from arail.registry import get_registry
+    from arail.registry.store import TIER0_ID, TIER1_ID
+    from arail.registry.ceiling import ModelCeilingViolation, resolve_answering_model
+    from arail.model_specs import resolve_params_b as _resolve_params_b
+    from arail import hardware as _hardware
+    from arail.portal.model_warmth import _tier1_resident
+
+    reg = get_registry()
+    reg._ensure_loaded()
+
+    resident: dict[str, Any] | None = None
+    t0 = reg.entries.get(TIER0_ID)
+    if t0 is not None:
+        # Deliberately NOT _resilient_chat_default() here: that helper's
+        # fallback chain can substitute an entirely different installed
+        # model (its own docstring's "ai-engineer:latest" back-compat
+        # entry resolves to 7.0B via the MODEL_METADATA_OVERRIDES table —
+        # the maximus DEEP persona, not a historical alias for the ~1B
+        # default) — exactly the silent identity substitution PR #167's
+        # ceiling exists to catch. The slots payload must show the
+        # registry's actual configured model, not a same-ish-name stand-in.
+        # The only normalization needed here is Ollama's implicit
+        # ":latest" tag, for the warm-set membership check below.
+        r_model_id = t0.model_id
+        try:
+            prov = resolve_answering_model(r_model_id, role="primary", backend=t0.backend)
+            r_ceiling: dict[str, Any] = {"eligible": True, "role": "primary", "reason": None}
+            r_params_b, r_param_source = prov.params_b, prov.param_source
+        except ModelCeilingViolation as exc:
+            r_ceiling = {"eligible": False, "role": "primary", "reason": str(exc)}
+            r_params_b, r_param_source = _resolve_params_b(r_model_id)
+        pin_env = os.getenv("ARAIL_OLLAMA_KEEP_ALIVE", "2h").strip()
+        warm_candidates = (
+            {r_model_id, f"{r_model_id}:latest"} if t0.backend == "ollama_native" else set()
+        )
+        resident = {
+            "entry_id": t0.id,
+            "model_id": r_model_id,
+            "display_name": t0.display_name,
+            "runtime": t0.backend,
+            "params_b": r_params_b,
+            "param_source": r_param_source,
+            "warm": bool(warm_candidates & ollama_warm_ids),
+            "health": t0.health.status,
+            "ceiling": r_ceiling,
+            "pinned": pin_env == "-1",
+            "keepwatch": {"enabled": False, "interval_sec": None},
+        }
+
+    deep: dict[str, Any] | None = None
+    t1 = reg.entries.get(TIER1_ID)
+    if t1 is not None:
+        try:
+            prov = resolve_answering_model(t1.model_id, role="secondary", backend="aerollm")
+            d_eligible, d_reason = True, None
+            d_params_b, d_param_source = prov.params_b, prov.param_source
+        except ModelCeilingViolation as exc:
+            d_eligible, d_reason = False, str(exc)
+            d_params_b, d_param_source = _resolve_params_b(t1.model_id)
+
+        # Part 4: peek at the resident instance's resolved ring_depth
+        # WITHOUT constructing anything (same R5 contract as
+        # model_warmth._tier1_resident) — None (never rendered as a
+        # number) whenever nothing is actually resident yet.
+        ring_depth = None
+        ring_depth_source = None
+        try:
+            from arail.router.backends import AeroLLMBackend
+            for inst in (getattr(AeroLLMBackend, "_shared", None) or {}).values():
+                if getattr(inst, "_runtime", None) is not None:
+                    ring_depth = getattr(inst, "_ring_depth", None)
+                    ring_depth_source = getattr(inst, "_ring_depth_source", None)
+                    break
+        except Exception:  # noqa: BLE001
+            pass
+
+        deep = {
+            "entry_id": t1.id,
+            "model_id": t1.model_id,
+            "display_name": t1.display_name,
+            "installed": _is_aerollm_installed(),
+            "model_ready": _aerollm_model_ready(t1.model_id),
+            "resident": _tier1_resident(),
+            "params_b": d_params_b,
+            "param_source": d_param_source,
+            "cap_b": _hardware.secondary_model_cap_b(),
+            "eligible": d_eligible,
+            "reason": d_reason,
+            "regime": "aerollm_resident",
+            "ring_depth": ring_depth,
+            "ring_depth_source": ring_depth_source,
+            "restart_note": (
+                "Changing the deep model swaps in-process (no portal "
+                "restart needed). Ring-depth profile changes only take "
+                "effect on the next swap or restart (construction-time only)."
+            ),
+            "available_in_tier": _current_tier() == "maximus",
+            "upgrade_command": "./arailctl upgrade maximus",
+            # Part 4: real in-process teardown-and-swap now exists for
+            # aerollm (_swap_optional_chat_backend) — AirLLM stays out of
+            # scope and isn't represented by this slot at all.
+            "swap": "in_process",
+        }
+
+    return {"resident": resident, "deep": deep}
 
 
 @app.get("/api/chat/system-prompt")
@@ -9996,8 +11402,12 @@ async def system_health():
     activity_file = Path.cwd() / "lab" / "data" / "activity.jsonl"
     workflow_file = Path.cwd() / "lab" / "data" / "agent_workflows.json"
     current_goal = goal_store.get_current()
-    current_model_path = os.getenv("ARAIL_MODELS_DIR", str(Path.cwd() / "models"))
-    from arail.config import DATA_DIR, PKB_ROOT
+    from arail.config import DATA_DIR, MODELS_DIR, PKB_ROOT
+    # Same env var + default (lab/models, NOT cwd/models) arail.config and
+    # every model-loading backend already use — this diagnostic used to
+    # disagree with reality and could report "Models Directory: missing"
+    # right next to a lab that had models loading fine.
+    current_model_path = str(MODELS_DIR)
 
     def add_check(
         check_id: str,
@@ -10600,8 +12010,8 @@ def _toggle_audit_path() -> Path:
 
 
 def _toggle_bind_is_loopback() -> bool:
-    bind = os.getenv("BIND_ADDR", "127.0.0.1").strip().lower()
-    return bind in {"127.0.0.1", "::1", "localhost"}
+    from arail import config
+    return config.bind_is_loopback()
 
 
 def _check_local_mutation_request(request: Request):
@@ -10963,6 +12373,24 @@ async def api_system_reveal(request: Request):
     return {"opened": True, "path": abspath, "slot": slot}
 
 
+def _costs_record_fields(last: dict[str, Any]) -> dict[str, Any]:
+    """Honest-cost fields for a history record; a legacy record with a
+    cloud figure but no source is re-gated by its backend."""
+    from arail.costs import cost_source, record_to_fields
+
+    fields = record_to_fields(last)
+    if not fields.get("cloud_cost_source"):
+        src = cost_source(last.get("backend"))
+        fields["cloud_cost_source"] = src
+        if src != "billed_estimate":
+            fields["cloud_cost_usd"] = None
+    if fields.get("cloud_equivalent_usd") is not None:
+        fields["cloud_equivalent_source"] = "simulated"
+    if fields.get("energy_cost_usd") is not None:
+        fields["energy_source"] = fields.get("energy_source") or "estimated"
+    return fields
+
+
 @app.get("/api/system/costs")
 async def system_costs():
     """Return cost tracking summary — cloud-equivalent spend and energy costs."""
@@ -10977,8 +12405,11 @@ async def system_costs():
         "last_record": {
             "backend": last.get("backend"),
             "model_class": last.get("model_class"),
-            "cloud_cost_usd": last.get("cloud_cost_usd"),
-            "energy_cost_usd": last.get("energy_cost_usd"),
+            **{
+                k: v
+                for k, v in _costs_record_fields(last).items()
+                if k not in ("backend", "model")
+            },
             "tokens_in": last.get("tokens_in"),
             "tokens_out": last.get("tokens_out"),
         } if last else None,
@@ -11041,13 +12472,47 @@ async def knowledge_redirect(request: Request):
     return RedirectResponse(url="/dac" + q, status_code=307)
 
 
-@app.get("/build", response_class=HTMLResponse)
-async def build_page(request: Request):
-    """Nucleus MODEL BUILDING tab — thin shell; hydrates from /api/build/*."""
-    if (gate := _require_surface("build")) is not None:
+@app.get("/build")
+async def build_redirect(request: Request):
+    # /build is retired (2026-09-23, sprints/2026-09-23-nucleus-sprint-1) --
+    # replaced by Model Forge. 308 preserves the request method/body
+    # semantics (there are none here, but it's the correct permanent-
+    # redirect status for a route that no longer exists at all) (T-FORGE-4).
+    q = ("?" + str(request.query_params)) if request.query_params else ""
+    return RedirectResponse(url="/forge" + q, status_code=308)
+
+
+@app.get("/forge", response_class=HTMLResponse)
+async def forge_list_page(request: Request):
+    """Model Forge — read-only DNA-card viewer (ARCHITECTURE.md §4.13)."""
+    if (gate := _require_surface("forge")) is not None:
         return gate
-    return templates.TemplateResponse(request, "build.html", {
-        "active": "build",
+    from arail.portal import forge_api
+
+    return templates.TemplateResponse(request, "forge.html", {
+        "active": "forge", "mode": "list",
+        "cards": forge_api.list_cards(), "in_progress": forge_api.list_in_progress_runs(),
+        **_identity_ctx(),
+    })
+
+
+@app.get("/forge/{shard}/{version}", response_class=HTMLResponse)
+async def forge_detail_page(request: Request, shard: str, version: str):
+    if (gate := _require_surface("forge")) is not None:
+        return gate
+    from arail.portal import forge_api
+
+    card_dir = forge_api.safe_card_dir(shard, version)
+    if card_dir is None:
+        return HTMLResponse(status_code=404, content="not found")
+    card = forge_api.load_card_safely(card_dir / "dna-card.yaml")
+    if card is None:
+        return HTMLResponse(status_code=404, content="not found")
+
+    return templates.TemplateResponse(request, "forge.html", {
+        "active": "forge", "mode": "detail", "shard": shard, "version": version,
+        "card": card, "verify_badge": forge_api.verify_badge(card),
+        "report_html": forge_api.render_report_html(card_dir / "build-report.md"),
         **_identity_ctx(),
     })
 
@@ -11152,7 +12617,70 @@ async def api_pkb_browse():
 async def api_pkb_search(q: str = ""):
     if not q.strip():
         return []
-    return pkb_search(q.strip())
+    results = pkb_search(q.strip())
+    # C1 (arail2-tier1-integration, REVIEW2.md required action 4): surface
+    # retrieval_status() in the search payload so an embedding-subsystem
+    # degradation is visible to whatever's calling this endpoint, not only
+    # to ./arailctl doctor. Response HEADERS rather than a wrapped JSON
+    # body, deliberately: dashboard.html/agents.html/docs_hub.html all do
+    # `fetch(...).then(r => r.json()).then(hits => hits.forEach(...))` —
+    # changing the top-level shape to an envelope would break all three
+    # without a matching frontend change, which is out of scope for this
+    # fix. The `/knowledge` banner and Buddy's context-header line (the
+    # other two C1 surfaces) are NOT wired in this pass — see
+    # sprints/2026-08-08-arail2-tier1-integration/SPRINT.md's explicit
+    # deferral and the matching sprints/BACKLOG.md entry.
+    from arail.pkb import retrieval_status
+    ok, reason = retrieval_status()
+    if ok:
+        return results
+    return JSONResponse(
+        content=results,
+        headers={
+            "X-Retrieval-Status": "degraded",
+            "X-Retrieval-Reason": _header_safe(reason)[:200],
+        },
+    )
+
+
+def _header_safe(value: str) -> str:
+    """Make an arbitrary string safe as an HTTP response header value
+    (QA-4/QA-5/QA-7, TEST_REPORT.md, 2026-08-08-arail2-tier1-integration).
+
+    Two independent hazards share this one call site because ``reason``
+    in ``api_pkb_search`` is never fully trusted: most of it comes from
+    ``pkb_index``'s own degraded-state prose, which is ASCII except for an
+    em dash (U+2014) every message contains — Starlette encodes response
+    headers as latin-1, so that alone 500s the endpoint on four of five
+    real Worlds plus the root lab, and on any clean machine that hasn't
+    pulled the embedding model yet (QA-5). But `EmbeddingError` messages
+    also splice in up to 400 bytes of a provider's raw HTTP error body
+    (``embed._post``), and in ``LAB_MODE=hybrid`` that provider can be
+    off-box — so the same string is also untrusted input on a
+    response-header-injection surface (QA-4: CR/LF/NUL reaching a header).
+
+    QA-7: an earlier version of this function denylisted CR/LF/NUL and
+    ASCII-folded everything above 0x7f. Every *other* C0 control character
+    (VT, FF, ESC, BEL, ...) passed through unchanged — not inert: `h11`
+    rejects VT/FF outright, and uvicorn's httptools transport rejects 29
+    of the 31, both the identical 500 QA-5 was, reached by a different
+    byte from the same provider-controlled call site. A denylist only
+    ever closes the members it names; an **allowlist** (printable ASCII,
+    plus tab and the space a folded line break leaves behind) closes the
+    whole class in one step.
+
+    Order: replace line breaks with a space first (a multi-line message —
+    the `provider` degrade text is the one real reason that's multi-line —
+    must still read as separated words, not run together at the join);
+    fold the em dash to `--` next (so the common case reads as prose,
+    e.g. "spec declares -- run `...`", rather than losing the punctuation
+    to the allowlist filter); then allowlist-filter everything that
+    remains, which is what actually guarantees no control character or
+    non-latin-1 byte can ever reach Starlette's latin-1 header encoder.
+    """
+    value = value.replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
+    value = value.replace("—", "--")
+    return "".join(ch for ch in value if ch == "\t" or " " <= ch <= "~")
 
 
 @app.post("/api/pkb/ingest")
@@ -11222,12 +12750,34 @@ async def api_pkb_review():
     """The review queue — raw candidates awaiting a human decision, plus the
     Compiled-KB state. This is the gate DaC's lifecycle calls for: agents
     propose (by creating raw content); the human approves what agents may
-    experiment/develop against."""
+    experiment/develop against.
+
+    **Scoped to the mounted World.** The PKB root is shared by every World
+    mounted into the same lab, so an unscoped queue showed one World's
+    glossary while another was mounted — a freshly-forged World looked like
+    it had inherited someone else's knowledge. With a World mounted the queue
+    is that World's candidates only; unmounted (the root lab) it is the
+    honest cross-World view, and every row carries the `world` it belongs to
+    so the UI can label it.
+    """
     from arail import compiled_kb as ckb
+    from arail.world_mount import current_mount
+
+    scope = None
+    try:
+        record = current_mount()
+        if record is not None and record.world:
+            scope = f"world-{record.world}"
+    except Exception as e:  # noqa: BLE001 — an unreadable mount must not 500 the queue
+        _log.warning("pkb review: mount lookup failed, showing all worlds: %s", e)
+
     return {
-        "pending": ckb.list_pending(),
+        "pending": ckb.list_pending(world=scope),
         "approved": ckb.list_approved(),
         "gate_enabled": ckb.gate_enabled(),
+        # Which World the queue is showing — None means the cross-World root
+        # lab view. The page renders this so the scope is never a guess.
+        "scope": scope,
     }
 
 
@@ -12545,7 +14095,7 @@ async def api_tuning_autoresearch_schedule_set(request: Request):
 # the tuning.html "AirLLM vs AeroLLM" cards consume.
 #
 # Result location: $AEROLLM_PERF_RESULTS_DIR if set, otherwise the
-# sibling aerollm checkout (../qukaizen-aerollm/scripts/perf/results/). Missing
+# sibling aerollm checkout (../qukaizen-queuellm/scripts/perf/results/). Missing
 # dir or no measurements → rows=[] with a `reason` so the page keeps
 # showing the projected numbers.
 #
@@ -12562,7 +14112,7 @@ def _perf_results_dir() -> Path:
     # arail/src/arail/portal/app.py → arail/ is parents[3]; aerollm
     # lives as a sibling checkout.
     arail_root = Path(__file__).resolve().parents[3]
-    return arail_root / "qukaizen-aerollm" / "scripts" / "perf" / "results"
+    return arail_root / "qukaizen-queuellm" / "scripts" / "perf" / "results"
 
 
 def _detect_perf_hw_id() -> str:

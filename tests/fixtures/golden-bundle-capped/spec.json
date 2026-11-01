@@ -1,0 +1,22 @@
+{
+  "slug": "golden-capped",
+  "display_name": "Golden Capped Fixture",
+  "categories": [
+    {
+      "id": "alpha",
+      "label": "Alpha"
+    },
+    {
+      "id": "beta",
+      "label": "Beta"
+    }
+  ],
+  "knowledge_sources": [
+    {
+      "kind": "model",
+      "ref": "model:test",
+      "trust": "model-asserted",
+      "holder": "test"
+    }
+  ]
+}

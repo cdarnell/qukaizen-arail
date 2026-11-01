@@ -16,6 +16,27 @@
     <span class="rx-tagline-note">(The git-branch-per-experiment ledger is the
     separate <a href="/tuning">Tuning</a> loop.)</span>
   </span>
+  <button type="button" class="rx-how-trigger" id="rx-how-trigger"
+          title="What Autoresearch actually does, in plain terms">
+    ❓ How does this work?
+  </button>
+</div>
+
+<!-- ═══ Model truth strip — what research actually runs on ═══
+     Hydrated from /api/research/status `models`; hidden until the first
+     fetch lands. The toggle flips deep (aeroLLM) passes via
+     POST /api/research/deep; tier-locked labs get a lock, not a dead
+     switch. -->
+<div class="rx-truth" id="rx-truth" hidden>
+  <span class="rx-truth-text" id="rx-truth-text">—</span>
+  <span class="rx-truth-controls">
+    <label class="rx-truth-toggle" id="rx-truth-toggle"
+           title="Use the QueueLLM deep model for planning and interpretation passes when the lab is idle">
+      <input type="checkbox" id="rx-truth-toggle-input">
+      <span>deep passes</span>
+    </label>
+    <span class="rx-truth-lock" id="rx-truth-lock" hidden></span>
+  </span>
 </div>
 
 <!-- ═══ Cockpit strip (top) ═══ -->
@@ -270,12 +291,17 @@
   </aside>
 </div>
 
-<!-- ═══ Experiment branches panel ═══ -->
+<!-- ═══ Experiment branches panel — the SEPARATE /tuning loop's ledger.
+     Maximus-only (the tuning surface is tier-gated); experiment-branches.js
+     no-ops when this section is absent. ═══ -->
+{% if 'tuning' in tier_surfaces %}
 <section class="rx-branches" id="rx-branches">
   <div class="rx-branches-head">
     <div>
-      <div class="rx-branches-kicker">Experiment Branches</div>
+      <div class="rx-branches-kicker">Tuning loop — experiment branches</div>
       <div class="rx-branches-title">autoresearch/* git history</div>
+      <div class="rx-branches-sub">Branch-per-run ledger written by the separate
+        <a href="/tuning">QueueLLM tuning</a> loop — not by the experiments above.</div>
     </div>
     <div class="rx-branches-filters" id="rx-branches-filters">
       <label class="compute-opt">
@@ -288,7 +314,7 @@
       </label>
       <label class="compute-opt">
         <input type="radio" name="rx-backend" value="aerollm">
-        <span>AeroLLM</span>
+        <span>QueueLLM</span>
       </label>
     </div>
   </div>
@@ -296,19 +322,30 @@
     <div class="rx-branches-empty">Loading experiment branches…</div>
   </div>
 </section>
+{% endif %}
 
-<!-- ═══ Empty state (no goal) ═══ -->
+<!-- ═══ Empty state (no goal) — world-aligned research options ═══
+     Options come from GET /api/research/options: world-derived cards when
+     a World is mounted, generic measurable seeds otherwise. Cards prefill
+     the composer / open the swarm review — nothing auto-starts. If the
+     fetch fails, the plain Set Research Goal button still works. -->
 <section class="rx-empty-state" id="rx-empty-state" hidden>
   <div class="rx-empty-card">
     <h1>A rail for experiments.</h1>
     <p class="rx-empty-motto">
       If you can measure it, we can improve it.
-      <a class="rx-learn-link" href="/docs/agents-explained.md#the-research-loop"
-         target="_blank" rel="noopener">📖 How the loop works</a>
+      <a class="rx-learn-link" href="#" id="rx-empty-how-link">📖 How the loop works</a>
     </p>
-    <p>Set a goal and the lab drafts a swarm. Every winning variant becomes a branch —
-       <code>autoresearch/&lt;id&gt;</code> — committed to your repo so you can review
-       the diff, cherry-pick what works, and ignore what didn't. The ledger writes itself.</p>
+    <p>Set a goal and the Researcher plans testable hypotheses, matches each
+       to a measurable experiment archetype, runs them on this machine, and
+       writes an honest report — every number is measured, could-not-run, or
+       unmeasured. Never invented.</p>
+    <div class="rx-options" id="rx-options" hidden>
+      <div class="rx-options-world" id="rx-options-world"></div>
+      <button type="button" class="rx-option-card rx-option-primary"
+              id="rx-options-primary" hidden></button>
+      <div class="rx-options-grid" id="rx-options-grid"></div>
+    </div>
     <div class="rx-empty-controls rx-center">
       <button type="button" class="rx-btn primary" id="rx-empty-open">Set Research Goal</button>
     </div>
@@ -339,8 +376,9 @@
     <button class="rx-modal-close" id="rx-modal-x" type="button" aria-label="Close">&times;</button>
     <h2>Set Research Goal</h2>
     <p>Describe what you want to investigate. If a goal is already active, it's archived only after you review and approve the new swarm plan.</p>
+    <div class="rx-modal-suggestions" id="rx-modal-suggestions" hidden></div>
     <textarea id="rx-modal-textarea"
-              placeholder="e.g. Help me plan my trip to Hokkaido Japan for 3 adults and 2 children in late September"></textarea>
+              placeholder="e.g. Measure how quantization affects my resident model's speed and answer consistency"></textarea>
     <label class="rx-scale-wrap" for="rx-modal-scale">
       <span>Swarm</span>
       <select id="rx-modal-scale">
@@ -353,6 +391,78 @@
       <button class="rx-btn" id="rx-modal-cancel">Cancel</button>
       <button class="rx-btn primary" id="rx-modal-submit">Review Swarm</button>
     </div>
+  </div>
+</div>
+
+<!-- ═══ "How does this work?" explainer modal ═══
+     Plain-language walkthrough of the REAL Autoresearch loop
+     (mini_experiments.py: Plan → Design → Run → Report). Deliberately
+     does not use git-commit/keep/revert language — that's the separate
+     /tuning loop. The point here is "learning, not just doing": every
+     step exists to make sure what gets written down is actually true. -->
+<div class="rx-modal" id="rx-how-modal" hidden>
+  <div class="rx-modal-card rx-how-card">
+    <button class="rx-modal-close" id="rx-how-close" type="button" aria-label="Close">&times;</button>
+    <h2>How Autoresearch actually works</h2>
+    <p class="rx-how-lede">
+      It's not a task-runner ticking off a checklist. It's a small learning
+      loop — try an idea, actually measure it, write down the honest
+      answer, then do it again with what it just learned.
+    </p>
+
+    <ol class="rx-how-steps">
+      <li class="rx-how-step">
+        <span class="rx-how-step-icon">🧠</span>
+        <div class="rx-how-step-body">
+          <span class="rx-how-step-title">1. Plan</span>
+          <p>Your goal becomes a handful of testable ideas — not just one
+             guess. You can see which ideas it picked and which it set
+             aside, and why.</p>
+        </div>
+      </li>
+      <li class="rx-how-step">
+        <span class="rx-how-step-icon">🎯</span>
+        <div class="rx-how-step-body">
+          <span class="rx-how-step-title">2. Design</span>
+          <p>Each idea gets matched to something that can actually be
+             measured on your machine — model speed, prompt quality,
+             how well your Knowledge Base answers a question. No idea
+             runs without a real way to check it.</p>
+        </div>
+      </li>
+      <li class="rx-how-step">
+        <span class="rx-how-step-icon">▶</span>
+        <div class="rx-how-step-body">
+          <span class="rx-how-step-title">3. Run</span>
+          <p>The experiment runs for real, locally. If it can't run yet
+             — no model loaded, nothing to measure against — it says so
+             plainly instead of inventing a number.</p>
+        </div>
+      </li>
+      <li class="rx-how-step">
+        <span class="rx-how-step-icon">📋</span>
+        <div class="rx-how-step-body">
+          <span class="rx-how-step-title">4. Report</span>
+          <p>The result gets written to the Knowledge Base labeled
+             <em>measured</em>, <em>not run</em>, or <em>unmeasured</em> —
+             so you always know what's a real number versus what's just
+             the model's commentary on it.</p>
+        </div>
+      </li>
+    </ol>
+
+    <div class="rx-how-callout">
+      <strong>The point isn't more experiments — it's not being wrong.</strong>
+      A result only counts if it was actually measured. Nothing here
+      fabricates a win to look productive; a plateau or a "couldn't test
+      that" is reported just as plainly as a success.
+    </div>
+
+    <p class="rx-how-foot">
+      <a href="/docs/agents-explained.md#the-research-loop" target="_blank" rel="noopener">
+        Read the full technical write-up →
+      </a>
+    </p>
   </div>
 </div>
 
@@ -377,6 +487,8 @@ const RESEARCH = {
   activity: [],         // ring buffer (newest first)
   expanded: new Set(),  // expanded experiment ids
   expRefreshTimer: null,
+  options: null,        // /api/research/options payload (world-aligned seeds)
+  models: null,         // /api/research/status `models` block (truth strip)
 };
 
 const STEP_DEFS = [
@@ -620,6 +732,212 @@ async function discardSwarmPreview() {
   if (typeof refreshAll === 'function') refreshAll();
 }
 
+// ── World-aligned research options ────────────────────────────
+// GET /api/research/options → cards in the empty state + chips in the
+// goal modal. Cards prefill the composer / draft the swarm preview;
+// approval is always the user's click. On fetch failure everything
+// stays hidden and the plain Set Research Goal button still works.
+
+const OPTION_KIND_LABEL = {
+  default: 'Default direction',
+  deepen: 'Deepen',
+  verify: 'Verify',
+  watch: 'Sources',
+  generic: 'Measurable seed',
+};
+
+async function fetchOptions() {
+  try {
+    const r = await fetch('/api/research/options');
+    if (!r.ok) return;
+    RESEARCH.options = await r.json();
+  } catch (e) { return; }
+  renderOptions();
+  renderModalSuggestions();
+}
+
+function prefillGoalModal(text) {
+  openModal();  // clears the textarea, then we prefill — same order as ?goal=
+  document.getElementById('rx-modal-textarea').value = text;
+}
+
+function renderOptions() {
+  const wrap = document.getElementById('rx-options');
+  const worldEl = document.getElementById('rx-options-world');
+  const primaryBtn = document.getElementById('rx-options-primary');
+  const grid = document.getElementById('rx-options-grid');
+  if (!wrap || !worldEl || !primaryBtn || !grid) return;
+  const data = RESEARCH.options;
+  const opts = data && Array.isArray(data.options) ? data.options : [];
+  if (!opts.length) { wrap.hidden = true; return; }
+
+  if (data.world) {
+    worldEl.innerHTML =
+      '<span class="rx-options-kicker">Research this World</span>' +
+      '<span class="rx-options-name">' + esc(data.display_name || data.world) + '</span>' +
+      (data.provenance_tier
+        ? '<span class="rx-chip rx-options-tier" title="Glossary provenance">' +
+          esc(data.provenance_tier) +
+          (data.term_count ? ' · ' + esc(String(data.term_count)) + ' terms' : '') +
+          '</span>'
+        : '') +
+      (data.tagline ? '<span class="rx-options-tagline">' + esc(data.tagline) + '</span>' : '');
+  } else {
+    worldEl.innerHTML =
+      '<span class="rx-options-kicker">Think to research</span>' +
+      '<span class="rx-options-tagline">Measurable starting points for this lab — ' +
+      'or <a href="/welcome?step=world">mount a World</a> for domain-aligned directions.</span>';
+  }
+
+  // "If you can measure it, we can improve it": every card says what the
+  // engine really measures, and flags the data points needed first.
+  const measureSetup = (o) =>
+    (o.measure ? '<span class="rx-option-measure">📏 ' + esc(o.measure) + '</span>' : '') +
+    (o.setup && o.setup.hint
+      ? '<span class="rx-option-setup">⚙ ' + esc(o.setup.hint) + '</span>' : '');
+
+  const primary = opts[0];
+  primaryBtn.innerHTML =
+    '<span class="rx-option-kind">' + esc(OPTION_KIND_LABEL[primary.kind] || primary.kind) + '</span>' +
+    '<span class="rx-option-title">' + esc(primary.title || '') + '</span>' +
+    (primary.goal_text ? '<span class="rx-option-goal">' + esc(primary.goal_text) + '</span>' : '') +
+    '<span class="rx-option-detail">' + esc(primary.detail || '') + '</span>' +
+    measureSetup(primary) +
+    '<span class="rx-option-cta">Review swarm plan →</span>';
+  primaryBtn.hidden = false;
+  primaryBtn.onclick = () => {
+    if (!primary.goal_text) return;
+    setNewGoal(primary.goal_text, { button: primaryBtn, statusSlot: true });
+  };
+
+  const rest = opts.slice(1);
+  grid.innerHTML = rest.map((o, i) => {
+    const inner =
+      '<span class="rx-option-kind">' + esc(OPTION_KIND_LABEL[o.kind] || o.kind) + '</span>' +
+      '<span class="rx-option-title">' + esc(o.title || '') + '</span>' +
+      '<span class="rx-option-detail">' + esc(o.detail || '') + '</span>' +
+      measureSetup(o);
+    if (!o.goal_text && o.href) {
+      return '<a class="rx-option-card" href="' + esc(o.href) + '">' + inner +
+             '<span class="rx-option-cta">Open Knowledge →</span></a>';
+    }
+    return '<button type="button" class="rx-option-card" data-opt="' + i + '">' + inner +
+           '<span class="rx-option-cta">Prefill goal →</span></button>';
+  }).join('');
+  grid.querySelectorAll('button[data-opt]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const o = rest[Number(btn.dataset.opt)];
+      if (o && o.goal_text) prefillGoalModal(o.goal_text);
+    });
+  });
+  grid.hidden = !rest.length;
+  wrap.hidden = false;
+
+  // With options on screen the plain button becomes the free-text path,
+  // and the composer's example follows the primary direction.
+  const emptyOpen = document.getElementById('rx-empty-open');
+  if (emptyOpen) emptyOpen.textContent = 'Write your own goal';
+  if (primary.goal_text) {
+    const ta = document.getElementById('rx-modal-textarea');
+    if (ta) ta.placeholder = 'e.g. ' + primary.goal_text;
+  }
+}
+
+function renderModalSuggestions() {
+  const row = document.getElementById('rx-modal-suggestions');
+  if (!row) return;
+  const data = RESEARCH.options;
+  const seeds = (data && Array.isArray(data.options) ? data.options : [])
+    .filter(o => o.goal_text);
+  if (!seeds.length) { row.hidden = true; return; }
+  row.innerHTML =
+    '<span class="rx-suggestions-label">' +
+    (data.world ? esc(data.display_name || data.world) + ' directions' : 'Starting points') +
+    '</span>' +
+    seeds.map((o, i) =>
+      '<button type="button" class="rx-suggestion-chip" data-seed="' + i +
+      '" title="' + esc(o.goal_text) + '">' + esc(o.title || o.id) + '</button>'
+    ).join('');
+  row.querySelectorAll('button[data-seed]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const o = seeds[Number(btn.dataset.seed)];
+      if (o) document.getElementById('rx-modal-textarea').value = o.goal_text;
+    });
+  });
+  row.hidden = false;
+}
+
+// ── Model truth strip ─────────────────────────────────────────
+// "Research runs on <fast> · Deep passes: <deep> — <state>". Rendered
+// from /api/research/status `models`; never guesses — hides when the
+// block is absent. The lock replaces the toggle when the tier or the
+// aeroLLM install rules deep out entirely.
+
+function renderTruthStrip() {
+  const strip = document.getElementById('rx-truth');
+  const text = document.getElementById('rx-truth-text');
+  const toggleWrap = document.getElementById('rx-truth-toggle');
+  const input = document.getElementById('rx-truth-toggle-input');
+  const lock = document.getElementById('rx-truth-lock');
+  if (!strip || !text || !toggleWrap || !input || !lock) return;
+  const m = RESEARCH.models;
+  if (!m) { strip.hidden = true; return; }
+  const fast = m.fast;
+  const deep = m.deep || {};
+
+  const fastHtml = fast
+    ? '<strong>' + esc(fast.display_name || '') + '</strong>' +
+      ' <span class="rx-truth-dim">via ' + esc(fast.backend || fast.provider_type || 'local') + '</span>'
+    : '<span class="rx-truth-dim">no model bound</span>';
+  const state = deep.reason_code === 'ok'
+    ? '<span class="rx-truth-ok">ready — runs planning &amp; interpretation</span>'
+    : '<span class="rx-truth-dim">' + esc(deep.reason || 'off') + '</span>';
+  text.innerHTML =
+    'Research runs on ' + fastHtml +
+    ' <span class="rx-truth-sep">·</span> Deep passes: <strong>' +
+    esc(deep.display_name || 'QueueLLM') + '</strong>' +
+    ' <span class="rx-truth-dim">@ QueueLLM</span> — ' + state;
+
+  const locked = deep.reason_code === 'tier_locked' || deep.reason_code === 'wheel_missing';
+  input.checked = !!deep.enabled_by_user;
+  input.disabled = locked;
+  toggleWrap.hidden = locked;
+  lock.hidden = !locked;
+  if (locked) {
+    lock.textContent = deep.reason_code === 'tier_locked'
+      ? '🔒 maximus tier' : '🔒 QueueLLM not installed';
+    lock.title = deep.reason || '';
+  }
+  strip.hidden = false;
+}
+
+function wireTruthToggle() {
+  const input = document.getElementById('rx-truth-toggle-input');
+  if (!input) return;
+  input.addEventListener('change', async () => {
+    const want = input.checked;
+    input.disabled = true;
+    try {
+      const r = await fetch('/api/research/deep', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: want }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok && d && d.models) {
+        RESEARCH.models = d.models;
+      } else {
+        input.checked = !want;
+        if (d && d.message) alert(d.message);
+      }
+    } catch (e) {
+      input.checked = !want;
+    } finally {
+      renderTruthStrip();  // re-derives disabled/lock from the fresh state
+    }
+  });
+}
+
 // ── Cockpit rendering ─────────────────────────────────────────
 function renderCockpit() {
   const goal = RESEARCH.goal;
@@ -840,11 +1158,28 @@ function renderExperiments() {
 // experiments" view above the 3-pane cockpit. Lets a returning user
 // absorb the lab's investigation at a glance. The cockpit stays
 // available below; the brief is the conceptual layer.
+// GET /api/experiments returns the whole corpus — every experiment ever
+// created, across every goal and every World this lab has run. It is not
+// filtered, and it is sorted newest-first. Left unfiltered, this section's
+// own header ("Experiments testing your goal") is a claim the data doesn't
+// back: a goal that hasn't started running yet can render five *other*
+// goals' experiments, marked ✓/✗ from THEIR runs, with nothing to say so.
+//
+// The fix uses data that already exists: goal_store.link_experiment() has
+// always stamped each experiment it designs onto goal.experiments (an ID
+// list) — it's just never been read here. No backend change needed; this
+// intersects the two lists that were already both correct.
+function goalScopedExperiments(goal, exps) {
+  const linked = new Set((goal && goal.experiments) || []);
+  if (!linked.size) return [];
+  return exps.filter(e => linked.has(e.id));
+}
+
 function renderSummary() {
   const summary = document.getElementById('rx-summary');
   if (!summary) return;
   const goal = RESEARCH.goal;
-  const exps = RESEARCH.experiments || [];
+  const exps = goalScopedExperiments(goal, RESEARCH.experiments || []);
   const hasGoal = !!goal;
   summary.hidden = !hasGoal;
   if (!hasGoal) return;
@@ -1007,6 +1342,12 @@ function renderExperimentCard(exp) {
   else if (prov === 'cannot_run') provBadge = '<span class="rx-exp-badge cannot-run" title="Could not run — see details">could not run</span>';
   else if (prov === 'unmeasured') provBadge = '<span class="rx-exp-badge unmeasured" title="Not measurable on-device">unmeasured</span>';
 
+  // Model badge — the exact model/backend this experiment's numbers were
+  // measured with (stamped by the engine into results; never guessed here).
+  const modelBadge = (exp.results && exp.results.model)
+    ? `<span class="rx-chip rx-exp-model" title="Model that ran this experiment">${esc(exp.results.model)}${exp.results.backend ? ' · ' + esc(exp.results.backend) : ''}</span>`
+    : '';
+
   const head = `
     <div class="rx-exp-head">
       <div class="rx-exp-hyp">${esc(exp.hypothesis || '(no hypothesis)')}</div>
@@ -1016,6 +1357,7 @@ function renderExperimentCard(exp) {
       <span class="rx-exp-status ${status}"><span class="rx-dot"></span>${esc(status.replace('_', ' '))}</span>
       ${exp.domain ? `<span class="rx-chip">${esc(exp.domain)}</span>` : ''}
       ${provBadge}
+      ${modelBadge}
       ${exp.hypothesis_supported === true  ? '<span class="rx-exp-badge supported">supported</span>' : ''}
       ${exp.hypothesis_supported === false ? '<span class="rx-exp-badge not-supported">not supported</span>' : ''}
     </div>
@@ -1201,7 +1543,9 @@ async function refreshStatus() {
   RESEARCH.status = s.status || 'idle';
   RESEARCH.run_state = s.run_state || null;
   if (typeof s.progress === 'number') RESEARCH.progress = s.progress;
+  if ('models' in s) RESEARCH.models = s.models || null;
   renderCockpit();
+  renderTruthStrip();
 }
 
 async function refreshAll() {
@@ -1215,7 +1559,9 @@ async function refreshAll() {
   RESEARCH.run_state = status.run_state || null;
   RESEARCH.progress = (typeof status.progress === 'number') ? status.progress
                     : (goal && typeof goal.progress === 'number' ? goal.progress : 0);
+  if ('models' in status) RESEARCH.models = status.models || null;
   renderCockpit();
+  renderTruthStrip();
   renderPreviewBanner();
   renderBrief();
   renderExperiments();
@@ -1316,6 +1662,14 @@ function closeModal() {
   document.getElementById('rx-modal').hidden = true;
 }
 
+// ── "How does this work?" explainer modal ───────────────────────
+function openHowModal() {
+  document.getElementById('rx-how-modal').hidden = false;
+}
+function closeHowModal() {
+  document.getElementById('rx-how-modal').hidden = true;
+}
+
 // ── Wiring ────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   // Buttons
@@ -1382,7 +1736,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Global Esc closes modal
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closeModal();
+    if (e.key === 'Escape') { closeModal(); closeHowModal(); }
+  });
+
+  // "How does this work?" explainer — tagline trigger + empty-state link
+  // both open the same modal; backdrop click and the × button close it.
+  const howTrigger = document.getElementById('rx-how-trigger');
+  if (howTrigger) howTrigger.addEventListener('click', openHowModal);
+  const howLink = document.getElementById('rx-empty-how-link');
+  if (howLink) howLink.addEventListener('click', (e) => { e.preventDefault(); openHowModal(); });
+  document.getElementById('rx-how-close').addEventListener('click', closeHowModal);
+  document.getElementById('rx-how-modal').addEventListener('click', (e) => {
+    if (e.target.id === 'rx-how-modal') closeHowModal();
   });
 
   const bind = (id, ev, fn) => {
@@ -1421,7 +1786,11 @@ document.addEventListener('DOMContentLoaded', () => {
   // Design-an-experiment form (generic runtime inputs, any archetype).
   wireDesignForm();
 
-  // Boot
+  // Model truth strip toggle (deep passes on/off).
+  wireTruthToggle();
+
+  // Boot — options fetch is independent of goal/status state.
+  fetchOptions();
   refreshAll().then(connectStream);
 });
 

@@ -77,6 +77,14 @@ ARAIL has **zero** relational databases (verified: no psycopg, postgres, pgvecto
 anywhere in `src/` or `pyproject.toml`). Its conventions are append-only JSONL (`activity.py`)
 and LanceDB.
 
+> **Premise amended (2026-08-10), conclusion intact.** The "zero relational databases" line above
+> was accurate as of 2026-07-16 and is superseded by `docs/adr/0005-sqlite-as-the-relational-store.md`
+> (`sqlite-as-the-relational-store`): ARAIL now embeds SQLite. The rejection of Letta below does
+> not weaken, because it never rested on "no database" — it rested on *dependency cost*. Letta
+> requires a ~500 MB server process plus a ~300 MB Postgres, on a network port, with Alembic
+> migrations on startup; ARAIL's SQLite is embedded, in-process, single-file, and stdlib. Those are
+> different claims about different things.
+
 The requirement — *"a nice disk-based technique where we can save off conversations for
 reference"* — is roughly 150 lines of JSONL append. Wrapping Letta means standing up a Postgres
 server to get it. **It fails the stated constraint harder than building fails "don't reinvent."**

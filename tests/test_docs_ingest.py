@@ -76,12 +76,19 @@ def test_index_all_includes_docs_rows(tmp_path, monkeypatch):
     assert "indexed" in result
     assert "path" in result
 
-    # Verify the docs rows landed in LanceDB with source_kind='docs'
+    # Verify the docs rows landed in LanceDB with source_kind='docs'. Read
+    # the table directly rather than through VectorIndex.search(), which
+    # always query-embeds via hash_embedding at its own fixed default
+    # dimension (128) — incompatible with a table written at the spec's
+    # declared dimension (768) since the Tier 1.2 embedder swap. This test
+    # is about row presence, not retrieval.
     from arail.vector_index import VectorIndex  # noqa: PLC0415
     from arail.pkb import _vector_db_path  # noqa: PLC0415
 
     idx = VectorIndex(name="pkb_pages", db_path=_vector_db_path(pkb_root))
-    all_rows = idx.search("Test Doc", k=200, min_score=0.0)
+    table = idx._table()  # noqa: SLF001 — test-only direct read
+    assert table is not None
+    all_rows = table.to_pandas().to_dict("records")
     docs_rows = [r for r in all_rows if r.get("source_kind") == "docs"]
     assert len(docs_rows) >= 1, (
         "No rows with source_kind='docs' found in LanceDB after index_all"

@@ -32,6 +32,12 @@ dependencies = [
     "tomli>=2.0.1; python_version < '3.11'",
     "lancedb>=0.13.0",
     "faster-whisper>=1.2.0",
+    # Model Forge (arail.nucleus): jsonschema validates domain configs and
+    # DNA cards; numpy is the reference KD-loss/renormalization math. Both
+    # are needed by the `plan` verb and the /forge viewer on minimalist,
+    # so they are core, not maximus-gated.
+    "numpy>=1.26",
+    "jsonschema>=4.18",
 ]
 
 [project.optional-dependencies]
@@ -55,12 +61,20 @@ dependencies = [
 # recall by default. The `vector` extra below is kept as a back-compat
 # alias for older docs.)
 minimalist = []
+# Buddy on the floor (src/arail/ops/buddy_floor.py). The harness is a separate
+# repository with zero product imports; this edge is pinned by commit.
+buddy = ["qukaizen-harness @ git+https://github.com/cdarnell/qukaizen-harness@91b15e82c20e284e674e91f77b0406c83ca10e33"]
 maximus = [
     "jupyterlab>=4.0.0",
     "anthropic>=0.34.0",
     "langchain>=0.2.0",
     "langgraph>=0.2.0",
     "pip-audit>=2.7.0,<3",
+    # Model Forge (arail.nucleus) certify/verify: ed25519 signing of the
+    # legacy-5 Nucleus seal payload. Declared here (not core) because
+    # signing is a maximus-only verb; minimalist `verify` prints a plain
+    # "install maximus" message instead of importing this.
+    "cryptography>=42",
     # NOTE: AeroLLM (the deep-mode "2nd inference") is intentionally NOT a
     # hard pip dependency here. `aerollm-api` is a cargo-built native
     # extension (crates/aerollm-api in the sibling repo), not a wheel on
@@ -120,7 +134,7 @@ vector    = ["lancedb>=0.13.0"]
 langchain = ["langchain>=0.2.0", "langgraph>=0.2.0"]
 
 # ── Dev / test ────────────────────────────────────────────────────────────
-dev   = ["pytest>=7.4.0"]
+dev   = ["pytest>=7.4.0", "cryptography>=42"]
 
 [project.urls]
 Repository = "https://github.com/cdarnell/qukaizen-arail"
@@ -241,14 +255,31 @@ coder_cpu    = "Qwen/Qwen2.5-Coder-3B-Instruct-GGUF"
 [tool.arail.package-sources]
 # AeroLLM (the deep "2nd inference") is installed by scripts/build-aerollm.sh:
 #   • DEV     — if the local sibling repo ($ARAIL_AEROLLM_REPO, default
-#               ~/ProJects/qukaizen-aerollm) is present, it's built from source via cargo
+#               ~/ProJects/qukaizen-queuellm) is present, it's built from source via cargo
 #               (`./arailctl deep rebuild`) so in-progress changes flow in.
 #   • RELEASE — otherwise the published wheel is pulled from the self-hosted
 #               index below (`./arailctl deep update`), public PyPI as fallback.
 #               Wheels are macOS-arm64-only (no Linux/CUDA build yet).
-# clone ref (source builds): git+https://github.com/cdarnell/qukaizen-aerollm@main
+# clone ref (source builds): git+https://github.com/cdarnell/qukaizen-queuellm@main
+# (repo renamed 2026-08-21, was qukaizen-aerollm; old URL still redirects.
+# the "aerollm" key/value below and the dependency pin are unchanged.)
 aerollm       = "aerollm-api>=1.0,<2.0"
 aerollm_index = "https://pypi.qukaizen.com/simple/"
+# BUNDLED — no sibling repo, no index credentials required. A checksummed
+# aerollm_api.abi3.so is fetched from an ARAIL GitHub Release asset
+# (`./arailctl deep install`, scripts/build-aerollm.sh bundle). The tag
+# below names which ARAIL release carries the bundle asset; keep it in
+# lockstep with THIRD-PARTY-LICENSES/aerollm/BUNDLE.json (see
+# docs/releasing.md — a drift test enforces this).
+aerollm_bundle_tag = "v1.1.0"
+# sha256 of the BUNDLE TARBALL (not the .so — that digest lives in
+# THIRD-PARTY-LICENSES/aerollm/BUNDLE.json's `sha256` field and is verified
+# separately, against the in-tarball MANIFEST.json, after extraction). This
+# is the out-of-band pin `docs/cli.md` tells security-conscious users to set
+# as AEROLLM_BUNDLE_SHA256 — forwarded by setup.sh exactly like
+# aerollm_bundle_tag. Bump alongside aerollm_bundle_tag (docs/releasing.md
+# step 4) whenever the bundle is refreshed.
+aerollm_bundle_sha256 = "57f30364738580d4a7808f9165ddfdf692eb52afaa435e491b4eda39afb63e93"
 # AirLLM stays declared for opt-in power-user installs (not pulled by default).
 airllm  = "airllm>=2.0"
 
@@ -266,5 +297,12 @@ markers = [
     "qa: paranoid QA edge-case tests (slow; may be excluded with -m 'not qa')",
     "live_stt: tests needing real audio + a local Whisper model / afconvert; skipped in CI (run with -m live_stt)",
     "live_ocr: tests needing real Apple Vision + swiftc compile + a real image; skipped in CI (run with -m live_ocr)",
+    "real_resolver_net: opt out of conftest's hermetic boot-model stubs (arail.model_resolve network reads, ARAIL_BOOT_WARM=0)",
+    "requires_ollama: tests needing a reachable local Ollama with the spec's embedding model pulled; auto-skipped when arail.dbspec.embed.probe() fails (FM18)",
+    "requires_mlx: tests needing a real mlx/mlx-lm install and Apple Silicon; skipped in CI",
+    "requires_aerollm: tests needing a real aerollm_api extension build; skipped in CI",
+    "requires_kernel: tests needing a real Linux kernel + vulns clone (item 10 only); skipped in CI",
+    "real_auth: opt out of conftest's autouse portal bearer (tests of the portal auth itself)",
+    "requires_qkz_bin: tests needing the real Nucleus Rust qkz binary (NUCLEUS_QKZ_BIN); skipped in CI",
 ]
 

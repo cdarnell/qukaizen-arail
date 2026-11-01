@@ -58,6 +58,19 @@ def wired_lab(monkeypatch, tmp_path):
     monkeypatch.setenv("AEROLLM_MODEL", "gpt-oss-20b-MLX-4bit")
     monkeypatch.setenv("AEROLLM_RESEARCH", "true")
     monkeypatch.setenv("LAB_MODE", "airgapped")
+    # Tier-1 `enabled` is a capability fact — tier + wheel importability —
+    # not an AEROLLM_RESEARCH opt-in (sprints/2026-08-11-two-slot-chat-
+    # models Part 2). Pin both sides so this fixture stays deterministic
+    # regardless of whether the real aerollm wheel happens to be built on
+    # the machine running the suite (same convention as
+    # tests/registry/conftest.py's tmp_registry).
+    monkeypatch.setenv("LAB_TIER", "maximus")
+    import importlib.util as _importlib_util
+    _orig_find_spec = _importlib_util.find_spec
+    monkeypatch.setattr(
+        _importlib_util, "find_spec",
+        lambda name, *a, **k: object() if name == "aerollm_api" else _orig_find_spec(name, *a, **k),
+    )
 
     fake_fast = _FakeBackend("fake-tier0", text="fast answer")
     fake_deep = _FakeBackend("fake-aerollm", text="deep answer")

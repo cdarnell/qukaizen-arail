@@ -28,6 +28,26 @@ _cli_test_find_venv() {
 
 REAL_VENV="$(_cli_test_find_venv)" || REAL_VENV=""
 
+# QA-8 (sprints/2026-08-10-arail2-persistence-instantiated/TEST_REPORT.md):
+# pin the interpreter's `arail` to THE CHECKOUT UNDER TEST.
+#
+# make_fake_venv symlinks the discovered venv's site-packages into every fake
+# repo. In CI that venv lives in the same checkout (`pip install -e .`) and
+# resolves correctly. In a *worktree* — the way every round of this sprint was
+# reviewed — REAL_VENV is the operator's main checkout's .venv, whose editable
+# `__editable__.arail-1.0.0.pth` points at THAT checkout's src/. A driver run
+# from a worktree therefore exercised main's `arail`, not the branch's:
+# measured 2026-08-10, `status_driver.sh` failed T10 with
+# `ModuleNotFoundError: No module named 'arail.dbspec.ensure'` (a module that
+# exists only on this branch), and passed 16/16 the moment PYTHONPATH pointed
+# at the worktree's src. Without this line, a shell driver can report green
+# while testing entirely different source — the exact class of blindness this
+# layer was already accused of twice.
+#
+# Prepended, so a driver that deliberately shadows a module (see
+# qa_db_ledger_driver.sh) still wins by prepending its own entry.
+export PYTHONPATH="$CLI_TEST_REPO/src${PYTHONPATH:+:$PYTHONPATH}"
+
 # Portable timeout wrapper (macOS ships no timeout(1)) — kills the WHOLE
 # process group on expiry so no stub server/uvicorn ever survives a driver
 # run. Requires REAL_VENV (python3).
@@ -232,6 +252,23 @@ make_fake_venv() {
     local fake="$1"
     [[ -n "$REAL_VENV" ]] || return 1
     mkdir -p "$fake/.venv/bin"
+    # ⚠️  DANGER — READ BEFORE WRITING A NEW SCENARIO OR EDITING THIS LINE.
+    # "$fake/.venv/lib" is a SYMLINK straight into the REAL venv's
+    # site-packages (the whole `lib/` dir, not a copy). Any scenario that
+    # renames, edits, deletes, or writes through a path reached via
+    # "$fake/.venv/lib/..." — e.g. "rename ensure.py so an import fails,"
+    # "patch a module file to simulate a bug" — mutates the OPERATOR'S
+    # REAL INSTALLATION, not a fixture. This is not hypothetical: a draft
+    # of a status_driver.sh scenario did exactly this during
+    # sprints/2026-08-10-arail2-persistence-instantiated's round 2 (caught
+    # and discarded before it ran — see REVIEW2.md's "make_fake_venv
+    # footgun" section). To simulate an import/module failure, break it
+    # from the CALLER side instead — a PYTHONPATH that shadows the target
+    # module ahead of site-packages, or a stub `python3` earlier on PATH
+    # — never by touching anything under this symlink. If you need a
+    # scenario to write into "fake"'s own site-packages specifically,
+    # this helper is the wrong tool; per-package symlinks or a read-only
+    # tree are the follow-up filed in sprints/BACKLOG.md, not yet built.
     ln -s "$REAL_VENV/lib" "$fake/.venv/lib" 2>/dev/null || true
     [[ -f "$REAL_VENV/pyvenv.cfg" ]] && ln -s "$REAL_VENV/pyvenv.cfg" "$fake/.venv/pyvenv.cfg"
     local f base

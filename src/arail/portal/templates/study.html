@@ -1,0 +1,472 @@
+{% extends "base.html" %}
+{% set active = 'study' %}
+{% block title %}{{ brand.name }} — Study{% endblock %}
+{% block head %}
+<style>
+  /* ══ Study bench ═══════════════════════════════════════════════════════
+     Calmer and larger than the rest of the portal on purpose: the reader is
+     a student mid-homework, not an operator scanning metrics.
+
+     Each subject carries its own visual identity, derived from the subject
+     itself rather than a generic palette rotation:
+
+       ballpoint  (Math)    — ballpoint blue on faint graph paper, mono
+                              numerals. Continuous with her printed rule sheet.
+       staygold   (English) — gold on dusk plum, ruled-notebook lines, serif
+                              display. Gold is The Outsiders' own motif.
+
+     Only the ACCENT, TEXTURE and DISPLAY FACE change per subject; the page
+     ground stays the lab's own theme tokens, so the bench reads as part of
+     the lab rather than a pasted-in app, and it follows the operator's
+     light/dark choice without a second palette to maintain. A coach whose
+     AGENT.md names no palette simply gets the default accent — the server
+     drops anything that isn't a clean hex or slug before it reaches here. */
+
+  .study-page{
+    --sub-accent:var(--accent);
+    --sub-ink:var(--text);
+    --sub-texture:none;
+    --sub-display:var(--font-sans, system-ui);
+    --sub-figure:var(--font-mono);
+    max-width:60rem;margin:0 auto;padding:1.5rem 1.1rem 4rem;
+  }
+  .study-page[data-palette="ballpoint"]{
+    --sub-accent:#5f83ff;
+    --sub-display:var(--font-mono);
+    --sub-texture:
+      linear-gradient(color-mix(in srgb,#5f83ff 9%,transparent) 1px,transparent 1px),
+      linear-gradient(90deg,color-mix(in srgb,#5f83ff 9%,transparent) 1px,transparent 1px);
+    --sub-texture-size:22px 22px;
+  }
+  .study-page[data-palette="staygold"]{
+    --sub-accent:#e0a63c;
+    --sub-display:Georgia,"Iowan Old Style",serif;
+    --sub-texture:linear-gradient(color-mix(in srgb,#e0a63c 11%,transparent) 1px,transparent 1px);
+    --sub-texture-size:100% 30px;
+  }
+
+  /* ── Greeting ─────────────────────────────────────────────────────── */
+  .study-head{display:flex;flex-direction:column;gap:.35rem;margin-bottom:1.5rem;}
+  .study-hello{
+    font-family:var(--sub-display);font-size:clamp(1.5rem,4.5vw,2.1rem);
+    line-height:1.15;margin:0;color:var(--text);text-wrap:balance;
+    letter-spacing:-.01em;
+  }
+  .study-hello em{color:var(--sub-accent);font-style:normal;}
+  .study-sub{margin:0;color:var(--text-muted);font-size:.87rem;max-width:56ch;}
+
+  /* ── The team ─────────────────────────────────────────────────────── */
+  .team-row{display:flex;gap:.7rem;flex-wrap:wrap;margin-bottom:1.5rem;}
+  .coach{
+    --c:var(--accent);
+    position:relative;display:flex;align-items:center;gap:.7rem;
+    padding:.7rem .95rem;cursor:pointer;min-width:12.5rem;
+    border:1px solid var(--border-strong);border-radius:var(--radius-l);
+    background:var(--surface);color:var(--text);font:inherit;text-align:left;
+    transition:border-color .16s ease,background .16s ease,transform .16s ease;
+  }
+  .coach:hover{border-color:var(--c);transform:translateY(-1px);}
+  .coach:focus-visible{outline:2px solid var(--c);outline-offset:2px;}
+  .coach[aria-pressed="true"]{
+    border-color:var(--c);
+    background:color-mix(in srgb,var(--c) 11%,var(--surface));
+  }
+  .coach[aria-pressed="true"]::before{
+    content:"";position:absolute;left:0;top:12%;bottom:12%;width:3px;
+    border-radius:0 3px 3px 0;background:var(--c);
+  }
+  .coach .ce{font-size:1.5rem;line-height:1;}
+  .coach .cn{display:block;font-weight:600;font-size:.9rem;}
+  .coach .cp{
+    display:block;font-size:.67rem;color:var(--text-muted);
+    font-family:var(--font-mono);font-variant-numeric:tabular-nums;margin-top:.1rem;
+  }
+  .bar{
+    position:relative;height:5px;border-radius:3px;background:var(--border);
+    overflow:hidden;margin-top:.4rem;width:100%;
+  }
+  .bar i{position:absolute;left:0;top:0;height:100%;transition:width .35s ease;}
+  .bar i.seen{background:color-mix(in srgb,var(--c) 42%,transparent);}
+  .bar i.mastered{background:var(--c);}
+
+  /* ── The card ─────────────────────────────────────────────────────── */
+  .card-shell{
+    position:relative;border:1px solid var(--border-strong);
+    border-radius:var(--radius-l);background:var(--surface);
+    padding:1.7rem 1.5rem;min-height:15rem;overflow:hidden;
+  }
+  .card-shell::before{
+    content:"";position:absolute;inset:0;pointer-events:none;
+    background-image:var(--sub-texture);
+    background-size:var(--sub-texture-size,22px 22px);
+    opacity:.55;
+  }
+  .card-shell::after{
+    content:"";position:absolute;left:0;right:0;top:0;height:3px;
+    background:linear-gradient(90deg,var(--sub-accent),transparent 78%);
+  }
+  .card-inner{position:relative;animation:rise .32s cubic-bezier(.2,.7,.3,1);}
+  @keyframes rise{from{opacity:0;transform:translateY(7px);}to{opacity:1;transform:none;}}
+  @media (prefers-reduced-motion:reduce){
+    .card-inner{animation:none;}
+    .coach,.bar i{transition:none;}
+  }
+
+  .skill-tag{
+    display:inline-block;font-size:.62rem;text-transform:uppercase;
+    letter-spacing:.09em;padding:.2em .65em;border-radius:var(--radius-pill);
+    color:var(--sub-accent);margin-bottom:1rem;font-family:var(--font-mono);
+    border:1px solid color-mix(in srgb,var(--sub-accent) 42%,transparent);
+    background:color-mix(in srgb,var(--sub-accent) 10%,transparent);
+  }
+  .prompt{
+    font-family:var(--sub-display);
+    font-size:clamp(1.15rem,3.2vw,1.45rem);line-height:1.45;
+    margin:0 0 1.4rem;white-space:pre-wrap;color:var(--text);text-wrap:balance;
+  }
+  .reveal{
+    border-top:1px dashed var(--border-strong);padding-top:1.2rem;margin-top:.4rem;
+    animation:rise .3s cubic-bezier(.2,.7,.3,1);
+  }
+  .answer{font-size:1.02rem;line-height:1.55;margin:0 0 1rem;color:var(--text);}
+  .answer b{color:var(--positive);}
+  .steps{
+    margin:0 0 1.1rem;padding-left:1.2rem;color:var(--text-muted);
+    font-size:.88rem;line-height:1.8;
+  }
+  .steps li::marker{color:var(--sub-accent);}
+  .why{
+    border-left:3px solid var(--sub-accent);padding:.85rem 1rem;margin:0;
+    background:color-mix(in srgb,var(--sub-accent) 7%,transparent);
+    border-radius:0 var(--radius-m) var(--radius-m) 0;
+    font-size:.87rem;line-height:1.65;color:var(--text);
+  }
+  .why h4{
+    margin:0 0 .4rem;font-size:.63rem;text-transform:uppercase;
+    letter-spacing:.09em;color:var(--text-muted);font-family:var(--font-mono);
+  }
+  .why p{margin:0 0 .5rem;}
+  .why p:last-child{margin:0;}
+
+  /* ── Closed-choice cards ──────────────────────────────────────────────
+     Deliberately big targets: these are meant to be answered in a couple of
+     seconds, on a phone, twenty in a row. */
+  .choices{display:flex;gap:.7rem;flex-wrap:wrap;margin-top:.4rem;}
+  .choice{
+    flex:1 1 11rem;padding:1rem 1.1rem;cursor:pointer;
+    font-family:var(--sub-display);font-size:1.05rem;font-weight:600;
+    color:var(--text);background:var(--surface2,var(--surface));
+    border:1.5px solid var(--border-strong);border-radius:var(--radius-l);
+    transition:border-color .14s ease,background .14s ease,transform .14s ease;
+  }
+  .choice:hover{
+    border-color:var(--sub-accent);transform:translateY(-2px);
+    background:color-mix(in srgb,var(--sub-accent) 10%,var(--surface));
+  }
+  .choice:focus-visible{outline:2px solid var(--sub-accent);outline-offset:2px;}
+  @media (prefers-reduced-motion:reduce){ .choice{transition:none;} }
+
+  .verdict{
+    display:flex;align-items:baseline;gap:.5rem;margin:0 0 .9rem;
+    font-size:1.05rem;font-weight:600;
+  }
+  .verdict .v-mark{font-size:1.25rem;line-height:1;}
+  .verdict.is-right{color:var(--positive);}
+  .verdict.is-wrong{color:var(--warn);}
+
+  .actions{display:flex;gap:.6rem;flex-wrap:wrap;margin-top:1.3rem;}
+  .btn-sub{
+    background:var(--sub-accent);border-color:var(--sub-accent);
+    color:#0d0f16;font-weight:600;
+  }
+  .btn-sub:hover{filter:brightness(1.08);}
+  .empty{color:var(--text-muted);font-size:.92rem;line-height:1.75;}
+  .empty code{font-size:.84rem;}
+</style>
+{% endblock %}
+{% block content %}
+
+<div class="study-page" id="study-page">
+
+  <header class="study-head">
+    <h1 class="study-hello" id="hello">Study</h1>
+    <p class="study-sub">
+      Every question here was written by a person and comes with worked steps.
+      Every explanation is read from a sourced glossary. Nothing on this page is
+      made up by a model.
+    </p>
+  </header>
+
+  <div class="team-row" id="team-row" role="group" aria-label="Your tutor team"></div>
+
+  <section class="card-shell" id="card-shell" aria-live="polite">
+    <div class="card-inner"><p class="empty" id="boot">Getting your team together…</p></div>
+  </section>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function(){
+  // All content reaches the DOM as text. The deck and the World are authored,
+  // but they are still rendered via textContent rather than innerHTML — same
+  // stance as the World term editor.
+  var team = [], current = null, card = null, revealed = false, picked = null;
+
+  var page  = document.getElementById('study-page');
+  var row   = document.getElementById('team-row');
+  var shell = document.getElementById('card-shell');
+  var hello = document.getElementById('hello');
+
+  function el(tag, cls, text){
+    var n = document.createElement(tag);
+    if(cls) n.className = cls;
+    if(text != null) n.textContent = text;
+    return n;
+  }
+  function coachOf(id){ return team.find(function(c){ return c.agent === id; }); }
+
+  // Two numbers, because they answer different questions: `seen` is "am I
+  // getting anywhere today" (moves every card), `mastered` is "do I actually
+  // know it" (only after a card survives several correct passes). A bar driven
+  // by mastered alone looks frozen through a whole session.
+  function pct(p, key){
+    if(!p || !p.total) return 0;
+    return Math.round(((p[key] || 0) / p.total) * 100);
+  }
+
+  function applySubject(){
+    var c = coachOf(current);
+    page.setAttribute('data-palette', (c && c.palette) || '');
+    hello.textContent = '';
+    if(c && c.subject){
+      hello.appendChild(document.createTextNode('Today: '));
+      hello.appendChild(el('em', null, c.subject));
+    } else {
+      hello.appendChild(document.createTextNode('Study'));
+    }
+  }
+
+  function renderTeam(){
+    row.textContent = '';
+    team.forEach(function(c){
+      var b = el('button', 'coach');
+      b.type = 'button';
+      b.setAttribute('aria-pressed', String(c.agent === current));
+      if(c.accent) b.style.setProperty('--c', c.accent);
+      b.appendChild(el('span', 'ce', c.emoji));
+      var wrap = el('span');
+      wrap.appendChild(el('span', 'cn', c.name));
+      wrap.appendChild(el('span', 'cp',
+        c.progress.seen + ' / ' + c.progress.total + ' seen · ' + c.progress.mastered + ' mastered'));
+      var bar = el('div', 'bar');
+      var seen = el('i', 'seen');  seen.style.width = pct(c.progress, 'seen') + '%';
+      var mast = el('i', 'mastered'); mast.style.width = pct(c.progress, 'mastered') + '%';
+      bar.appendChild(seen); bar.appendChild(mast); wrap.appendChild(bar);
+      b.appendChild(wrap);
+      b.addEventListener('click', function(){
+        if(current === c.agent) return;
+        current = c.agent; applySubject(); renderTeam(); loadCard();
+      });
+      row.appendChild(b);
+    });
+  }
+
+  function paint(node){
+    shell.textContent = '';
+    var inner = el('div', 'card-inner');
+    inner.appendChild(node);
+    shell.appendChild(inner);
+  }
+
+  function renderEmptyTeam(){
+    var p = el('p', 'empty');
+    p.appendChild(document.createTextNode('No coaches yet. A coach is an agent folder under '));
+    p.appendChild(el('code', null, 'lab/pkb/agents/'));
+    p.appendChild(document.createTextNode(' whose AGENT.md declares a '));
+    p.appendChild(el('code', null, 'deck:'));
+    p.appendChild(document.createTextNode('. Add one and it shows up here — no code change needed.'));
+    paint(p);
+  }
+
+  function renderCard(){
+    var frag = document.createDocumentFragment();
+
+    if(!card){
+      frag.appendChild(el('p', 'empty',
+        'Nothing due right now — everything in this deck is on a spaced-review timer. ' +
+        'That is the schedule working, not a bug. Come back later, or switch subjects.'));
+      var acts0 = el('div', 'actions');
+      if(team.length > 1){
+        var other = el('button', 'btn btn-sm', 'Next subject');
+        other.type = 'button';
+        other.addEventListener('click', nextSubject);
+        acts0.appendChild(other);
+      }
+      frag.appendChild(acts0);
+      paint(frag); return;
+    }
+
+    if(card.skill) frag.appendChild(el('span', 'skill-tag', card.skill));
+    frag.appendChild(el('p', 'prompt', card.prompt));
+
+    // Closed-choice cards: she picks, and the pick is graded immediately.
+    // Auto-grading is honest here and only here — the answer space is finite
+    // and authored, so "Divide" is checkable. A free-text answer about a
+    // theme is not, which is why every other card stays self-graded.
+    if(card.choices && card.choices.length && !revealed){
+      var pick = el('div', 'choices');
+      card.choices.forEach(function(choice){
+        var b = el('button', 'choice', choice);
+        b.type = 'button';
+        b.addEventListener('click', function(){ choose(choice); });
+        pick.appendChild(b);
+      });
+      frag.appendChild(pick);
+      paint(frag); return;
+    }
+
+    if(!revealed){
+      var c = coachOf(current);
+      if(c && c.greeting) frag.appendChild(el('p', 'empty', c.greeting));
+      var acts = el('div', 'actions');
+      var show = el('button', 'btn btn-sub', 'Show the answer');
+      show.type = 'button';
+      show.addEventListener('click', function(){ revealed = true; renderCard(); });
+      var skip = el('button', 'btn btn-sm', 'Skip');
+      skip.type = 'button';
+      skip.addEventListener('click', loadCard);
+      acts.appendChild(show); acts.appendChild(skip);
+      frag.appendChild(acts);
+      paint(frag); return;
+    }
+
+    var rev = el('div', 'reveal');
+
+    // On a graded pick, lead with the verdict rather than the answer — she
+    // already committed to a choice, so "right/wrong" is the information she
+    // is waiting for.
+    if(picked !== null){
+      var right = picked === card.correct_choice;
+      var v = el('p', 'verdict ' + (right ? 'is-right' : 'is-wrong'));
+      v.appendChild(el('span', 'v-mark', right ? '✓' : '✗'));
+      v.appendChild(document.createTextNode(
+        right ? 'Yes — ' + picked : 'You picked ' + picked + ' · it\'s ' + card.correct_choice));
+      rev.appendChild(v);
+    }
+
+    var ans = el('p', 'answer');
+    ans.appendChild(el('b', null, 'Answer: '));
+    ans.appendChild(document.createTextNode(card.answer || ''));
+    rev.appendChild(ans);
+
+    if(card.steps && card.steps.length){
+      var ol = el('ol', 'steps');
+      card.steps.forEach(function(s){ ol.appendChild(el('li', null, s)); });
+      rev.appendChild(ol);
+    }
+
+    if(card.explanation){
+      var why = el('div', 'why');
+      why.appendChild(el('h4', null, 'Why — from the ' + (card.world || 'World') + ' glossary'));
+      // The kit hands back light markdown; render it as plain paragraphs.
+      card.explanation.split('\n\n').forEach(function(para){
+        if(para.trim()) why.appendChild(el('p', null, para.replace(/\*\*/g, '').replace(/^_|_$/g, '')));
+      });
+      rev.appendChild(why);
+    }
+
+    var acts2 = el('div', 'actions');
+    if(picked !== null){
+      var next = el('button', 'btn btn-sub', 'Next question →');
+      next.type = 'button';
+      next.addEventListener('click', loadCard);
+      acts2.appendChild(next);
+      rev.appendChild(acts2);
+      frag.appendChild(rev);
+      paint(frag); return;
+    }
+    var got = el('button', 'btn btn-sub', '✓ I got it');
+    got.type = 'button';
+    got.addEventListener('click', function(){ grade(true); });
+    var miss = el('button', 'btn', '↻ Missed it — show again soon');
+    miss.type = 'button';
+    miss.addEventListener('click', function(){ grade(false); });
+    acts2.appendChild(got); acts2.appendChild(miss);
+    rev.appendChild(acts2);
+    frag.appendChild(rev);
+    paint(frag);
+  }
+
+  // A closed-choice pick: grade it against the authored answer, then reveal.
+  // The Leitner box moves on the pick itself, so these cards need no second
+  // self-assessment step — that is what makes them five-second cards.
+  function choose(choice){
+    picked = choice;
+    revealed = true;
+    renderCard();
+    grade(choice === card.correct_choice, {advance: false});
+  }
+
+  function nextSubject(){
+    if(team.length < 2) return;
+    var i = team.findIndex(function(c){ return c.agent === current; });
+    current = team[(i + 1) % team.length].agent;
+    applySubject(); renderTeam(); loadCard();
+  }
+
+  async function loadCard(){
+    revealed = false; picked = null; card = null;
+    if(!current) return;
+    paint(el('p', 'empty', 'Picking a question…'));
+    try{
+      var r = await fetch('/api/study/next?agent=' + encodeURIComponent(current), {cache:'no-store'});
+      if(!r.ok){ paint(el('p','empty','That coach is not available right now.')); return; }
+      var d = await r.json();
+      card = d.card;
+      applyProgress(current, d.progress);
+    }catch(e){
+      paint(el('p', 'empty', 'Could not reach the lab. Is the portal still running?'));
+      return;
+    }
+    renderCard();
+  }
+
+  function applyProgress(agent, progress){
+    if(!progress) return;
+    var c = coachOf(agent);
+    if(c){ c.progress = progress; renderTeam(); }
+  }
+
+  async function grade(correct, opts){
+    if(!card || !current) return;
+    var advance = !opts || opts.advance !== false;
+    try{
+      var r = await fetch('/api/study/grade', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({agent: current, card_id: card.card_id, correct: correct})
+      });
+      if(r.ok){ var d = await r.json(); applyProgress(current, d.progress); }
+    }catch(e){ /* grading is a nicety — never block the next question on it */ }
+    if(advance) loadCard();
+  }
+
+  async function boot(){
+    try{
+      var r = await fetch('/api/study/team', {cache:'no-store'});
+      var d = await r.json();
+      team = d.team || [];
+    }catch(e){ team = []; }
+    if(!team.length){ row.textContent = ''; renderEmptyTeam(); return; }
+    current = team[0].agent;
+    applySubject();
+    renderTeam();
+    loadCard();
+  }
+
+  boot();
+})();
+</script>
+{% endblock %}

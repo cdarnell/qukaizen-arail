@@ -17,7 +17,7 @@
     {
       "slug": "action-space",
       "term": "Action Space",
-      "category": "architecture",
+      "category": "care-actions",
       "short": "The set of things an agent can do — internal (reason, retrieve) and external (call tools, act in the world).",
       "definition": "In the CoALA framework an agent's action space splits into internal actions (reasoning, retrieval from memory, learning) and external/grounding actions (tool calls, environment steps). Defining a clear, bounded action space is what makes an agent controllable and safe.",
       "example": "An agent's action space might be {search, run_code, read_file, ask_user} plus internal reasoning.",
@@ -145,7 +145,7 @@
     {
       "slug": "add-regularization",
       "term": "Add regularization",
-      "category": "care-actions",
+      "category": "fundamentals",
       "short": "Apply dropout, weight decay, or data augmentation to reduce overfitting.",
       "definition": "When the train/val loss gap is large (overfitting), regularization constrains the model from over-specializing to training data. Options: weight decay (L2) penalizes large weights via the optimizer; dropout randomly zeroes activations during training; data augmentation expands effective dataset size; label smoothing prevents overconfident predictions. For fine-tuning, LoRA is an implicit regularizer (low-rank constraint).",
       "example": "Adding dropout=0.1 and weight_decay=0.01 to a fine-tuning run reduces the train/val gap from 1.4 to 0.6 nats.",
@@ -163,7 +163,7 @@
       "aka": [
         "swarm"
       ],
-      "category": "qukaizen",
+      "category": "fine-tuning",
       "short": "A loop of agents (interrogate, challenge, evaluate, correct) that hardens a model until it stops breaking.",
       "definition": "The Adversarial Swarm Reactor pits Interrogator, Adversary, Evaluator, and Corrector agents (plus data-collection agents) against the student in cycles, systematically hunting and eliminating hallucination pathways. The model graduates not by passing a fixed test but when the swarm can no longer break it.",
       "example": "The swarm keeps inventing harder kernel-bug traps until the student answers them all, then it graduates.",
@@ -180,7 +180,7 @@
       "aka": [
         "AeroLLM"
       ],
-      "category": "qukaizen",
+      "category": "inference",
       "short": "QuKaiZen's inference engine that streams frontier models off disk so they run without full GPU residency.",
       "definition": "AeroLLM is the inference layer that makes disk-streamed teachers practical — layer streaming plus speculative decoding to claw back speed. It is how QuKaiZen serves 400B+ teachers on workstations that lack the VRAM to hold them.",
       "example": "Point the teacher backend at AeroLLM to stream a 405B teacher on a single box instead of an 8x H100 node.",
@@ -195,7 +195,7 @@
     {
       "slug": "aerollm-runtime",
       "term": "AeroLLM (SLM runtime)",
-      "category": "qukaizen",
+      "category": "formats-runtime",
       "short": "[ROADMAP] QuKaiZen's OSS inference engine for running SLMs without full GPU residency.",
       "definition": "[ROADMAP] AeroLLM is QuKaiZen's open-source inference engine for running small language models on consumer hardware without requiring the model to reside fully in GPU VRAM. AeroLLM the OSS engine exists (separate repo). Its integration into the QuKaiZen bake pipeline — specifically, running the baked domain-specialist SLM at 43+ tok/s as the runtime serving component — is ROADMAP within this pipeline. The label is ROADMAP for the pipeline integration specifically; the engine itself is independently available.",
       "example": "Once the ml-engineering SLM is baked, AeroLLM will serve it on the M5 at interactive token rates for training-run triage queries.",
@@ -366,15 +366,11 @@
     {
       "slug": "automation",
       "term": "Automation",
-      "category": "architecture",
+      "category": "fundamentals",
       "short": "Letting software run repeatable work end-to-end with no human in the loop.",
       "definition": "Automation captures a repeatable process so it runs on its own, reliably and on schedule. PaperAgents automates with small specialist agents reconciled to a desired state.",
       "example": "Invoicing that books, charges, and files itself every night.",
-      "related": [
-        "workflow",
-        "agent",
-        "reconcile"
-      ],
+      "related": [],
       "source": "QuKaiZen AI Dictionary"
     },
     {
@@ -5442,6 +5438,130 @@
         "sft"
       ],
       "source": "authored"
+    },
+    {
+      "slug": "reinforcement-learning",
+      "term": "Reinforcement Learning",
+      "category": "rl-alignment",
+      "short": "Reinforcement learning is a type of machine learning where an agent learns to make decisions by performing actions and receiving rewards or penalties in an environment, aiming to maximize the cumulati",
+      "definition": "Reinforcement learning is a type of machine learning where an agent learns to make decisions by performing actions and receiving rewards or penalties in an environment, aiming to maximize the cumulative reward over time.",
+      "example": "A robot learning to navigate a maze receives a reward for reaching the end and a penalty for hitting walls, optimizing its path through trial and error.",
+      "related": [
+        "ppo",
+        "rlhf",
+        "rlaif",
+        "mcp",
+        "awq"
+      ],
+      "source": "model:ai-engineer"
+    },
+    {
+      "slug": "attention-mask",
+      "term": "Attention Mask",
+      "category": "architecture",
+      "short": "An attention mask is a binary signal used in transformer models to indicate which input tokens should be attended to during the model's processing, effectively masking out irrelevant or padding tokens",
+      "definition": "An attention mask is a binary signal used in transformer models to indicate which input tokens should be attended to during the model's processing, effectively masking out irrelevant or padding tokens.",
+      "example": "In text processing, an attention mask might set all positions corresponding to actual words to 1 and padding tokens to 0, ensuring that the model ignores these padded positions when generating output.",
+      "related": [
+        "transformer",
+        "self-attention",
+        "cross-attention",
+        "layer-normalization",
+        "transformer-layers"
+      ],
+      "source": "model:ai-engineer"
+    },
+    {
+      "slug": "bert",
+      "term": "BERT",
+      "category": "fundamentals",
+      "short": "BERT",
+      "definition": "BERT is a transformer-based model pre-trained using unsupervised learning on a large corpus of text data and fine-tuned for specific downstream tasks like question answering, text classification, and sentiment analysis.",
+      "example": "BERT can be fine-tuned to answer questions based on given context, such as generating the correct response to 'What is the capital of France?' from a passage about geography.",
+      "related": [
+        "transformer",
+        "transformer-layers",
+        "transformer-depth",
+        "attention",
+        "self-attention"
+      ],
+      "source": "model:ai-engineer"
+    },
+    {
+      "slug": "transformer-layers",
+      "term": "Transformer Layers",
+      "category": "architecture",
+      "short": "Transformer layers are a key component in the architecture of transformer models, consisting of self-attention mechanisms and feed-forward networks that enable these models to process sequential data ",
+      "definition": "Transformer layers are a key component in the architecture of transformer models, consisting of self-attention mechanisms and feed-forward networks that enable these models to process sequential data efficiently.",
+      "example": "In the Transformer model by Vaswani et al., each layer processes sequences through multi-head self-attention followed by a fully connected feed-forward network.",
+      "related": [
+        "attention",
+        "self-attention",
+        "multi-head-attention",
+        "grouped-query-attention",
+        "sliding-window-attention"
+      ],
+      "source": "model:ai-engineer"
+    },
+    {
+      "slug": "transformer-depth",
+      "term": "Transformer Depth",
+      "category": "architecture",
+      "short": "Depth",
+      "definition": "Transformer depth refers to the number of layers in a transformer architecture, which affects its ability to capture long-range dependencies and process complex patterns in sequential data.",
+      "example": "A transformer model with 12 layers (e.g., BERT) can better understand context over longer sequences compared to a simpler model with just 6 layers.",
+      "related": [
+        "bert",
+        "transformer-layers",
+        "scaling-laws",
+        "latent-diffusion-models",
+        "denoising-autoencoders"
+      ],
+      "source": "model:ai-engineer"
+    },
+    {
+      "slug": "latent-diffusion-models",
+      "term": "Latent Diffusion Models",
+      "category": "training",
+      "short": "LDM",
+      "definition": "Latent Diffusion Models are a type of generative model that operate in the latent space of an encoder, using stochastic processes to synthesize data by gradually adding noise and then reversing this process through a series of denoising steps.",
+      "example": "A Latent Diffusion Model can generate intricate images from textual descriptions by first encoding the text into a latent space, diffusing it with noise, and then iteratively denoising it to produce realistic visuals.",
+      "related": [
+        "denoising-autoencoders",
+        "variational-autoencoder",
+        "autoencoder",
+        "transformer-layers"
+      ],
+      "source": "model:ai-engineer"
+    },
+    {
+      "slug": "denoising-autoencoders",
+      "term": "Denoising Autoencoders",
+      "category": "training",
+      "short": "Denoising autoencoders are a type of neural network used for learning useful representations of data by reconstructing clean versions of corrupted input data.",
+      "definition": "Denoising autoencoders are a type of neural network used for learning useful representations of data by reconstructing clean versions of corrupted input data.",
+      "example": "A denoising autoencoder can be trained to reconstruct clear images from noisy ones, improving the quality of image datasets.",
+      "related": [
+        "autoencoder",
+        "transformer-layers",
+        "latent-diffusion-models",
+        "convolutions-in-nlp"
+      ],
+      "source": "model:ai-engineer"
+    },
+    {
+      "slug": "convolutions-in-nlp",
+      "term": "Convolutions in NLP",
+      "category": "architecture",
+      "short": "Convolution",
+      "definition": "In Natural Language Processing (NLP), convolutions are a type of filter that slides over the sequence of words in a text, extracting local features such as n-grams to capture patterns and structures relevant for tasks like sentiment analysis or text classification.",
+      "example": "A convolutional layer in an NLP model might analyze sequences of three consecutive words (trigrams) to identify common phrases indicative of positive sentiment, such as 'love this' or 'great experience'.",
+      "related": [
+        "nf4",
+        "attention-mask",
+        "bert"
+      ],
+      "source": "model:ai-engineer"
     }
   ]
 }

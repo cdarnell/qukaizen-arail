@@ -283,29 +283,22 @@ def test_sec_xss_malicious_model_id_escaped_in_render(monkeypatch):
 
 
 def test_sec_chat_html_escapes_every_model_identity_field_insertion():
-    """SEC-2 (F7 source audit — repointed 2026-07-21): grep the LIVE template —
-    every place a model's id/label/runtime/provider is interpolated into
-    innerHTML by the picker/rail/active-card renderers must wrap it in
-    escapeHtml().
+    """SEC-2 (F7 source audit — repointed 2026-07-21, then again 2026-08-11):
+    grep the LIVE template — every place a model's id/label/runtime/provider
+    is interpolated into innerHTML by the picker/comparison-strip renderers
+    must wrap it in escapeHtml().
 
     Originally this pinned chat.legacy.html's per-provider "cloud card" grid
-    (fetched via GET /api/chat/models?provider=<p>, rendered with CSS markers
-    fmp-cloud-card / fmp-cloud-card-name / fmp-cloud-chip). chat.legacy.html
-    was deleted as dead code in c3c401a (portal-design-v2 sprint, 2026-07-07)
-    — per that sprint's ARCHITECTURE.md it "has no route" and was already
-    unreachable before deletion, so this test had been pinning dead code for
-    some time before the delete turned that into a hard failure (missing
-    file).
-
-    The live chat.html has no per-provider catalog render path at all: the
-    Compute Source pivot only flips State.activeSource (never fetches a
-    provider's model list), and the one GET /api/chat/models call at init
-    carries no provider param. Every model row — local, deep (aeroLLM/
-    AirLLM), and the active/current selection — instead flows through
-    makeOpt() / renderModelRail() / renderActiveCard(). Those three are the
-    live descendants of the old cloud-card concept and carry the identical
-    escaping obligation, so this test now pins them instead: a future edit
-    still can't drop the escape on a model id, whatever its source.
+    (deleted as dead code in c3c401a). Repointed 2026-07-21 to makeOpt() /
+    renderModelRail() / renderActiveCard() — the live descendants at the
+    time. sprints/2026-08-11-two-slot-chat-models Phase 5 deleted
+    renderModelRail/renderActiveCard (collapsed onto two picker chips) —
+    this test now pins makeOpt() (every picker row, local or deep) and
+    renderModelInfo() (the model-info drawer), the surviving template-
+    literal-style sinks. renderComparisonStrip() (the new Compare-mode A/B
+    header) is a real third sink for the same risky fields but builds its
+    HTML via string concatenation, not `${}` interpolation — the scanner
+    below is template-literal-specific, so it's checked separately.
     """
     import re
 
@@ -326,13 +319,13 @@ def test_sec_chat_html_escapes_every_model_identity_field_insertion():
         r"|State\.bId\b|State\.bRuntime\b"
     )
     # Only consider lines actually building an HTML tag (an innerHTML sink).
-    # Excludes e.g. renderModelRail's flashStatus(`ejected ${m.id}`) — plain
-    # status text through .textContent, not a DOM-insertion hole.
+    # Excludes e.g. flashStatus(`ejected ${m.id}`) — plain status text
+    # through .textContent, not a DOM-insertion hole.
     looks_like_html = re.compile(r"<[a-zA-Z]")
 
     suspicious = []
     bodies = {}
-    for fn in ("makeOpt", "renderModelRail", "renderActiveCard"):
+    for fn in ("makeOpt", "renderModelInfo"):
         body = extract_function(fn)
         bodies[fn] = body
         for ln in body.splitlines():
@@ -351,6 +344,20 @@ def test_sec_chat_html_escapes_every_model_identity_field_insertion():
     assert "escapeHtml(m.label || m.id)" in combined, "id/label no longer escaped in the render path"
     assert "escapeHtml(provider)" in combined, "provider no longer escaped in the render path"
     assert "escapeHtml(m.runtime" in combined, "runtime no longer escaped in the render path"
+
+    # renderComparisonStrip: same identity fields (a.id/a.runtime, State.bId),
+    # concatenation style — assert the escape call wraps the risky value
+    # directly (`escapeHtml(String(model))` / `escapeHtml(runs)`) and that no
+    # risky field is concatenated into the HTML string bare (`+ model +`
+    # etc. without an escapeHtml(...) around it).
+    cs_body = extract_function("renderComparisonStrip")
+    assert "escapeHtml(String(model))" in cs_body
+    assert "escapeHtml(runs)" in cs_body
+    bare_concat = re.compile(r"\+\s*(model|runs|aModel|State\.bId)\s*\+")
+    assert not bare_concat.search(cs_body), (
+        "renderComparisonStrip concatenates a risky identity field into "
+        "HTML without escapeHtml()"
+    )
 
 
 @pytest.mark.parametrize("provider", [

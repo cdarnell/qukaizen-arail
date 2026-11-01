@@ -31,6 +31,31 @@ have a fallback — a broken `.py` just means the agent doesn't
 load and a warning goes to the activity log. The Forge will
 surface these errors prominently in its own UI.
 
+## Skills-only agents (``_SKILLS_ONLY``)
+
+``researcher``, ``curator``, and ``browser`` are a THIRD category,
+distinct from both of the above. ``agent_seed.py`` seeds their
+``AGENT.md`` on first boot purely as a hot-editable skills
+loadout — the actual implementations are top-level modules
+(``src/arail/agents/{researcher,curator,browser}.py``) imported
+directly by the portal (``GET /api/agents/status`` and friends),
+never through this loader. ``researcher`` even has a matching
+module-level singleton (``researcher = ResearcherAgent()``) that
+*could* satisfy ``load_one``'s contract, but wiring it through here
+too would risk a second, divergent instance; ``curator``/``browser``
+don't have a loader-shaped singleton at all — they're helper
+modules ``researcher.py`` calls into, not independent ticking
+agents.
+
+There was never meant to be a companion ``<id>.py`` in these three
+folders, so a missing one is not a failure — before this was made
+explicit, ``load_one`` logged "Agent 'researcher' failed to load"
+(error level) for all three, on every single boot, for three
+months, with nothing actually broken. ``discover()`` still returns
+all three (unchanged) — the Skills tab reads their frontmatter via
+``/api/agents/loadouts`` and must keep working; only the
+import-and-instantiate half of the pipeline skips them.
+
 ## Cache
 
 Agents are loaded lazily and cached per-process — repeated calls
@@ -48,6 +73,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from arail import agent_context
 from arail.activity import activity_log
 from arail.pkb import _pkb_root
 from arail.skills_loader import parse_frontmatter
@@ -63,6 +89,13 @@ _SHIPPED: set[str] = {
     "buddy", "sre", "presence", "librarian",
     "debt_advisor", "consolidation_analyzer",
 }
+
+# Agents whose AGENT.md is a skills-loadout sidecar for an implementation
+# that's wired directly at the top level (see the module docstring's
+# "Skills-only agents" section) — never meant to have a companion
+# lab/pkb/agents/<id>/<id>.py, so load_one() must not treat a missing one
+# as a failure. discover() is untouched: the Skills tab still needs these.
+_SKILLS_ONLY: set[str] = {"researcher", "curator", "browser"}
 
 # Singleton cache. Key = agent_id, value = agent instance (or the
 # sentinel _BROKEN if loading failed this session).
@@ -200,9 +233,12 @@ def load_one(agent_id: str, pkb_root: Path | None = None) -> Optional[Any]:
       1. Cache hit — return the stored instance (even the broken
          sentinel, so we don't retry).
       2. Seed folder if it's a shipped agent and missing.
-      3. Import ``lab/pkb/agents/<id>/<id>.py`` dynamically.
-      4. On failure, fall back to the shipped builtin (if any).
-      5. Return None for a user-forged agent whose code is broken.
+      3. Skills-only agent with no companion .py — return None quietly
+         (see the module docstring's "Skills-only agents" section; this
+         is the expected shape, not a failure, so no error is logged).
+      4. Import ``lab/pkb/agents/<id>/<id>.py`` dynamically.
+      5. On failure, fall back to the shipped builtin (if any).
+      6. Return None for a user-forged agent whose code is broken.
     """
     if agent_id in _CACHE:
         cached = _CACHE[agent_id]
@@ -218,6 +254,16 @@ def load_one(agent_id: str, pkb_root: Path | None = None) -> Optional[Any]:
     folder = _agents_root(pkb_root) / agent_id
     py_file = folder / f"{agent_id}.py"
     unique = f"arail.agents._folder_{agent_id}"
+
+    # A missing .py here was never a failure for these three — it's the
+    # designed state (agent_seed.py seeds their AGENT.md as a skills-only
+    # sidecar; the real implementation is wired directly at the top level).
+    # Not cached: the check is one Path.exists(), cheaper than the sentinel
+    # bookkeeping, and lets a .py that later appears (hand-added, or a
+    # future seed) be picked up on the very next call instead of being
+    # permanently shadowed by a stale cache entry from this boot.
+    if agent_id in _SKILLS_ONLY and not py_file.exists():
+        return None
 
     instance = None
     if py_file.exists():
@@ -313,7 +359,16 @@ def start_all_auto(agents: Dict[str, Any], pkb_root: Path | None = None) -> None
 
         if should_start and hasattr(instance, "start"):
             try:
-                instance.start()
+                # L1 — the loader contract's "cannot be forgotten" layer
+                # (ARCHITECTURE.md, sprint 2026-09-20-buddy-front-and-
+                # center): attribute the whole agent loop to agent_id here,
+                # once. asyncio.create_task copies the calling context, so
+                # an agent that spawns its loop inside start() (every
+                # built-in does) is attributed for the life of that loop —
+                # no per-agent edit required, including for a user-defined
+                # agent the loader has never seen before.
+                with agent_context.agent_call(agent_id):
+                    instance.start()
             except Exception as e:  # noqa: BLE001
                 activity_log.emit(
                     "agents",

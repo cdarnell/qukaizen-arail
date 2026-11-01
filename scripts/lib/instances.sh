@@ -198,6 +198,62 @@ inst_list_slugs() {
     return 0
 }
 
+# inst_ondisk_slugs — every lab/instances/<slug>/ directory that contains a
+# data/ dir or an instance.env file, ONE PER LINE, regardless of whether it
+# has a registry record. sprints/2026-08-10-arail2-persistence-instantiated
+# §4.3: the operator's registry.d/ can be (was, measured) literally empty
+# while five instance dirs exist on disk — inst_list_slugs() alone reaches
+# zero of them. This is the raw on-disk enumeration; inst_resolve_data_dirs
+# below is the union with the registry.
+inst_ondisk_slugs() {
+    local root d
+    root="$(inst_root_dir)"
+    [[ -d "$root" ]] || return 0
+    for d in "$root"/*/; do
+        [[ -d "$d" ]] || continue
+        local slug
+        slug="$(basename "$d")"
+        [[ "$slug" == "registry.d" ]] && continue
+        if [[ -d "${d}data" || -f "${d}instance.env" ]]; then
+            printf '%s\n' "$slug"
+        fi
+    done
+    return 0
+}
+
+# inst_resolve_data_dirs — the six-roots fix (shell mirror of
+# arail.data_dirs.resolve_data_dirs). Emits one TSV line per row:
+#   <slug>\t<data_dir>\t<origin>
+# where origin is root|registry|ondisk. Union is never smaller than either
+# input (F11); the root lab is always exactly one row. Mirrors
+# src/arail/data_dirs.py's resolve_data_dirs() — a shared-fixture test
+# (tests/test_data_dirs_resolve_shell_parity.py, if the .venv running this
+# checkout has one) is expected to assert the two agree on the same
+# on-disk fixture; see BUILD_LOG.md for what has and has not been run.
+inst_resolve_data_dirs() {
+    # No associative arrays (services.sh's portability rule: macOS system
+    # bash is 3.2, no `declare -A`) — dedup via a plain newline list and
+    # grep -Fxq instead.
+    local root_data_dir="${ARAIL_DATA_DIR:-$REPO_ROOT/lab/data}"
+    printf '__root__\t%s\troot\n' "$root_data_dir"
+
+    local slug registry_slugs
+    registry_slugs="$(inst_list_slugs)"
+    while IFS= read -r slug; do
+        [[ -n "$slug" ]] || continue
+        printf '%s\t%s\tregistry\n' "$slug" "$(inst_data_dir "$slug")"
+    done <<< "$registry_slugs"
+
+    while IFS= read -r slug; do
+        [[ -n "$slug" ]] || continue
+        if printf '%s\n' "$registry_slugs" | grep -Fxq "$slug"; then
+            continue  # already emitted as a registry row above
+        fi
+        printf '%s\t%s\tondisk\n' "$slug" "$(inst_data_dir "$slug")"
+    done < <(inst_ondisk_slugs)
+    return 0
+}
+
 # inst_prune <slug> — remove the registry record for <slug> iff it is
 # stale (predicate steps 2/3 fail). Never touches lab/instances/<slug>/
 # data (ARCHITECTURE.md §2.5). No-op, exit 0, if the record is alive or

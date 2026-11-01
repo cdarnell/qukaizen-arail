@@ -50,6 +50,15 @@ ports, PKB, default model, PATH shim, verify. Idempotent — respects an
 existing `.env`. The **only** verb that may prompt, install OS packages,
 or create/rewrite `.env`/`lab.conf`.
 
+**The relational store (`arail.db`).** After deps and the lab tree are
+in place, `setup` runs the same `ensure_db(apply=True)` sweep `install`
+uses (`sprints/2026-08-10-arail2-persistence-instantiated`
+ARCHITECTURE.md §10) over every root `resolve_data_dirs()` resolves —
+closing the one gap between `setup` and `start` where `./arailctl
+doctor` would otherwise honestly report the relational store as not yet
+instantiated. SAFE-FORWARD only, same as `install`/`start`; never fails
+`setup` — a blocked/ahead/diverged root warns and setup continues.
+
 | Flag | Effect |
 |---|---|
 | `--with-coder` / `--no-coder` | Download the Qwen2.5-Coder starter model, or don't |
@@ -94,8 +103,24 @@ reason unless `--force`.
 | `[1/5] source` | `git pull --ff-only`; prints `old…new` short SHAs + commit count; **re-execs itself if HEAD moved** so a self-update never runs on stale bytes | not a git repo · dirty worktree · detached HEAD · no upstream · diverged (not a fast-forward) · airgapped without `--force` |
 | `[2/5] deps` | `pip install -e ".[$LAB_TIER]"` (idempotent); with `--rebuild-venv`, recreates `.venv` first (**failure here is a hard failure, exit 1** — not degraded) | airgapped without `--force` |
 | `[3/5] components` | `scripts/update.sh --apply --non-interactive` — `components.json` drives it; a single component's failure warns and continues | airgapped without `--force` (`update.sh`'s own check) |
-| `[4/5] models` | Compares the expected primary chat model (`model_defaults.yaml`'s `default_a` if present, else `llama-ai-eng`) against `ollama list`; reports drift + the exact commands; applies only with `--models` | ollama absent / daemon unreachable → skipped (never hangs); the apply step also honors the airgap refusal |
-| `[5/5] verify` | `./arailctl doctor` — its exit code folds straight through (`3`→degraded, `1`→hard failure) | — |
+| `[4/5] models` | Compares the expected primary chat model (the last-resolved slot A in `model_defaults.yaml`, else its pin or a v1 `default_a`, else `llama-ai-eng`) against `ollama list`; reports drift + the exact commands; applies only with `--models` | ollama absent / daemon unreachable → skipped (never hangs); the apply step also honors the airgap refusal |
+| `[5/5] verify` | `./arailctl doctor` — its exit code folds straight through (`3`→degraded, `1`→hard failure); before that, ensures every resolved root's `arail.db` is created and forward-migrated (see "The relational store" below) | — |
+
+**The relational store (`arail.db`).** Before `[5/5] verify`, `install`
+runs `ensure_db(apply=True)` over every root `resolve_data_dirs()`
+resolves — root lab, every registered instance, and every on-disk
+instance with no registry record — printing one `[db]` line per root
+that actually acted (silent for a root that's already `ok`). This is the
+"seamless" promise's real home (sprints/2026-08-10-arail2-persistence-
+instantiated §4.6): after `install`, every lab on the machine has a
+database. SAFE-FORWARD migrations only — additive `CREATE TABLE`/`CREATE
+INDEX`/`ALTER TABLE … ADD COLUMN`, never a statement that can remove or
+rewrite a row. Anything LOSSY/AHEAD/DIVERGED is reported, never applied
+— `install` degrades (not hard-fails) and names the exact verb
+(`./arailctl db apply --allow-destructive`, `./arailctl db plan`, or "update
+this checkout"). Note: `arail.db` has **no runtime reader yet** as of this
+sprint — creating it satisfies "the dependent service is up," it does not
+by itself make any feature work.
 
 Exit: `0` all phases ok/no-op · `3` degraded (a phase refused or failed,
 lab still usable; also `--check` pending changes) · `1`
@@ -165,6 +190,63 @@ with a real readiness gate either way, not a print-and-hope.
 directly, even when a daemon is active — daemon-mode refusal is
 `start.sh`'s own job so it can name the World slug (or `--root`) in the
 message.
+
+**Model selection is automatic; `start` only reports it.** The readiness
+banner always prints a `Models:` block with the two slots (A: the fast,
+resident Ollama chat model; B: the deep model QueueLLM streams in) and
+where each came from (`source:` `pin`, `env`, `auto` or `cache`, plus a
+reason when something fell through). `start` never picks a model and
+never prompts: the portal resolves both slots itself every time it
+starts, from what is installed and what this machine can hold, then
+loads them (below). Precedence per slot is **pin** (`model_defaults.yaml`
+`pins`) > **`.env`** (`MODEL_NAME` / `AEROLLM_MODEL`) > **auto**
+(installed x fits x ranked) > none. A pin or `.env` value that is not
+installed, too big, or over the RAM budget never blocks anything: it
+falls through to the next level and the portal's degraded strip says so,
+with the exact `ollama pull` / `hf download` command as text.
+
+`model_defaults.yaml` (repo root, gitignored — see
+`model_defaults.yaml.example`) holds your `pins` (preserved across boots;
+`null` = auto, slot B may be `none` to keep the deep slot off) and a
+`resolved` cache of the last result, rewritten every boot and never
+compared for "drift". The banner reads that cache with
+`python -m arail.model_defaults --banner` (what `start` shells out to) or
+`--get default_a`/`--get default_b` (empty line if unset — used to fix
+the Ollama-presence check below instead of hardcoding `llama-ai-eng`);
+`--json` prints `{version, path, pins, resolved, ...}`. Pin from the
+portal (the Resident chip, or `POST /api/models/pin`). Deleting the file
+just means "re-resolve, no pins". A v1 file (`default_a` / `default_b`)
+is upgraded on first portal boot, keeping `.model_defaults.v1.bak`;
+`default_b: null` becomes the `none` pin so a deep model you disabled
+stays disabled. `POST /api/models/settle` still works for one release as
+a deprecated alias for two pins.
+
+**Boot warm is on by default** and no longer waits for
+`ARAIL_AUTOCHECKS` (loading a local model is local work; the interval
+health loop and Claude-cache prewarm stay autochecks-gated). Slot A warms
+with a 1-token completion; slot B (maximus + the `aerollm_api` wheel) loads
+once, memory-pressure permitting. A crash while loading B leaves a
+sentinel, and that model is skipped on later boots until you pin a
+different one or re-pin it. Opt out with `ARAIL_BOOT_WARM=0` (both slots),
+`ARAIL_TIER0_BOOT_WARM=0` (slot A) or `ARAIL_AEROLLM_PRELOAD=0` (slot B).
+`GET /api/instance` reports `warm_a` / `warm_b` (`ok|skipped|failed|
+deferred|disabled`).
+
+**The relational store (`arail.db`), a dependent service** (sprints/
+2026-08-10-arail2-persistence-instantiated §4.5). Before the portal
+binds, `start` ensures THIS instance's own `arail.db` — never a
+sibling's, and never any root-relative path a `--world` invocation
+shouldn't touch — is created and forward-migrated: `ensure_db(this_data_dir,
+apply=True)`. SAFE-FORWARD only, and reported when it acts: `db: created
+lab/instances/ai/data/arail.db (schema v1)`. A healthy, already-`ok` DB
+prints nothing (quiet boot). A LOSSY/AHEAD/DIVERGED/unavailable DB
+**warns, names the exact fixing verb, and `start` continues booting** —
+this is deliberate, not a bug: nothing outside `src/arail/dbspec/` reads
+`arail.db` at runtime yet (verified by grep), so refusing to start a
+working lab over an inert store would trade a real outage for a
+theoretical one. **This is revisitable**: the moment a runtime feature
+starts reading `arail.db`, this must become a hard readiness gate — filed
+in `sprints/BACKLOG.md`.
 
 **Root-lab readiness:** a pre-spawn check refuses immediately (before
 anything is started) if the portal port is already answering
@@ -310,13 +392,85 @@ active).
 
 ### `deep <op>`
 
-AeroLLM 2nd-inference control: `rebuild` (from source) | `update`
-(published wheel) | `status`. Unchanged.
+QueueLLM 2nd-inference control: `install` (bundled prebuilt binary) |
+`rebuild` (from source) | `update` (published wheel) | `status`.
+
+Three install channels, dispatched by `scripts/build-aerollm.sh auto`
+(what `setup.sh` and a bare `./arailctl deep install` with no forced
+channel both use):
+
+| Channel | Op | Requires | Who it's for |
+|---|---|---|---|
+| BUNDLED | `deep install` | network to `github.com` (or a local tarball via `AEROLLM_BUNDLE_FILE`) | outside users — no source repo, no credentials |
+| DEV | `deep rebuild` | the QueueLLM sibling repo checked out at `$ARAIL_AEROLLM_REPO` | maintainers with local QueueLLM changes |
+| RELEASE | `deep update` | `pypi.qukaizen.com` index credentials | maintainers on the private index |
+
+`auto` picks DEV if the sibling repo is present, RELEASE if
+`AEROLLM_CHANNEL=release` or index credentials are configured, and
+BUNDLED otherwise. Force any channel with `AEROLLM_CHANNEL=dev|release|bundle`
+regardless of what's on disk.
+
+**Bundled-channel env knobs** (all optional):
+
+| Var | Default | Meaning |
+|---|---|---|
+| `AEROLLM_CHANNEL` | unset (auto) | force `dev` \| `release` \| `bundle` |
+| `AEROLLM_BUNDLE_URL` | derived from repo/tag below | full asset URL override (mirrors, forks) |
+| `AEROLLM_BUNDLE_REPO` | `cdarnell/qukaizen-arail` | which GitHub repo carries the release asset |
+| `AEROLLM_BUNDLE_TAG` | pinned in `pyproject.toml` `[tool.arail.package-sources] aerollm_bundle_tag` | which ARAIL release carries the bundle |
+| `AEROLLM_BUNDLE_FILE` | unset | use a local tarball instead of downloading — the offline / airgapped install path |
+| `AEROLLM_BUNDLE_SHA256` | read from `pyproject.toml [tool.arail.package-sources] aerollm_bundle_sha256` — a genuine out-of-band pin, independent of the download — on both routes: `./arailctl setup` forwards it, and standalone `./arailctl deep install` reads pyproject itself when the env var is unset. An explicit env value always wins. Only if pyproject can't be read at all does it fall back to the same-origin `.sha256` sidecar | pin/override the expected **tarball** digest |
+
+`./arailctl deep status` reports a `channel:` line (`dev` \| `release` \|
+`bundled` \| `none`) and, when bundled, a `QueueLLM <version> (<short-sha>,
+built <date>)` provenance line read from `aerollm_api.bundle.json`.
+
+**What the sha256 check does and doesn't guarantee (v1):** when
+`AEROLLM_BUNDLE_SHA256` is unset, the expected digest is fetched from the
+same GitHub Release, over the same connection, as the tarball itself
+(`<url>.sha256`). That catches corruption in transit — it is **not** an
+authenticity or supply-chain-integrity control, since anyone able to serve
+a malicious tarball from that origin can serve a matching digest alongside
+it. The actual trust boundary is GitHub's TLS + repo access control, not
+the checksum. If you need a digest independent of that origin, pass
+`AEROLLM_BUNDLE_SHA256` explicitly from a value pinned in git — the
+committed `pyproject.toml`'s `[tool.arail.package-sources]
+aerollm_bundle_sha256` (the TARBALL digest; this is what `./arailctl
+setup` forwards automatically at tier `maximus`). **Do not** pass
+`THIRD-PARTY-LICENSES/aerollm/BUNDLE.json`'s `sha256` field here — that
+field is a digest of the extracted `aerollm_api.abi3.so` itself, not the
+tarball, and is verified separately (against the tarball's own
+`MANIFEST.json`, after extraction) — the two digests are of different
+objects and will never match `AEROLLM_BUNDLE_SHA256`.
+
+**Beyond the tarball checksum:** after extraction, `bundle_install()` also
+(a) verifies the extracted `.so`'s sha256 against the in-tarball
+`MANIFEST.json` (catches a tarball-vs-member substitution) and (b) checks
+the `.so` has Mach-O 64-bit magic bytes before copying it into
+site-packages (catches an obviously-wrong payload). Neither check is a
+codesign, notarization, or authenticity control — `aerollm_api.abi3.so` is
+an **unsigned** binary, and importing a native extension is always code
+execution at import time. The full trust chain here is same-origin: GitHub
+TLS + repo access control, one hop. Treat the bundled channel accordingly.
+
+See `sprints/2026-08-05-arail-bundled-aerollm/ARCHITECTURE.md` for the
+full design and `docs/releasing.md` for the maintainer-side bundle
+refresh checklist.
 
 ### `reset [mode]`
 
 Wipe state: `models`\|`data`\|`pkb`\|`plugins`\|`env`\|`full`\|`destroy`.
-See `./arailctl reset help`. Unchanged.
+See `./arailctl reset help`.
+
+`full` wipes models, data, plugins, the research program, and
+`.venv`/`.env`/`lab.conf` — everything except the knowledge base (`pkb`;
+chain with `reset pkb` if you want that gone too) and source code.
+**Downloaded models are the one exception inside `full`**: `lab/models/`
+is kept unless you say otherwise — `--include-models` on the command
+line, or a yes at the interactive prompt `full` asks when run without
+`--yes`. A bare `--yes` confirms the wipe as a whole; it does not by
+itself imply "and delete my downloaded models too," since re-fetching
+them is the one step with a real time/bandwidth cost to undo.
 
 ### `status`
 
@@ -347,9 +501,55 @@ scheduler window and `lab/` disk usage. Stale registry records are pruned
 **after** rendering, in every mode — a status command that silently
 deletes what it just reported would be surprising.
 
+**Models (`models`).** `--json`/`--json=full` also carries an optional
+`models` object, `{"a": {"model", "source", "warm"}, "b": {...}}`, read
+from the last-resolved cache in `model_defaults.yaml` (a local file read:
+no network, nothing loaded, allowed under `--no-probe`). It is additive,
+so the document stays `arail.status/v2`; it is absent when no cache
+exists yet, and human mode prints one matching `models:` line.
+`--json=instances` is untouched.
+
+**The relational store (`arail.db`) as a dependent service**
+(sprints/2026-08-10-arail2-persistence-instantiated §4.4). Every
+resolved root — root lab, every `registry.d/*.json` slug, and every
+on-disk `lab/instances/<slug>/` dir with no registry record — gets a
+read-only check (never creates what it checks; `apply=False`, always,
+even without `--no-probe`; a local file read, budgeted <50ms/root). In
+`--json`/`--json=full` this is additive:
+
+```json
+"root": {"state": "up", ..., "origin": "root",
+         "db": {"state": "ok", "version": 1, "spec_version": 1, "present": true, "detail": ""}},
+"instances": [{"slug": "ai", ..., "origin": "registry", "db": {...}}]
+```
+
+An on-disk-unregistered instance appears as its own synthetic row
+(`"state": "unregistered"`, `"origin": "ondisk"`) — the "2 of 6 roots
+reached" miss, made visible instead of silently skipped. **`--json=instances`
+is unchanged** — it keeps emitting exactly the pre-existing bare rows
+array, with neither `db` nor `origin` on any row; the augmentation only
+ever lands in `--json`/`--json=full`'s `.instances`. Human mode prints a
+`db:` line per lab only when that lab is up/live AND its db state isn't
+already `ok`/`created`/`updated` — quiet when everything is fine, exactly
+like every other line on this surface.
+
+**When a live instance's data root itself is missing** (the pre-existing
+`data_root_missing` warning), its `db` object is suppressed (`null`)
+rather than reporting the derived state (which would always be
+`pending` — there's nothing there to have a database) — that would be a
+second, misleading complaint about the same underlying fact, naming the
+wrong subsystem. This is a documented, deliberate exception: a live
+instance with a missing data root still does **not** degrade `status`'s
+exit code on its own (unchanged, pre-existing behavior) — the missing
+root is reported, once, as a warning, not amplified into a second
+`db:`-prefixed verdict reason.
+
 Exit: `0` something expected is up and nothing is wrong · `3` degraded
-(up but a service is down, a registry record is stale/unreadable, or a
-foreign checkout answers the portal port) · `4` nothing running · `1`
+(up but a service is down, a registry record is stale/unreadable, a
+foreign checkout answers the portal port, **or a live root/instance's db
+is `pending`/`blocked`/`ahead`/`diverged`**) · `4` nothing running (a
+never-created `arail.db` on a lab that was never started does **not**
+promote this to `3` — a lab that was never started is not degraded) · `1`
 internal failure (registry directory unreadable) · `2` bad flag.
 
 ### `doctor`
@@ -379,10 +579,206 @@ Tail `lab/data/activity.jsonl`, optionally filtered by component
 (`browser`\|`system`\|`researcher`\|`goal`\|`wiki`\|`pkb`\|`chat`\|`consent`).
 Unchanged.
 
+`logs --since 2m|10m|1h` prints the events from that window and exits (no
+tail). It is the form Buddy uses. Any other window is refused.
+
+### `drift`
+
+Alias of `db drift`. CI gate: `0` in sync, `3` on drift.
+
+### `rule "<rendered command>" allow|deny`
+
+Appends a ruling to `~/.qukaizen/rulings.jsonl` (`$QKZ_HOME` overrides). This
+is the `y` a person presses in their own pane for a command Buddy may not run
+unattended (for example `pactl apply teams.toml`). A ruling allows that exact
+invocation once. Only commands Buddy can propose for a ruling are accepted.
+Needs `.venv` with the `buddy` extra (`pip install -e '.[buddy]'`).
+
+### `db <op>`
+
+Declarative persistence. The spec tree in `spec/` is the source of truth;
+SQLite, the LanceDB tables, and the generated resolver/registry are all
+compiled from it. Never hand-edit the database or the generated files —
+edit the spec and re-apply.
+
+| Op | What it does | Exit |
+|----|--------------|------|
+| `plan` | Diff spec vs actual across both stores. No writes. | `0` |
+| `apply` | Generate + lint a migration, `atlas schema apply`, reconcile the vector tables, regenerate code, record the spec version. | `0`, `1` on lint failure |
+| `doctor` | Integrity checks, reported **per user**. | `0` clean, `3` on errors |
+| `optimize` | Compact Lance tables and prune retained versions. | `0` |
+| `drift` | CI gate — does actual match the spec? | `0` in sync, `3` on drift |
+| `migrate` | One-shot 1.x → 2.0 data migration. | `0` |
+
+Common options: `--data-dir DIR`, `--pkb-root DIR`, `--spec-dir DIR`
+(accepted before or after the op). `apply` takes `--allow-destructive` for
+vector rebuilds; `migrate` takes `--lab-root DIR`, `--user NAME`, `--apply`.
+
+**`plan`, `drift`, and `migrate` are dry-run by default** — `migrate` writes
+nothing without `--apply`, and never modifies or deletes the 1.x source data.
+
+Destructive vector changes (dimension, distance metric, index type) require a
+rebuild and are **refused** unless `--allow-destructive` is passed. Safe
+changes (add/drop/retype column, create/drop index) auto-apply.
+
+`doctor` reports per user so single-user corruption is visible rather than
+averaged away. It checks orphaned `content_refs`, embedding model/dimension
+drift against the spec, degenerate vectors, fragment counts, retained
+versions, missing vector indexes, and worlds with no entities.
+
+> **Note on migration lint.** Since Atlas v0.38 `atlas migrate lint` requires
+> an Atlas Pro login and exits non-zero *without linting*. When that happens
+> `apply` runs a narrower local destructive-statement gate instead and says so
+> in its output — a gate that did not run is never reported as a gate that
+> passed. Run `atlas login` to get full lint with no code change.
+
 ### `pkb <op>`
 
 `ingest`\|`compile`\|`browse` — ARAIL lab knowledge-base content ops.
 Unchanged.
+
+`prune` — reconcile the **Compiled KB** (the approved layer agents build
+on) with what is actually on disk: drop approvals whose raw file no longer
+exists.
+
+| Flag | Effect |
+|---|---|
+| `--dry-run` | List what would be dropped, change nothing |
+
+Why this exists: the Compiled KB is a *manifest of pointers* into the raw
+corpus, not a second copy. Mounting a World runs
+`world_mount._sweep_other_worlds()`, which deletes the previous World's
+staged `sources/world-<slug>/` term files — deliberately, because a World
+IS the lab's dataset. The approvals for those terms used to outlive their
+files, and since the retrieval gate is a query-time intersection (approved
+paths ∩ live search hits), a dangling pointer matches nothing. Enough of
+them and `search_for_agents()` returns zero hits for **every** query in
+**every** World, with no error raised anywhere — the gate fails closed, and
+"no approved truth" is indistinguishable from "nothing approved yet."
+
+Mount, swap, and `unmount --remove-staged` now prune automatically. This
+verb is the manual door for a lab that already drifted. `./arailctl doctor`
+reports the dangling count (and warns when a World is mounted but nothing
+is approved, so agents would find nothing).
+
+Exit: `0` pruned or already clean · `3` pkb root missing/unreadable — the
+prune deliberately refuses there rather than treating "every path looks
+deleted" as 556 revocations.
+
+`bootstrap` — backfill the Compiled KB for one root: auto-approve the
+currently-staged World's term pages, or write an empty-but-present manifest
+if none qualify. Fixes the QA-6 symptom (agents get zero knowledge-base
+results because the gate ships on while nothing has ever been approved).
+`./arailctl install` (alias `update`) calls this once, non-fatally, for the
+root lab. It is deliberately **not** called by `./arailctl start` — booting
+must stay quiet and must never silently re-approve a term the operator
+revoked. `world_mount.mount()` **and** `world_mount.swap()` both call the
+same reconciliation on every mount/switch going forward — `bootstrap` exists
+for backfilling roots that were mounted/swapped before this mechanism
+shipped, or whose auto-approval was skipped by an escape hatch at the time.
+
+| Flag | Effect |
+|---|---|
+| `--dry-run` | Print what would be approved, change nothing |
+| `--world <slug>` | Target one World instance's PKB root (`lab/instances/<slug>/pkb`) instead of the root lab. `--world root` targets the root lab explicitly. |
+| `--all-instances` | Run bootstrap for the root lab **and** every registered World instance (`lab/instances/<slug>/pkb` for each slug in the instance registry — see `scripts/lib/instances.sh`), one after another. Mutually exclusive with `--world`. Per-root failures are printed and do not abort the remaining roots; the verb's own exit code is non-zero if any root failed. |
+
+A concurrent-Worlds lab (`./arailctl start --world <slug>`, see
+`docs/concurrent-worlds.md`) has one PKB root per instance plus the root
+lab's own — `./arailctl install` only ever backfills the root lab, so after
+adding or resuming World instances, run `./arailctl pkb bootstrap
+--all-instances` once to backfill every root in one command. This is the
+full multi-World backfill procedure; there is no other documented path and
+none is needed — hand-reconstructing an instance's env pack to invoke the
+single-root form is not required.
+
+Scope invariant (a security boundary, not a convenience default): a path is
+auto-approved iff it matches `sources/world-<slug>/terms/<term-slug>.md`
+**and** `<term-slug>` is present in the bundle's `terms.json`. `notes/`,
+`inbox/`, `conversations/`, and everything under `agents/` are unreachable by
+this mechanism no matter what a World bundle contains — only World-forged,
+DaC-compiled term pages qualify.
+
+Two verification levels, both auditable from `approved_by` in
+`compiled/kb/approved.json`:
+
+- `world-seal:<sha12>` — written by the `mount()`/`swap()` hook, where
+  `<sha12>` is the first 12 hex chars of the bundle's `verify_seal()`-checked
+  `computed_sha256`. The seal was actually verified before this approval was
+  written.
+- `world-terms:<sha12>` — written by `./arailctl pkb bootstrap`, where
+  `<sha12>` is the sha256 of the catalog's `terms.json` bytes alone.
+  `bootstrap()` reads the catalog copy directly and does **not** call
+  `verify_seal()` — the stamp says so honestly rather than claiming a
+  verification that did not happen. This is not a widened attack surface:
+  anyone with write access to the lab who could forge a bundle that passes
+  this check already has write access to `approved.json` itself.
+
+Two escape hatches, both fail toward *less* auto-approval:
+
+- `ARAIL_AUTO_APPROVE_WORLD_TERMS=off` disables the mount-time hook globally
+  (the explicit `bootstrap` verb still works).
+- A sentinel file `compiled/kb/no-auto-approve` under a PKB root disables it
+  for that root only — presence, or any error reading it, counts as
+  disabled. It's a file rather than a config flag so it lives with the data
+  and survives a re-mount; drop it into a World's PKB root to opt that World
+  out with no code change.
+
+A term the operator explicitly revokes (`./arailctl pkb prune` doesn't do
+this — revocation is via the Knowledge page's Compiled KB review, or
+`compiled_kb.revoke()`) stays revoked across future mounts via a sticky
+`compiled/kb/unapproved.json` record; a later explicit re-approval clears
+it. `./arailctl pkb bootstrap` is also the door for a lab whose World was
+mounted before this sprint shipped — those bundles are already sealed and
+will never re-enter a mount path on their own, so they need one manual run.
+
+`reembed` — explicit, resumable re-embed of one World's (or the root
+lab's) `pkb_pages` vector index with the spec-declared embedding provider
+(C2, `sprints/2026-08-08-arail2-tier1-integration/`). This is the **only**
+path that (re)writes vectors — nothing else triggers a network embed call;
+in particular, an empty or stale index degrades honestly (a status message
+naming this command) instead of embedding on demand from inside a search
+request.
+
+| Flag | Effect |
+|---|---|
+| `--world <slug>` \| `--root` \| `--all` | Target one World, the root lab, or every mounted World + root (exactly one required) |
+| `--resume` | Resume from the last checkpoint; refuses if the checkpoint's model/dimension/spec disagree with the current spec (never mixes vector spaces) |
+| `--dry-run` | Print row count and an ETA from a 32-row timing probe; writes nothing |
+| `--yes` | Reserved; this verb never prompts today |
+
+Mechanics: vectors are written into a shadow build
+(`<pkb_root>/.cache/lancedb.next/`) batch by batch, with a checkpoint
+(`<pkb_root>/.cache/reembed-state.json`) written after every batch. Before
+swapping, the shadow build's actual row count is re-read from LanceDB and
+compared against the expected total — a mismatch (e.g. an external
+cleanup removed `.next`, or a `--resume` checkpoint's claim disagrees
+with what's actually in the shadow table) discards the shadow build and
+checkpoint and refuses to swap, rather than putting a truncated index
+live. A `total == 0` scan is also refused if a live table already
+exists — an empty result never replaces a populated index. Only once the
+shadow build is verified complete does the live table get replaced — the
+previous table is renamed to `pkb_pages.lance.bak-<ts>` first, so a crash
+between steps leaves either the old table or the old table plus a
+discardable `.next` directory, never a half-embedded live index. An
+`O_EXCL` lock file (`<pkb_root>/.cache/reembed.lock`) prevents two
+concurrent runs against the same root; a second run refuses immediately
+with an actionable message rather than racing LanceDB's own transaction
+conflict resolver. SIGINT stops queuing new batches (the in-flight batch
+finishes and checkpoints normally) and exits `130`; resume with
+`--resume`. A provenance sidecar (`pkb_pages.provenance.json`) is written
+last, after the swap.
+
+On a warm Ollama, expect roughly 75–134 rows/s (measured on the live
+`ai`/`video-games` worlds — see RESULTS.md in the sprint above); a
+5,000-row lab is a ~60s operation. That visibility is the point of having
+an explicit verb instead of an implicit one.
+
+Exit: `0` ok · `1` error (LanceDB unavailable, `--resume` checkpoint spec
+or shadow-build mismatch, empty corpus against an existing live table,
+another `pkb reembed` already running against this root) · `2` the given
+`--pkb-root` doesn't exist · `4` the embedding provider is unavailable
+(`EmbeddingError`) · `130` interrupted (resume with `--resume`).
 
 ### `wiki <op>`
 
@@ -393,10 +789,96 @@ Unchanged.
 DaC WorldBundle ops — passthrough to `python -m arail.world_mount`.
 Unchanged.
 
+### `auth <verb>`
+
+Portal credentials, run from the machine's own shell (exit codes: `0` ok · `2` usage · `3`
+refused: not onboarded, unsafe token file, or not the lab's owner). Every verb takes
+`--world <slug>` to act on a World instance's own token, sessions and passphrase.
+
+| Verb | Effect |
+|---|---|
+| `token` | Make sure `<DATA_DIR>/portal.token` exists (`0600`); print its **id** and path, never the value. Programs send it as `Authorization: Bearer <token>`. |
+| `token --rotate` | New token; the old one stops working on the next request. |
+| `reset` | New lab passphrase (asked twice). It also ends every browser session and remembered browser, replaces the portal token and the OpenCode shim token (it prints the new token id and where the token lives), and clears a login lockout. Use it when you forget the passphrase, or when you think someone got in. |
+| `logout-all` | End every browser session, including in a portal that is already running. |
+| `unlock` | Clear a login lockout. After 5 wrong passphrases in a row (from any local process) new logins wait 10 s, doubling to 5 min; a browser that has logged in before is not held by that. |
+
+### `buddy <verb>`
+
+Link a Buddy (the always-on QA expert you reach from your phone) to this lab through the
+loopback edge `buddy.host/v1` — passthrough to `python -m arail.buddy_host` (`0` ok · `2`
+usage · `3` refused by policy). It never prints the credential. See `docs/buddy-edge.md`.
+
+| Verb | What it does |
+|----|--------------|
+| `link --buddy-home PATH [--yes]` | Shows the consent text, records consent to `api.telegram.org`, mints the credential (ARAIL keeps only its sha256) and writes it to Buddy's `secrets.env` (`0600`). Root lab only, portal bound to loopback. |
+| `link --rotate --buddy-home PATH` | New credential; the old one dies at once |
+| `unlink [--buddy-home PATH]` | Delete ARAIL's link and revoke consent; with a path, also Buddy's link and credential line |
+| `status [--json]` | Linked? credential id, since when, contract currency, consent |
+
+### `nucleus <verb>`
+
+Model Forge (local domain distillation) — passthrough to
+`python -m arail.nucleus`, which owns its own tier gate and exit-code
+contract (`0` ok · `1` internal error · `2` usage · `3` refused by
+policy). See `docs/nucleus.md` for the full tour.
+
+| Verb | What it does |
+|----|--------------|
+| `plan "<intent>" --name <slug>` | Writes `configs/domains/<slug>.yaml` and confirms it resolves |
+| `stage <slug> --source KIND:NAME=<path>` | Stages a local corpus; makes zero network calls |
+| `build <slug> --profile local` | Preflight, then extract / extract-on-cert / train / fuse / eval |
+| `spike <slug>` | Gate B half-day M5 harness |
+| `certify <build_id>` | Contamination gate, DNA card, seal, build report, local ledger |
+| `verify <shard>@<version>|<dir>` | Re-checks a card's signature, key trust, and content hashes |
+| `status <build_id>` | Prints a build's `run.json` |
+| `list` | Shows certified shards |
+
 ### `benchmark_models` (aliases: `benchmark`, `aerollm`)
 
 Measure local model TPS for autoresearch routing. Defaults to `--all`
 when no args are given. Unchanged.
+
+### `autoresearch <op>`
+
+Retention for what the tuning loop leaves behind. The loop creates a
+baseline branch plus one branch per variant on every pass and appends to
+a bench log, and it prunes nothing — run it nightly for a month and you
+have hundreds of refs and an unbounded JSONL. These two ops bound that.
+
+**Both ops are dry-run by default.** With no `--apply` they print the
+plan and change nothing.
+
+| Op | What it does |
+|----|--------------|
+| `prune` | Delete old losing/superseded `autoresearch/*` branches |
+| `rotate` | Move the oldest bench records into a sibling archive file |
+
+| Flag | Effect |
+|---|---|
+| `--apply` | Actually make the change (mutually exclusive with `--dry-run`) |
+| `--dry-run` | Explicit form of the default |
+| `--json` | Emit the plan (and result) as JSON |
+| `--keep-recent N` | `prune`: never touch the N newest branches (default 20) |
+| `--older-than-days N` | `prune`: never touch anything younger (default 14) |
+| `--verbose` | `prune`: also list what was kept, and why |
+| `--max-lines N` | `rotate`: how many newest records stay in place (default 5000) |
+
+`prune` never deletes a **win**, the branch you are currently on, a
+branch it cannot classify (`unknown`/`running`), the newest N, anything
+younger than the age gate, or any ref outside `autoresearch/`. Every gate
+is a *keep* gate, so a new failure mode defaults to keeping. Before each
+deletion it appends a receipt to `lab/data/autoresearch-pruned.jsonl`
+carrying the branch's full SHA and a ready-to-paste `git branch <name>
+<sha>` restore line — only the ref is removed, never the objects.
+
+`rotate` discards nothing: the archive is appended to, and the live file
+is replaced atomically so a crash cannot truncate it.
+
+Exit: `0` planned, applied, or nothing to do · `2` usage error (bad flag,
+invalid policy, `--apply` with `--dry-run`) · `3` applied but one or more
+branches failed to delete — the pile is still there, so this is degraded,
+not success.
 
 ### `kb <op>`
 

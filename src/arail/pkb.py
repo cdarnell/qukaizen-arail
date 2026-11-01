@@ -9,18 +9,35 @@ Three operations:
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shutil
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+_log = logging.getLogger(__name__)
 
 
 def _pkb_root() -> Path:
     """Resolve PKM root via central config (honors LAB_PKM env)."""
     from arail.config import PKB_ROOT
     return PKB_ROOT
+
+
+def retrieval_status() -> tuple[bool, str]:
+    """(ok, message) for the vector-search subsystem (C1 in
+    ARCHITECTURE.md). ok=False means the last embedding call failed and
+    search()/search_for_agents() are currently running keyword-only —
+    callers that present retrieval as "semantic" should say so. Thin
+    delegate to pkb_index, which owns the degraded flag."""
+    try:
+        from arail import pkb_index
+        return pkb_index.embedding_status()
+    except Exception:  # noqa: BLE001
+        return True, ""
 
 
 def _ts() -> str:
@@ -76,6 +93,23 @@ _EXT_MAP = {
 }
 
 
+def _mounted_world_prefix() -> str | None:
+    """``world-<slug>`` for the currently mounted World, else None.
+
+    Never raises: an unreadable or absent mount just means "no World to
+    attribute this to", which is the correct root-lab behavior.
+    """
+    try:
+        from arail.world_mount import current_mount
+        record = current_mount()
+    except Exception as e:  # noqa: BLE001 — ingest must never fail on a bad mount
+        _log.warning("pkb.ingest: mount lookup failed, ingesting unscoped: %s", e)
+        return None
+    if record is None or not getattr(record, "world", ""):
+        return None
+    return f"world-{record.world}"
+
+
 def ingest(pkb_root: Path | None = None) -> dict[str, Any]:
     """Process everything in inbox/ → sources/.
 
@@ -89,6 +123,16 @@ def ingest(pkb_root: Path | None = None) -> dict[str, Any]:
     if not inbox.exists():
         return {"moved": 0, "urls_fetched": 0, "errors": [], "destinations": {}}
 
+    # Knowledge ingested while a World is mounted BELONGS to that World, so it
+    # lands under sources/world-<slug>/ and the review queue can scope to it
+    # (compiled_kb._world_of reads exactly that prefix). Without this, every
+    # upload joined one undifferentiated pool and a freshly-forged World's
+    # queue filled up with the previous World's material.
+    #
+    # Unmounted (root lab) keeps the flat sources/<kind>/ layout — there is no
+    # World to attribute to, and inventing one would be a lie about provenance.
+    scope_prefix = _mounted_world_prefix()
+
     moved = 0
     urls_fetched = 0
     errors: list[str] = []
@@ -97,7 +141,9 @@ def ingest(pkb_root: Path | None = None) -> dict[str, Any]:
     # Process links.txt (URL bookmarks dropped in inbox)
     links_file = inbox / "links.txt"
     if links_file.exists():
-        bookmarks = root / "sources" / "bookmarks.md"
+        bookmarks = (root / "sources" / scope_prefix / "bookmarks.md"
+                     if scope_prefix else root / "sources" / "bookmarks.md")
+        bookmarks.parent.mkdir(parents=True, exist_ok=True)
         try:
             lines = links_file.read_text().strip().splitlines()
             with open(bookmarks, "a") as f:
@@ -145,7 +191,8 @@ def ingest(pkb_root: Path | None = None) -> dict[str, Any]:
         if item.is_file():
             ext = item.suffix.lower()
             subfolder = _EXT_MAP.get(ext, "articles")  # default to articles
-            dest_dir = root / "sources" / subfolder
+            dest_dir = (root / "sources" / scope_prefix / subfolder
+                        if scope_prefix else root / "sources" / subfolder)
             dest_dir.mkdir(parents=True, exist_ok=True)
             dest_name = f"{_date_prefix()}_{item.name}"
             dest = dest_dir / dest_name
@@ -397,12 +444,25 @@ def _iter_pkb_files(root: Path):
             continue
         if _is_world_machinery(p):
             continue
+        rel_parts = p.relative_to(root).parts
         # Conversation memory is raw chat state, never searchable KB content.
         # Its meta.json (user-authored titles) has a .json suffix and would
         # otherwise leak into the ungated /api/pkb/search index. Transcripts are
         # .jsonl (not indexed), but exclude the whole dir to close the sibling
         # meta.json leak and keep chat memory out of the wiki/KB.
-        if "conversations" in p.relative_to(root).parts:
+        if "conversations" in rel_parts:
+            continue
+        # .cache/ holds the vector index itself plus (as of the
+        # arail2-tier1-integration sprint) the reembed checkpoint and
+        # provenance sidecars — machine state, never searchable content.
+        # Without this, ``.cache/reembed-state.json`` and
+        # ``.cache/lancedb/pkb_pages.provenance.json`` would get indexed as
+        # ordinary PKB rows and re-embedded on the very next reembed run
+        # (a self-referential bug C2 surfaced; only ``.cache`` is excluded
+        # here — the pre-existing ``.wiki-cache`` dot-directory indexing
+        # defect is separate, deliberately out of scope, and tracked in
+        # sprints/BACKLOG.md).
+        if ".cache" in rel_parts:
             continue
         try:
             text = p.read_text(errors="replace")
@@ -413,6 +473,22 @@ def _iter_pkb_files(root: Path):
 
 def _vector_db_path(root: Path) -> Path:
     return root / ".cache" / "lancedb"
+
+
+def _current_spec_sha256() -> str:
+    """The current spec tree's sha256, for the C4 provenance sidecar.
+
+    Uses ``dbspec.spec.load_spec()`` (public API) rather than reaching into
+    ``dbspec.migrate``/``reconcile``/``repo`` — those are the files this
+    sprint's consolidation-cutover-rejected scope must not touch. Returns
+    "" if the spec cannot be loaded (never raises — a provenance sidecar
+    with an empty spec_sha256 is still useful for the model/dim check,
+    which is the one C4 actually gates on)."""
+    try:
+        from arail.dbspec.spec import load_spec, DEFAULT_SPEC_DIR  # noqa: PLC0415
+        return load_spec(DEFAULT_SPEC_DIR).sha256
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 def _source_kind_for_rel(rel: str) -> str:
@@ -433,8 +509,8 @@ def _source_kind_for_rel(rel: str) -> str:
     return "user"
 
 
-def _build_docs_rows() -> list[dict[str, Any]]:
-    """Build LanceDB rows for every registered doc.
+def _collect_docs_rows() -> list[dict[str, Any]]:
+    """Row inputs for every registered doc — no precomputed vector.
 
     Reuses docs_registry.all_docs() so the set is always in sync with
     what the Hub renders.  Returns [] if the registry raises or is empty
@@ -443,18 +519,19 @@ def _build_docs_rows() -> list[dict[str, Any]]:
     Row schema mirrors the PKB schema so search callers need no changes:
       path        — "docs/<slug>.md" or "root/<slug>.md" (namespace-safe)
       name        — Doc.title (semantic label for the vector)
-      vector      — hash_embedding of "<title> <slug> <body[:4096]>")
+      embed_input — "<title> <slug> <body[:4096]>" — the caller embeds it
+                    (see collect_pending_rows / index_all). Splitting row
+                    construction from embedding is what lets index_all and
+                    ``./arailctl pkb reembed`` share this exact function
+                    while using different embedders/batching (A4).
       mtime       — Doc.mtime
       source_kind — "docs" (new value; existing PKB rows stay "user"/agent/*)
     """
-    from arail.vector_index import hash_embedding  # noqa: PLC0415
-
     try:
         from arail.portal.docs_registry import all_docs  # noqa: PLC0415
         docs = all_docs()
     except Exception as exc:  # pragma: no cover
-        import logging
-        logging.getLogger(__name__).warning(
+        _log.warning(
             "pkb.index_all: docs_registry.all_docs() failed (%s); "
             "skipping docs ingest — PKB rows will still be indexed.",
             exc,
@@ -468,7 +545,8 @@ def _build_docs_rows() -> list[dict[str, Any]]:
             body = p.read_text(errors="replace") if p.exists() else ""
         except OSError:
             body = ""
-        # Cap at 4 KB — same as PKB to keep hash_embedding cheap on large docs.
+        # Cap at 4 KB — same as PKB rows, keeps the embed call cheap on
+        # large docs regardless of which embedder is in use.
         snippet = body[:4096]
         # Namespace the path so a future pkb/docs/foo.md cannot collide:
         #   docs/ files  → "docs/<slug>.md"
@@ -478,10 +556,51 @@ def _build_docs_rows() -> list[dict[str, Any]]:
         rows.append({
             "path": row_path,
             "name": doc.title,
-            "vector": hash_embedding(f"{doc.title} {doc.slug} {snippet}"),
             "mtime": doc.mtime,
             "source_kind": "docs",
+            "embed_input": f"{doc.title} {doc.slug} {snippet}",
         })
+    return rows
+
+
+def collect_pending_rows(pkb_root: Path, *, include_docs: bool = True) -> list[dict[str, Any]]:
+    """Every PKB row's (path, name, mtime, source_kind, embed_input) — no
+    vector. The single source of truth for *what* gets embedded and *how
+    the embedding input string is built*, shared by ``index_all`` and
+    ``./arailctl pkb reembed`` (``pkb_reembed.py``) so the two indexing
+    paths can never diverge on the embedding input (A4 in
+    ARCHITECTURE.md's arail2-tier1-integration sprint).
+
+    NOTE on docs-registry coverage (REVIEW.md required action, carried in
+    ``sprints/BACKLOG.md``): the Tier 1.2 A/B measurement
+    (``scripts/eval/retrieval_ab.py``) scored PKB rows only — it did not
+    call ``_collect_docs_rows()`` because that function pulls a *global*,
+    non-world-scoped corpus with no ``root`` parameter, which would make
+    per-world recall@5 incoherent. This function (and therefore
+    ``index_all``/``pkb_reembed``) *does* include the docs-registry slice
+    when ``include_docs=True`` — it re-embeds rows the A/B never measured,
+    on the strength of the general result (same embedder, same
+    embed-input shape, same document type) rather than a slice-specific
+    measurement. Documented here as the explicit, written assumption
+    REVIEW.md required, not a silent one.
+    """
+    rows: list[dict[str, Any]] = []
+    for p, text in _iter_pkb_files(pkb_root):
+        rel = p.relative_to(pkb_root).as_posix()
+        # Compose the vector input: name + path + first 4 KB of body.
+        # Capping keeps the embed call cheap on big files regardless of
+        # embedder; the snippet preview the API returns is computed
+        # separately.
+        snippet_for_embedding = text[:4096]
+        rows.append({
+            "path": rel,
+            "name": p.name,
+            "mtime": p.stat().st_mtime,
+            "source_kind": _source_kind_for_rel(rel),
+            "embed_input": f"{p.name} {rel} {snippet_for_embedding}",
+        })
+    if include_docs:
+        rows.extend(_collect_docs_rows())
     return rows
 
 
@@ -499,44 +618,81 @@ def index_all(pkb_root: Path | None = None, *, include_docs: bool = True) -> dic
                       False to index PKB-only (e.g. in tests that assert
                       source_kind != 'docs').
 
-    Returns ``{ok, indexed, indexed_docs, path}`` so callers can surface
-    the state in activity logs.  The ``indexed_docs`` key is new in Sprint 3;
-    it is 0 when ``include_docs=False`` or when the registry is empty.
+    Returns ``{ok, indexed, indexed_docs, path, error, skipped}`` so
+    callers can surface the state in activity logs. ``indexed_docs`` is 0
+    when ``include_docs=False`` or when the registry is empty. ``error``
+    and ``skipped`` are always present on a normal return (both empty/0
+    today — no per-item SKIP-class failure is currently tracked past
+    ``_iter_pkb_files``'s own silent-OSError-skip); an embedding failure
+    does not populate them because it does not return normally at all —
+    see below.
 
     Schema: {path, name, vector, mtime, source_kind}
+
+    Row construction is delegated to ``collect_pending_rows`` — this
+    function's job is choosing the embedder, writing, and (C4) recording
+    provenance.
+
+    **Ordering is load-bearing, not incidental**: every vector is computed
+    (``embed_documents``, one batched call) *before* ``VectorIndex.replace``
+    is touched, because ``replace()`` is a ``mode="overwrite"`` drop
+    (``vector_index.py:162``) — a partial embedding must never reach it,
+    or a mid-run outage would silently empty the index instead of leaving
+    it exactly as it was. If the embedder raises ``EmbeddingError``, this
+    function does not catch it: the exception propagates to the caller
+    (LOUD, per C1) and NOTHING is written — the existing table, if any, is
+    untouched. Every call site in ``pkb_index.py`` is written to catch it
+    separately and degrade rather than let it surface as an unhandled
+    exception in a background thread.
     """
-    from arail.vector_index import VectorIndex, hash_embedding, available
+    from arail.vector_index import VectorIndex, available
+    from arail.dbspec.embed import embed_documents
+    from arail.dbspec.generated.models_registry import EMBEDDING_DIM, embedding_model
 
     root = pkb_root or _pkb_root()
     if not root.exists() or not available():
-        return {"ok": False, "indexed": 0, "indexed_docs": 0, "path": None}
+        return {"ok": False, "indexed": 0, "indexed_docs": 0, "path": None,
+                "error": None, "skipped": 0}
 
-    rows: list[dict[str, Any]] = []
-    for p, text in _iter_pkb_files(root):
-        rel = p.relative_to(root).as_posix()
-        # Compose the vector input: name + path + first 4 KB of body.
-        # Capping keeps the SHA1 token sweep cheap on big files; the
-        # snippet preview the API returns is computed separately.
-        snippet_for_embedding = text[:4096]
-        rows.append({
-            "path": rel,
-            "name": p.name,
-            "vector": hash_embedding(f"{p.name} {rel} {snippet_for_embedding}"),
-            "mtime": p.stat().st_mtime,
-            "source_kind": _source_kind_for_rel(rel),
-        })
+    pending = collect_pending_rows(root, include_docs=include_docs)
 
-    docs_rows: list[dict[str, Any]] = _build_docs_rows() if include_docs else []
-    all_rows = rows + docs_rows
+    # Compute every vector BEFORE any write (see docstring — this ordering
+    # is the whole point of C1/FM10). EmbeddingError propagates untouched.
+    vectors = embed_documents([r["embed_input"] for r in pending]) if pending else []
+
+    all_rows: list[dict[str, Any]] = [
+        {
+            "path": r["path"],
+            "name": r["name"],
+            "vector": v,
+            "mtime": r["mtime"],
+            "source_kind": r["source_kind"],
+        }
+        for r, v in zip(pending, vectors)
+    ]
+    indexed_docs = sum(1 for r in pending if r["source_kind"] == "docs")
 
     db_path = _vector_db_path(root)
-    idx = VectorIndex(name="pkb_pages", db_path=db_path)
+    idx = VectorIndex(name="pkb_pages", db_path=db_path, dim=EMBEDDING_DIM)
     written = idx.replace(all_rows)
+
+    # C4: provenance written LAST, only after the data write succeeded.
+    try:
+        from arail import pkb_provenance
+        pkb_provenance.write(
+            db_path, embedding_model=embedding_model().name,
+            embedding_dim=EMBEDDING_DIM, spec_sha256=_current_spec_sha256(),
+            rows=written)
+    except Exception as exc:  # noqa: BLE001 — provenance is best-effort
+        _log.warning("pkb.index_all: failed to write provenance sidecar: %s", exc)
+
     return {
         "ok": True,
         "indexed": written,
-        "indexed_docs": len(docs_rows),
+        "indexed_docs": indexed_docs,
         "path": str(db_path),
+        "error": None,
+        "skipped": 0,
     }
 
 
@@ -568,21 +724,110 @@ def _semantic_search(
     min_score: float = 0.05,
     approved: set[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Vector-backed search. Returns [] if LanceDB or the index is absent.
+    """Vector-backed search. Returns [] if LanceDB or the index is absent,
+    empty, the table's provenance disagrees with the spec, or the
+    embedding provider is unavailable — ``search()`` then runs the regex
+    fallback and the caller can read ``retrieval_status()``.
+
+    C4/BLOCK-1: this function enforces the read-path health check
+    (dimension + provenance, via ``pkb_index.check_read_path_health``) on
+    EVERY call, not just once at process startup — a table that degrades
+    mid-process (sidecar rewritten, schema changed underneath) is caught
+    on the very next search. A successful ``embed_query()`` call clears
+    only the "provider" degraded code; it is evidence the network path
+    works, not evidence about the table's dimension or provenance, and
+    must never clear those.
 
     When ``approved`` is a set of pkb-relative paths, results are filtered to
     that set — the Compiled-KB gate (agents build only on approved truth)."""
-    from arail.vector_index import VectorIndex, available
+    from arail.vector_index import VectorIndex, VectorSearchError, available
+    from arail.dbspec.embed import embed_query, EmbeddingError
+    from arail.dbspec.generated.models_registry import EMBEDDING_DIM
+    from arail import pkb_index
 
     if not available():
+        # Defect B: this is the only early return in this function that
+        # previously did not call set_degraded(...). When the interpreter
+        # cannot import the vector backend at all, every other health
+        # surface (embedding_status(), retrieval_status(),
+        # X-Retrieval-Status, doctor) must say so instead of reporting
+        # healthy while semantic retrieval is silently dead. Cleared only
+        # by a later successful available() observation or a full rebuild
+        # (clear_degraded(None)) — a successful embed call is not evidence
+        # about this code (BLOCK-1 discipline).
+        pkb_index.set_degraded(
+            "backend",
+            f"LanceDB is not importable in this interpreter "
+            f"({sys.executable}) — run `./arailctl install`, or you are "
+            f"running a non-.venv python")
         return []
-    idx = VectorIndex(name="pkb_pages", db_path=_vector_db_path(root))
+    # A successful available() observation is evidence about the "backend"
+    # code specifically (§4.7) — clear it if it was set by an earlier call
+    # in this process (e.g. a hot-reloaded interpreter).
+    pkb_index.clear_degraded("backend")
+    db_path = _vector_db_path(root)
+    idx = VectorIndex(name="pkb_pages", db_path=db_path, dim=EMBEDDING_DIM)
     if idx.count() == 0:
-        # Lazy first-time indexing — every install ships LanceDB so we
-        # build the index on demand instead of failing silently.
-        index_all(root)
-    # Over-fetch when gating so the approved subset still fills k results.
-    hits = idx.search(query, k=(k * 6 if approved is not None else k), min_score=min_score)
+        # C2/FM11: the lazy index_all() call is REMOVED on this
+        # integration. A user typing in the search box must never trigger
+        # hundreds of synchronous embed calls. Degrade honestly, naming
+        # the explicit command that builds the index.
+        pkb_index.set_degraded(
+            "empty", "KB index is empty for this world — run `./arailctl pkb reembed`")
+        return []
+
+    table = idx._table()  # noqa: SLF001 — same accessor pkb_index's own health check uses
+    if table is None:
+        pkb_index.set_degraded("empty", "pkb_pages table could not be opened")
+        return []
+
+    # REVIEW3.md "also fix": reaching here IS evidence the table is
+    # non-empty (idx.count() > 0 above, and the table opened) — clear
+    # "empty" now rather than leaving it sticky forever once set. Without
+    # this, a table that starts empty (search sets "empty"), then becomes
+    # populated via an incremental _flush, keeps reporting degraded
+    # indefinitely even though every subsequent search actually succeeds:
+    # /api/pkb/search would stamp X-Retrieval-Status: degraded on healthy
+    # responses forever.
+    pkb_index.clear_degraded("empty")
+
+    # C4/BLOCK-1: dimension + provenance, checked fresh on every search —
+    # never served from a table that disagrees with the spec.
+    ok, _reason = pkb_index.check_read_path_health(table, db_path)
+    if not ok:
+        return []
+
+    try:
+        query_vector = embed_query(query)
+    except EmbeddingError as e:
+        _log.error("pkb: semantic search embedding failed: %s", e)
+        try:
+            from arail.activity import activity_log
+            activity_log.emit("pkb", f"Semantic search degraded: {e}", "error")
+        except Exception:  # noqa: BLE001
+            pass
+        pkb_index.set_degraded("provider", str(e))
+        return []
+    # A successful embed call is evidence about the PROVIDER only.
+    pkb_index.clear_degraded("provider")
+
+    try:
+        # Over-fetch when gating so the approved subset still fills k results.
+        hits = idx.search_vector(
+            query_vector, k=(k * 6 if approved is not None else k), min_score=min_score)
+    except VectorSearchError as e:
+        # A backend failure here (should be rare — check_read_path_health
+        # already screened for the known dimension/provenance causes) must
+        # not be swallowed into a silent []-that-looks-like-no-hits. Log,
+        # degrade, and fall through the same way an EmbeddingError does.
+        _log.error("pkb: semantic search backend error: %s", e)
+        try:
+            from arail.activity import activity_log
+            activity_log.emit("pkb", f"Semantic search backend error: {e}", "error")
+        except Exception:  # noqa: BLE001
+            pass
+        pkb_index.set_degraded("dimension", str(e))
+        return []
     if approved is not None:
         hits = [h for h in hits if h.get("path") in approved][:k]
     if not hits:
@@ -670,13 +915,53 @@ def search(query: str, pkb_root: Path | None = None, *,
     return results
 
 
+def retrieve_for_agents(query: str, pkb_root: Path | None = None) -> dict[str, Any]:
+    """Retrieval for agents that experiment/develop (Researcher, chat RAG, goal
+    drafter). Honors the Compiled-KB gate: when the gate is enabled (default),
+    agents build ONLY on approved knowledge. When disabled via
+    ``ARAIL_APPROVED_ONLY=off``, falls back to the full raw corpus.
+
+    Returns ``{"hits": [...], "gate": <gate_state(cheap=True)>, "empty_reason":
+    None|"gate_empty"|"no_match"|"gate_off_no_match"}`` so a caller can tell
+    "the gate is empty, the search never ran" apart from "the search ran and
+    found nothing" — both were a silent zero before this. Never raises: an
+    internal error fails closed AND loud (``hits=[]``,
+    ``empty_reason="gate_empty"``), never silent.
+    """
+    from arail.compiled_kb import gate_enabled, gate_state, approved_paths
+
+    try:
+        enabled = gate_enabled()
+        gate = gate_state(pkb_root, cheap=True)
+        if enabled and not approved_paths(pkb_root):
+            return {"hits": [], "gate": gate, "empty_reason": "gate_empty"}
+        hits = search(query, pkb_root, approved_only=enabled)
+        if hits:
+            return {"hits": hits, "gate": gate, "empty_reason": None}
+        reason = "no_match" if enabled else "gate_off_no_match"
+        return {"hits": hits, "gate": gate, "empty_reason": reason}
+    except Exception:  # noqa: BLE001 — fail closed and loud, never silent
+        from arail.compiled_kb import gate_state as _gs
+        try:
+            gate = _gs(pkb_root, cheap=True)
+        except Exception:  # noqa: BLE001
+            gate = {"schema": "arail.kb-gate/v1", "enabled": True,
+                     "manifest_present": False, "approved_count": 0,
+                     "live_count": 0, "pending_count": -1,
+                     "state": "unbootstrapped", "hint": ""}
+        return {"hits": [], "gate": gate, "empty_reason": "gate_empty"}
+
+
 def search_for_agents(query: str, pkb_root: Path | None = None) -> list[dict[str, Any]]:
     """Retrieval for agents that experiment/develop (Researcher, chat RAG, goal
     drafter). Honors the Compiled-KB gate: when the gate is enabled (default),
     agents build ONLY on approved knowledge. When disabled via
-    ``ARAIL_APPROVED_ONLY=off``, falls back to the full raw corpus."""
-    from arail.compiled_kb import gate_enabled
-    return search(query, pkb_root, approved_only=gate_enabled())
+    ``ARAIL_APPROVED_ONLY=off``, falls back to the full raw corpus.
+
+    Kept as ``retrieve_for_agents(...)["hits"]`` — unchanged shape and gate
+    semantics, so existing callers and ``tests/test_pkb_gate.py`` need no
+    edit."""
+    return retrieve_for_agents(query, pkb_root)["hits"]
 
 
 # ── Agent Write Helpers ──────────────────────────────────────────────────

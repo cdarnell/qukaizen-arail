@@ -96,11 +96,27 @@ def _make_fake_router():
 # The golden snapshot capture helper
 # ---------------------------------------------------------------------------
 
+def _isolate_registry(monkeypatch) -> None:
+    """Point the process-wide model registry at a throwaway file + fresh
+    singleton (same convention as tests/registry/conftest.py's
+    tmp_registry) before any test exercises /api/chat/models — the
+    endpoint now reads get_registry() to build `slots`
+    (sprints/2026-08-11-two-slot-chat-models), and without this a test
+    run would read/pollute the real lab/data/model_registry.json, or
+    inherit a stale singleton left loaded by an earlier test."""
+    import tempfile
+    from arail.registry import core as reg_core
+    tmp_dir = tempfile.mkdtemp(prefix="arail-r1-golden-registry-")
+    monkeypatch.setenv("ARAIL_MODEL_REGISTRY_FILE", os.path.join(tmp_dir, "model_registry.json"))
+    reg_core.reset_registry()
+
+
 def _capture_golden_payload(monkeypatch) -> dict:
     """Run GET /api/chat/models with fully-mocked internals; return the JSON dict."""
     monkeypatch.setenv("LAB_MODE", "airgapped")
     monkeypatch.setenv("MODEL_NAME", _FAKE_MODEL_NAME)
     monkeypatch.setenv("ARAIL_MODELS_DIR", "/nonexistent/models_dir_for_test")
+    _isolate_registry(monkeypatch)
 
     from arail.portal import app as portal_app
     from fastapi.testclient import TestClient
@@ -129,12 +145,16 @@ _R1_EXPECTED_TOP_KEYS = {
     "backend", "provider", "current", "models", "switchable",
     "local_models", "install_hint", "optional_backends",
     "default_optional_backend", "deep", "gallery", "compact",
-    "onboarding", "local_model_entries", "fit", "model_load",
+    "onboarding", "local_model_entries", "fit", "model_load", "slots",
 }
 # NOTE: top-level "hardware" was DELETED (sprint 2026-07-20-model-ux-unification,
 # §2.1/BLOCK-1, F-DEADFIELD). The frontend's only reader was `compact.hardware`,
 # which the response never populated (F-BLANK) — the snapshot is now nested
 # there instead of duplicated at the top level where nothing read it.
+#
+# NOTE: top-level "slots" was ADDED (sprint 2026-08-11-two-slot-chat-models)
+# — the two-slot model (resident/deep), read from the registry. See
+# test_chat_slots_contract.py for value-level coverage.
 
 
 def test_r1_snapshot_top_keys_exact(monkeypatch):
@@ -315,6 +335,7 @@ def test_r1_snapshot_onboarding_has_required_keys(monkeypatch):
 def test_r1_snapshot_empty_provider_reaches_legacy(monkeypatch):
     """R1: ?provider= (empty) must reach the legacy branch (not cloud)."""
     monkeypatch.setenv("LAB_MODE", "airgapped")
+    _isolate_registry(monkeypatch)
 
     from arail.portal import app as portal_app
     from fastapi.testclient import TestClient
@@ -342,6 +363,7 @@ def test_r1_snapshot_empty_provider_reaches_legacy(monkeypatch):
 def test_r1_snapshot_my_machine_reaches_legacy(monkeypatch):
     """R1: ?provider=my_machine must reach the legacy branch (not cloud)."""
     monkeypatch.setenv("LAB_MODE", "airgapped")
+    _isolate_registry(monkeypatch)
 
     from arail.portal import app as portal_app
     from fastapi.testclient import TestClient

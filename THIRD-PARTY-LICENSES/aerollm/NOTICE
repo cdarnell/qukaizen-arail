@@ -1,0 +1,9 @@
+AeroLLM Runtime
+Copyright 2026 Charles Darnell and AeroLLM contributors.
+
+This product is licensed under the Apache License, Version 2.0.
+See the LICENSE file for the full license text.
+
+This is a from-scratch codebase. No third-party source code is vendored.
+Runtime dependencies are declared in Cargo.toml and pyproject.toml
+(where applicable) and retain their respective licenses.

@@ -1,4 +1,4 @@
-"""Provenance recognizer -- port of DaC's ``src/provenance.ts``.
+"""Provenance recognizer -- port of DDaC's ``src/provenance.ts``.
 
 The ``model:`` regex; tier is DERIVED from the corpus, never asserted.
 Moved verbatim from qukaizen-arail's ``src/arail/world_forge.py`` as part of

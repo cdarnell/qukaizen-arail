@@ -24,6 +24,8 @@ import os
 import threading
 from typing import Any, Optional
 
+from arail.agent_context import AgentHeldError
+
 # Gentle background pressure ceiling — well under the 0.75 hard chat guard in
 # mlx_guard, so background deep work bows out long before the foreground would.
 _BG_PRESSURE_DEFAULT = 0.60
@@ -58,41 +60,110 @@ def _aerollm_importable() -> bool:
         return False
 
 
-def background_safe() -> bool:
-    """True when running the heavy 2nd inference in the background right now
-    would not be intrusive (window / presence / profile / memory)."""
+def _background_gate() -> "tuple[bool, str, str]":
+    """Walk the background non-intrusiveness checks, in policy order.
+
+    Returns ``(ok, reason_code, detail)`` — code/detail empty when ok.
+    Extracted from background_safe() so explain() can name the failing
+    gate without duplicating the decision logic.
+    """
     from arail import runtime_profile, scheduler
     if scheduler.jobs_halted():
-        return False
+        return False, "deferred_now", "background jobs are halted"
     if scheduler.current_window() == "active":
-        return False
+        return (False, "deferred_now",
+                "inside the active work window — deep passes run in "
+                "heavy/idle hours")
     profile, _ = runtime_profile.resolve()
     if profile == "interactive":  # operator is present — yield to them
-        return False
+        return (False, "deferred_now",
+                "operator present (interactive profile) — deep passes run "
+                "when the lab is idle")
     if not runtime_profile.params(profile).get("background_aerollm"):
-        return False
+        return (False, "deferred_now",
+                f"runtime profile '{profile}' disables background QueueLLM")
     try:
         from arail.router.mlx_guard import metal_memory_pressure
         pressure = metal_memory_pressure()
     except Exception:  # noqa: BLE001
         pressure = None
     if pressure is not None and pressure >= _bg_pressure_ceiling():
-        return False
-    return True
+        return (False, "deferred_now",
+                f"memory pressure {pressure:.0%} is above the background "
+                "ceiling")
+    return True, "", ""
+
+
+def background_safe() -> bool:
+    """True when running the heavy 2nd inference in the background right now
+    would not be intrusive (window / presence / profile / memory)."""
+    return _background_gate()[0]
+
+
+def boot_warm_gate() -> "tuple[bool, str, str]":
+    """Gate for the one-shot boot warm of the deep slot (sprints/2026-10-20-
+    boot-model-autoresolve): ``(ok, reason_code, detail)``.
+
+    Same tier / wheel checks as explain(), plus the gentle Metal memory-
+    pressure ceiling -- but deliberately NOT operator presence, halted jobs
+    or the active window: the operator is always present at boot, so
+    background_safe() would never pass. Model fit is decided by the boot
+    resolver before this is asked. The interval preload loop keeps the full
+    background gate as the later re-warmer.
+    """
+    from arail.tier import is_maximus
+    if not _enabled():
+        return (False, "disabled",
+                "ARAIL_AGENT_DEEP is off (agent deep-inference kill switch)")
+    if not is_maximus():
+        return (False, "tier_locked", "deep inference needs the maximus tier")
+    if not _aerollm_importable():
+        return (False, "wheel_missing", "aerollm_api is not installed")
+    try:
+        from arail.router.mlx_guard import metal_memory_pressure
+        pressure = metal_memory_pressure()
+    except Exception:  # noqa: BLE001
+        pressure = None
+    if pressure is not None and pressure >= _bg_pressure_ceiling():
+        return (False, "deferred_now",
+                f"memory pressure {pressure:.0%} is above the boot-warm ceiling")
+    return True, "ok", "deep model can warm at boot"
+
+
+def boot_warm_safe() -> bool:
+    """Boolean projection of boot_warm_gate()."""
+    return boot_warm_gate()[0]
+
+
+def explain(*, foreground: bool) -> "tuple[bool, str, str]":
+    """``prefer_deep`` with its reason: ``(ok, reason_code, detail)``.
+
+    reason_code ∈ {"ok", "disabled", "tier_locked", "wheel_missing",
+    "deferred_now"}. prefer_deep() is a boolean projection of this walk,
+    so the UI's explanation and the agents' decision can never drift.
+    """
+    from arail.tier import is_maximus
+    if not _enabled():
+        return (False, "disabled",
+                "ARAIL_AGENT_DEEP is off (agent deep-inference kill switch)")
+    if not is_maximus():
+        return (False, "tier_locked",
+                "deep inference needs the maximus tier — run "
+                "./arailctl upgrade maximus")
+    if not _aerollm_importable():
+        return (False, "wheel_missing",
+                "aerollm_api is not installed — run ./arailctl deep install")
+    if foreground:
+        return True, "ok", "deep inference available"
+    ok, code, detail = _background_gate()
+    if not ok:
+        return False, code, detail
+    return True, "ok", "deep passes will run in the background"
 
 
 def prefer_deep(*, foreground: bool) -> bool:
     """The single yes/no: use the aeroLLM 2nd inference for this call?"""
-    from arail.tier import is_maximus
-    if not _enabled():
-        return False
-    if not is_maximus():
-        return False
-    if not _aerollm_importable():
-        return False
-    if foreground:
-        return True
-    return background_safe()
+    return explain(foreground=foreground)[0]
 
 
 def get_deep_router():
@@ -120,6 +191,22 @@ def get_deep_router():
         return _deep_router
 
 
+def invalidate_deep_router() -> None:
+    """Drop the cached deep (aeroLLM) router so the next get_deep_router()
+    call re-resolves (sprints/2026-08-11-two-slot-chat-models Part 4).
+
+    Called after an in-process deep-model swap replaces the underlying
+    AeroLLMBackend singleton — without this, get_deep_router() would keep
+    returning a ModelRouter wrapping the just-closed backend instance
+    forever (it's cached unconditionally once built). Public and safe to
+    call from production code, unlike _reset_for_tests (which also drops
+    the unrelated _fast_router cache — this touches only _deep_router).
+    """
+    global _deep_router
+    with _lock:
+        _deep_router = None
+
+
 _fast_cfgv: "int | None" = None
 
 
@@ -143,6 +230,35 @@ def _get_fast_router():
             return _fast_router
         except Exception:  # noqa: BLE001
             return None
+
+
+def _agent_stream_fast_enabled() -> bool:
+    """The only way to get a real (not honest-n/a) TTFT for any agent call
+    today (ARCHITECTURE.md finding 1) — the fast branch streams from
+    Ollama's native /api/chat with stream:true instead of stream:false,
+    joining the deltas back into the identical string complete() would
+    return. Default on; ``ARAIL_AGENT_STREAM_FAST=0`` reverts to the old
+    non-streaming call and every agent's TTFT becomes an honest ``n/a``
+    (F20) — one env var, not a revert of this function."""
+    return os.getenv("ARAIL_AGENT_STREAM_FAST", "1").strip().lower() not in (
+        "0", "false", "no")
+
+
+def _join_stream(router: Any, prompt: str, *, max_tokens: int,
+                 temperature: float, system: Optional[str]) -> Optional[str]:
+    """Consume ``stream_complete`` and return the same string ``complete()``
+    would — the terminal ``ModelResponse.text`` is the ground truth when
+    present, deltas joined otherwise. Raises on any failure; the caller
+    falls back to ``complete()`` unconditionally (F20)."""
+    parts: list[str] = []
+    final_text: Optional[str] = None
+    for item in router.stream_complete(prompt, max_tokens=max_tokens,
+                                       temperature=temperature, system=system):
+        if isinstance(item, str):
+            parts.append(item)
+        else:
+            final_text = getattr(item, "text", None)
+    return final_text if final_text is not None else "".join(parts)
 
 
 def complete_preferring_deep(
@@ -170,6 +286,11 @@ def complete_preferring_deep(
                 text = (resp.text or "").strip() if resp else ""
                 if text:
                     return text
+            except AgentHeldError:
+                # F8 (ARCHITECTURE.md): agents are held -- do not also try
+                # fast, which would hit the chokepoint a second time and
+                # emit a second refused_halted trace for one decision.
+                return None
             except Exception as exc:  # noqa: BLE001
                 # Fall through to fast — never crash, never OOM — but make
                 # the degradation VISIBLE via the registry health state.
@@ -182,10 +303,22 @@ def complete_preferring_deep(
     fr = fast_router or _get_fast_router()
     if fr is None:
         return None
+    if _agent_stream_fast_enabled():
+        try:
+            text = _join_stream(fr, prompt, max_tokens=max_tokens,
+                                temperature=temperature, system=system)
+            return (text or "").strip() or None
+        except AgentHeldError:
+            # F8: one refusal is enough -- do not also try .complete().
+            return None
+        except Exception:  # noqa: BLE001 - unconditional fallback (F20)
+            pass
     try:
         resp = fr.complete(prompt, max_tokens=max_tokens,
                            temperature=temperature, system=system)
         return ((resp.text or "").strip() or None) if resp else None
+    except AgentHeldError:
+        return None
     except Exception:  # noqa: BLE001
         return None
 

@@ -261,23 +261,34 @@ def _watch_crash_recurrence() -> Optional[Observation]:
 
 
 def _watch_service_health() -> Optional[Observation]:
-    """Fires when the portal's /api/jobs/state endpoint is unreachable.
+    """Fires when the portal's liveness endpoint is unreachable or unhealthy.
 
-    A quick GET with a 2-second timeout. If it fails or times out,
-    we surface a warn. Cooldown: 10 min (keyed to 'service-health').
+    Probes ``/api/system/health``, which portal auth keeps anonymous (a liveness check that needed
+    a credential would report "down" whenever the token file was unreadable or rotated). A quick
+    GET with a 2-second timeout. A 4xx/5xx means the portal is up but unhealthy; only a connection
+    failure means unreachable. Cooldown: 10 min (keyed to 'service-health').
     """
     try:
+        import urllib.error
         import urllib.request
         port = int(os.getenv("PORTAL_PORT", "8080"))
-        url = f"http://127.0.0.1:{port}/api/jobs/state"
+        url = f"http://127.0.0.1:{port}/api/system/health"
         req = urllib.request.urlopen(url, timeout=2)
         req.read()
         return None  # healthy
+    except urllib.error.HTTPError as exc:
+        return Observation(
+            watcher="service-health",
+            severity="warn",
+            fact=f"Portal is up but unhealthy: /api/system/health answered HTTP {exc.code}.",
+            cooldown_key="service-health",
+            cooldown_sec=10 * 60,
+        )
     except OSError:
         return Observation(
             watcher="service-health",
             severity="warn",
-            fact=f"Portal /api/jobs/state is unreachable — portal may be down.",
+            fact="Portal /api/system/health is unreachable — portal may be down.",
             cooldown_key="service-health",
             cooldown_sec=10 * 60,
         )
@@ -552,7 +563,33 @@ class SREAgent:
         try:
             while True:
                 await asyncio.sleep(interval)
-                self._maybe_speak(global_cooldown)
+                # asyncio.to_thread, not a direct call: _maybe_speak() runs
+                # every watcher synchronously, and _watch_service_health()
+                # makes a BLOCKING urllib call to the portal's own
+                # /api/jobs/state — i.e. this coroutine, if it called
+                # _maybe_speak directly, would block the single asyncio
+                # event loop that ALSO has to answer that very HTTP
+                # request. That's a guaranteed self-deadlock: the request
+                # can never complete until this coroutine yields, and this
+                # coroutine can never finish until the request completes.
+                # It reproduces 100% of the time, not intermittently —
+                # confirmed live: a fresh instance fired "Portal
+                # /api/jobs/state is unreachable — portal may be down" on
+                # its very first health-check tick, while an external
+                # process hitting the identical URL at the identical
+                # moment got a clean 200. Dispatching the whole watcher
+                # pass to a worker thread frees the loop to answer its own
+                # request. Safe to do for the ENTIRE call, not just the
+                # network probe: _maybe_speak only touches plain dict/file
+                # state on `self` and calls activity_log.emit()/
+                # update_agent_workflow(), both plain sync functions with
+                # no event-loop affinity (emit() is explicitly documented
+                # "Called from sync or async code" and already handles the
+                # no-running-loop case via call_soon_threadsafe). Calls are
+                # strictly sequential (this loop always awaits the
+                # previous tick before starting the next), so there is
+                # never more than one thread touching that state at once.
+                await asyncio.to_thread(self._maybe_speak, global_cooldown)
         except asyncio.CancelledError:
             return
 

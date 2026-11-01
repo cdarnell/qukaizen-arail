@@ -1,0 +1,56 @@
+{#
+  Boot model strip (included by _nav.html on EVERY page). ARAIL resolves the
+  fast (A) and deep (B) models itself at start; this strip is hidden unless
+  GET /api/models/boot reports mode "degraded" -- something the operator can
+  act on (Ollama down, a pin that isn't installed, not enough RAM for the deep
+  model, a model that crashed last boot). It states the problem in one line
+  and offers "Change…", which opens the existing Resident chip in Chat.
+  Fetch-once: one GET on page load, no polling/SSE (quiet-boot contract).
+  Details come from the server as plain text and are written with
+  textContent only. Install commands are shown as text, never as links, so an
+  airgapped lab is never nudged toward a download. v2 tokens only.
+#}
+<style>
+  #model-boot-banner{border-bottom:1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+    background:color-mix(in srgb, var(--accent) 8%, transparent);}
+  #model-boot-banner[hidden]{display:none;}
+  #mbb-strip{display:flex;align-items:center;gap:.6rem;padding:.3rem .9rem;
+    font-size:.74rem;color:var(--text);}
+  #mbb-strip-text{flex:1 1 auto;}
+</style>
+<div id="model-boot-banner" hidden>
+  <div id="mbb-strip" role="status">
+    <span id="mbb-strip-text"></span>
+    <button type="button" class="icon-btn" id="mbb-change">Change…</button>
+    <button type="button" class="icon-btn" id="mbb-dismiss">Dismiss</button>
+  </div>
+</div>
+<script>
+(function(){
+  var banner = document.getElementById('model-boot-banner');
+  var text = document.getElementById('mbb-strip-text');
+  var key = null;
+  function hide(){ if(banner) banner.hidden = true; }
+  function apply(p){
+    if(!banner || !text || !p || p.mode !== 'degraded' || !p.degraded.length) return hide();
+    var msg = p.degraded.slice(0, 2).map(function(d){ return d.detail || d.kind; }).join(' · ');
+    key = 'mbb-dismissed:' + msg;
+    if(sessionStorage.getItem(key)) return hide();
+    text.textContent = msg;
+    banner.hidden = false;
+  }
+  var change = document.getElementById('mbb-change');
+  if(change) change.addEventListener('click', function(){
+    var chip = document.getElementById('model-picker');
+    if(chip) chip.click(); else window.location.href = '/chat';
+  });
+  var dismiss = document.getElementById('mbb-dismiss');
+  if(dismiss) dismiss.addEventListener('click', function(){
+    if(key) sessionStorage.setItem(key, '1');
+    hide();
+  });
+  fetch('/api/models/boot', {cache: 'no-store'})
+    .then(function(r){ return r.ok ? r.json() : null; })
+    .then(apply).catch(function(){});
+})();
+</script>

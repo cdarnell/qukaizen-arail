@@ -42,6 +42,18 @@ info()  { echo -e "${GREEN}[arail]${RESET} $*"; }
 warn()  { echo -e "${YELLOW}[arail]${RESET} $*"; }
 error() { echo -e "${RED}[arail]${RESET} $*"; exit 1; }
 
+# ARCHITECTURE.md §10 finding 2 (PR #181 CI, sprints/2026-08-10-arail2-
+# persistence-instantiated): resolve_data_dirs() lives in
+# scripts/lib/instances.sh, needed below by setup_db_ensure(). It reads
+# $REPO_ROOT directly (no CWD fallback of its own), so pin it as a real
+# global here rather than only ever using the ${REPO_ROOT:-$PWD} inline
+# fallback the rest of this file uses. Sourced the same way install.sh
+# does — a no-op if the file is somehow missing rather than a hard
+# failure, since this whole step is itself required to never fail setup.
+REPO_ROOT="${REPO_ROOT:-$PWD}"
+# shellcheck disable=SC1091
+[[ -f "$REPO_ROOT/scripts/lib/instances.sh" ]] && source "$REPO_ROOT/scripts/lib/instances.sh"
+
 # Self-sufficient install policy:
 #   ARAIL_NONINTERACTIVE=1  → never prompt; default-yes everything (agent-driven)
 #   ARAIL_AUTO_INSTALL=0    → never auto-install; preserve old "tell user to install" behavior
@@ -132,6 +144,14 @@ AEROLLM_KV_BUDGET_PCT="0.60"
 # present. Overridden by [tool.arail.package-sources] in pyproject.toml.
 AEROLLM_PIP_SPEC="aerollm-api>=0.1,<0.2"
 AEROLLM_INDEX_URL="https://pypi.qukaizen.com/simple/"
+# Bundled channel — the GitHub Release tag whose assets carry the prebuilt
+# aerollm_api.abi3.so. Overridden by [tool.arail.package-sources]
+# aerollm_bundle_tag in pyproject.toml (see load_pyproject_metadata below).
+AEROLLM_BUNDLE_TAG="v1.1.0"
+# sha256 of the bundle TARBALL (not the .so) — the out-of-band pin
+# build-aerollm.sh compares AEROLLM_BUNDLE_SHA256 against. Overridden by
+# [tool.arail.package-sources] aerollm_bundle_sha256 in pyproject.toml.
+AEROLLM_BUNDLE_SHA256=""
 
 # Unified password — set by capture_password() below. One secret covers:
 #   - code-server (IDE) login
@@ -166,6 +186,8 @@ values = {
     "AEROLLM_MODEL_MAX_ID": str(models.get("aerollm_maximus", models.get("aerollm_max", models.get("aerollm", "")))),
     "AEROLLM_PIP_SPEC": str(sources.get("aerollm", "")),
     "AEROLLM_INDEX_URL": str(sources.get("aerollm_index", "")),
+    "AEROLLM_BUNDLE_TAG": str(sources.get("aerollm_bundle_tag", "")),
+    "AEROLLM_BUNDLE_SHA256": str(sources.get("aerollm_bundle_sha256", "")),
 }
 for key, value in values.items():
     if value:
@@ -631,34 +653,46 @@ install_accel_deps() {
 
     # AeroLLM — the Maximus tier deep-mode backend (the "2nd inference").
     # Gated to tier=maximus so Minimalist installs stay lean (ai-eng is enough
-    # for the everyday lab; deep streaming is a Maximus escalation). Built from
-    # the LOCAL sibling repo ($ARAIL_AEROLLM_REPO, default ~/ProJects/qukaizen-aerollm)
-    # by scripts/build-aerollm.sh — the same helper behind
-    # `./arailctl deep rebuild`, so the actively-improving repo flows straight
-    # into the lab. That helper uses `cargo build` (NOT `maturin develop`,
-    # which breaks the Metal kernel compile on macOS arm64). On CUDA Maximus,
-    # AeroLLM's CUDA backend isn't ready yet; AirLLM (opt-in) is the fallback.
+    # for the everyday lab; deep streaming is a Maximus escalation).
+    # scripts/build-aerollm.sh auto picks one of three channels, in order:
+    #   DEV      — LOCAL sibling repo present ($ARAIL_AEROLLM_REPO, default
+    #              ~/ProJects/qukaizen-aerollm) → cargo build (NOT `maturin
+    #              develop`, which breaks the Metal kernel compile on macOS
+    #              arm64). Maintainer-only in practice.
+    #   RELEASE  — AEROLLM_CHANNEL=release or private-index credentials
+    #              configured → pip install from the self-hosted index.
+    #              Maintainer-only in practice (needs creds).
+    #   BUNDLED  — otherwise (the outside-user default as of 2026-08):
+    #              fetch a checksummed prebuilt binary from an ARAIL GitHub
+    #              Release asset. No source repo, no credentials. See
+    #              sprints/2026-08-05-arail-bundled-aerollm/ARCHITECTURE.md.
+    # On CUDA Maximus, AeroLLM's CUDA backend isn't ready yet; AirLLM
+    # (opt-in) is the fallback.
     if [[ "${LAB_TIER:-minimalist}" != "maximus" ]]; then
-        info "Skipping AeroLLM install — tier is '${LAB_TIER:-minimalist}', not 'maximus'."
+        info "Skipping QueueLLM install — tier is '${LAB_TIER:-minimalist}', not 'maximus'."
         info "  Upgrade with: ./arailctl upgrade maximus"
     elif [[ "${ARAIL_SKIP_AEROLLM_PROBE:-0}" == "1" ]]; then
-        info "Skipping AeroLLM build (ARAIL_SKIP_AEROLLM_PROBE=1)."
+        info "Skipping QueueLLM build (ARAIL_SKIP_AEROLLM_PROBE=1)."
     elif [[ "$(uname -s)" == "Darwin" ]] && [[ "$(uname -m)" == "arm64" ]]; then
         if python3 -c "import aerollm_api" 2>/dev/null; then
-            info "aerollm_api already present — AeroLLM is the deep-mode 2nd inference."
+            info "aerollm_api already present — QueueLLM is the deep-mode 2nd inference."
         else
-            info "Installing AeroLLM (source if sibling repo present, else published wheel)…"
+            info "Installing QueueLLM (source → release → bundled, first that applies)…"
             if AEROLLM_INDEX_URL="$AEROLLM_INDEX_URL" AEROLLM_PIP_SPEC="$AEROLLM_PIP_SPEC" \
+               AEROLLM_BUNDLE_TAG="$AEROLLM_BUNDLE_TAG" \
+               AEROLLM_BUNDLE_SHA256="$AEROLLM_BUNDLE_SHA256" \
                bash "${REPO_ROOT:-$PWD}/scripts/build-aerollm.sh" auto; then
-                info "AeroLLM ready — the deep-mode 2nd inference on Apple Silicon."
+                info "QueueLLM ready — the deep-mode 2nd inference on Apple Silicon."
             else
-                warn "AeroLLM not installed (see above). The lab runs without the"
-                warn "2nd inference until you run: ./arailctl deep rebuild (or: deep update)"
+                warn "QueueLLM not installed (see above). The lab runs without the"
+                warn "2nd inference until you run: ./arailctl deep install (bundled binary,"
+                warn "no source repo or credentials needed — or: deep rebuild / deep update"
+                warn "if you're a maintainer with the QueueLLM source or private-index access)"
             fi
         fi
     else
-        info "AeroLLM auto-build is Apple-Silicon-only today; on this host run"
-        info "  ./arailctl deep rebuild  once aerollm supports it (CUDA backend WIP)."
+        info "QueueLLM auto-build is Apple-Silicon-only today; on this host run"
+        info "  ./arailctl deep rebuild  once QueueLLM supports it (CUDA backend WIP)."
     fi
 }
 
@@ -1054,6 +1088,30 @@ install_services() {
             fi
         fi
     fi
+
+    # ── Embedding model for PKB semantic search (C5, arail2-tier1-integration) ──
+    # nomic-embed-text (~274 MB), the spec-declared provider arail.dbspec.embed
+    # serves. Every code path above this point either returned early
+    # (ARAIL_SKIP_OLLAMA / ARAIL_SKIP_MODEL_DOWNLOAD / daemon unreachable — this
+    # pull inherits the same skip intent) or confirmed Ollama is installed and
+    # its daemon is reachable, so this reuses that same gate rather than
+    # re-probing. Same pattern as the llama3.2:1b pull above: warn and
+    # continue, never fail setup. First PKB ingest on a machine without this
+    # model fails loudly with an actionable `ollama pull` message and writes
+    # zero vectors (see arail.dbspec.embed.EmbeddingUnavailable) — it does not
+    # silently write hash vectors instead.
+    if ollama show nomic-embed-text &>/dev/null; then
+        info "nomic-embed-text already present in Ollama — skipping."
+    else
+        info "Pulling nomic-embed-text (~274 MB, PKB semantic search)…"
+        if _arail_timeout 180 ollama pull nomic-embed-text 2>&1 | tail -5; then
+            info "nomic-embed-text ready."
+        else
+            warn "ollama pull nomic-embed-text failed (offline or network issue)."
+            warn "PKB semantic search will degrade with an actionable message until"
+            warn "you run:  ollama pull nomic-embed-text"
+        fi
+    fi
 }
 
 # -----------------------------------------------------------------------------
@@ -1213,7 +1271,7 @@ capture_tier() {
                 HuggingFace) reachable over plain HTTP when
                 LAB_MODE=hybrid.
     ${BOLD}maximus${RESET}     Everything in minimalist + Admin, Notebooks,
-                AeroLLM deep-mode runtime, Anthropic SDK,
+                QueueLLM deep-mode runtime, Anthropic SDK,
                 LangChain/LangGraph, full cloud catalog. Targets 32GB+
                 machines.
 
@@ -1266,7 +1324,7 @@ EOF
     # 16 GB = 17179869184 bytes.
     local _ram_16gb_floor=17179869184
 
-    info "AeroLLM deep model for ${LAB_TIER}: ${BOLD}${AEROLLM_MODEL_ID}${RESET}"
+    info "QueueLLM deep model for ${LAB_TIER}: ${BOLD}${AEROLLM_MODEL_ID}${RESET}"
 
     # RAM-headroom hint for operators who manually upgrade AEROLLM_MODEL in .env
     # to a frontier (32B+) checkpoint. With the 7B default the warning
@@ -1500,12 +1558,12 @@ setup_env() {
         local _aero_basename="${AEROLLM_MODEL_ID##*/}"
         local _aero_dir="lab/models/${_aero_basename}"
         if [[ ! -d "$_aero_dir" ]]; then
-            warn "AeroLLM weights missing at ${_aero_dir}."
+            warn "QueueLLM weights missing at ${_aero_dir}."
             warn "The deep (2nd inference) box won't load until you run:"
             warn "  hf download ${AEROLLM_MODEL_ID} --local-dir ${_aero_dir}"
             warn "Or downgrade AEROLLM_MODEL in .env to a model whose weights you have."
         else
-            info "AeroLLM weights present at ${_aero_dir} ✓"
+            info "QueueLLM weights present at ${_aero_dir} ✓"
         fi
 
         # AeroLLM KV budget — fraction of system RAM the runtime may
@@ -1517,7 +1575,7 @@ setup_env() {
         if grep -q '^AEROLLM_KV_BUDGET_PCT=' .env; then
             sed -i.bak "s|^AEROLLM_KV_BUDGET_PCT=.*|AEROLLM_KV_BUDGET_PCT=${AEROLLM_KV_BUDGET_PCT}|" .env
         else
-            printf '\n# AeroLLM KV-cache budget as a fraction of system RAM. 0.60 by\n# default; raise carefully — exceeding ~0.85 risks portal evictions.\nAEROLLM_KV_BUDGET_PCT=%s\n' "$AEROLLM_KV_BUDGET_PCT" >> .env
+            printf '\n# QueueLLM KV-cache budget as a fraction of system RAM. 0.60 by\n# default; raise carefully — exceeding ~0.85 risks portal evictions.\nAEROLLM_KV_BUDGET_PCT=%s\n' "$AEROLLM_KV_BUDGET_PCT" >> .env
         fi
 
         rm -f .env.bak
@@ -1747,6 +1805,56 @@ YAML
     info "code-server config written (binds 127.0.0.1:${ide_port})"
 
     mkdir -p lab/data/goals lab/data/goals/history lab/data/consent lab/data/experiments lab/models
+}
+
+# -----------------------------------------------------------------------------
+# Relational store readiness (ARCHITECTURE.md §10 finding 2, PR #181 CI —
+# sprints/2026-08-10-arail2-persistence-instantiated)
+# -----------------------------------------------------------------------------
+# CLAUDE.md documents `./arailctl setup && ./arailctl start` as the first-run
+# path; §4.5/§4.6 of the sprint's ARCHITECTURE.md wired ensure_db into
+# `start` and `install` but never `setup` — a design omission, not builder
+# drift (architect's own ruling). Without this, `doctor` between `setup` and
+# the first `start` honestly reports relational_store as not instantiated
+# and exits 3, which is the check working correctly on a real gap, not a
+# check to be muted.
+#
+# This is a CALL SITE, not a new mechanism: reuses the exact shim
+# install.sh's own `_install_db_ensure` already uses, verbatim — the same
+# allowlist classifier, the same atlas.sum ledger verification, the same
+# safe-forward-only line (nothing about calling it from `setup` changes what
+# may be auto-applied). Sequenced after the deps phase (install_core_deps,
+# so `arail.dbspec.ensure` is importable) and after setup_runtime_files (so
+# `lab/` exists) — both already true by the time this runs in the main
+# sequence below. Driven by resolve_data_dirs(), not a hardcoded root, so
+# re-running `setup` on an existing multi-World lab behaves like `install`.
+# Local file + SQLite only — no network, no embedder, no Atlas — so the
+# airgapped default is unaffected.
+#
+# MUST NOT FAIL SETUP: warns and continues on any non-ok root, matching
+# `install` (degrades, never hard-fails) and `start` (warns, continues) —
+# never calls `error()`.
+setup_db_ensure() {
+    [[ -d "${REPO_ROOT:-$PWD}/.venv" ]] || return 0
+    if ! declare -F inst_resolve_data_dirs >/dev/null 2>&1; then
+        warn "db: skipped (scripts/lib/instances.sh not available) — run ./arailctl install later"
+        return 0
+    fi
+    local slug data_dir origin line rc
+    while IFS=$'\t' read -r slug data_dir origin; do
+        [[ -n "$data_dir" ]] || continue
+        line="$(cd "${REPO_ROOT:-$PWD}" && source .venv/bin/activate && \
+            python -m arail.dbspec.ensure "$data_dir" --apply --quiet-ok 2>&1)"
+        rc=$?
+        if [[ -n "$line" ]]; then
+            if [[ "$rc" == "0" ]]; then
+                info "db: ${line}"
+            else
+                warn "db: ${line}"
+            fi
+        fi
+    done < <(inst_resolve_data_dirs)
+    return 0
 }
 
 # -----------------------------------------------------------------------------
@@ -2306,7 +2414,7 @@ main() {
     #   3/11 ensure_python + install_core_deps + load_pyproject_metadata + install_accel_deps
     #   4/11 capture_brand
     #   5/11 capture_password
-    #   6/11 setup_env + setup_runtime_files + validate_env
+    #   6/11 setup_env + setup_runtime_files + setup_db_ensure + validate_env
     #   7/11 setup_pkb
     #   8/11 download_model
     #   9/11 capture_goal
@@ -2324,6 +2432,7 @@ main() {
     capture_password
     setup_env
     setup_runtime_files
+    setup_db_ensure
     validate_env
     setup_pkb
     gentoo_notes

@@ -56,7 +56,12 @@ let W, H, dpr;
 
 const COLORS = {{ color_map|default({'core':'var(--positive)','agent':'var(--accent2)','skill':'var(--info)','backend':'var(--warn)','plugin':'var(--danger)','service':'var(--text-muted)'})|tojson }};
 const ICONS  = {{ icon_map|default({'core':'◈','agent':'◉','skill':'◇','backend':'⬡','plugin':'⊕','service':'▣'})|tojson }};
-let LEGEND = {{ legend_groups|default([{'label':'Core','color':'var(--positive)'},{'label':'Agent','color':'var(--accent2)'},{'label':'Skill','color':'var(--info)'},{'label':'Backend','color':'var(--warn)'},{'label':'Plugin','color':'var(--danger)'},{'label':'Service','color':'var(--text-muted)'}])|tojson }};
+let LEGEND = {{ legend_groups|default([{'label':'Core','color':'var(--positive)','key':'core'},{'label':'Agent','color':'var(--accent2)','key':'agent'},{'label':'Skill','color':'var(--info)','key':'skill'},{'label':'Backend','color':'var(--warn)','key':'backend'},{'label':'Plugin','color':'var(--danger)','key':'plugin'},{'label':'Service','color':'var(--text-muted)','key':'service'}])|tojson }};
+
+// Category filter — groups the user has clicked off in the legend. Toggling
+// a legend chip hides that group's nodes (and any edge touching one) without
+// re-fetching; state resets on scope switch since LEGEND is rebuilt then.
+let hiddenGroups = new Set();
 
 /* Canvas 2D cannot resolve CSS custom properties — read the live token
    values off :root so the canvas repaints with the mounted World theme. */
@@ -192,6 +197,7 @@ function toWorld(sx, sy) {
 function drawEdge(e) {
   const a = nodeMap[e.source], b = nodeMap[e.target];
   if (!a || !b) return;
+  if (hiddenGroups.has(a.group) || hiddenGroups.has(b.group)) return;
   const sa = toScreen(a.x, a.y), sb = toScreen(b.x, b.y);
 
   // Ghost edges touch a pending candidate — dashed and faded until the
@@ -237,6 +243,7 @@ function drawEdge(e) {
 }
 
 function drawNode(n) {
+  if (hiddenGroups.has(n.group)) return;
   const s = toScreen(n.x, n.y);
   const r = n.radius * camera.zoom;
   const isHovered = n === hoveredNode;
@@ -333,6 +340,7 @@ function hitTest(sx, sy) {
   const w = toWorld(sx, sy);
   for (let i = nodes.length - 1; i >= 0; i--) {
     const n = nodes[i];
+    if (hiddenGroups.has(n.group)) continue;
     const dx = w.x - n.x, dy = w.y - n.y;
     if (dx * dx + dy * dy < n.radius * n.radius * 1.5) return n;
   }
@@ -422,14 +430,33 @@ function statusBadge(s) {
 
 function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
+// Legend chips double as category filters — click one to hide/show that
+// group's nodes (and edges touching them) on the canvas. Chips without a
+// `key` (older callers that didn't set one) render but can't be toggled,
+// since there's no group value to match against.
 function buildLegend() {
   const el = document.getElementById('legend');
   el.innerHTML = LEGEND.map(i => {
     const dot = i.ghost
       ? `<div class="legend-dot legend-dot--ghost"></div>`
       : `<div class="legend-dot" style="background:${i.color}"></div>`;
-    return `<div class="legend-item">${dot}${i.label}</div>`;
-  }).join('') + '<div class="legend-item legend-hint">Click nodes for details</div>';
+    const filterable = !!i.key;
+    const muted = filterable && hiddenGroups.has(i.key);
+    const cls = 'legend-item' + (filterable ? ' legend-item--filter' : '') + (muted ? ' legend-item--muted' : '');
+    const attrs = filterable ? ` data-group="${i.key}" role="button" tabindex="0" title="Click to ${muted ? 'show' : 'hide'} ${i.label}"` : '';
+    return `<div class="${cls}"${attrs}>${dot}${i.label}</div>`;
+  }).join('') + '<div class="legend-item legend-hint">Click nodes for details · click legend to filter</div>';
+
+  el.querySelectorAll('.legend-item--filter').forEach(chip => {
+    const toggle = () => {
+      const key = chip.dataset.group;
+      if (hiddenGroups.has(key)) hiddenGroups.delete(key); else hiddenGroups.add(key);
+      buildLegend();
+      draw();
+    };
+    chip.addEventListener('click', toggle);
+    chip.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
+  });
 }
 
 let panStart = null;
@@ -609,7 +636,11 @@ window.arailGraph = {
   api() { return CURRENT_API; },
   stats() { return computeStats(); },
   setLegend(groups) {
-    if (Array.isArray(groups) && groups.length) { LEGEND = groups; buildLegend(); }
+    if (Array.isArray(groups) && groups.length) {
+      LEGEND = groups;
+      hiddenGroups.clear();
+      buildLegend();
+    }
   },
   setEmpty(msg) { if (msg) GRAPH_EMPTY = msg; },
 };
@@ -658,7 +689,7 @@ async function refreshHealth() {
       html += `<div class="health-row"><span class="health-label">GPU</span><span class="health-value">${h.gpu.name}</span></div>`;
     }
     if (h.deep_enabled) {
-      html += `<div class="health-row"><span class="health-label">Deep</span><span class="health-value health-deep">AeroLLM ✓</span></div>`;
+      html += `<div class="health-row"><span class="health-label">Deep</span><span class="health-value health-deep">QueueLLM ✓</span></div>`;
     }
     html += `<div class="health-row last"><span class="health-label">Services</span><span class="health-value">`;
     for (const [name, up] of Object.entries(h.services)) {

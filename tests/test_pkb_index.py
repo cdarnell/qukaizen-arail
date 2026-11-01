@@ -183,6 +183,12 @@ def test_ensure_ready_compatible_table_reuses(tmp_path: Path, monkeypatch):
     from arail.vector_index import hash_embedding
     import lancedb  # type: ignore[import-not-found]
 
+    # This test is about schema-compatibility reuse, not the embedding
+    # provider or provenance (C2/C4) — see test_ensure_ready_staleness_sweep
+    # for the same pattern.
+    monkeypatch.setattr(pki, "_vector_dim", lambda: 128)
+    monkeypatch.setattr("arail.pkb_provenance.agrees_with_spec", lambda *a, **k: True)
+
     db_path = tmp_path / ".cache" / "lancedb"
     db_path.mkdir(parents=True, exist_ok=True)
     db = lancedb.connect(str(db_path))
@@ -232,6 +238,16 @@ def test_ensure_ready_staleness_sweep(tmp_path: Path, monkeypatch):
     import lancedb  # type: ignore[import-not-found]
     import os
 
+    # This test is about the staleness sweep, not the embedding provider or
+    # provenance (C2/C4) — stub the provenance check to "agrees" so
+    # ensure_ready falls through to the staleness sweep this test actually
+    # exercises. The seed vector's dimension must match what the (stubbed,
+    # tests/conftest.py) embedder actually produces (768, the spec's real
+    # declared dimension) since the sweep incrementally upserts a NEW row
+    # into this SAME table, and a dimension conflict inside one LanceDB
+    # table is a hard write failure, not a soft one.
+    monkeypatch.setattr("arail.pkb_provenance.agrees_with_spec", lambda *a, **k: True)
+
     db_path = tmp_path / ".cache" / "lancedb"
     db_path.mkdir(parents=True, exist_ok=True)
     db = lancedb.connect(str(db_path))
@@ -246,7 +262,7 @@ def test_ensure_ready_staleness_sweep(tmp_path: Path, monkeypatch):
     db.create_table("pkb_pages", data=[{
         "path": "notes/stale.md",
         "name": "stale.md",
-        "vector": hash_embedding("old content"),
+        "vector": hash_embedding("old content", dim=768),
         "mtime": old_mtime,
         "source_kind": "user",
     }], mode="overwrite")

@@ -91,7 +91,7 @@ class TestComputeSourceEnv:
         )
 
     def test_compute_source_env_my_machine(self, monkeypatch):
-        """my_machine → OPENCODE_API_KEY='not-needed', shim base (Sprint 2: not Ollama).
+        """my_machine → OPENCODE_API_KEY=<arl1s_ shim token>, shim base (Sprint 2: not Ollama).
 
         Sprint 2 update: _compute_source_env now points my_machine at the
         lab-side OpenAI shim (/api/openai/v1), not the Ollama default.
@@ -107,7 +107,7 @@ class TestComputeSourceEnv:
         )
         self._patch_provider(monkeypatch, "my_machine")
         env = oc._compute_source_env()
-        assert env["OPENCODE_API_KEY"] == "not-needed"
+        assert env["OPENCODE_API_KEY"].startswith("arl1s_")
         # Sprint 2: base URL is the lab shim, not Ollama
         assert "127.0.0.1" in env["OPENCODE_API_BASE"]
         assert "/api/openai/v1" in env["OPENCODE_API_BASE"]
@@ -130,7 +130,7 @@ class TestComputeSourceEnv:
         self._patch_provider(monkeypatch, "my_machine")
         env = oc._compute_source_env()
         assert "/api/openai/v1" in env["OPENCODE_API_BASE"]
-        assert env["OPENCODE_API_KEY"] == "not-needed"
+        assert env["OPENCODE_API_KEY"].startswith("arl1s_")
 
     def test_compute_source_env_cloud_claude(self, monkeypatch):
         """claude provider → Anthropic base + token passed through (F-CONFIG-2)."""
@@ -164,7 +164,7 @@ class TestComputeSourceEnv:
         monkeypatch.delenv("MODEL_API_BASE", raising=False)
         self._patch_provider(monkeypatch, "unknown_provider_xyz")
         env = oc._compute_source_env()
-        assert env["OPENCODE_API_KEY"] == "not-needed"
+        assert env["OPENCODE_API_KEY"].startswith("arl1s_")
 
     def test_compute_source_env_never_logged(self, monkeypatch, caplog):
         """No token value should appear in any log record (F-SEC-2)."""

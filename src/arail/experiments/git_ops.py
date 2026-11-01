@@ -160,11 +160,24 @@ def commit_experiment(
                 f"refusing to commit {f}: not in ALLOWED_WRITABLE_FILES"
             )
     # Stage explicitly; never `git add -A`.
+    #
+    # `-f` is required, not sloppiness: `lab/data/` is gitignored
+    # wholesale (.gitignore:42), and two of the four whitelisted paths
+    # live under it. A plain `git add` on an ignored path exits 1 and
+    # stages nothing, so with check=True this raised CalledProcessError
+    # on the FIRST commit of every pass — the baseline capture, whose
+    # caller only catches GitSafetyError. The loop could not complete a
+    # single pass on a clean checkout.
+    #
+    # Forcing is safe here precisely because it can only ever reach
+    # ALLOWED_WRITABLE_FILES: the membership check above has already
+    # rejected anything else, so `-f` cannot be used to sneak an
+    # ignored path into a commit.
     for f in files:
         full = _repo_root() / f
         if not full.exists():
             continue  # nothing to stage for this path
-        _run(["add", "--", f])
+        _run(["add", "-f", "--", f])
 
     # Check if there's actually anything staged. If the variant
     # produced no diff, we don't make an empty commit.

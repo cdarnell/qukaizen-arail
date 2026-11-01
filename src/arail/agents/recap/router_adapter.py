@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING, List, Optional
 
+from arail import agent_context
 from arail.costs import recap_depth_context
 from arail.agents.recap.state import truncate_for_context, window
 
@@ -111,8 +112,14 @@ class RouterAdapter:
             )
             flat = flatten_messages(windowed)
 
-        # Step 4 — call inside depth context so cost_tracker picks it up
-        with recap_depth_context(depth):
+        # Step 4 — call inside depth context so cost_tracker picks it up.
+        # L3 (ARCHITECTURE.md): recap is not itself an agent -- system_call
+        # under a generic "recap" label, same shape as world-forge/
+        # dictionary/goal-parser. No production caller constructs a
+        # RouterAdapter today (this whole subsystem is dormant, like
+        # _builtin_drafter.compose was before this sprint's guard), so
+        # there is no existing attribution to clobber.
+        with recap_depth_context(depth), agent_context.system_call("recap"):
             resp = self.router.complete(
                 flat,
                 max_tokens=max_tokens if max_tokens is not None else self.max_tokens,

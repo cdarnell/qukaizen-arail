@@ -119,7 +119,7 @@ def check_models() -> None:
             h = e.health
             if h.status == "healthy":
                 any_healthy = True
-            where = e.endpoint or ("aerollm (in-process)"
+            where = e.endpoint or ("QueueLLM (in-process)"
                                    if e.provider_type == "aerollm" else "local")
             lat = f", {h.latency_ms:.0f}ms" if h.latency_ms is not None else ""
             detail = f" — {h.detail}" if h.detail else ""
@@ -135,10 +135,65 @@ def check_knowledge_base() -> None:
     _section("Knowledge base (PKB index)")
     try:
         from arail.pkb_index import ensure_ready
-        ensure_ready()
-        _p("  pkb_pages index   : ready")
+        # REVIEW3.md BLOCK-3: doctor is a diagnostic and must never build,
+        # write, or embed anything -- build=False makes ensure_ready
+        # genuinely read-only (inspect existing state and report; the
+        # detailed status, including whether an index exists at all, is
+        # printed by the embedding-status block right below). Before this,
+        # a World with no pkb_pages table yet took ensure_ready's default
+        # build=True path, which ran a full embed_documents() pass over
+        # the whole corpus and wrote a brand-new index -- reproduced by
+        # the reviewer, by accident, on the operator's real `finance`
+        # World.
+        ensure_ready(build=False)
+        _p("  pkb_pages index   : checked (read-only — doctor never builds)")
     except Exception as e:  # noqa: BLE001
         _p(f"  pkb_pages index   : NOT ready ({type(e).__name__}: {e})")
+
+    # C4/C5 (arail2-tier1-integration): the embedding provider and the
+    # vector-index provenance sidecar. Required — ARCHITECTURE.md is
+    # explicit that no query should be served from a table whose
+    # provenance disagrees with the spec, and doctor is where that
+    # disagreement (or a plain unreachable-Ollama outage the search path
+    # would otherwise degrade silently into) becomes visible to a human.
+    try:
+        from arail.dbspec.embed import probe as embed_probe
+        ok, detail = embed_probe()
+        _p(f"  embedding provider: {'reachable' if ok else 'NOT reachable'} — {detail}")
+    except Exception as e:  # noqa: BLE001
+        _p(f"  embedding provider: ? ({type(e).__name__}: {e})")
+
+    try:
+        from arail import pkb_index
+        embed_ok, embed_reason = pkb_index.embedding_status()
+        if embed_ok:
+            _p("  vector index status: ok")
+        else:
+            _p(f"  vector index status: degraded — {embed_reason}")
+        # REVIEW2.md: couple the exit code to the structured reason CODE,
+        # never to a substring match on prose. "dimension" and "provenance"
+        # are both C4 violations — no query should ever be served from a
+        # table whose vector width or provenance disagrees with the spec —
+        # and both are REQUIRED (exit 3), including the dimension-mismatch
+        # case, which is the common state of every legacy 128-dim lab
+        # (previously INFO-only here because the message didn't contain the
+        # word "provenance" — a real gap, now fixed). "provider" (Ollama
+        # simply not reachable/pulled yet) and "empty" (index not built
+        # yet) stay INFO-only, matching "no model configured" (A8: a clean
+        # machine/CI runner legitimately has neither, and doctor must stay
+        # exit 0 there unless --strict is passed) — C5 promises setup never
+        # fails on this, and doctor must not contradict that promise.
+        codes = pkb_index.degraded_codes()
+        # "backend" (defect B, sprints/2026-08-10-arail2-persistence-
+        # instantiated): LanceDB is a hard dep in both tiers, so an
+        # interpreter that cannot import it is a broken environment, not an
+        # optional-feature gap — same tier as "dimension"/"provenance".
+        required_codes = set(codes) & {"dimension", "provenance", "backend"}
+        _record("embedding_provenance", "required", not required_codes, embed_reason)
+        _record("embedding_reachable", "info", embed_ok, embed_reason)
+    except Exception as e:  # noqa: BLE001
+        _record("embedding_reachable", "info", False, str(e))
+
     # Required check (ARCHITECTURE.md §5.2/§13): "PKB root unwritable" is one
     # of doctor's named degraded conditions. Probed with os.access rather
     # than an actual write, so a healthy run never leaves a stray file.
@@ -153,6 +208,66 @@ def check_knowledge_base() -> None:
         _record("pkb_writable", "required", writable, str(root))
     except Exception as e:  # noqa: BLE001
         _record("pkb_writable", "required", False, str(e))
+
+    # The Compiled-KB gate is the ONLY thing agents build on, and it fails
+    # closed by design — every failure mode ends in "zero approved hits",
+    # which is indistinguishable from "nothing approved yet" and reports no
+    # error anywhere. That silence is how a lab ran for two weeks with 554
+    # of 556 approvals pointing at files a World switch had deleted, while
+    # the Researcher kept concluding its hypotheses were "not measurable".
+    # Doctor is where that becomes visible.
+    try:
+        from arail import compiled_kb, world_mount
+        approved = compiled_kb.approved_paths()
+        dangling = compiled_kb.dangling_paths()
+        live = len(approved) - len(dangling)
+        _p(f"  compiled KB       : {live} live / {len(approved)} approved")
+        if dangling:
+            _p(f"  dangling approvals: {len(dangling)} point at files that no longer exist")
+            _p("                      fix: ./arailctl pkb prune")
+        # An empty gate is worth naming even when nothing dangles: it means
+        # agents have no approved truth at all, which is a legitimate state
+        # on a fresh lab and a bug-shaped one on a lab with a World mounted.
+        if live == 0:
+            rec = world_mount.current_mount()
+            if rec is not None:
+                _p(f"  ⚠ no approved knowledge while World '{rec.world}' is mounted —")
+                _p("    agents will find nothing. Approve terms on /dac (Knowledge).")
+        _record("compiled_kb_dangling", "info", not dangling,
+                f"{len(dangling)} dangling of {len(approved)}")
+    except Exception as e:  # noqa: BLE001
+        _record("compiled_kb_dangling", "info", True, f"skipped: {e}")
+
+
+def check_provisioning() -> None:
+    """The class check (sprints/2026-08-10-arail2-persistence-instantiated
+    §5): every declared mechanism names its own instantiation predicate.
+    "Declared and not instantiated" is always a finding here, never
+    silence — this is what would have caught defect A (the relational
+    store) and defect B (the vector backend) before either shipped."""
+    _section("Provisioning (declared vs. instantiated)")
+    try:
+        from arail import provisioning
+        from arail import config
+        # REVIEW.md ASK-1: repo_root=os.getcwd() mis-reported (a silent,
+        # non-degrading "unavailable" on a healthy DB) whenever doctor ran
+        # from a subdirectory. Derived from the package location instead —
+        # the same technique arail.dbspec.ensure.DEFAULT_SPEC_DIR already
+        # uses — so it no longer depends on where the caller happened to
+        # be standing.
+        from arail.dbspec.ensure import DEFAULT_SPEC_DIR
+        repo_root = DEFAULT_SPEC_DIR.parent
+        assertions = provisioning.evaluate_all(
+            repo_root=str(repo_root), data_dir=str(config.DATA_DIR))
+        for a in assertions:
+            mark = "OK" if not a.finding else ("MISSING" if a.declared else "off")
+            _p(f"  [{a.tier:<8}] {a.key:<22}: {mark}"
+               + (f" — {a.detail}" if a.detail else ""))
+            if a.finding and a.action:
+                _p(f"             fix: {a.action}")
+            _record(f"provisioning_{a.key}", a.tier, not a.finding, a.detail)
+    except Exception as e:  # noqa: BLE001
+        _p(f"  provisioning check failed: {type(e).__name__}: {e}")
 
 
 def check_components() -> None:
@@ -236,6 +351,7 @@ def main(argv: list[str] | None = None) -> int:
     check_environment()
     check_models()
     check_knowledge_base()
+    check_provisioning()
     check_components()
     if args.updates:
         check_updates()

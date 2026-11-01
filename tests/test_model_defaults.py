@@ -10,12 +10,17 @@ nothing downstream needs to change to respect it.
 """
 from __future__ import annotations
 
+import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 from arail import model_defaults
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 @pytest.fixture(autouse=True)
@@ -34,7 +39,13 @@ def _clean_env(monkeypatch):
     shape."""
     monkeypatch.delenv("MODEL_NAME", raising=False)
     monkeypatch.delenv("AEROLLM_MODEL", raising=False)
-    _saved = {k: os.environ.get(k) for k in ("MODEL_NAME", "AEROLLM_MODEL")}
+    monkeypatch.delenv("ARAIL_ENV_PREF_A", raising=False)
+    monkeypatch.delenv("ARAIL_ENV_PREF_B", raising=False)
+    # Slot A is stamped into MODEL_NAME only when the primary backend fronts
+    # Ollama (round 3, QA-1); unset would mean mlx.
+    monkeypatch.setenv("MODEL_BACKEND", "ollama_native")
+    _saved = {k: os.environ.get(k) for k in ("MODEL_NAME", "AEROLLM_MODEL",
+                                  "ARAIL_ENV_PREF_A", "ARAIL_ENV_PREF_B")}
     yield
     for k, v in _saved.items():
         if v is None:
@@ -163,12 +174,317 @@ def test_session_isolation_points_at_a_file_that_does_not_exist():
     assert not Path(override).exists()
 
 
-def test_example_file_is_valid_yaml_and_documents_both_keys():
-    """The committed .example file must actually parse and name both
-    slots — it's the thing a new operator reads first."""
+def test_example_file_is_valid_v2_yaml_with_both_pins_unset():
+    """The committed .example file must parse as v2, pin nothing (so copying
+    it changes nothing), and read back through model_defaults.read()."""
     import yaml
     example = Path(__file__).resolve().parent.parent / "model_defaults.yaml.example"
     assert example.exists()
     data = yaml.safe_load(example.read_text(encoding="utf-8"))
-    assert "default_a" in data
-    assert "default_b" in data
+    assert data["version"] == 2
+    assert data["pins"] == {"a": None, "b": None}
+    got = model_defaults.read(example)
+    assert got["version"] == 2 and got["pins"] == {"a": None, "b": None}
+
+
+# ---------------------------------------------------------------------------
+# v2: pins + resolved cache (sprint 2026-10-20-boot-model-autoresolve)
+# ---------------------------------------------------------------------------
+
+import warnings
+
+import yaml
+
+
+def _res(a="llama-ai-eng:latest", b=None):
+    return {"resolved_at": "2026-10-20T00:00:00+0000",
+            "a": {"model": a, "source": "auto", "reason": None, "size_gb": 1.3},
+            "b": {"model": b, "source": "none" if not b else "auto",
+                  "reason": None if b else "pinned off", "size_gb": None}}
+
+
+def test_write_pin_roundtrips_and_preserves_cache(tmp_path):
+    f = tmp_path / "model_defaults.yaml"
+    model_defaults.write_cache(_res(), path=f)
+    model_defaults.write_pin("a", "qwen3:4b", path=f)
+    data = model_defaults.read(f)
+    assert data["pins"] == {"a": "qwen3:4b", "b": None}
+    assert data["resolved"]["a"]["model"] == "llama-ai-eng:latest"
+
+
+def test_write_cache_preserves_pins_byte_stable(tmp_path):
+    f = tmp_path / "model_defaults.yaml"
+    model_defaults.write_pin("a", "qwen3:4b", path=f)
+    model_defaults.write_pin("b", "none", path=f)
+    before = yaml.safe_load(f.read_text())["pins"]
+    model_defaults.write_cache(_res(), path=f)
+    model_defaults.write_cache(_res(a="other:1b"), path=f)
+    after = yaml.safe_load(f.read_text())
+    assert after["pins"] == before == {"a": "qwen3:4b", "b": "none"}
+    assert after["version"] == 2
+    assert after["resolved"]["a"]["model"] == "other:1b"
+
+
+def test_write_pin_none_only_for_slot_b_and_auto_clears(tmp_path):
+    f = tmp_path / "model_defaults.yaml"
+    with pytest.raises(ValueError):
+        model_defaults.write_pin("a", "none", path=f)
+    with pytest.raises(ValueError):
+        model_defaults.write_pin("c", "x", path=f)
+    model_defaults.write_pin("b", "none", path=f)
+    assert model_defaults.read(f)["pins"]["b"] == "none"
+    model_defaults.write_pin("b", "auto", path=f)
+    assert model_defaults.read(f)["pins"]["b"] is None
+
+
+def test_apply_v2_stamps_resolved_and_clears_b_when_none(tmp_path, monkeypatch):
+    f = tmp_path / "model_defaults.yaml"
+    model_defaults.write_cache(_res(a="llama-ai-eng:latest", b=None), path=f)
+    monkeypatch.setenv("AEROLLM_MODEL", "Qwen2.5-7B-Instruct-4bit")
+    monkeypatch.setenv("MODEL_NAME", "from-dotenv")
+    monkeypatch.delenv("ARAIL_ENV_PREF_A", raising=False)
+    monkeypatch.delenv("ARAIL_ENV_PREF_B", raising=False)
+    try:
+        model_defaults.apply(f)
+        assert os.environ["MODEL_NAME"] == "llama-ai-eng:latest"
+        assert "AEROLLM_MODEL" not in os.environ
+        # the .env value is remembered as a preference, not lost
+        assert model_defaults.env_preference() == {
+            "a": "from-dotenv", "b": "Qwen2.5-7B-Instruct-4bit"}
+        model_defaults.apply(f)  # idempotent: marker keeps the first capture
+        assert model_defaults.env_preference()["a"] == "from-dotenv"
+    finally:
+        os.environ.pop("ARAIL_ENV_PREF_A", None)
+        os.environ.pop("ARAIL_ENV_PREF_B", None)
+
+
+def test_apply_v2_without_cache_uses_pins(tmp_path):
+    f = tmp_path / "model_defaults.yaml"
+    model_defaults.write_pin("a", "qwen3:4b", path=f)
+    try:
+        assert model_defaults.apply(f)["default_a"] == "qwen3:4b"
+    finally:
+        os.environ.pop("ARAIL_ENV_PREF_A", None)
+
+
+def test_v1_file_reads_as_pins_with_null_b_as_none(tmp_path):  # FM11
+    f = tmp_path / "model_defaults.yaml"
+    f.write_text("default_a: ai-engineer:latest\ndefault_b: null\n")
+    data = model_defaults.read(f)
+    assert data["legacy"] is True
+    assert data["pins"] == {"a": "ai-engineer:latest", "b": "none"}
+
+
+def test_migrate_v1_rewrites_v2_with_backup_once(tmp_path):  # FM11
+    f = tmp_path / "model_defaults.yaml"
+    original = "# operator note: Qwen SIGABRTs\ndefault_a: ai-engineer:latest\ndefault_b: null\n"
+    f.write_text(original)
+    assert model_defaults.migrate_v1(f) is True
+    data = yaml.safe_load(f.read_text())
+    assert data["version"] == 2
+    assert data["pins"] == {"a": "ai-engineer:latest", "b": "none"}
+    assert "migrated from v1" in data["pin_notes"]["b"]
+    bak = tmp_path / ".model_defaults.v1.bak"
+    assert bak.read_text() == original
+    assert model_defaults.migrate_v1(f) is False      # already v2
+
+
+def test_write_cache_unwritable_returns_false_never_raises(tmp_path, monkeypatch):  # FM10
+    f = tmp_path / "model_defaults.yaml"
+
+    def boom(*a, **k):
+        raise OSError("read-only")
+    monkeypatch.setattr(os, "replace", boom)
+    assert model_defaults.write_cache(_res(), path=f) is False
+
+
+def test_corrupt_file_reads_as_no_pins(tmp_path):  # FM10
+    f = tmp_path / "model_defaults.yaml"
+    f.write_text("{{{ not yaml")
+    data = model_defaults.read(f)
+    assert data["ok"] is False and data["pins"] == {"a": None, "b": None}
+
+
+def test_update_warm_records_status(tmp_path):
+    f = tmp_path / "model_defaults.yaml"
+    model_defaults.write_cache(_res(), path=f)
+    model_defaults.update_warm("a", "ok", path=f)
+    assert model_defaults.read(f)["resolved"]["warm"] == {"a": "ok"}
+
+
+def test_write_defaults_is_deprecated_shim_mapping_to_pins(tmp_path):
+    f = tmp_path / "model_defaults.yaml"
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        written = model_defaults.write_defaults("llama-ai-eng", None, path=f)
+    assert written == f
+    assert any(issubclass(x.category, DeprecationWarning) for x in w)
+    assert model_defaults.read(f)["pins"] == {"a": "llama-ai-eng", "b": "none"}
+
+
+def test_write_pin_is_atomic_no_partial_file_on_crash(tmp_path, monkeypatch):
+    f = tmp_path / "model_defaults.yaml"
+
+    def _boom(*a, **kw):
+        raise OSError("simulated crash")
+
+    monkeypatch.setattr(os, "replace", _boom)
+    with pytest.raises(OSError):
+        model_defaults.write_pin("a", "llama-ai-eng", path=f)
+    assert not f.exists()
+    assert list(tmp_path.glob(".model_defaults.*.tmp")) == []
+
+
+def test_write_pin_respects_path_override_precedence(monkeypatch, tmp_path):
+    env_file = tmp_path / "env.yaml"
+    explicit_file = tmp_path / "explicit.yaml"
+    monkeypatch.setenv("ARAIL_MODEL_DEFAULTS_FILE", str(env_file))
+    assert model_defaults.write_pin("a", "x", path=explicit_file) == explicit_file
+    assert not env_file.exists()
+    assert model_defaults.write_pin("a", "x") == env_file
+
+
+def test_concurrent_write_pin_during_cache_write_keeps_pin(tmp_path):  # FM13
+    import threading
+    f = tmp_path / "model_defaults.yaml"
+    model_defaults.write_pin("a", "qwen3:4b", path=f)
+    stop = threading.Event()
+
+    def spam():
+        while not stop.is_set():
+            model_defaults.write_cache(_res(), path=f)
+    t = threading.Thread(target=spam)
+    t.start()
+    try:
+        for _ in range(20):
+            model_defaults.write_pin("b", "none", path=f)
+    finally:
+        stop.set()
+        t.join()
+    assert model_defaults.read(f)["pins"]["a"] == "qwen3:4b"
+
+
+# ---------------------------------------------------------------------------
+# resolve_slots() / _gather_slot_facts() / report() — projections of the cache
+# ---------------------------------------------------------------------------
+
+def test_resolve_slots_without_file_falls_back_to_builtin(monkeypatch, tmp_path):
+    monkeypatch.setenv("ARAIL_MODEL_DEFAULTS_FILE", str(tmp_path / "m.yaml"))
+    result = model_defaults.resolve_slots()
+    assert "settled" not in result
+    assert result["default_a"] == "llama-ai-eng"
+    assert result["default_b"] is None
+
+
+def test_resolve_slots_reports_source_and_reason_from_cache(monkeypatch, tmp_path):
+    f = tmp_path / "model_defaults.yaml"
+    monkeypatch.setenv("ARAIL_MODEL_DEFAULTS_FILE", str(f))
+    model_defaults.write_cache(_res(), path=f)
+    monkeypatch.setenv("MODEL_NAME", "llama-ai-eng:latest")
+    result = model_defaults.resolve_slots()
+    assert result["a"]["source"] == "auto"
+    assert result["b"]["reason"] == "pinned off"
+    assert result["version"] == 2
+
+
+def test_gather_slot_facts_is_a_projection_without_network(monkeypatch, tmp_path):
+    f = tmp_path / "model_defaults.yaml"
+    monkeypatch.setenv("ARAIL_MODEL_DEFAULTS_FILE", str(f))
+    model_defaults.write_cache(_res(), path=f)
+    monkeypatch.setenv("MODEL_NAME", "llama-ai-eng:latest")
+    monkeypatch.delenv("AEROLLM_MODEL", raising=False)
+
+    def no_net(*a, **k):
+        raise AssertionError("network used")
+    monkeypatch.setattr("arail.chat._ollama_installed_models", no_net)
+    facts = model_defaults._gather_slot_facts()
+    assert facts["a"]["model"] == "llama-ai-eng:latest"
+    assert facts["a"]["size_gb"] == 1.3
+    assert facts["a"]["install_command"] is None
+    assert facts["b"]["model"] is None and facts["b"]["reason"] == "pinned off"
+
+
+def test_report_never_raises_and_mentions_both_slots_with_source(monkeypatch, tmp_path):
+    f = tmp_path / "model_defaults.yaml"
+    monkeypatch.setenv("ARAIL_MODEL_DEFAULTS_FILE", str(f))
+    model_defaults.write_cache(_res(), path=f)
+    text = model_defaults.report()
+    assert "A (resident):" in text and "B (QueueLLM):" in text
+    assert "source: auto" in text and "pinned off" in text
+
+
+# ---------------------------------------------------------------------------
+# CLI (python -m arail.model_defaults) — the start.sh readiness-banner surface
+# ---------------------------------------------------------------------------
+
+def _cli(tmp_path, *args):
+    env = dict(os.environ)
+    env["ARAIL_MODEL_DEFAULTS_FILE"] = str(tmp_path / "model_defaults.yaml")
+    env["ARAIL_ENV_FILE"] = str(tmp_path / "env")
+    for k in ("MODEL_NAME", "AEROLLM_MODEL", "ARAIL_ENV_PREF_A", "ARAIL_ENV_PREF_B"):
+        env.pop(k, None)
+    return subprocess.run([sys.executable, "-m", "arail.model_defaults", *args],
+                          capture_output=True, text=True, env=env, cwd=_REPO_ROOT)
+
+
+def test_cli_get_default_a_unsettled_prints_builtin_fallback(tmp_path):
+    result = _cli(tmp_path, "--get", "default_a")
+    assert result.returncode == 0
+    assert result.stdout.strip() == "llama-ai-eng"
+
+
+def test_cli_get_reads_resolved_cache(tmp_path):
+    model_defaults.write_cache(_res(a="qwen3:4b"), path=tmp_path / "model_defaults.yaml")
+    assert _cli(tmp_path, "--get", "default_a").stdout.strip() == "qwen3:4b"
+
+
+def test_cli_banner_prints_models_block(tmp_path):
+    model_defaults.write_cache(_res(), path=tmp_path / "model_defaults.yaml")
+    result = _cli(tmp_path, "--banner")
+    assert result.returncode == 0
+    assert "Models:" in result.stdout and "source: auto" in result.stdout
+
+
+def test_cli_json_v2_shape(tmp_path):
+    model_defaults.write_cache(_res(), path=tmp_path / "model_defaults.yaml")
+    result = _cli(tmp_path, "--json")
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["version"] == 2
+    assert {"pins", "resolved"} <= set(payload)
+    assert "settled" not in payload
+    assert payload["resolved"]["a"]["model"] == "llama-ai-eng:latest"
+
+
+# ── round 2: review BLOCK 1 (write_pin on an unreadable file) ──────
+
+def test_write_pin_backs_up_an_unreadable_file_before_replacing_it(tmp_path):
+    f = tmp_path / "model_defaults.yaml"
+    mangled = "pins:\n  b: none\nresolved: [unclosed\n"
+    f.write_text(mangled)
+    model_defaults.write_pin("a", "llama-ai-eng", path=f)
+    bak = tmp_path / ".model_defaults.corrupt.bak"
+    assert bak.read_text() == mangled
+    assert model_defaults.read(f)["pins"]["a"] == "llama-ai-eng"
+
+
+def test_write_cache_refuses_an_unreadable_file(tmp_path):
+    f = tmp_path / "model_defaults.yaml"
+    f.write_text("pins: [oops\n")
+    assert model_defaults.write_cache({"a": {"model": "x"}}, path=f) is False
+    assert f.read_text() == "pins: [oops\n"
+
+
+def test_report_banner_columns_align_and_say_queuellm(monkeypatch, tmp_path):
+    """The display name is QueueLLM (not aeroLLM) and the A and B model
+    columns start at the same offset."""
+    f = tmp_path / "model_defaults.yaml"
+    monkeypatch.setenv("ARAIL_MODEL_DEFAULTS_FILE", str(f))
+    model_defaults.write_cache(_res(), path=f)
+    lines = model_defaults.report().splitlines()
+    a_line = next(x for x in lines if "A (resident):" in x)
+    b_line = next(x for x in lines if "B (QueueLLM):" in x)
+    assert "aeroLLM" not in "\n".join(lines)
+    a_model = a_line.split("A (resident):")[1]
+    b_model = b_line.split("B (QueueLLM):")[1]
+    assert (len(a_model) - len(a_model.lstrip())) == (len(b_model) - len(b_model.lstrip()))

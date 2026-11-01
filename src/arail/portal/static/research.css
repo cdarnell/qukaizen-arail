@@ -32,6 +32,27 @@
 .rx-tagline-text {
   color: var(--text-muted);
 }
+.rx-how-trigger {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 0.28rem 0.65rem;
+  background: transparent;
+  border: 1px solid var(--accent2-a28);
+  border-radius: var(--radius-pill);
+  color: var(--accent2);
+  font-family: var(--font-sans);
+  font-size: 0.7rem;
+  font-weight: 550;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--dur-1) var(--ease-accent),
+              color var(--dur-1) var(--ease-accent);
+}
+.rx-how-trigger:hover {
+  background: var(--accent2-a08);
+  color: var(--text-strong);
+  border-color: var(--accent2);
+}
 
 .rx-preview-banner {
   display: flex;
@@ -914,6 +935,84 @@
   margin-top: 1rem;
 }
 
+/* ── "How does this work?" explainer modal ────────────────────── */
+.rx-how-card {
+  max-width: min(560px, 94vw);
+  max-height: min(88vh, calc(100vh - 60px));
+  overflow-y: auto;
+  padding: 1.25rem 1.4rem;
+}
+.rx-how-lede {
+  color: var(--text) !important;
+  font-size: 0.85rem !important;
+  line-height: 1.55;
+  margin-bottom: 1.1rem !important;
+}
+.rx-how-steps {
+  list-style: none;
+  margin: 0 0 1.1rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.rx-how-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.6rem 0.15rem;
+  border-left: 2px solid var(--border);
+  padding-left: 0.85rem;
+}
+.rx-how-step-icon {
+  flex: 0 0 auto;
+  font-size: 1.05rem;
+  line-height: 1.4;
+}
+.rx-how-step-title {
+  display: block;
+  color: var(--text-strong);
+  font-weight: 650;
+  font-size: 0.8rem;
+  margin-bottom: 0.15rem;
+}
+.rx-how-step-body p {
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  line-height: 1.5;
+  margin: 0;
+}
+.rx-how-step-body em {
+  color: var(--accent2);
+  font-style: normal;
+  font-weight: 600;
+}
+.rx-how-callout {
+  padding: 0.7rem 0.85rem;
+  background: var(--accent-a08);
+  border: 1px solid var(--accent-a28);
+  border-radius: var(--radius-m);
+  color: var(--text);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+.rx-how-callout strong {
+  display: block;
+  color: var(--accent);
+  margin-bottom: 0.25rem;
+}
+.rx-how-foot {
+  margin: 1rem 0 0 !important;
+  text-align: right;
+}
+.rx-how-foot a {
+  color: var(--accent2);
+  font-size: 0.72rem;
+  text-decoration: none;
+  border-bottom: 1px dotted var(--accent2-a28);
+}
+.rx-how-foot a:hover { color: var(--text-strong); border-bottom-color: var(--accent2); }
+
 .rx-swarm-card {
   max-width: min(720px, 94vw);
   max-height: min(90vh, calc(100vh - 60px));
@@ -1709,3 +1808,225 @@
   font-size: 0.7rem;
   color: var(--text-muted);
 }
+
+/* ── Model truth strip (under the tagline) ─────────────────────────
+   What research actually runs on. Quiet by design — one line of fact,
+   the deep-passes toggle on the right. */
+.rx-truth {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 0.45rem 1.25rem;
+  background: var(--surface2);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+.rx-truth[hidden] { display: none !important; }
+.rx-truth-text { flex: 1 1 auto; min-width: 0; }
+.rx-truth-text strong { color: var(--text-strong); font-weight: 600; }
+.rx-truth-dim { color: var(--text-muted); }
+.rx-truth-ok { color: var(--accent); font-weight: 550; }
+.rx-truth-sep { color: var(--border); margin: 0 0.15rem; }
+.rx-truth-controls {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.rx-truth-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.22rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  text-transform: var(--label-transform);
+  letter-spacing: var(--label-tracking);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color var(--dur-1) var(--ease-accent),
+              color var(--dur-1) var(--ease-accent);
+}
+.rx-truth-toggle:hover { border-color: var(--accent2-a28); color: var(--text); }
+.rx-truth-toggle:has(input:checked) {
+  border-color: var(--accent2-a28);
+  color: var(--accent2);
+}
+.rx-truth-toggle input { accent-color: var(--accent2); margin: 0; }
+.rx-truth-toggle[hidden] { display: none !important; }
+.rx-truth-lock {
+  padding: 0.22rem 0.6rem;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-pill);
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.rx-truth-lock[hidden] { display: none !important; }
+
+/* ── World-aligned research options (empty state) ────────────────── */
+.rx-options {
+  margin: 1.4rem 0 1.2rem;
+  text-align: left;
+}
+.rx-options[hidden] { display: none !important; }
+.rx-options-world {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-bottom: 0.75rem;
+}
+.rx-options-kicker {
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  font-weight: 600;
+  color: var(--accent);
+  text-transform: var(--label-transform);
+  letter-spacing: var(--label-tracking);
+}
+.rx-options-name {
+  font-size: 0.95rem;
+  font-weight: 650;
+  color: var(--text-strong);
+}
+.rx-options-tier { flex: 0 0 auto; }
+.rx-options-tagline {
+  flex-basis: 100%;
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.rx-options-tagline a { color: var(--accent2); text-decoration: none; }
+.rx-options-tagline a:hover { text-decoration: underline; }
+.rx-option-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.3rem;
+  width: 100%;
+  padding: 0.8rem 0.9rem;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  color: var(--text);
+  font-family: var(--font-sans);
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  transition: border-color var(--dur-1) var(--ease-accent),
+              background var(--dur-1) var(--ease-accent);
+}
+.rx-option-card:hover { border-color: var(--accent2-a28); }
+.rx-option-card[hidden] { display: none !important; }
+.rx-option-primary {
+  margin-bottom: 0.6rem;
+  border-color: var(--accent);
+  background:
+    linear-gradient(120deg, var(--glow-a), transparent 65%), var(--surface2);
+}
+.rx-option-primary:hover { border-color: var(--accent); }
+.rx-options-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 0.6rem;
+}
+.rx-options-grid[hidden] { display: none !important; }
+.rx-option-kind {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: var(--label-transform);
+  letter-spacing: var(--label-tracking);
+}
+.rx-option-primary .rx-option-kind { color: var(--accent); }
+.rx-option-title {
+  font-size: 0.85rem;
+  font-weight: 650;
+  color: var(--text-strong);
+  line-height: 1.3;
+}
+.rx-option-goal {
+  font-size: 0.74rem;
+  color: var(--text);
+  line-height: 1.45;
+}
+.rx-option-detail {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+.rx-option-measure {
+  font-size: 0.66rem;
+  color: var(--text-muted);
+  line-height: 1.45;
+  font-family: var(--font-mono);
+}
+.rx-option-setup {
+  font-size: 0.66rem;
+  color: var(--accent);
+  line-height: 1.45;
+}
+.rx-option-cta {
+  margin-top: 0.15rem;
+  font-size: 0.68rem;
+  font-weight: 550;
+  color: var(--accent2);
+}
+
+/* ── Goal-modal suggestion chips ─────────────────────────────────── */
+.rx-modal-suggestions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.6rem;
+}
+.rx-modal-suggestions[hidden] { display: none !important; }
+.rx-suggestions-label {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: var(--label-transform);
+  letter-spacing: var(--label-tracking);
+  margin-right: 0.2rem;
+}
+.rx-suggestion-chip {
+  padding: 0.24rem 0.6rem;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 0.7rem;
+  cursor: pointer;
+  transition: border-color var(--dur-1) var(--ease-accent),
+              color var(--dur-1) var(--ease-accent);
+}
+.rx-suggestion-chip:hover { border-color: var(--accent2-a28); color: var(--accent2); }
+
+/* ── Per-experiment model badge ──────────────────────────────────── */
+.rx-exp-model {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  color: var(--text-muted);
+}
+
+/* ── Branches panel subtitle (tuning-loop attribution) ───────────── */
+.rx-branches-sub {
+  margin-top: 0.25rem;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+.rx-branches-sub a { color: var(--accent2); text-decoration: none; }
+.rx-branches-sub a:hover { text-decoration: underline; }

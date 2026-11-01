@@ -24,7 +24,11 @@
     source: "source",
   };
 
-  const state = { pending: [], approved: [], gate: true, selected: new Set(), showApproved: false };
+  // `scope` is the World the queue is showing (e.g. "world-debt-finance"),
+  // or null for the root lab's cross-World view. The server decides it from
+  // the mount; the page only reports it.
+  const state = { pending: [], approved: [], gate: true, selected: new Set(),
+                  showApproved: false, scope: null };
 
   function el(tag, cls, text) {
     const n = document.createElement(tag);
@@ -48,6 +52,7 @@
     state.pending = data.pending || [];
     state.approved = data.approved || [];
     state.gate = !!data.gate_enabled;
+    state.scope = data.scope || null;
     state.selected.clear();
     render();
     // Broadcast counts for page-level consumers (the World hero's
@@ -81,6 +86,13 @@
     title.appendChild(el("span", "ckb-title-main", "Compiled Knowledge Base"));
     title.appendChild(el("span", "ckb-title-sub",
       "The approved layer your agents build on — raw is a candidate pool until you approve it."));
+    // Scope line: what this queue is and is not. Without it, a mounted World
+    // showing 0 candidates and the root lab showing 53 look like the same
+    // surface disagreeing with itself.
+    title.appendChild(el("span", "ckb-title-scope",
+      state.scope
+        ? "Showing " + state.scope.replace(/^world-/, "") + " only — knowledge from other Worlds is not listed here."
+        : "Root lab · every World in this lab. Mount a World to narrow it to that World's knowledge."));
     head.appendChild(title);
     const gateBadge = el("span", "ckb-gate " + (state.gate ? "ckb-gate--on" : "ckb-gate--off"),
       state.gate ? "gate on · agents use approved only" : "gate off · agents use raw corpus");

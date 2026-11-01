@@ -133,7 +133,25 @@ NOTE on naming: the Gemma Terms do NOT require the model name to contain
 so qkz-project-aware-2b requires no rename; attribution is via the notice above.
 
 ────────────────────────────────────────────────────────────────────────────
+Third-party software component: AeroLLM
+────────────────────────────────────────────────────────────────────────────
+ARAIL's maximus-tier deep inference backend can be satisfied by a prebuilt
+AeroLLM Runtime extension (`aerollm_api`) published as a binary asset on
+ARAIL's own GitHub Releases (the BUNDLED install channel,
+`scripts/build-aerollm.sh bundle`). This makes ARAIL a redistributor of a
+compiled Object form of that work under Apache License, Version 2.0.
+
+  Copyright 2026 Charles Darnell and AeroLLM contributors.
+  Component: AeroLLM Runtime (`aerollm-api`)
+  License: Apache License, Version 2.0
+  License text and full attribution: THIRD-PARTY-LICENSES/aerollm/
+
+See THIRD-PARTY-LICENSES/aerollm/README.md for what's shipped, which
+commit, and the modification disclosure required by Apache-2.0 §4(b).
+
+────────────────────────────────────────────────────────────────────────────
 ARAIL's own MIT license (see LICENSE) covers only the software in this
-repository. It does not extend to any model weights, and it does not
-override or supersede the base model licenses listed above.
+repository. It does not extend to any model weights or bundled third-party
+software components, and it does not override or supersede the base model
+licenses or the AeroLLM Apache-2.0 license listed above.
 ────────────────────────────────────────────────────────────────────────────

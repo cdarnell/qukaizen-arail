@@ -52,6 +52,16 @@
         </button>
       </div>
 
+      <!-- Inline key-add — appears only when Frontier API is disabled for
+           lack of a saved key, so the operator doesn't have to go hunt for
+           Chat → ⚙ Connections just to unlock this one option. -->
+      <div class="frontier-key-row" id="frontier-key-row" hidden>
+        <span class="micro-label">No Claude key saved</span>
+        <input type="password" id="frontier-key-input" placeholder="sk-ant-…" autocomplete="off">
+        <button type="button" class="btn btn-ghost btn-sm" id="frontier-key-save">Save key</button>
+        <span class="forge-err" id="frontier-key-err" role="alert"></span>
+      </div>
+
       <div class="forge-size" id="forge-size" role="radiogroup" aria-label="World size">
         <button type="button" class="size-opt" data-terms="25"><span class="size-n">25</span> · Sketch <span class="size-eta">≈4 min</span></button>
         <button type="button" class="size-opt selected" data-terms="50" aria-pressed="true"><span class="size-n">50</span> · Field guide <span class="size-eta">≈8 min</span></button>

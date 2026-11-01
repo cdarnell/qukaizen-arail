@@ -125,3 +125,87 @@ def test_fail_closed_on_corrupt_manifest(pkb):
     (pkb / "compiled" / "kb" / "approved.json").write_text("{ not json")
     # corrupt manifest reads as nothing approved, never raises
     assert ckb.approved_paths(pkb) == set()
+
+
+# ── manifest_present / gate_state (QA-6 bootstrap) ───────────────────────
+
+def test_manifest_present_false_when_missing(pkb):
+    assert ckb.manifest_present(pkb) is False
+
+
+def test_manifest_present_true_after_write(pkb):
+    ckb.approve(["notes/scratch.md"], pkb)
+    assert ckb.manifest_present(pkb) is True
+
+
+@pytest.mark.parametrize("payload", ["{ not json", "null", '"x"'])
+def test_manifest_present_corrupt_or_non_dict_list_shapes(pkb, payload):
+    (pkb / "compiled" / "kb").mkdir(parents=True)
+    (pkb / "compiled" / "kb" / "approved.json").write_text(payload)
+    assert ckb.manifest_present(pkb) is False
+
+
+def test_manifest_present_list_shape_is_true(pkb):
+    (pkb / "compiled" / "kb").mkdir(parents=True)
+    (pkb / "compiled" / "kb" / "approved.json").write_text('["a", "b"]')
+    assert ckb.manifest_present(pkb) is True
+
+
+def test_manifest_present_truncated_json_is_false(pkb):
+    (pkb / "compiled" / "kb").mkdir(parents=True)
+    (pkb / "compiled" / "kb" / "approved.json").write_text("{ not json")
+    assert ckb.manifest_present(pkb) is False
+
+
+def test_gate_state_off(pkb, monkeypatch):
+    monkeypatch.setenv("ARAIL_APPROVED_ONLY", "off")
+    gs = ckb.gate_state(pkb)
+    assert gs["state"] == "off"
+    assert gs["enabled"] is False
+
+
+def test_gate_state_unbootstrapped(pkb, monkeypatch):
+    monkeypatch.delenv("ARAIL_APPROVED_ONLY", raising=False)
+    gs = ckb.gate_state(pkb)
+    assert gs["state"] == "unbootstrapped"
+    assert gs["manifest_present"] is False
+
+
+def test_gate_state_empty_after_bootstrap_with_nothing_approved(pkb, monkeypatch):
+    monkeypatch.delenv("ARAIL_APPROVED_ONLY", raising=False)
+    # simulate bootstrap: write manifest with zero items
+    ckb.approve([], pkb)
+    gs = ckb.gate_state(pkb)
+    assert gs["state"] == "empty"
+    assert gs["manifest_present"] is True
+    assert gs["live_count"] == 0
+
+
+def test_gate_state_populated(pkb, monkeypatch):
+    monkeypatch.delenv("ARAIL_APPROVED_ONLY", raising=False)
+    ckb.approve(["notes/scratch.md"], pkb)
+    gs = ckb.gate_state(pkb)
+    assert gs["state"] == "populated"
+    assert gs["live_count"] == 1
+
+
+def test_gate_state_cheap_skips_pending_walk(pkb, monkeypatch):
+    monkeypatch.delenv("ARAIL_APPROVED_ONLY", raising=False)
+    ckb.approve(["notes/scratch.md"], pkb)
+
+    def _boom(*a, **k):
+        raise AssertionError("pending_count must not be called when cheap=True")
+
+    monkeypatch.setattr(ckb, "pending_count", _boom)
+    gs = ckb.gate_state(pkb, cheap=True)
+    assert gs["pending_count"] == -1
+
+
+def test_gate_state_never_raises_on_total_failure(pkb, monkeypatch):
+    def _boom(*a, **k):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(ckb, "manifest_present", _boom)
+    gs = ckb.gate_state(pkb)
+    assert gs["state"] == "unbootstrapped"
+    assert gs["manifest_present"] is False

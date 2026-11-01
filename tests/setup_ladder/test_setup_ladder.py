@@ -63,19 +63,43 @@ def test_llama_pull_ok_but_create_fails_warns_and_continues(ladder):
 # ---------------------------------------------------------------------------
 
 def test_llama_ai_eng_already_installed_is_idempotent_skip(ladder):
-    """llama-ai-eng already present → no pull, no curl, clean skip."""
+    """llama-ai-eng already present → no persona pull, no curl, clean skip.
+
+    nomic-embed-text (C5, arail2-tier1-integration) is a separate,
+    independent pull in the same ladder and is NOT present in this test's
+    $QA_INSTALLED, so it is expected to still attempt a pull — scope the
+    assertion to the ai-eng persona models specifically.
+    """
     r = ladder(installed="llama-ai-eng")
     assert r.ladder_exit == 0
-    assert not r.called("PULL"), "llama-ai-eng present → skip"
+    assert not r.called("PULL llama3.2:1b"), "llama-ai-eng present → skip"
+    assert not r.called("PULL qwen2.5:7b")
     assert not r.called("CURL")
 
 
 def test_ai_eng_already_installed_is_idempotent_skip(ladder):
-    """Legacy ai-eng present → no pull, clean skip (back-compat idempotency)."""
+    """Legacy ai-eng present → no persona pull, clean skip (back-compat
+    idempotency). See test_llama_ai_eng_already_installed_is_idempotent_skip
+    for why the nomic-embed-text pull is excluded from this assertion."""
     r = ladder(installed="ai-eng")
     assert r.ladder_exit == 0
-    assert not r.called("PULL")
+    assert not r.called("PULL llama3.2:1b")
+    assert not r.called("PULL qwen2.5:7b")
     assert not r.called("CURL")
+
+
+def test_nomic_embed_text_pulled_when_absent(ladder):
+    """C5: nomic-embed-text is pulled independently of which ai-eng branch
+    ran, following the llama3.2:1b warn-and-continue pattern."""
+    r = ladder(installed="llama-ai-eng")
+    assert r.ladder_exit == 0
+    assert r.called("PULL nomic-embed-text")
+
+
+def test_nomic_embed_text_already_installed_is_idempotent_skip(ladder):
+    r = ladder(installed="llama-ai-eng nomic-embed-text")
+    assert r.ladder_exit == 0
+    assert not r.called("PULL nomic-embed-text")
 
 
 # ---------------------------------------------------------------------------

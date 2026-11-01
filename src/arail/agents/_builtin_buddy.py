@@ -1260,11 +1260,16 @@ class BuddyAgent:
             "Pair on the goal, surface what matters",
         )
         self._task = asyncio.create_task(self._run())
-        self._host.emit(
-            "buddy",
-            f"{EMOJI} {NAME} is online — obsessing over your goal.",
-            "info",
-        )
+        # Operator decision (a), SPRINT.md 2026-09-20-buddy-front-and-center:
+        # widen the gate to Buddy's remaining proactive lines -- this boot
+        # notice is one of them (REVIEW.md D4/B3).
+        from arail import agent_context
+        if agent_context.speech_gate("buddy"):
+            self._host.emit(
+                "buddy",
+                f"{EMOJI} {NAME} is online — obsessing over your goal.",
+                "info",
+            )
 
     def stop(self) -> None:
         if self._task and not self._task.done():
@@ -1377,6 +1382,13 @@ class BuddyAgent:
         self._emit(chosen, kind="suggest")
 
     def _emit(self, obs: Observation, *, kind: str) -> None:
+        # F9 (ARCHITECTURE.md): the single funnel for every proactive line
+        # Buddy speaks (watchers and suggesters alike) — gated here rather
+        # than at each caller, same "one place, cannot be forgotten" logic
+        # as the chokepoint's halt_gate for inference.
+        from arail import agent_context
+        if not agent_context.speech_gate("buddy"):
+            return
         sentence = _voice(obs.fact)
         level = {
             "praise": "success",
@@ -1431,6 +1443,15 @@ class BuddyAgent:
         """
         from datetime import datetime, timezone
         from arail.pkb import write_buddy_dream as _write_buddy_dream
+        # Pre-existing bug, found while pinning this site's speech_gate
+        # (operator decision (a)): activity_log.emit() below was never
+        # imported into this method's scope -- it raised NameError on
+        # every call where the gate was open, so the dream announcement
+        # has never actually spoken. Fixing the missing import is required
+        # to make the widened gate here testable/functional at all; it is
+        # not a behavior change beyond "the announcement now actually
+        # fires instead of crashing."
+        from arail.activity import activity_log
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         dreams_dir = _state_file().parent / "dreams"
         dreams_dir.mkdir(parents=True, exist_ok=True)
@@ -1463,12 +1484,18 @@ class BuddyAgent:
         # as target above) and calls schedule_upsert internally.
         _write_buddy_dream(today, body, pkb_root=_host.get_pkb_root())
 
-        activity_log.emit(
-            "buddy",
-            f"{EMOJI} {NAME} dreamed — {target.name}",
-            "info",
-            data={"dream_file": str(target), "preview": reflection[:160]},
-        )
+        # Operator decision (a): the dream announcement is the other
+        # remaining ungated Buddy proactive line (REVIEW.md D4/B3) -- it
+        # carries a 160-char model-output preview, exactly the "posting a
+        # finding, suggestion or announcement" the widened copy names.
+        from arail import agent_context
+        if agent_context.speech_gate("buddy"):
+            activity_log.emit(
+                "buddy",
+                f"{EMOJI} {NAME} dreamed — {target.name}",
+                "info",
+                data={"dream_file": str(target), "preview": reflection[:160]},
+            )
         self._recent_actions.append(f"Dreamed and wrote {target.name}")
         self._sync_workflow(
             "Dream consolidation complete",

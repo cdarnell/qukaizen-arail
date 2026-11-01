@@ -41,9 +41,9 @@
   "candidate":"◌"
 } %}
 {% set legend_groups = [
-  {"label": "World terms", "color": "var(--accent2)"},
-  {"label": "Approved",    "color": "var(--positive)"},
-  {"label": "Candidates (pending)", "color": "var(--text-muted)", "ghost": True}
+  {"label": "World terms", "color": "var(--accent2)", "key": "world"},
+  {"label": "Approved",    "color": "var(--positive)", "key": "approved"},
+  {"label": "Candidates (pending)", "color": "var(--text-muted)", "ghost": True, "key": "candidate"}
 ] %}
 {% else %}
 {% set color_map = {
@@ -63,12 +63,12 @@
   "inference":"⊕"
 } %}
 {% set legend_groups = [
-  {"label": "Sources",  "color": "var(--accent2)"},
-  {"label": "Agents",   "color": "var(--positive)"},
-  {"label": "Notes",    "color": "var(--info)"},
-  {"label": "Compiled", "color": "var(--warn)"},
-  {"label": "Docs",     "color": "var(--danger)"},
-  {"label": "Inference","color": "var(--text-muted)"}
+  {"label": "Sources",  "color": "var(--accent2)", "key": "sources"},
+  {"label": "Agents",   "color": "var(--positive)", "key": "agents"},
+  {"label": "Notes",    "color": "var(--info)", "key": "notes"},
+  {"label": "Compiled", "color": "var(--warn)", "key": "compiled"},
+  {"label": "Docs",     "color": "var(--danger)", "key": "docs"},
+  {"label": "Inference","color": "var(--text-muted)", "key": "inference"}
 ] %}
 {% endif %}
 {% include "_graph_canvas.html" %}

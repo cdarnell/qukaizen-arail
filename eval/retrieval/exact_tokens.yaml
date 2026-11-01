@@ -1,0 +1,58 @@
+# Hand-labelled exact-token retrieval fixture (F2).
+#
+# Literal file names / IDs / URLs / env var names, one per query, each with
+# exactly one `expected_path`. Scored on rank-1 only (H1). This is the class
+# where lexical hashing legitimately wins — VISION.md win condition 4 — and
+# where nomic must not regress (a rank-1 loss here fails the gate regardless
+# of the recall number). Same pre-registration and verbatim-lint rules as
+# queries.yaml; committed before any measurement result exists.
+
+- id: root-exact-001
+  world: root
+  query: "https://github.com/lyogavin/airllm"
+  expected_path: sources/seeds/model-building/06-airllm-layer-streaming.md
+
+- id: root-exact-002
+  world: root
+  query: "falsify-hypothesis"
+  expected_path: skills/falsify-hypothesis/SKILL.md
+
+- id: ai-exact-001
+  world: ai
+  query: "LAB_BUDDY"
+  expected_path: agents/buddy/AGENT.md
+
+- id: ai-exact-002
+  world: ai
+  query: "LAB_SRE"
+  expected_path: agents/sre/AGENT.md
+
+- id: vg-exact-001
+  world: video-games
+  query: "2026-08-07_c83e0a76"
+  expected_path: agents/experiments/2026-08-07_c83e0a76.md
+
+- id: vg-exact-002
+  world: video-games
+  query: "dlss"
+  expected_path: sources/world-video-games/terms/dlss.md
+
+- id: df-exact-001
+  world: debt-finance
+  query: "blended-apr-calc"
+  expected_path: skills/blended-apr-calc/SKILL.md
+
+- id: df-exact-002
+  world: debt-finance
+  query: "https://www.ramseysolutions.com/debt/how-debt-snowball-method-works"
+  expected_path: sources/world-debt-finance/terms/debt-snowball-method.md
+
+- id: qukaizen-exact-001
+  world: qukaizen
+  query: "LAB_LIBRARIAN"
+  expected_path: agents/librarian/AGENT.md
+
+- id: qukaizen-exact-002
+  world: qukaizen
+  query: "wisdom-per-watt"
+  expected_path: sources/world-qukaizen/terms/wisdom-per-watt.md

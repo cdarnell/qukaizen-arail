@@ -60,12 +60,15 @@ load-bearing.
   the `/api/tuning/autoresearch/start` endpoint returns a 200
   with `{ok: false, error: ...}`. Belt + braces so an accidental
   click can't make commits.
-- **Only two files are ever writable by the loop.** Enforced in
-  `git_ops.ALLOWED_WRITABLE_FILES`:
-  - `config/tuning.yml`
-  - `lab/data/aerollm-bench.jsonl`
+- **Only four files are ever writable by the loop.** Enforced in
+  `git_ops.ALLOWED_WRITABLE_FILES` — two per backend:
+  - `config/tuning.yml` + `lab/data/aerollm-bench.jsonl` (QueueLLM/CUDA)
+  - `config/tuning-mlx.yml` + `lab/data/mlx-bench.jsonl` (QueueLLM MLX/Apple)
+
   If the agent somehow proposes a different edit, `commit_experiment`
-  raises `GitSafetyError` before anything is staged.
+  raises `GitSafetyError` before anything is staged. A test pins this
+  set small (`tests/test_experiments.py`); adding a backend means adding
+  exactly two entries, with justification.
 - **Schema validator rejects off-schema knob values.** Each knob
   in `tuning.yml` declares a type and bounds/choices. Candidates
   that propose invalid values are skipped as errors without
@@ -74,7 +77,26 @@ load-bearing.
   `autoresearch/<timestamp>-<slug>` branch. Losing variants are
   left on-branch for human inspection; winners are committed with
   a structured message, still on their branch — human reviews &
-  cherry-picks.
+  cherry-picks. A losing variant is undone with `git checkout -- .`
+  plus a checkout of the original branch — **not** `git reset`; the
+  branch ref survives on purpose.
+
+- **The baseline gets its own branch too.** The baseline capture is
+  committed on `autoresearch/baseline-<timestamp>`, created before
+  anything is staged. Variants then branch from *that*, so each variant
+  carries the baseline record it's being measured against. Nothing the
+  loop does ever commits to the branch you started from.
+
+  (This was a real bug until 2026-08-16: the baseline was committed
+  before any branch existed, so running the loop from `main` put a
+  commit on `main` — and `./arailctl update`'s `git pull --ff-only`
+  would later refuse, with an error you couldn't trace back to the
+  loop. See [the integration audit](plans/autoresearch-integration.md)
+  hazards H1/H2.)
+
+- **You end up back where you started.** When the pass finishes — win,
+  loss, or crash — the loop checks your original branch back out. It
+  will not leave you sitting on a winning variant branch.
 - **No pushes, no force, no rebases.** This module never shells
   out to any git operation that rewrites history or sends anything
   over the network.
@@ -97,7 +119,7 @@ load-bearing.
 ## The candidate list
 
 `autoresearch.CANDIDATES` is a hand-curated list of variants
-mirroring the knobs AeroLLM exposes. Adding a new candidate
+mirroring the knobs QueueLLM exposes. Adding a new candidate
 requires two edits:
 
 1. `config/tuning.yml` — if the variant needs a new knob or a new
@@ -110,14 +132,16 @@ the maintainer's back. Agents that propose variants at runtime
 must pass them via the `candidates` parameter; they cannot extend
 `CANDIDATES` in-place.
 
-## Extending with upstream AeroLLM knobs
+## Extending with upstream QueueLLM knobs
 
 Today `AeroLLMBackend` honors two env-var knobs directly:
 `AEROLLM_COMPRESSION` and `AEROLLM_MAX_LENGTH`. The other four —
 `prefetch_enabled`, `prefetch_lookahead`, `expert_cache_size_mb`,
-and `aerollm_package` — land when the upstream Rust runtime at
-[github.com/qukaizen/aerollm](https://github.com/qukaizen/aerollm)
-exposes them. The workflow to wire a new one:
+and `aerollm_package` — land when the upstream Rust runtime exposes
+them. (The install ref that is actually used lives in the
+`aerollm_package` knob in `config/tuning.yml` — treat that value as the
+source of truth for where the runtime is fetched from, not any URL
+written in prose here.) The workflow to wire a new one:
 
 1. Land the knob upstream in the Rust runtime (or a branch of it)
    so it's read at engine init.

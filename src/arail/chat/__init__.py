@@ -42,6 +42,12 @@ class CatalogEntry:
     # vanish before reaching the gallery.
     provider: "str | None" = field(default=None)
     ctx: "str | None" = field(default=None)
+    # Structured HF repo id for source: hf|mlx rows (e.g.
+    # "mlx-community/Qwen2.5-7B-Instruct-4bit") — previously only embedded
+    # inside the free-text `install` string, which meant a real HF link
+    # could never be derived without parsing shell commands. Empty string
+    # (not None) when unset, matching the rest of this dataclass's "" convention.
+    hf_repo: str = field(default="")
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -59,6 +65,9 @@ class CatalogEntry:
             # sees a missing key; None means "not set".
             "provider": self.provider,
             "ctx": self.ctx,
+            "hf_repo": self.hf_repo,
+            "hf_url": (f"https://huggingface.co/{self.hf_repo}"
+                       if self.hf_repo else None),
         }
 
 
@@ -93,6 +102,7 @@ def load_catalog() -> list[CatalogEntry]:
                 # unaffected and as_dict() always emits them (F-CATALOG).
                 provider=(str(entry["provider"]) if entry.get("provider") else None),
                 ctx=(str(entry["ctx"]) if entry.get("ctx") else None),
+                hf_repo=str(entry.get("hf_repo") or ""),
             ))
         except (KeyError, TypeError, ValueError):
             continue

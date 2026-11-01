@@ -6,6 +6,181 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed (Chat tab — two-slot model selection replaces five overlapping pickers)
+
+- **The Chat tab now shows exactly two model chips: Resident and Deep.**
+  Resident is the small, always-warm model pinned in the GPU
+  (`ARAIL_RESIDENT_PIN`, default on); Deep is the AeroLLM-served model,
+  fully resident once loaded. Previously the page had five separate,
+  partly-broken ways to touch model selection (a non-clickable chip, a
+  dead `⌘K` picker, a below-the-fold rail, an "active model" strip whose
+  "swap →" only scrolled, and a rival nav switcher that could disagree
+  with all of them) — this is the redesign the operator asked for
+  directly (see `sprints/2026-08-11-two-slot-chat-models/SPRINT.md`).
+- **Resident picker** defaults to ≤3B models, with a "show larger" reveal
+  up to the existing <8B primary-model ceiling; every row's eligibility
+  and Llama-license attribution are computed server-side, never
+  re-derived in the browser.
+- **Deep picker** offers real alternatives (every installed MLX-runtime
+  model, checked against the hardware's resident-deep-model capacity) —
+  picking one swaps in-process, no portal restart.
+- **Compare** (`+ Compare`) now always runs Resident vs. Deep side by
+  side, with genuinely separate per-column chat history (a real bug:
+  both columns previously shared one history array).
+- **AeroLLM can now actually be unloaded.** The Deep chip's eject frees
+  it via a real in-process teardown, replacing the earlier "aeroLLM can
+  never be freed this sprint" restriction.
+- Compute-source pills (Claude, NVIDIA, OpenRouter, HF, Custom) are
+  honestly disabled with a reason when clicked, instead of silently
+  failing at send time — wiring their actual send path is a follow-up.
+
+### Added (settle model selection at boot, once and for all)
+
+- **A two-slot model-selection banner, settled once.** The portal shows a
+  banner under the statusbar (every page) asking which model should load
+  into GPU/memory now (slot A) and which model AeroLLM should reference
+  for deep answers (slot B) — each candidate shows size, on-disk/Ollama
+  presence, RAM fit, and the exact `ollama pull` / `hf download` command
+  (plus an HF link) when it's missing. Confirming writes
+  `model_defaults.yaml` via the new `POST /api/models/settle` (refusing
+  any choice that isn't actually installed, or that violates the
+  answering-model ceiling / secondary RAM cap). The banner then stays
+  hidden — reappearing only if the settled model later vanishes, no
+  longer fits, or `.env` drifts away from what was settled — via the new
+  `GET /api/models/boot`. `LAB_MODE=airgapped` shows no cloud candidates
+  and no HuggingFace links.
+- **`./arailctl start`'s readiness banner names the model.** A `Models:`
+  block now prints for both slots (name, size, on-disk?, fits?, download
+  command when missing), backed by a new read-only
+  `python -m arail.model_defaults --banner`/`--get`/`--json` CLI. The
+  Ollama-presence check that used to hardcode `llama-ai-eng` now checks
+  whichever model is actually configured.
+- **Catalog entries carry a structured `hf_repo`.** `source: hf|mlx` rows
+  in `src/arail/chat/models_catalog.yaml` gained an `hf_repo:` field (the
+  boot banner derives a real `huggingface.co` link from it) instead of
+  the repo id only ever existing inside a free-text `install:` command.
+- Fixed two `ARAIL_MODELS_DIR` inconsistencies that silently pointed at
+  the wrong directory: `lab/tools/benchmark_models.py` (was
+  `<repo>/models`, ignoring the env var entirely) and the
+  `/api/system/health` "Models Directory" doctor check (was
+  `./models`) — both now agree with `arail.config.MODELS_DIR`
+  (`lab/models`, env-overridable).
+
+### Added (ARAIL 2.0 persistence, instantiated — the relational store comes up seamlessly)
+
+- **`arail.db` is now created and forward-migrated automatically by
+  `install` and `start`.** ARAIL 2.0 (#175) shipped a per-data-dir SQLite
+  store that nothing ever created — `arail.db` existed on zero machines.
+  `./arailctl install` now runs `ensure_db(apply=True)` over every
+  resolved root (root lab, every registered World instance, and every
+  on-disk instance with no registry record); `./arailctl start` does the
+  same for exactly the instance it's booting, before the portal binds.
+  Atlas-free (no `atlas` binary required — that stays a developer-only
+  tool for `./arailctl db apply`): replays the committed migration ledger
+  using `PRAGMA user_version` as the cursor. Only SAFE-FORWARD migrations
+  (no `DROP`/`DELETE`/`UPDATE`/table-rebuild) ever apply automatically;
+  anything lossy, ahead of this checkout, or diverged from what's on
+  disk is reported — never applied — naming the exact verb
+  (`./arailctl db apply --allow-destructive`, `./arailctl db plan`).
+  `arail.db` has no runtime reader yet — this makes the dependent service
+  come up, it does not by itself change any feature's behavior.
+- **`./arailctl status` reports the relational store per root.**
+  `--json`/`--json=full` gains an additive `db` object on the root lab
+  and every instance row, plus an `origin` (`root`/`registry`/`ondisk`)
+  tag; an on-disk instance with no registry record gets its own
+  synthetic row instead of being silently unreachable.
+  **`--json=instances` is unchanged** — still the byte-compatible bare
+  rows array, with neither key added. A live root/instance whose db is
+  `pending`/`blocked`/`ahead`/`diverged` degrades `status` to exit `3`; a
+  db that was simply never created on a lab that was never started does
+  **not** promote the existing exit `4` ("nothing running") to `3`.
+- **`./arailctl doctor` catches "declared but never instantiated" as a
+  class**, not per-incident. New `arail.provisioning` registry
+  (`relational_store`, `vector_backend`, `kb_gate`,
+  `embedding_provenance`, `instance_registry`) — every mechanism names
+  its own instantiation predicate, and "declared and not instantiated" is
+  always a finding.
+- **Semantic retrieval now reports honestly when the vector backend
+  itself can't be imported.** `pkb._semantic_search`'s
+  `if not available(): return []` branch was the only early return that
+  never set a degraded code — every health surface (`embedding_status()`,
+  `retrieval_status()`, `X-Retrieval-Status`, `doctor`) reported healthy
+  while semantic search was silently dead in that interpreter. Now sets
+  (and, on later evidence, clears) a `"backend"` degraded code, required
+  tier in `doctor` (LanceDB is a hard dep in both tiers).
+
+### Changed (`./arailctl reset full` keeps downloaded models by default)
+
+- **`reset full` no longer wipes `lab/models/` unless asked.** Previously
+  it unconditionally deleted every downloaded model alongside data, pkb
+  sources, plugins, and the research program — the one step in a "full
+  wipe" with a real cost to undo (often several GB, slow to re-fetch),
+  and the least likely thing an operator expects gone just because they
+  asked for "full." Models are now kept unless you explicitly say
+  otherwise: `--include-models` on the command line, or a yes at a
+  dedicated interactive prompt. A bare `--yes` (which already confirms
+  the wipe as a whole) does not by itself imply "and delete my models
+  too." The standalone `reset models` mode is unchanged — it still always
+  wipes models, since that's the one thing it's for.
+
+### Added (Bundled AeroLLM — a third install channel)
+
+- **Outside users (no aeroLLM sibling repo, no `pypi.qukaizen.com`
+  credentials) can now get the deep-mode 2nd inference at all.**
+  `scripts/build-aerollm.sh` gains a third channel, **BUNDLED**: a
+  checksummed, prebuilt `aerollm_api.abi3.so` fetched from an ARAIL
+  GitHub Release asset (`./arailctl deep install`). sha256 verification
+  happens before any file is copied; a checksum mismatch, a 404, or the
+  wrong platform (non-macOS-arm64) all abort with nothing installed.
+  `AEROLLM_BUNDLE_FILE` sideloads a local tarball for the fully offline
+  path. DEV (`deep rebuild`) and RELEASE (`deep update`) are byte-for-byte
+  unchanged.
+- **Behavior change, called out explicitly:** `build-aerollm.sh auto`
+  (what `setup.sh` runs on a Maximus-tier install) now falls through to
+  BUNDLED instead of always attempting a RELEASE pip install when no
+  sibling repo is present. Maintainer machines that relied on the old
+  unconditional pip fallback should set `AEROLLM_CHANNEL=release`
+  explicitly (`setup.sh` already exports the release-index vars, so this
+  is a one-line env override, not a config rewrite).
+  `AEROLLM_CHANNEL=dev|release|bundle` forces any channel from any mode.
+- `THIRD-PARTY-LICENSES/aerollm/` — Apache-2.0 compliance material
+  (`LICENSE`, `NOTICE`, `README.md`, `BUNDLE.json`) for redistributing a
+  compiled Object form of AeroLLM, plus a paragraph in ARAIL's own
+  `NOTICE`. A repo-level test enforces that the committed manifest stays
+  in lockstep with the version pinned in `pyproject.toml`.
+- `scripts/package-aerollm-bundle.sh` — maintainer-only producer:
+  cargo builds aerollm_api from the sibling source, packages
+  `.so` + `LICENSE` + `NOTICE` + a manifest into a tarball + `.sha256`,
+  ready for `gh release upload`. Refuses a dirty aeroLLM worktree unless
+  `ALLOW_DIRTY=1`.
+- See `sprints/2026-08-05-arail-bundled-aerollm/` for the full design,
+  build log, and `docs/releasing.md` for the maintainer refresh checklist.
+
+### Fixed (Compiled KB survives a World switch)
+
+- **A World switch used to silently empty the agent knowledge gate.** The
+  Compiled KB is a manifest of *pointers* into the raw corpus, and mounting
+  a World deletes the previous World's staged term files
+  (`_sweep_other_worlds()` — deliberate: a World IS the lab's dataset).
+  Nothing pruned the manifest, so approvals outlived their files. Because
+  the retrieval gate is a query-time intersection (approved paths ∩ live
+  search hits), every dangling pointer matches nothing — and the gate fails
+  closed, so the result is zero hits for **every** query in **every** World
+  with no error raised anywhere. Observed in a real lab: 554 of 556
+  approvals were corpses, `search_for_agents()` returned nothing for two
+  weeks, and the Researcher kept concluding its hypotheses were "not
+  measurable on-device" because it genuinely had no approved truth to reason
+  from. `mount()`, `swap()`, and `unmount(remove_staged=True)` now reconcile
+  the manifest against disk.
+- **`./arailctl pkb prune`** (`--dry-run`) — the manual door for a lab that
+  already drifted. Refuses when the pkb root is missing or unreadable: that
+  makes every path look deleted, and the correct reading is "misconfigured
+  lab", not "the operator revoked everything."
+- **`./arailctl doctor` reports gate health** — live vs dangling approval
+  counts, and an explicit warning when a World is mounted but nothing is
+  approved (agents will find nothing). The silence is what let this run
+  undetected; doctor is where it becomes visible.
+
 ### Added (World selection at start)
 
 - **The World picker remembers.** Every successful start — root lab,

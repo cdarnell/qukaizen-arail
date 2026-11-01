@@ -38,7 +38,7 @@ class TestComputeSourceEnvUpdated:
         assert "127.0.0.1" in base, (
             f"Expected loopback URL, got: {base!r}"
         )
-        assert env.get("OPENCODE_API_KEY") == "not-needed"
+        assert env.get("OPENCODE_API_KEY", "").startswith("arl1s_")
 
     def test_compute_source_env_cloud_sets_provider_env_var(self, monkeypatch):
         """provider=claude, token='sk-X' → env contains ANTHROPIC_API_KEY='sk-X'. (F-SEC-CRED-1)"""

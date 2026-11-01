@@ -19,7 +19,7 @@ Prompt caching is an **Anthropic API feature**. It only does anything when:
 2. The active **Compute Source is Claude** (the `claude` backend, with an
    `ANTHROPIC_API_KEY`).
 
-For **My Machine** (MLX / CUDA / llama.cpp / Ollama / AeroLLM) and every other
+For **My Machine** (MLX / CUDA / llama.cpp / Ollama / QueueLLM) and every other
 provider, nothing changes — those backends keep their existing behavior
 byte-for-byte. Caching is purely additive and Claude-scoped.
 

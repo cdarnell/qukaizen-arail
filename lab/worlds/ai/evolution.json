@@ -8,6 +8,107 @@
       "brain": "auto",
       "added": [],
       "corrections": []
+    },
+    {
+      "at": "2026-08-07T02:30:52Z",
+      "model": "ollama_native",
+      "brain": "auto",
+      "added": [
+        {
+          "slug": "reinforcement-learning",
+          "term": "Reinforcement Learning"
+        },
+        {
+          "slug": "attention-mask",
+          "term": "Attention Mask"
+        },
+        {
+          "slug": "bert",
+          "term": "BERT"
+        },
+        {
+          "slug": "transformer-layers",
+          "term": "Transformer Layers"
+        },
+        {
+          "slug": "transformer-depth",
+          "term": "Transformer Depth"
+        },
+        {
+          "slug": "latent-diffusion-models",
+          "term": "Latent Diffusion Models"
+        },
+        {
+          "slug": "denoising-autoencoders",
+          "term": "Denoising Autoencoders"
+        },
+        {
+          "slug": "convolutions-in-nlp",
+          "term": "Convolutions in NLP"
+        }
+      ],
+      "corrections": [
+        {
+          "slug": "action-space",
+          "kind": "recategorize",
+          "field": "category",
+          "before": "architecture",
+          "after": "care-actions",
+          "note": "Action space more about actions than architecture."
+        },
+        {
+          "slug": "add-regularization",
+          "kind": "recategorize",
+          "field": "category",
+          "before": "care-actions",
+          "after": "fundamentals",
+          "note": "Too broad for 'care-actions'."
+        },
+        {
+          "slug": "adversarial-swarm",
+          "kind": "recategorize",
+          "field": "category",
+          "before": "qukaizen",
+          "after": "fine-tuning",
+          "note": "Inconsistent terminology, unclear relation."
+        },
+        {
+          "slug": "aerollm",
+          "kind": "recategorize",
+          "field": "category",
+          "before": "qukaizen",
+          "after": "inference",
+          "note": "Infer-related term, wrong category."
+        },
+        {
+          "slug": "aerollm-runtime",
+          "kind": "recategorize",
+          "field": "category",
+          "before": "qukaizen",
+          "after": "formats-runtime",
+          "note": "Unclear category, edge terms"
+        },
+        {
+          "slug": "automation",
+          "kind": "recategorize",
+          "field": "category",
+          "before": "architecture",
+          "after": "fundamentals",
+          "note": "Term too general; focus on ML aspects."
+        },
+        {
+          "slug": "automation",
+          "kind": "unlink",
+          "field": "related",
+          "before": [
+            "workflow",
+            "agent",
+            "reconcile"
+          ],
+          "after": [],
+          "note": "Term too general; focus on ML aspects."
+        }
+      ]
     }
   ]
 }

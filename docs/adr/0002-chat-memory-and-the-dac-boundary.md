@@ -168,6 +168,13 @@ append-only JSONL (`activity.py`) and JSON+LanceDB dual-write (`agent_workflows.
 decisively, siting conversation data outside the PKB root breaks the documented "wipe the PKB =
 wipe memory" contract.
 
+> **Superseded in part** by `docs/adr/0005-sqlite-as-the-relational-store.md` (`sqlite-as-the-relational-store`,
+> Accepted 2026-08-10): the "wholly new pattern" objection above no longer holds — SQLite is now
+> ARAIL's declared relational store for worlds/entities/state. The "breaks wipe-the-PKB" objection
+> is **upheld and promoted to a binding constraint** in that ADR: conversation data still must not
+> land in `<data_dir>/arail.db` unless `reset pkb` is taught to clear it. Read this rejection as
+> scoped to conversation memory specifically, not as a general prohibition on SQLite.
+
 ## References
 
 - `docs/conversation-memory.md` — the schema contract and invariants

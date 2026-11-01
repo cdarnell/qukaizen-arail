@@ -14,9 +14,9 @@ when_not_to_use:
 ---
 This lab studies how modern AI systems are built, trained, tuned, quantized, served, and debugged. Every factual claim is grounded in the World's cited sources; the glossary spans fundamentals, architecture, training, fine-tuning, RL & alignment, quantization, inference, performance, formats & runtime, and the training-run clinic (symptoms, conditions, pathologies, remedies).
 
-Every term in this World is grounded in a cited source.
+Some terms are model-asserted (unverified); cite a source when promoting them.
 
-_This World has 331 terms; the 153 most connected are shown here. The full glossary lives in the Knowledge Base._
+_This World has 339 terms; the 153 most connected are shown here. The full glossary lives in the Knowledge Base._
 
 _Answer only from the terms below. Every term lists its source. If a question cannot be answered from these terms, say the World does not cover it — do not invent._
 
@@ -31,6 +31,8 @@ _Answer only from the terms below. Every term lists its source. If a question ca
 - **CoALA** (`coala`) — A framework (Princeton, 2023) organizing language agents into memory modules, an action space, and a decision-making loop.
   - Source: Sumers, Yao, Narasimhan & Griffiths, 'Cognitive Architectures for Language Agents' (2023), arXiv:2309.02427
 - **Context Window** (`context-window`) — The maximum number of tokens a model can attend to at once — its working span of input plus output.
+  - Source: authored
+- **Cross-Attention** (`cross-attention`) — Attention where queries come from one sequence and keys/values from another.
   - Source: authored
 - **Desired State** (`desired-state`) — The end state you declare; the system's job is to make reality match it.
   - Source: QuKaiZen AI Dictionary
@@ -76,10 +78,6 @@ _Answer only from the terms below. Every term lists its source. If a question ca
   - Source: QuKaiZen AI Dictionary
 - **Reflection** (`reflection`) — An agent reviews its own past actions or outputs and writes higher-level lessons or corrections.
   - Source: authored
-- **Residual Connection** (`residual-connection`) — Add a layer's input to its output so gradients and signal can flow straight through deep stacks.
-  - Source: authored
-- **RoPE** (`rope`) — Encodes token position by rotating query/key vectors — the dominant positional scheme in modern LLMs.
-  - Source: authored
 - **Semantic Memory** (`semantic-memory`) — An agent's store of general world knowledge and facts, decoupled from any single experience.
   - Source: authored
 - **Sliding-Window Attention** (`sliding-window-attention`) — Each token attends only to a fixed window of nearby tokens, making attention linear in length.
@@ -88,15 +86,13 @@ _Answer only from the terms below. Every term lists its source. If a question ca
   - Source: QuKaiZen AI Dictionary
 - **Transformer** (`transformer`) — The attention-based neural architecture behind essentially every modern LLM.
   - Source: authored
-- **Workflow** (`workflow`) — A declared sequence of steps an agent or pipeline executes.
-  - Source: QuKaiZen AI Dictionary
+- **Transformer Layers** (`transformer-layers`) — Transformer layers are a key component in the architecture of transformer models, consisting of self-attention mechanisms and feed-forward networks that enable these models to process sequential data
+  - Source: model:ai-engineer
 
 ### Remedies & Care Actions
 
 - **Apply warmup schedule** (`apply-warmup-schedule`) — Ramp the LR from near-zero to peak over N steps before the main schedule.
   - Source: HF Trainer docs (warmup_steps, lr_scheduler_type='cosine_with_restarts'); NVIDIA training guide; OLMo training config
-- **Reduce learning rate** (`reduce-learning-rate`) — Lower the peak LR (and/or lengthen warmup) to restabilize.
-  - Source: HF Trainer docs (learning_rate, warmup_steps); NVIDIA training-performance guide; OLMo logbook
 - **Switch optimizer** (`switch-optimizer`) — Change the optimizer (e.g., SGD → Adam, Adam → AdamW) to better fit the problem.
   - Source: AdamW: Loshchilov & Hutter arXiv:1711.05101; HF Trainer docs (optim=adamw_hf); PyTorch optimizer docs
 
@@ -117,6 +113,8 @@ _Answer only from the terms below. Every term lists its source. If a question ca
 
 - **Adapters** (`adapters`) — Small trainable modules inserted into a frozen model to add new skills without retraining it.
   - Source: authored
+- **Adversarial Swarm** (`adversarial-swarm`) — A loop of agents (interrogate, challenge, evaluate, correct) that hardens a model until it stops breaking.
+  - Source: QuKaiZen NUCLEUS_AGENT_PROTOCOL
 - **Distillation** (`distillation`) — Transfer a big teacher model's behavior into a small student model.
   - Source: authored
 - **Domain Adaptation** (`domain-adaptation`) — Specialize a general model to a target domain, often via continued pretraining on domain text.
@@ -157,6 +155,8 @@ _Answer only from the terms below. Every term lists its source. If a question ca
 
 - **Benchmark** (`benchmark`) — A standardized test set used to measure and compare model capability.
   - Source: QuKaiZen AI Dictionary
+- **BERT** (`bert`) — BERT
+  - Source: model:ai-engineer
 - **Chain-of-Thought** (`chain-of-thought`) — Prompting a model to show its intermediate steps, which sharply improves reasoning.
   - Source: QuKaiZen AI Dictionary
 - **Embeddings** (`embeddings`) — Dense numeric vectors representing tokens or text so similar meanings sit close together.
@@ -253,13 +253,13 @@ _Answer only from the terms below. Every term lists its source. If a question ca
   - Source: authored
 - **Mixed Precision** (`mixed-precision`) — Use lower precision for most math but keep sensitive parts in higher precision for stability.
   - Source: authored
+- **NF4** (`nf4`) — A 4-bit 'normal float' data type, used in QLoRA, tuned for the bell-curve distribution of weights.
+  - Source: authored
 - **Quantization** (`quantization`) — Storing weights/activations in fewer bits (FP16 to INT4) to shrink models and speed inference.
   - Source: knowledge_base/wiki/concepts/Quantization_SNR_Affine.md
 
 ### QuKaiZen Stack
 
-- **Adversarial Swarm** (`adversarial-swarm`) — A loop of agents (interrogate, challenge, evaluate, correct) that hardens a model until it stops breaking.
-  - Source: QuKaiZen NUCLEUS_AGENT_PROTOCOL
 - **Convergence Graduation** (`convergence-graduation`) — A model graduates when the adversarial swarm gives up trying to break it — not at a fixed cycle limit.
   - Source: QuKaiZen NUCLEUS_AGENT_PROTOCOL
 - **Nucleus (bake engine)** (`nucleus-bake-engine`) — [ROADMAP] QuKaiZen's training pipeline for baking domain-specialist SLMs.
@@ -368,4 +368,4 @@ _Answer only from the terms below. Every term lists its source. If a question ca
 - **Weight Decay** (`weight-decay`) — A penalty that nudges weights toward zero each step, discouraging overly large parameters and overfitting.
   - Source: authored
 
-<!-- dac:world_sha256 df6b682da2dec3694cc5df543a6085016a41940ec20a2c6bae7a52b0e24e175f -->
+<!-- dac:world_sha256 c1914ba993a75f2f9cfa0dc3b08f91f50a2d27f1e5ae7b1487930f2665f29d4b -->

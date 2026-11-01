@@ -22,6 +22,7 @@
 #    wiki     ARAIL documentation-as-code: build | info | new <title>
 #    kb       QuKaiZen Karpathy LLM Wiki ops: status | compile | lint | query |
 #             search | ingest | index | where  (discoverable, no hardcoded paths)
+#    autoresearch  tuning-loop retention: prune branches | rotate bench logs
 #    help     show this message
 #
 #  `install`/`tier` are the canonical names for the refresh and feature-set
@@ -251,7 +252,8 @@ EOF
     uninstall-daemon  remove launchd supervision (back to dev/foreground mode)
     tier [<tier>]   switch (or print) the feature-set tier — minimalist | maximus
                     ('upgrade' is a permanent alias — see docs/cli.md)
-    deep <op>       AeroLLM 2nd inference: rebuild (source) | update (wheel) | status
+    deep <op>       QueueLLM 2nd inference: install (bundled binary) | rebuild (source) |
+                    update (wheel) | status
     version         show installed component versions
     status [--json[=full|instances]] [--probe|--no-probe] [--quiet]  show what's
                     running (World instances + root lab); exits 0/3/4 — see docs/cli.md
@@ -259,12 +261,18 @@ EOF
     logs [comp]     tail activity log — filter by component
     reset [mode]    wipe state — models|data|pkb|plugins|env|full|destroy
     world <op>      DaC WorldBundle: list | mount <dir> [--apply-face] | verify <dir> | verify-shipped [--examples] | swap <dir> | unmount
-    pkb <op>        ARAIL lab content: ingest | compile | browse
+    nucleus <verb>  Model Forge (local domain distillation): plan | stage | build | spike |
+                    eval | certify | verify | status | list — see docs/nucleus.md
+    auth <verb>     Portal credentials: token [--rotate] | reset | logout-all | unlock  (each takes --world SLUG)
+    buddy <verb>    Buddy on your phone (loopback edge): link --buddy-home PATH [--rotate] [--yes] |
+                    unlink [--buddy-home PATH] | status [--json] — see docs/buddy-edge.md
+    pkb <op>        ARAIL lab content: ingest | compile | browse | prune | bootstrap
     wiki <op>       ARAIL docs-as-code: build | info | new <title>
     kb <op>         QuKaiZen Karpathy Wiki: status | compile | lint | query
                     | search | ingest | index | where    (auto-discovers KB root)
     blueprint <op>  list | catalog | show | create | apply | destroy — Configuration as Code
     benchmark_models [opts]  measure model TPS for autoresearch routing (alias: benchmark, aerollm)
+    autoresearch <op>  tuning-loop retention: prune (branches) | rotate (bench logs)
     help            this message
 
 EOF
@@ -774,13 +782,29 @@ case "$cmd" in
         exec bash "$REPO_ROOT/scripts/upgrade.sh" "$@"
         ;;
     deep)
-        # AeroLLM 2nd-inference: rebuild (source) | update (published wheel) | status.
+        # AeroLLM 2nd-inference: install (bundled binary) | rebuild (source) |
+        # update (published wheel) | status. `install` is the route an
+        # outside user (no sibling repo, no private-index creds) actually
+        # needs — see ARCHITECTURE.md (sprints/2026-08-05-arail-bundled-aerollm).
+        #
+        # Target the lab's own venv, never the system interpreter: a bare
+        # `python3` here is macOS system Python, whose site-packages is
+        # missing/unwritable and is not the interpreter ARAIL runs anyway.
+        # An explicit $PYTHON from the caller still wins (tests, power users).
+        if [[ -z "${PYTHON:-}" ]]; then
+            if [[ -x "$REPO_ROOT/.venv/bin/python" ]]; then
+                export PYTHON="$REPO_ROOT/.venv/bin/python"
+            else
+                die "missing .venv — run ./arailctl setup first (deep install targets the lab's venv, not system Python)"
+            fi
+        fi
         op="${1:-status}"; shift || true
         case "$op" in
+            install) exec bash "$REPO_ROOT/scripts/build-aerollm.sh" bundle "$@" ;;
             rebuild) exec bash "$REPO_ROOT/scripts/build-aerollm.sh" build ;;
             update)  exec bash "$REPO_ROOT/scripts/build-aerollm.sh" update ;;
             status)  exec bash "$REPO_ROOT/scripts/build-aerollm.sh" status ;;
-            *) die "deep op must be one of: rebuild | update | status" ;;
+            *) die "deep op must be one of: install | rebuild | update | status" ;;
         esac
         ;;
     install)
@@ -815,6 +839,29 @@ case "$cmd" in
     status)  exec bash "$REPO_ROOT/scripts/status.sh" "$@" ;;
     logs)
         LOG_FILE="$REPO_ROOT/lab/data/activity.jsonl"
+        if [[ "${1:-}" == "--since" ]]; then
+            # Non-streaming window for Buddy: events from the last 2m|10m|1h, then exit.
+            [[ -f "$LOG_FILE" ]] || die "No activity log yet — start the lab first: ./arailctl start"
+            case "${2:-}" in 2m) _win=120 ;; 10m) _win=600 ;; 1h) _win=3600 ;;
+                *) die "logs --since takes 2m, 10m or 1h" ;; esac
+            python3 -I - "$LOG_FILE" "$_win" <<'PYSINCE'
+import sys, json
+from datetime import datetime, timezone
+path, win = sys.argv[1], int(sys.argv[2])
+now = datetime.now(timezone.utc)
+for line in open(path, encoding="utf-8", errors="replace"):
+    try:
+        e = json.loads(line)
+        ts = datetime.fromisoformat(e["ts"])
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        if -5 <= (now - ts).total_seconds() <= win:  # 5s of clock skew; never the future
+            print(f"{e['ts'][:19].replace('T',' ')}  {str(e.get('source','?')):<12}  {e.get('message','')}")
+    except (ValueError, KeyError, TypeError):
+        pass
+PYSINCE
+            exit 0
+        fi
         COMP="${1:-all}"; shift || true
         LINES="${1:-50}"; shift || true
         if [[ ! -f "$LOG_FILE" ]]; then
@@ -914,6 +961,17 @@ LOGSEOF
                 ;;
         esac
         ;;
+    drift)
+        # Buddy's vocabulary: spec-vs-actual gate. Alias of `db drift`.
+        exec "$REPO_ROOT/arailctl" db drift "$@"
+        ;;
+    rule)
+        # The `y` a person presses: ./arailctl rule "<rendered command>" allow|deny
+        [[ $# -eq 2 && ( "$2" == "allow" || "$2" == "deny" ) ]] \
+            || die 'usage: ./arailctl rule "<rendered command>" allow|deny'
+        [[ -x "$REPO_ROOT/.venv/bin/python" ]] || die "missing .venv — run ./arailctl setup first"
+        exec "$REPO_ROOT/.venv/bin/python" -m arail.ops.buddy_floor rule "$1" "$2"
+        ;;
     doctor)
         # Exit-code contract (ARCHITECTURE.md §12/§13): 0 healthy · 1 broken
         # (no .venv, import failure) · 3 degraded (a required check failed,
@@ -981,13 +1039,242 @@ LOGSEOF
         fi
         say "doctor: OK"
         ;;
+    autoresearch)
+        # Retention for what the tuning loop leaves behind. Both ops are
+        # dry-run by default; --apply opts into the write.
+        op="${1:-}"; shift || true
+        case "$op" in
+            prune|rotate) ;;
+            ""|help|-h|--help)
+                cat <<'EOF'
+Usage: ./arailctl autoresearch <command> [options]
+
+  prune    Delete old losing/superseded autoresearch/* branches.
+           Never touches wins, the branch you're on, the newest N, or
+           anything it cannot classify. Writes a recovery receipt with
+           each branch's SHA before deleting it.
+  rotate   Move the oldest records out of the bench logs into a sibling
+           archive, keeping the newest in place. Nothing is discarded.
+
+Both are dry-run by default — pass --apply to make the change.
+
+Common options: --apply  --dry-run  --json
+  prune:  --keep-recent N  --older-than-days N  --verbose
+  rotate: --max-lines N
+EOF
+                exit 0
+                ;;
+            *) die "autoresearch command must be one of: prune | rotate" ;;
+        esac
+        [[ -d .venv ]] || die "missing .venv — run ./arailctl setup"
+        # shellcheck disable=SC1091
+        source .venv/bin/activate
+        exec python -m arail.experiments.retention "$op" "$@"
+        ;;
+    db)
+        # Declarative persistence: the spec tree in spec/ is the source of
+        # truth; SQLite, LanceDB, and the generated resolver/registry are all
+        # compiled from it. Never hand-edit the database.
+        op="${1:-}"; shift || true
+        case "$op" in
+            plan|apply|doctor|optimize|drift|migrate) ;;
+            ""|help|-h|--help)
+                cat <<'EOF'
+Usage: ./arailctl db <command> [options]
+
+  plan       Diff spec vs actual across SQLite and LanceDB. No writes.
+  apply      atlas schema apply + reconcile --apply + regenerate code.
+  doctor     Integrity checks, reported per user. Exit 3 on errors.
+  optimize   Compact Lance tables and prune retained versions.
+  drift      CI gate. Exit 3 if actual does not match the spec.
+  migrate    One-shot 1.x -> 2.0 migration. Dry-run unless --apply.
+
+Common options: --data-dir DIR  --pkb-root DIR  --spec-dir DIR
+EOF
+                exit 0
+                ;;
+            *) die "db command must be one of: plan | apply | doctor | optimize | drift | migrate" ;;
+        esac
+        [[ -d .venv ]] || die "missing .venv — run ./arailctl setup"
+        # shellcheck disable=SC1091
+        source .venv/bin/activate
+        exec python -m arail.dbspec.cli "$op" "$@"
+        ;;
     pkb)
         op="${1:-}"; shift || true
         case "$op" in
             ingest)  exec "$REPO_ROOT/scripts/pkb-ingest" "$@" ;;
             compile) exec "$REPO_ROOT/scripts/pkb-compile" "$@" ;;
             browse)  exec "$REPO_ROOT/scripts/pkb-browse" "$@" ;;
-            *) die "pkb op must be one of: ingest | compile | browse" ;;
+            prune)
+                # Reconcile the Compiled KB with disk: drop approvals whose
+                # raw file is gone (a World switch sweeps the previous
+                # World's term files, but the approval manifest points at
+                # them). Mount/unmount now do this automatically; this verb
+                # is the manual door for a lab that already drifted.
+                [[ -d .venv ]] || die "missing .venv — run ./arailctl setup"
+                # shellcheck disable=SC1091
+                source .venv/bin/activate
+                exec python -m arail.compiled_kb prune "$@"
+                ;;
+            bootstrap)
+                # Backfill the Compiled KB: auto-approve the currently
+                # staged World's term pages (or write an empty-but-present
+                # manifest if none qualify), so gate_state() moves from
+                # "unbootstrapped" to "empty"/"populated". Never runs on
+                # start — only here and once from `install`.
+                #
+                # --all-instances / --world <slug> (QA-6 review, BLOCK-2):
+                # a concurrent-Worlds lab has one PKB root per World instance
+                # (lab/instances/<slug>/pkb) plus the root lab's own
+                # (LAB_PKB / lab/pkb). bootstrap()'s Python side only ever
+                # touches the single PKB_ROOT resolved into its process, so
+                # reaching more than one root means invoking it once per
+                # root with LAB_PKB pointed at that root — the loop lives
+                # here, not in Python, because scripts/lib/instances.sh
+                # (already sourced above) is the one place instance
+                # enumeration is allowed to live; a second implementation in
+                # Python would be exactly the "sixth implementation" the
+                # registry rule forbids.
+                [[ -d .venv ]] || die "missing .venv — run ./arailctl setup"
+                # shellcheck disable=SC1091
+                source .venv/bin/activate
+
+                _pkb_boot_target=""   # "" | "root" | "<slug>" (--world)
+                _pkb_boot_all=0
+                _pkb_boot_rest=()
+                while [[ $# -gt 0 ]]; do
+                    case "$1" in
+                        --all-instances) _pkb_boot_all=1; shift ;;
+                        --world)
+                            [[ $# -ge 2 ]] || die "pkb bootstrap --world requires a slug"
+                            _pkb_boot_target="$2"; shift 2 ;;
+                        --world=*)
+                            _pkb_boot_target="${1#--world=}"; shift ;;
+                        *) _pkb_boot_rest+=("$1"); shift ;;
+                    esac
+                done
+                set -- ${_pkb_boot_rest[@]+"${_pkb_boot_rest[@]}"}
+
+                if [[ -n "$_pkb_boot_target" && "$_pkb_boot_all" == "1" ]]; then
+                    die "pkb bootstrap: --world and --all-instances are mutually exclusive"
+                fi
+
+                if [[ -n "$_pkb_boot_target" ]]; then
+                    if [[ "$_pkb_boot_target" == "root" ]]; then
+                        python -m arail.compiled_kb bootstrap "$@"
+                        exit $?
+                    fi
+                    inst_valid_slug "$_pkb_boot_target" || die "invalid World slug: $_pkb_boot_target"
+                    _pkb_dir="$(inst_pkb_dir "$_pkb_boot_target")"
+                    [[ -d "$_pkb_dir" ]] || die "no such World instance: $_pkb_boot_target (no $_pkb_dir)"
+                    LAB_PKB="$_pkb_dir" python -m arail.compiled_kb bootstrap "$@"
+                    exit $?
+                fi
+
+                if [[ "$_pkb_boot_all" == "1" ]]; then
+                    say "pkb bootstrap: root lab"
+                    _pkb_boot_rc=0
+                    python -m arail.compiled_kb bootstrap "$@" || _pkb_boot_rc=1
+                    while IFS= read -r _pkb_slug; do
+                        [[ -n "$_pkb_slug" ]] || continue
+                        _pkb_dir="$(inst_pkb_dir "$_pkb_slug")"
+                        if [[ ! -d "$_pkb_dir" ]]; then
+                            warn "pkb bootstrap: $_pkb_slug — no pkb dir at $_pkb_dir, skipping"
+                            continue
+                        fi
+                        say "pkb bootstrap: World '$_pkb_slug'"
+                        LAB_PKB="$_pkb_dir" python -m arail.compiled_kb bootstrap "$@" || _pkb_boot_rc=1
+                    done < <(inst_list_slugs)
+                    exit "$_pkb_boot_rc"
+                fi
+
+                exec python -m arail.compiled_kb bootstrap "$@"
+                ;;
+            revoke)
+                # ASK-1: `pkb revoke --auto` — the one-step rollback for the
+                # whole mount/swap/bootstrap auto-approval mechanism.
+                # Non-sticky (see compiled_kb.revoke_auto docstring): fully
+                # reversible by the next mount/swap/bootstrap.
+                [[ -d .venv ]] || die "missing .venv — run ./arailctl setup"
+                # shellcheck disable=SC1091
+                source .venv/bin/activate
+                exec python -m arail.compiled_kb revoke "$@"
+                ;;
+            reembed)
+                # C2 (ARCHITECTURE.md, arail2-tier1-integration): the ONLY
+                # path that (re)writes pkb_pages with the spec-declared
+                # embedder. Never triggered implicitly by search or ingest.
+                [[ -d .venv ]] || die "missing .venv — run ./arailctl setup"
+                # shellcheck disable=SC1091
+                source .venv/bin/activate
+
+                _reembed_world=""; _reembed_root=0; _reembed_all=0
+                _reembed_extra=()
+                while [[ $# -gt 0 ]]; do
+                    case "$1" in
+                        --world) _reembed_world="${2:-}"; shift 2 ;;
+                        --root) _reembed_root=1; shift ;;
+                        --all) _reembed_all=1; shift ;;
+                        --resume|--dry-run|--yes) _reembed_extra+=("$1"); shift ;;
+                        *) die "unknown flag for pkb reembed: $1" ;;
+                    esac
+                done
+
+                _reembed_targets=()   # "label:path" pairs
+                if [[ "$_reembed_all" == "1" ]]; then
+                    _reembed_targets+=("root:$REPO_ROOT/lab/pkb")
+                    while IFS= read -r _reembed_slug; do
+                        [[ -n "$_reembed_slug" ]] || continue
+                        _reembed_targets+=("$_reembed_slug:$(inst_pkb_dir "$_reembed_slug")")
+                    done < <(inst_list_slugs)
+                elif [[ "$_reembed_root" == "1" ]]; then
+                    _reembed_targets+=("root:$REPO_ROOT/lab/pkb")
+                elif [[ -n "$_reembed_world" ]]; then
+                    _reembed_targets+=("$_reembed_world:$(inst_pkb_dir "$_reembed_world")")
+                else
+                    die "pkb reembed requires --world <slug> | --root | --all"
+                fi
+
+                # bash 3.2 (A2): "${arr[@]}" on a ZERO-element array aborts
+                # under `set -u` — _reembed_extra is legitimately empty when
+                # none of --resume/--dry-run/--yes were passed. Same guard
+                # pattern as `restart`'s _switch_live (arailctl:708).
+                _reembed_status=0
+                for _reembed_t in "${_reembed_targets[@]}"; do
+                    _reembed_label="${_reembed_t%%:*}"
+                    _reembed_path="${_reembed_t#*:}"
+                    python -m arail.pkb_reembed --pkb-root "$_reembed_path" \
+                        --world-label "$_reembed_label" \
+                        ${_reembed_extra[@]+"${_reembed_extra[@]}"} \
+                        || _reembed_status=$?
+                done
+                exit "$_reembed_status"
+                ;;
+            ""|help|-h|--help)
+                cat <<'EOF'
+Usage: ./arailctl pkb <op> [options]
+
+  ingest   Process inbox/ into sources/
+  compile  Merge sources/ + agents/ + notes/ into compiled/ + index.md
+  browse   Search and list the knowledge base
+  prune    Drop Compiled-KB approvals whose raw file is gone
+  bootstrap Backfill the Compiled KB so gate_state() leaves "unbootstrapped":
+             --world <slug>     one World instance (or `root` for the root lab)
+             --all-instances    the root lab plus every registered World
+             --dry-run          report what would be approved; write nothing
+  revoke   Roll back Compiled-KB approvals:
+             --auto       undo the mount/swap/bootstrap auto-approval
+                          (non-sticky — reversible by the next mount)
+  reembed  Explicit, resumable re-embed of the vector index (C2):
+             --world <slug> | --root | --all   (required, pick one)
+             --resume     resume from the last checkpoint
+             --dry-run    print row count + ETA; write nothing
+             --yes        reserved (this verb never prompts)
+EOF
+                exit 0
+                ;;
+            *) die "pkb op must be one of: ingest | compile | browse | prune | bootstrap | revoke | reembed" ;;
         esac
         ;;
     wiki)
@@ -1031,11 +1318,53 @@ TEMPLATE
             *) die "wiki op must be one of: build | info | new <title> | serve" ;;
         esac
         ;;
+    nucleus)
+        # Model Forge — see docs/nucleus.md. `python -m arail.nucleus` owns
+        # its own tier gate and exit-code contract (0 ok / 1 internal error /
+        # 2 usage / 3 refused by policy); this case is a thin exec, same
+        # pattern as `world` and `pkb` above.
+        [[ -d .venv ]] || die "missing .venv — run ./arailctl setup"
+        # shellcheck disable=SC1091
+        source .venv/bin/activate
+        exec python -m arail.nucleus "$@"
+        ;;
     world)
         [[ -d .venv ]] || die "missing .venv — run ./arailctl setup"
         # shellcheck disable=SC1091
         source .venv/bin/activate
         exec python -m arail.world_mount "$@"
+        ;;
+    auth)
+        # Portal credentials (ARCHITECTURE.md C7). `--world SLUG` is resolved here, from the
+        # instance registry, so the Python side only ever sees ARAIL_DATA_DIR/ARAIL_INSTANCE.
+        [[ -d .venv ]] || die "missing .venv — run ./arailctl setup"
+        _auth_args=()
+        _auth_world=""
+        while [[ $# -gt 0 ]]; do
+            if [[ "$1" == "--world" ]]; then
+                [[ -n "${2:-}" ]] || die "auth: --world needs a slug"
+                _auth_world="$2"; shift 2
+            else
+                _auth_args+=("$1"); shift
+            fi
+        done
+        if [[ -n "$_auth_world" ]]; then
+            [[ -d "$(inst_instance_dir "$_auth_world")" ]] || die "auth: no World instance '$_auth_world'"
+            export ARAIL_INSTANCE="$_auth_world"
+            export ARAIL_DATA_DIR="$(inst_data_dir "$_auth_world")"
+        fi
+        # shellcheck disable=SC1091
+        source .venv/bin/activate
+        exec python -m arail.portal.auth_cli ${_auth_args[@]+"${_auth_args[@]}"}
+        ;;
+    buddy)
+        # Buddy on your phone — see docs/buddy-edge.md. `python -m arail.buddy_host`
+        # owns its exit codes (0 ok / 2 usage / 3 refused by policy) and never
+        # prints the credential; thin exec, same pattern as `world` and `nucleus`.
+        [[ -d .venv ]] || die "missing .venv — run ./arailctl setup"
+        # shellcheck disable=SC1091
+        source .venv/bin/activate
+        exec python -m arail.buddy_host "$@"
         ;;
     benchmark_models|benchmark|aerollm)
         [[ -d .venv ]] || die "missing .venv — run ./arailctl setup"

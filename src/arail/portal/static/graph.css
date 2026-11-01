@@ -150,6 +150,23 @@ canvas:active { cursor: grabbing; }
   opacity: 0.8;
 }
 
+/* Legend chips double as category filters — clicking one hides that
+   group's nodes on the canvas without a refetch. */
+.legend-item--filter {
+  cursor: pointer;
+  padding: 0.1rem 0.35rem;
+  margin: -0.1rem -0.35rem;
+  border-radius: var(--radius-s, 4px);
+  transition: background 0.12s ease, opacity 0.12s ease;
+}
+.legend-item--filter:hover {
+  background: var(--surface2, rgba(127,127,127,0.12));
+}
+.legend-item--muted {
+  opacity: 0.4;
+  text-decoration: line-through;
+}
+
 /* Detail-panel approval row (brain scope) */
 .detail-approval { text-decoration: none; }
 .detail-approval--pending  { color: var(--warn); }

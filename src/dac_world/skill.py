@@ -1,4 +1,4 @@
-"""SKILL.md renderer -- port of DaC's ``src/arail-export/skill.ts``.
+"""SKILL.md renderer -- port of DDaC's ``src/arail-export/skill.ts``.
 
 Moved verbatim from qukaizen-arail's ``src/arail/world_forge.py`` as part of
 the ``dac_world`` migration — see
@@ -37,31 +37,96 @@ def _cmp_key(s: str) -> str:
     return s.casefold()
 
 
+def measured_skill_size(t: dict) -> int:
+    """The canonical "what a term costs in SKILL.md" measurement (C2,
+    sprints/2026-08-27-heavy-world-model/ARCHITECTURE.md). Mirrors the TS
+    twin, ``src/size.ts::measureTermSize``, byte-for-byte — parity is
+    asserted on a shared vector (tests/python/test_measured_skill_size.py +
+    tests/size.test.ts both read
+    tests/fixtures/measure-term-size-vectors.json).
+
+    Deliberately NOT ``len(short)+len(definition)+len(example)`` (that
+    payload is ~1.7x larger than what SKILL.md actually renders — the
+    premise correction in ARCHITECTURE.md). Returns the UTF-8 byte length of
+    the two SKILL.md lines this term renders as (render_world_skill L126-127),
+    each including its trailing newline:
+        `- **{term}** (`{slug}`) — {short}`
+        `  - Source: {source}`
+
+    Pure, total: never throws; a missing field contributes "" to its segment.
+    """
+    term = str(t.get("term") or "")
+    slug = str(t.get("slug") or "")
+    short = str(t.get("short") or "")
+    source = str(t.get("source") or "")
+    line1 = f"- **{term}** (`{slug}`) — {short}"
+    line2 = f"  - Source: {source}"
+    return len((line1 + "\n").encode("utf-8")) + len((line2 + "\n").encode("utf-8"))
+
+
+def _related_edge_slug(edge: object) -> str:
+    """A related edge is either a bare slug string or a typed {slug, rel}
+    dict (RelatedEdge, src/types.ts). Always resolve to the target SLUG for
+    degree counting — F5: counting `str(dict)` instead of `.slug` silently
+    zeroes inbound degree for every typed edge once one reaches this path."""
+    if isinstance(edge, dict):
+        return str(edge.get("slug", "")).strip()
+    return str(edge).strip()
+
+
 def _skill_terms_capped(terms: list[dict]) -> tuple[list[dict], Optional[str]]:
     """Pick which terms SKILL.md carries. skills_loader caps the body at ~56K
     chars, so a big World (e.g. 512 fetched terms) can't render every term into
     the agent prompt. Keep the most CONNECTED terms (highest related-degree —
-    the concepts the World hangs off of) up to the char budget, and return an
-    honest note so agents know the full glossary lives in the Knowledge Base.
-    Small Worlds render whole (note=None)."""
-    if estimate_skill_chars(len(terms)) <= SKILL_CHAR_BUDGET:
+    the concepts the World hangs off of) up to the MEASURED render budget
+    (measured_skill_size, C2 — not the flat SKILL_CHARS_PER_TERM estimate,
+    which overcounts real SKILL-line cost ~1.7x and needlessly drops terms a
+    World's real render would have fit), and return an honest note so agents
+    know the full glossary lives in the Knowledge Base. Small Worlds render
+    whole (note=None).
+
+    OVERHEAD is a conservative allowance for frontmatter + framing + category
+    headers + rails that aren't per-term. It is NOT trusted blindly for
+    correctness: the caller (write_bundle) renders the returned `kept` set for
+    real, and callers' tests assert the real rendered body stays under
+    SKILL_CHAR_BUDGET (F6) — this function's job is only to pick a kept set
+    that SHOULD fit, not to certify that it does.
+    """
+    OVERHEAD = 1_500  # conservative: frontmatter + framing + category headers + rails
+    total = OVERHEAD + sum(measured_skill_size(t) for t in terms)
+    if total <= SKILL_CHAR_BUDGET:
         return terms, None
-    # degree = inbound+outbound related edges
+
+    # Degree = inbound + outbound related edges, counted by SLUG (F5) so a
+    # typed {slug,rel} edge counts identically to an equivalent bare-slug one.
     indeg: dict[str, int] = {}
     for t in terms:
         for r in (t.get("related") or []):
-            rs = str(r).strip()
+            rs = _related_edge_slug(r)
             if rs:
                 indeg[rs] = indeg.get(rs, 0) + 1
 
     def _degree(t: dict) -> int:
-        return len(t.get("related") or []) + indeg.get(str(t.get("slug", "")), 0)
+        out_deg = sum(1 for r in (t.get("related") or []) if _related_edge_slug(r))
+        return out_deg + indeg.get(str(t.get("slug", "")), 0)
 
-    # how many terms fit the budget (estimate_skill_chars is ~linear per term)
-    per_term = max(1, estimate_skill_chars(100) // 100)
-    n = max(1, min(len(terms), SKILL_CHAR_BUDGET // per_term))
     ranked = sorted(terms, key=lambda t: (-_degree(t), str(t.get("slug", ""))))
-    kept = ranked[:n]
+
+    # The highest-degree PREFIX that fits the MEASURED budget (C4 Promises) —
+    # stop at the first term that would overflow, don't skip ahead to a
+    # smaller lower-ranked one (that would silently reorder the "most
+    # connected" guarantee the honest note makes). Always keep at least one
+    # term from a non-empty over-budget corpus (never an empty SKILL.md for a
+    # real World).
+    kept: list[dict] = []
+    running = OVERHEAD
+    for t in ranked:
+        cost = measured_skill_size(t)
+        if kept and running + cost > SKILL_CHAR_BUDGET:
+            break
+        running += cost
+        kept.append(t)
+
     note = (f"This World has {len(terms)} terms; the {len(kept)} most connected "
             "are shown here. The full glossary lives in the Knowledge Base.")
     return kept, note

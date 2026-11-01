@@ -593,14 +593,60 @@ def test_resilient_chat_default_prefers_llama_ai_eng_over_legacy(monkeypatch):
     assert result == "llama-ai-eng"
 
 
-def test_resilient_chat_default_aliases_legacy_ai_engineer(monkeypatch):
-    """If only legacy ai-engineer:latest is installed, the resolver finds it."""
+def test_resilient_chat_default_last_resorts_to_ai_engineer_with_warning(monkeypatch, caplog):
+    """ai-engineer:latest (7B deep persona) is a last resort, not a confident alias.
+
+    It is NOT a prior name for the ~1B default (see
+    model_specs.MODEL_METADATA_OVERRIDES and scripts/setup.sh's "Do NOT
+    alias" handling of the same legacy name) — it's ARAIL's original
+    pre-two-tier default, based on qwen3:8b then qwen2.5:7b, repositioned as
+    the maximus deep persona. When it's the only model installed,
+    _resilient_chat_default still returns it (better than refusing, and it
+    passes the primary-model ceiling) — but unlike a real alias, that
+    fallback must be logged, not silent.
+    """
     monkeypatch.setenv("LAB_MODE", "airgapped")
     import arail.chat as chat_mod
     monkeypatch.setattr(chat_mod, "detect_installed_models",
                         lambda: [{"id": "ai-engineer:latest"}], raising=False)
     from arail.portal import app as portal_app
-    assert portal_app._resilient_chat_default("ai-eng:latest") == "ai-engineer:latest"
+    with caplog.at_level("WARNING", logger="arail.portal.app"):
+        result = portal_app._resilient_chat_default("ai-eng:latest")
+    assert result == "ai-engineer:latest"
+    assert any("ai-engineer:latest" in r.message for r in caplog.records), (
+        "falling back to the differently-sized ai-engineer must be logged, not silent"
+    )
+
+
+def test_resilient_chat_default_ai_engineer_still_subject_to_ceiling_check(monkeypatch):
+    """REGRESSION GUARD: ai-engineer:latest must not bypass the ceiling check.
+
+    Before the fix, ai-engineer:latest sat in the same back-compat
+    preferred-name tuple as llama-ai-eng/ai-eng:latest, so it was returned
+    unconditionally — never even reaching the primary-model ceiling check
+    that's supposed to gate the answering-model slot, not just passing it.
+    Simulate the ceiling rejecting every installed model (as it would for an
+    oversized or misconfigured one) and confirm ai-engineer:latest is no
+    longer exempt: the resolver must fall through to refusing (returning the
+    original candidate) rather than handing back a model the ceiling just
+    rejected.
+    """
+    monkeypatch.setenv("LAB_MODE", "airgapped")
+    import arail.chat as chat_mod
+    monkeypatch.setattr(chat_mod, "detect_installed_models",
+                        lambda: [{"id": "ai-engineer:latest"}], raising=False)
+    from arail.portal import app as portal_app
+    from arail.registry import ceiling as ceiling_mod
+
+    def _always_refuse(model_id, *, role, **k):
+        raise ceiling_mod.ModelCeilingViolation("simulated refusal", model_id=model_id, role=role)
+
+    monkeypatch.setattr(ceiling_mod, "resolve_answering_model", _always_refuse, raising=False)
+    result = portal_app._resilient_chat_default("ai-eng:latest")
+    assert result == "ai-eng:latest", (
+        "ai-engineer:latest must not bypass a failing ceiling check just "
+        "because it shares a name prefix with the real ai-eng alias family"
+    )
 
 
 def test_no_reference_to_removed_modelfile_production_tag():

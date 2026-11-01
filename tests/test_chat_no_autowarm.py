@@ -41,18 +41,28 @@ def test_init_does_not_queue_a_microtask_warm():
 
 
 def test_loadmodel_still_exists_for_the_explicit_load_button():
-    """The fix removes the *automatic* trigger, not the mechanism itself
-    — the per-card Load button (explicit, user-initiated) must still work."""
+    """The fix removes the *automatic* trigger, not the mechanism itself.
+    sprints/2026-08-11-two-slot-chat-models Phase 5 replaced the per-card
+    rail "Load" button with the resident/deep pickers — clicking a picker
+    row IS the explicit, user-initiated load trigger now
+    (selectResidentModel/selectDeepModel, both of which await loadModel())."""
     assert "async function loadModel(m)" in CHAT_HTML
-    assert "loadBtn.addEventListener('click'" in CHAT_HTML
+    assert "const ok = await loadModel(m);" in CHAT_HTML  # selectResidentModel
+    assert "await loadModel({ id: m.id" in CHAT_HTML       # selectDeepModel
 
 
 def test_init_function_ends_without_calling_loadmodel_directly():
     """init() itself (the function that runs unconditionally on every
     page load) must not call loadModel — only user-triggered handlers
-    (selectModel's frontier auto-route, the B-column button, the Load
-    button) are allowed to."""
+    (a picker row click, via selectResidentModel/selectDeepModel) are
+    allowed to. Only counts loadModel as an actual call site (`loadModel(`
+    not preceded by a comment marker on the same line) — a prose mention
+    in a comment explaining this exact invariant doesn't count."""
     start = CHAT_HTML.index("async function init(")
     end = CHAT_HTML.index("\n    init();", start)
     init_body = CHAT_HTML[start:end]
-    assert "loadModel(" not in init_body
+    call_sites = [
+        ln for ln in init_body.splitlines()
+        if "loadModel(" in ln and "//" not in ln.split("loadModel(")[0]
+    ]
+    assert not call_sites, f"init() calls loadModel() directly: {call_sites}"

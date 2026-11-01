@@ -7,9 +7,11 @@ import os
 import re
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
+from arail import agent_context, agent_trace
 from arail.router import ModelRouter
 
 
@@ -18,16 +20,44 @@ from arail.router import ModelRouter
 # the first time. Tunable via ARAIL_GOAL_PARSE_TIMEOUT_SEC.
 _SUBPROCESS_TIMEOUT_SEC = int(os.getenv("ARAIL_GOAL_PARSE_TIMEOUT_SEC", "60"))
 
+# QA F2 (TEST_REPORT.md): error_class is documented in the trace schema as
+# a class name -- ``type(exc).__name__`` shape only, never free text. The
+# child (_subprocess_runner.py) is trusted to send a real class name in
+# its own "error_class" field, but the parent must not take that on
+# faith: an old or hostile child could still send only the legacy
+# "error" message field (or something else entirely) in its JSON, and
+# that message text (which has already been shown to carry an
+# ``Authorization: Bearer ...`` fragment) must never reach a trace
+# record just because it happened to be present. This allow-list is the
+# actual enforcement point; everything else is defense in depth.
+_ERROR_CLASS_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_ERROR_CLASS_MAX_LEN = 64
+
+
+def _sanitize_error_class(payload: Any) -> str:
+    """Return a value safe for the trace schema's error_class field, or
+    a generic fallback -- never anything derived from a free-text
+    ``error`` message, and never unbounded length."""
+    if isinstance(payload, dict):
+        candidate = payload.get("error_class")
+        if (isinstance(candidate, str)
+                and 0 < len(candidate) <= _ERROR_CLASS_MAX_LEN
+                and _ERROR_CLASS_RE.fullmatch(candidate)):
+            return candidate
+    return "SubprocessError"
+
 
 DOMAIN_KEYWORDS: Dict[str, list[str]] = {
-    "farming": ["crop", "farm", "yield", "soil", "harvest", "peanut",
-                 "corn", "wheat", "garden", "irrigation"],
+    "farming": ["crop", "crop yield", "farm", "farming", "soil", "harvest",
+                 "peanut", "corn", "wheat", "garden", "irrigation",
+                 "acre", "livestock", "agronomy"],
     "ml-research": ["model", "training", "accuracy", "dataset", "neural",
                      "llm", "fine-tune", "gpu", "benchmark"],
     "culinary": ["cook", "recipe", "cuisine", "pastry", "dish",
                   "ingredient", "technique", "ferment"],
     "business": ["revenue", "growth", "customer", "market", "sales",
-                  "profit", "scale", "startup"],
+                  "profit", "scale", "startup", "debt", "portfolio",
+                  "yield curve", "interest rate", "cash flow"],
     "health": ["fitness", "health", "diet", "exercise", "wellness",
                 "strength", "nutrition"],
     "education": ["learn", "skill", "knowledge", "course", "master",
@@ -38,15 +68,49 @@ DOMAIN_KEYWORDS: Dict[str, list[str]] = {
                "drywall", "pipefitter"],
 }
 
+_KEYWORD_PATTERNS: Dict[str, "re.Pattern[str]"] = {}
+
+
+def _keyword_pattern(keyword: str) -> "re.Pattern[str]":
+    """Word-boundary matcher for a keyword or multi-word phrase.
+
+    Substring matching is wrong here: it makes "corn" fire on
+    "cornerstone" and "scale" fire on "escalate".
+    """
+    pattern = _KEYWORD_PATTERNS.get(keyword)
+    if pattern is None:
+        pattern = re.compile(rf"\b{re.escape(keyword)}\b", re.IGNORECASE)
+        _KEYWORD_PATTERNS[keyword] = pattern
+    return pattern
+
+
+def matched_keywords(text: str, domain: str) -> list[str]:
+    """Keywords of ``domain`` that occur in ``text`` on word boundaries."""
+    return [kw for kw in DOMAIN_KEYWORDS.get(domain, [])
+            if _keyword_pattern(kw).search(text)]
+
 
 def infer_domain(text: str) -> str:
-    lower = text.lower()
-    scores = {
-        domain: sum(1 for kw in kws if kw in lower)
-        for domain, kws in DOMAIN_KEYWORDS.items()
-    }
-    best = max(scores, key=scores.get, default="general")  # type: ignore[arg-type]
-    return best if scores.get(best, 0) > 0 else "general"
+    """Best-effort domain label for a goal, or ``"general"``.
+
+    A tie resolves to ``"general"``, never to a domain. The previous
+    implementation used ``max(scores, key=scores.get)``, which returns
+    the first maximal key in dict order — so every tie silently
+    resolved to whichever domain happened to be declared first
+    (``farming``), and finance or games goals came back labelled as
+    agriculture. Keep this order-independent: the caller wants "I don't
+    know" rather than a confident wrong answer, because the label
+    selects agent system prompts and source allowlists downstream.
+    """
+    scores = {domain: len(matched_keywords(text, domain))
+              for domain in DOMAIN_KEYWORDS}
+    top = max(scores.values(), default=0)
+    if top == 0:
+        return "general"
+    winners = [domain for domain, score in scores.items() if score == top]
+    if len(winners) > 1:
+        return "general"
+    return winners[0]
 
 
 def extract_entities(text: str) -> Dict[str, list[str]]:
@@ -135,8 +199,13 @@ class GoalParser:
         :meth:`_llm_subprocess` in production.
         """
         try:
-            resp = self._get_router().complete(prompt, max_tokens=800,
-                                               temperature=0.5)
+            # L3 (ARCHITECTURE.md): goal_parser is not an agent -- system_call,
+            # same label as the subprocess path uses for the out-of-process
+            # trace, so the in-proc test path and the production path agree
+            # on what this work is called.
+            with agent_context.system_call("goal-parser"):
+                resp = self._get_router().complete(prompt, max_tokens=800,
+                                                   temperature=0.5)
             return resp.text
         except Exception:
             return None
@@ -148,11 +217,21 @@ class GoalParser:
         recoverable failure (subprocess crash, timeout, OOM, JSON
         protocol error). Callers fall back to the heuristic parser.
         """
+        # Attribution round-trip (ARCHITECTURE.md contract #9): merge the
+        # current context into the wire payload so the child can bill its
+        # own cost_tracker correctly. The child never writes a trace file
+        # itself (see _subprocess_runner.py's docstring) -- this function
+        # is the sole trace author for the whole round-trip, always
+        # recording exactly once, success or failure, so DE2's known leak
+        # (this subprocess) is closed rather than merely labelled.
+        subprocess_ctx = agent_context.to_subprocess_payload()
         request = json.dumps({
             "prompt": prompt,
             "max_tokens": 800,
             "temperature": 0.5,
+            **subprocess_ctx,
         })
+        t0 = time.monotonic()
         try:
             proc = subprocess.run(
                 [sys.executable, "-m",
@@ -163,26 +242,69 @@ class GoalParser:
                 timeout=_SUBPROCESS_TIMEOUT_SEC,
             )
         except subprocess.TimeoutExpired:
+            self._record_subprocess_trace(
+                subprocess_ctx, outcome="error", error_class="TimeoutExpired")
             return None
-        except (OSError, ValueError):
+        except (OSError, ValueError) as exc:
             # Couldn't spawn the subprocess at all (bad path, ulimit,
             # weird sys.executable). Fall back silently.
+            self._record_subprocess_trace(
+                subprocess_ctx, outcome="error", error_class=type(exc).__name__)
             return None
+        elapsed_ms = (time.monotonic() - t0) * 1000
 
         if proc.returncode != 0:
             # The runner caught its own errors and exited 0 even on
             # Python-level failure, so a non-zero return code means
             # the process itself died (Metal OOM, segfault, etc).
             # That's the hardened path the user reported — survive it.
+            self._record_subprocess_trace(
+                subprocess_ctx, outcome="error", error_class="SubprocessDied",
+                latency_ms=elapsed_ms)
             return None
 
         try:
             payload = json.loads(proc.stdout or "{}")
         except json.JSONDecodeError:
+            self._record_subprocess_trace(
+                subprocess_ctx, outcome="error", error_class="JSONDecodeError",
+                latency_ms=elapsed_ms)
             return None
         if not payload.get("ok"):
+            self._record_subprocess_trace(
+                subprocess_ctx, outcome="error",
+                error_class=_sanitize_error_class(payload),
+                latency_ms=elapsed_ms)
             return None
+
+        self._record_subprocess_trace(
+            subprocess_ctx, outcome="ok", latency_ms=elapsed_ms,
+            model=payload.get("model"), backend=payload.get("backend"),
+            tokens_out=payload.get("tokens_used"))
         return payload.get("text")
+
+    @staticmethod
+    def _record_subprocess_trace(subprocess_ctx: Dict[str, Any], **fields: Any) -> None:
+        """The parent authors the one trace record for this out-of-process
+        call (contract #9). ``out_of_process=True`` distinguishes it from
+        anything recorded by the router chokepoint directly."""
+        agent_trace.record(
+            trace_id=subprocess_ctx.get("trace_id"),
+            agent_id=subprocess_ctx.get("agent_id"),
+            kind="agent" if subprocess_ctx.get("agent_id") else "system",
+            label=subprocess_ctx.get("agent_id") or "goal-parser",
+            attribution=(
+                f"agent:{subprocess_ctx['agent_id']}"
+                if subprocess_ctx.get("agent_id") else "sys:goal-parser"
+            ),
+            brain=subprocess_ctx.get("brain"),
+            effort=subprocess_ctx.get("effort"),
+            out_of_process=True,
+            streamed=False,
+            ttft_ms=None,
+            ttft_status="non_streaming",
+            **fields,
+        )
 
     def parse_offline(self, goal_text: str) -> Dict[str, Any]:
         """Heuristic-only parsing — no LLM needed (works airgapped with no
@@ -209,7 +331,7 @@ class GoalParser:
 
         # Infer resources from domain
         resource_hints: Dict[str, list[str]] = {
-            "ml-research": ["local LLM", "GPU or AeroLLM", "research papers"],
+            "ml-research": ["local LLM", "GPU or QueueLLM", "research papers"],
             "farming": ["weather data", "soil data", "crop databases"],
             "culinary": ["recipe databases", "ingredient sources"],
             "business": ["market data", "analytics tools"],

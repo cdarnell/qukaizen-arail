@@ -511,6 +511,33 @@ reset_pkb() {
     # the one-shot World prompt so the next boot offers the picker again.
     rm -f "${DATA_DIR}/world-mount.json" 2>/dev/null || true
     rm -f "${DATA_DIR}/.world-prompt-seen" 2>/dev/null || true
+    # ADR-0005: `<data_dir>/arail.db` sits OUTSIDE the tree this function
+    # just wiped, but two of its tables hold rows derived straight from PKB
+    # content — `content_refs` for the pkb_pages/wiki_nodes Lance datasets
+    # (both just deleted above) and the "document" entities migrate.py
+    # creates from them. Left behind, they're exactly what ADR-0002's
+    # "wipe the PKB = wipe memory" contract promises is gone, and
+    # `db doctor` would report them as orphaned content_refs (the #163
+    # shape) on top of that. Purge them here, in the same function that
+    # wipes the PKB, so the two can't drift apart the way ADR-0005 warned
+    # they would.
+    local db_file="${DATA_DIR}/arail.db"
+    if [[ -f "$db_file" ]]; then
+        if command -v sqlite3 >/dev/null 2>&1; then
+            if sqlite3 "$db_file" <<'SQL' >/dev/null 2>&1
+PRAGMA foreign_keys = ON;
+DELETE FROM content_refs WHERE lance_table IN ('pkb_pages', 'wiki_nodes');
+DELETE FROM entities WHERE kind = 'document';
+SQL
+            then
+                info "Purged PKB-derived rows (content_refs, document entities) from arail.db."
+            else
+                warn "could not purge PKB-derived rows from arail.db — it may still hold content_refs/entities for the KB just wiped."
+            fi
+        else
+            warn "sqlite3 not on PATH — arail.db may still hold PKB-derived rows (content_refs, document entities) for the KB just wiped."
+        fi
+    fi
     info "Knowledge base removed. Starter packs will re-seed on next ./arailctl start."
 }
 
@@ -626,7 +653,25 @@ reset_env() {
 
 full_wipe() {
     stop_services
-    reset_models
+    # Models are the one step here with a real re-download cost (often
+    # several GB), so — unlike every other piece of a "full wipe" — they
+    # are NOT included unless the operator explicitly says so: either
+    # --include-models on the command line, or a yes at this prompt. A
+    # bare --yes (which already confirmed the wipe as a whole via
+    # confirm_and_run) does NOT imply "and delete my downloaded models
+    # too" — that needs its own, separate opt-in.
+    if [[ "$INCLUDE_MODELS" != "true" && "$AUTO_CONFIRM" != "true" ]]; then
+        echo ""
+        read -rp "  Also remove downloaded models (${MODELS_DIR}/, $(report_size "$MODELS_DIR"))? [y/N] " models_yn
+        case "${models_yn}" in
+            [Yy]*) INCLUDE_MODELS="true" ;;
+        esac
+    fi
+    if [[ "$INCLUDE_MODELS" == "true" ]]; then
+        reset_models
+    else
+        info "Keeping ${MODELS_DIR}/ ($(report_size "$MODELS_DIR")) — pass --include-models to also wipe downloaded models."
+    fi
     reset_data
     reset_plugins
     # Per user decision (2026-04-24): `reset all` includes the research
@@ -695,7 +740,10 @@ usage() {
     echo "              User-authored skills + AGENT.md loadouts stay put."
     echo "    plugins   Remove installed plugins"
     echo "    env       Remove .venv, .env, lab.conf"
-    echo "    full      Complete wipe — keeps the knowledge base safe."
+    echo "    full      Complete wipe — keeps the knowledge base safe, and"
+    echo "              keeps downloaded models unless you say otherwise:"
+    echo "              [--include-models] to also wipe lab/models/ (else"
+    echo "              you're asked interactively, default No)."
     echo "              Chain with 'pkb' if you truly want everything gone."
     echo "    destroy   Delete the entire local lab copy and app data"
     echo "    stop      Just stop running services"
@@ -726,7 +774,7 @@ interactive_menu() {
     echo "    3) Knowledge base (notes, uploads, agent findings)"
     echo "    4) Plugins"
     echo "    5) Environment (.venv, .env, configs)"
-    echo "    6) Full wipe (preserves the knowledge base)"
+    echo "    6) Full wipe (preserves the knowledge base + models by default)"
     echo "    7) Destroy this lab copy entirely"
     echo "    8) Just stop services"
     echo "    0) Cancel"
@@ -770,6 +818,13 @@ confirm_and_run() {
 MODE=""
 STOP_WORLD=""
 STOP_ALL="false"
+# `full` used to unconditionally wipe lab/models/ (often several GB, slow
+# to re-download) alongside everything else — the one piece of a "full
+# wipe" an operator is least likely to want gone by default, since it's
+# the only step here that costs real time/bandwidth to undo. Models are
+# now skipped unless explicitly requested, via this flag or the
+# interactive prompt full_wipe() asks when not --yes.
+INCLUDE_MODELS="false"
 # ARCHITECTURE.md §10 (sprints/2026-07-29-elite-cli, Ruling 5): --root
 # dispatches straight to stop_services (the root lab only), skipping the
 # auto-resolution branch entirely — so `stop --root` is well-defined and
@@ -779,6 +834,7 @@ STOP_ROOT="false"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --yes|-y) AUTO_CONFIRM="true"; shift ;;
+        --include-models) INCLUDE_MODELS="true"; shift ;;
         --all)    STOP_ALL="true"; shift ;;
         --root)   STOP_ROOT="true"; shift ;;
         # m9: a plain `shift 2` errors (aborting under `set -e`) when

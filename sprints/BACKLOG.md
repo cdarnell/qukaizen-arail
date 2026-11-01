@@ -560,3 +560,1741 @@ shape (single caller, in-place upgrades are the exception not degrading
 unsafely) — filed so a future sprint that changes either assumption
 (adds a second `tick()` caller, or needs snapshot continuity across an
 upgrade) finds this written down instead of rediscovering it.
+
+---
+
+## PDF text extraction → PKB → librarian scout
+
+**Filed by:** `sprints/2026-08-06-deep-research-world-forge/VISION.md`
+(reject-as-scoped verdict on a proposed "Deep Research World Forge"
+source mode).
+
+**The gap, independent of the rejected feature.** A PDF dropped into
+`lab/pkb/inbox` (the Knowledge tab's drag-drop zone) is filed by `pkb.py`
+under the `"papers"` category and then **never read by anything.**
+`_PKB_TEXT_SUFFIXES` (`pkb.py:376`) is `.md/.txt/.rst/.csv/.json/.html`;
+`librarian_scout._TEXT_SUFFIXES` (line 53) is narrower still —
+`.md/.txt/.markdown`. `grep` for `pypdf|PyPDF|pdfminer|fitz|pdftotext`
+across `src/` and `pyproject.toml` returns nothing — there is zero PDF
+text extraction anywhere in ARAIL. The user-visible surface (a drag-drop
+zone, a folder-reveal button, a `"papers"` filing category) implies PDFs
+are used. They are not. This is arguably already a defect, not just a
+missing feature.
+
+**Why it surfaced now.** An operator asked for a "Deep Research World
+Forge" mode (live web research via the Browser agent, feeding a new
+World's starting term base) to build a "Quantum" World with current
+post-quantum cryptography jargon. VISION.md rejected that proposal — the
+Browser agent is a `subprocess.run(["agent-browser", ...])` call the
+egress guard structurally cannot see (it patches `requests`/`urllib`/
+`httpx`, all in-process), so routing forge through it would make the
+existing forge banner's audit promise (`worlds.html:92`) false. Separately,
+the actual motivating sources (NIST FIPS 203/204/205, the PQC standards)
+are PDFs — so a web-research mode wouldn't have reached the right content
+anyway.
+
+**The better wedge, once (if) the need is confirmed.** Add a PDF-to-text
+step at PKB ingest (`pypdf` — pure Python, no system deps, no network),
+extend both text-suffix allowlists above to cover the extracted text, and
+let the existing machinery do the rest: `librarian_scout.mine_candidates()`
+already scans `pkb/inbox`/`pkb/sources` for capitalized multi-word phrases
+and standalone acronyms — precisely the shape of `ML-KEM`, `SLH-DSA`,
+`Module-Lattice-Based Key-Encapsulation Mechanism` — and already routes
+mined candidates through evidence accumulation, the ubiquity threshold,
+and the Compiled-KB approval gate. No new egress surface (the operator
+downloads the PDF themselves), no new consent gate, no Node/npm/Chromium
+dependency, and it generalizes past one World: every future World forged
+from a specialized corpus (a standards body, a textbook, a paper set) is
+served, not just Quantum.
+
+**Why not done now.** VISION.md's reject verdict was contingent on a
+pre-registered, falsifiable experiment (three-arm forge coverage test —
+local dream / frontier-brain dream / Wikipedia fetch — against a
+~20-term PQC checklist) that had not yet been run at time of filing. If
+Arm B (frontier brain) scores ≥70% coverage, the existing "Frontier API"
+forge-brain toggle already solves the operator's stated problem and this
+item drops in priority to "fix the PDF-ingest defect" without the
+World-forge framing. Revisit alongside that experiment's result — see
+`sprints/2026-08-06-deep-research-world-forge/VISION.md` for the full
+decision tree and thresholds.
+
+---
+
+## `pkb._iter_pkb_files` indexes dot-directory contents as ordinary PKB rows
+
+**Filed by:** `sprints/2026-08-08-arail2-tier1-integration/BUILD_LOG.md`
+(W1), confirmed and required for filing by REVIEW.md's tech-debt section.
+
+**The gap.** `pkb._iter_pkb_files` (`pkb.py:391-411`) skips a file only if
+`p.name.startswith(".")` — it does not skip files whose *ancestor
+directory* starts with a dot. `.wiki-cache/manifest.json`, the
+machine-generated wiki index (1.15 MB in the `ai` world, ~230 KB in
+`debt-finance`, present in every world), is therefore indexed as an
+ordinary PKB row alongside real user/agent content. Confirmed live: of the
+889-row corpus measured in this sprint, 19 rows come from
+`.wiki-cache/manifest.json` files (5 worlds, 1 each — actually one per
+world where the wiki has been built).
+
+**Why it wasn't fixed here.** `pkb.py` is on this sprint's explicit
+"must NOT touch" list (ARCHITECTURE.md §"What the builder must NOT touch"
+#6) — it stays byte-identical to baseline `8cb5760` unless and until the
+embedding-provider gate passed, and even then the architecture scopes the
+allowed `pkb.py` edits to the C1 error contract, C2's lazy-index removal,
+and the C4/W9 embed-call-site swap specifically, not general bug fixes
+picked up along the way. This is a genuine, independent production defect
+that predates this sprint and is orthogonal to embeddings.
+
+**Impact today:** neutral to search *quality* under `hash_embedding`
+(both arms in this sprint's A/B saw the same distractor rows, so it did
+not bias the measurement — confirmed in REVIEW.md's tech-debt section).
+It does waste embedding calls once nomic is live (a 1 MB JSON blob costs
+one more embed call per world, capped at 4096 chars like everything else,
+so the cost is bounded but non-zero and pointless) and it pollutes
+`source_kind="user"` search results with an internal cache artifact that
+was never meant to be searchable.
+
+**What a future sprint needs to do:** exclude any path with a
+dot-prefixed *directory component* (not just a dot-prefixed filename) in
+`_iter_pkb_files`, or explicitly denylist `.wiki-cache/` and
+`.cache/` by name (both already exist as sibling exclusions for other
+reasons — `.cache/` holds the LanceDB table itself). Needs a regression
+test asserting `.wiki-cache/manifest.json` is absent from `index_all()`'s
+row count before and after the fix, since silently changing row counts
+without a test would make the next embedder-migration measurement
+non-reproducible against this sprint's baseline.
+
+---
+
+## Docs-registry corpus slice is unmeasured by the Tier 1.2 A/B, but is re-embedded by the swap
+
+**Filed by:** `sprints/2026-08-08-arail2-tier1-integration/BUILD_LOG.md`
+(W1 design decision), required for filing by REVIEW.md's spec-adherence
+section (acknowledged drift #2) and required action 1.
+
+**The gap.** `pkb.index_all()` appends `pkb._build_docs_rows()` — a
+*global*, non-world-scoped set of rows drawn from `docs_registry.all_docs()`
+— to every world's PKB rows before writing the vector table
+(`pkb.py:529-530`). The Tier 1.2 A/B harness
+(`scripts/eval/retrieval_ab.py`) deliberately excludes this slice: since
+`_build_docs_rows()` takes no `root` parameter, the same docs rows would
+appear identically in all five worlds' harness corpora, making "recall@5
+per world" incoherent (a docs page would simultaneously count as "in"
+`ai`, `qukaizen`, `debt-finance`, etc.). REVIEW.md agreed with this call.
+
+**Consequence, carried forward explicitly (not silently):** the published
+recall@5 numbers (hash 50.0% / nomic 90.6%, Δ +40.6pp) say nothing about
+retrieval quality over the docs-registry slice specifically. When W9 swaps
+the embedding provider at the `index_all`/`_build_docs_rows` call sites,
+it will re-embed this slice too, on the strength of the *general* result
+(nomic beats hash on prose-and-glossary content of the same rough shape:
+markdown pages with titles, short bodies, procedural or definitional
+prose) rather than a slice-specific measurement. Risk is assessed as low
+— same embedder, same embed-input construction, same document shape — but
+it is an unmeasured extrapolation and should be named as such wherever
+W9's rationale is written up, not treated as directly covered by the A/B.
+
+**What a future sprint could do, if this matters in practice:** extend
+`scripts/eval/retrieval_ab.py` with a `--include-docs` mode that scores
+the docs-registry rows as their own pseudo-world (or folds them into
+`root`, since `docs_registry` content is root-scoped conceptually) so the
+docs slice gets its own recall@5 number rather than inheriting the
+PKB-only result by assumption.
+
+---
+
+## `pkb_provenance.py`'s JSON sidecar is a second-best `content_refs`
+
+**Filed by:** ARCHITECTURE.md §"Tech debt assessment" (conditional),
+required to be filed "at build time" — this is that filing, from
+`sprints/2026-08-08-arail2-tier1-integration/BUILD_LOG.md` W7/W9.
+
+**The gap.** The rejected 2.0 consolidated store's `content_refs` table
+records `embedding_model`/`embedding_dim` per row, transactionally, as
+part of the same write. The 1.x per-instance `pkb_pages` tables have no
+such column, so `pkb_provenance.py` (new this sprint) is a JSON file
+sitting next to the LanceDB table instead: written last, read on load,
+compared against the current spec. It does the job (C4: no query served
+from a table whose provenance disagrees with the spec), but it is a
+second-best solution to a problem the 2.0 store already solves properly,
+and it is one more piece of on-disk state that can theoretically drift
+from the table it describes (e.g. a `pkb_pages.lance` directory copied
+without its sidecar).
+
+**What a future sprint should do:** retire `pkb_provenance.py` if/when
+the consolidated 2.0 store cutover is revisited (see
+`sprints/2026-08-08-arail2-declarative-persistence/INTEGRATION.md` and
+VISION.md's rejection rationale for that cutover) — `content_refs`
+subsumes it. Until then, `pkb_provenance.py`'s three functions
+(`write`/`read`/`agrees_with_spec`) are the whole surface; a future
+migration only needs to reimplement `agrees_with_spec`'s semantics
+against `content_refs` rows.
+
+---
+
+## Two vector spaces in one lab: `pkb_pages` (nomic) vs `wiki_nodes` / `agent_workflows` / `experiments` (hash)
+
+**Filed by:** ARCHITECTURE.md §"Tech debt assessment" (conditional,
+"Also filed") and REVIEW.md's amendment 1 — required to be filed at
+build time. This is that filing, from
+`sprints/2026-08-08-arail2-tier1-integration/BUILD_LOG.md` W9.
+
+**The gap.** After the Tier 1.2 embedder swap, `pkb_pages` is embedded
+with nomic-embed-text (768-dim, real semantic vectors). `wiki_nodes.py`'s
+own hash table, `agent_workflows`, and `experiments` all still use
+`vector_index.hash_embedding` (128-dim, a SHA1 token-hash projection).
+This is safe today — the tables are physically separate LanceDB tables/
+directories, so nothing cross-contaminates — but it means "semantic
+search" now means two different, incompatible things depending on which
+surface of the lab you're searching, and only one of them (`pkb_pages`)
+carries a provenance sidecar (C4) recording what it actually is.
+
+**Corrected framing (REVIEW.md amendment 1, measured, not assumed):**
+`hash_embedding` is not kept around because it is competitive on any
+retrieval axis this sprint measured (see
+`sprints/2026-08-08-arail2-tier1-integration/RESULTS.md`'s exact-token
+collision diagnostic — hash lost even the class it was assumed to win).
+It is kept **only** because `wiki_nodes`/`agent_workflows`/`experiments`
+still call it directly and swapping those three call sites was
+explicitly out of scope for this sprint (A5 in ARCHITECTURE.md).
+
+**What a future sprint should do:** if `wiki_nodes`/`agent_workflows`/
+`experiments` search quality becomes a live complaint, measure them the
+same way this sprint measured `pkb_pages` — a fixture, an A/B, a
+15-point-or-larger bar — rather than assuming the `pkb_pages` result
+transfers. Their content shape (wiki term pages, workflow logs,
+experiment records) differs enough from PKB prose that the `pkb_pages`
+number is not strong evidence either way. Extend each with its own
+`pkb_provenance`-style sidecar (or the shared module, generalized past
+"pkb_pages" as a hardcoded table name) if/when they are swapped, so "two
+vector spaces in one lab" stays a recorded, provenance-checkable fact
+instead of reverting to being an undocumented discovery.
+
+---
+
+## `pkb_index`'s degraded state is a module global; PKB roots are per-World
+
+**Filed by:** REVIEW2.md's tech-debt section (required to be filed before
+PASS), `sprints/2026-08-08-arail2-tier1-integration/BUILD_LOG.md` build3.
+
+**The gap.** `pkb_index._degraded_codes` (and, before build3's reason-
+scoping fix, the single `_degraded`/`_degraded_reason` pair) is one dict
+shared by the whole process, but `ensure_ready` caches `_pkb_root_cache`
+and early-returns on `_initialized` — meaning in a process that touches
+more than one PKB root, one World's degraded status can describe another
+World's table. Concurrent-Worlds usage (`./arailctl start --world <slug>`)
+runs each World as its own OS process today (per
+`docs/concurrent-worlds.md`), which is what makes this survivable right
+now — one process, one root, one meaningful global. Per the operator's
+own recorded usage pattern (serial, not concurrent Worlds — see
+`learnings/` cross-product memory), this has not bitten anyone yet.
+
+**What a future sprint needs to do, if concurrent in-process multi-root
+access is ever introduced:** key `_degraded_codes` (and `_pending`,
+`_timer`, `_pkb_root_cache`) by `pkb_root` instead of being process-global
+singletons. This is a real refactor (the debounce timer machinery assumes
+one root too), not a one-line fix — scope it as its own sprint if/when the
+concurrent-Worlds architecture starts sharing a process.
+
+---
+
+## `tests/conftest.py`'s suite-wide embedding stub hides a hash-vector regression
+
+**Filed by:** REVIEW2.md's tech-debt section (required to be filed before
+PASS), `sprints/2026-08-08-arail2-tier1-integration/BUILD_LOG.md` build3.
+
+**The gap.** The autouse `_stub_embedding_provider` fixture (added W6,
+`tests/conftest.py`) replaces `arail.dbspec.embed.embed_documents`/
+`embed_query`/`embed` with a deterministic `hash_embedding`-based fake for
+every test not marked `@pytest.mark.requires_ollama`. This is the right
+call for FM18 (a CI runner with no Ollama must not turn every pkb test
+into an integration test) — but it means a hypothetical future regression
+where production code silently falls back to `hash_embedding` instead of
+calling the real `embed_documents` symbol would be **invisible** to the
+entire test suite: the stub's own output looks identical in shape to what
+a real accidental hash-vector fallback would produce.
+
+**Mitigation already shipped, build3:** one non-stubbed guard test
+(`tests/test_w9_embedder_swap.py::test_index_all_calls_the_real_embed_documents_symbol`)
+asserts `index_all` calls the actual `arail.dbspec.embed.embed_documents`
+function object (via `unittest.mock.patch`'s call-target identity, not the
+stub), so a regression that swapped the call site back to
+`hash_embedding` would fail this one test even though every other
+pkb-related test in the suite would stay green.
+
+**What a future sprint could do, if this matters more:** extend the guard
+pattern to `_build_row`/`pkb_reembed.run` (the other two production call
+sites), or add a suite-wide post-run assertion that greps the coverage
+report for the `hash_embedding` symbol's call sites and fails if any of
+the three production embed call sites show up.
+
+---
+
+## `pkb reembed`'s `.bak-<ts>` backups accumulate with no pruning
+
+**Filed by:** REVIEW2.md's tech-debt section (required to be filed before
+PASS), `sprints/2026-08-08-arail2-tier1-integration/BUILD_LOG.md` build3.
+
+**The gap.** Every successful `./arailctl pkb reembed` that replaces an
+existing live table renames the old `pkb_pages.lance` to
+`pkb_pages.lance.bak-<unix-ts>` rather than deleting it — the documented
+rollback path (`docs/cli.md`'s `reembed` section: "move the `.bak-<ts>`
+dir back over `pkb_pages.lance`"). Nothing prunes these. A World that gets
+re-embedded repeatedly (e.g. after several spec/model changes, or after
+an operator scripts periodic reembeds) accumulates one full-size backup
+directory per run, unbounded, with no CLI surface to list or clean them
+and no mention of the accumulation in `docs/cli.md` beyond the rollback
+instructions.
+
+**What a future sprint should do:** either (a) a `--keep-backups N` flag
+defaulting to something like 1–2, pruning older `.bak-<ts>` dirs after a
+successful swap, or (b) fold pruning into `./arailctl db optimize`
+(ARCHITECTURE.md's rollback plan already floats this: "`db optimize` may
+claim them later"), whichever surface makes more sense once the
+consolidated-store question is revisited. Until then, an operator running
+`pkb reembed` repeatedly should expect disk usage proportional to run
+count × corpus size, and should manually `rm -rf` old `.bak-<ts>` dirs
+once they've confirmed a reembed succeeded.
+
+---
+
+## C1's `/knowledge` banner and Buddy context-header wiring — deferred
+
+**Filed by:** REVIEW2.md required action 4 (explicit-deferral option),
+`sprints/2026-08-08-arail2-tier1-integration/SPRINT.md` build3 decisions
+log, `sprints/2026-08-08-arail2-tier1-integration/BUILD_LOG.md` build3.
+
+**The gap.** C1 in ARCHITECTURE.md named three surfaces for
+`retrieval_status()`: the search API payload, the `/knowledge` banner, and
+Buddy's context-header line ("an agent must not be handed keyword-only
+results while the UI claims semantic retrieval"). Build3 wired the first
+(`/api/pkb/search` now sets `X-Retrieval-Status`/`X-Retrieval-Reason`
+response headers when degraded — see
+`tests/test_pkb_search_api_status.py`). The other two were not: `/knowledge`
+is itself a 307 redirect to `/dac` today (the surface moved since C1 was
+written), and Buddy's system-prompt/context-builder wiring is a separate
+code path (`search_for_agents` → whatever assembles Buddy's LLM context)
+that needs its own read-and-scope pass rather than a same-commit addition
+alongside two BLOCK fixes.
+
+**What a future sprint needs to do:** (a) find the current DaC/`/dac`
+knowledge surface's template and add a degraded banner there, reading
+`pkb.retrieval_status()` the same way the search endpoint now does; (b)
+find where Buddy's (and any other agent's) system prompt is assembled
+from `search_for_agents()` results and prepend a one-line honesty note
+("semantic search is degraded: <reason>; results below are keyword-only")
+when `retrieval_status()` reports not-ok. Both are small once located —
+the backend primitive (`pkb.retrieval_status()`) already exists and is
+tested; this is purely "find the two remaining call sites and read one
+tuple."
+
+**Hard constraint added by QA (TEST_REPORT.md QA-6, 2026-08-08):** (b)
+must NOT be built as a naive read of `retrieval_status()` on its own. The
+Compiled-KB gate ships on by default with nothing approved on all six of
+the operator's real PKB roots (pre-existing, Phase 1 audit A36,
+`compiled_kb.py:109` failing closed) — so `search_for_agents` /
+`pkb.search(approved_only=True)` returns `[]` **before**
+`_semantic_search` ever runs, and no degraded code is ever set.
+`retrieval_status()` therefore reports `(True, "")` — healthy — on
+exactly the same legacy World where Buddy gets zero hits. A context
+header built exactly as C1 specifies, wired straight to
+`retrieval_status()`, would print a **false "retrieval healthy"** right
+next to zero results. Whoever builds (b) must first make the agent path
+itself consult the gate/approved-count state (not just the embedding
+degraded-codes) before trusting `retrieval_status()` for this surface —
+see `tests/test_qa_tier1_buddy_retrieval.py::test_agent_retrieval_returns_nothing_and_reports_healthy_on_a_legacy_world`,
+which pins the hazard.
+
+---
+
+## `VectorIndex._table()` is re-opened three times per PKB query
+
+**Filed by:** REVIEW3.md's performance assessment, per the coordinator's
+explicit "do not optimize now" instruction —
+`sprints/2026-08-08-arail2-tier1-integration/BUILD_LOG.md` build4.
+
+**The gap.** `pkb._semantic_search` now calls `idx.count()`, then
+`idx._table()` directly for the read-path health check, then
+`idx.search_vector()` opens the table a third time internally
+(`VectorIndex._table()` is not memoised — it re-resolves the table handle
+on every call, by design, since `VectorIndex` instances are typically
+short-lived per-call wrappers). The health check itself is not the cost
+(measured at 0.105 ms, one small provenance-sidecar JSON read).
+
+**Correction (QA, TEST_REPORT.md, 2026-08-08):** REVIEW3's original
+measurement of `_table()` at 7.5 ms of a 20.8 ms `pkb.search()` call was
+overstated — QA measured the real call directly and got **0.39–1.21 ms**
+per `_table()` open on realistic corpora, roughly an order of magnitude
+lower. The triple-open shape described below is still real and still
+worth fixing eventually, but it is not the hot-path emergency the
+original number implied; treat this entry as lower urgency than its
+original framing.
+
+**Why it wasn't fixed now.** The coordinator ruled explicitly: measure
+and file, don't optimize this sprint — the fix (passing the
+already-opened `table` object into `search_vector`, or memoising
+`VectorIndex._table()`) is a real change to a hot path that deserves its
+own focused pass with its own before/after measurement, not a
+reflexive addition to an already-large integration sprint's diff.
+
+**What a future sprint should do:** either (a) give `_semantic_search`
+a variant that opens the table once and threads it through
+`check_read_path_health` and `search_vector` explicitly, or (b) add a
+small opt-in cache to `VectorIndex` (e.g. `_table_cache: Any | None`,
+invalidated by a generation counter or simply never reused across
+`VectorIndex` instances, since each call site already constructs a fresh
+one). `open_table` cost is expected to grow with LanceDB fragment count,
+so this gets worse, not better, as a World's PKB grows — worth doing
+before a World's corpus gets large enough for it to matter in practice.
+
+---
+
+## `pkb_reembed`'s shadow-build verification is cardinality-only, not content-aware
+
+**Filed by:** REVIEW3.md's "also fix" #3 (coverage half implemented; the
+underlying check itself was explicitly not upgraded) —
+`sprints/2026-08-08-arail2-tier1-integration/BUILD_LOG.md` build4.
+
+**The gap.** Both shadow-completeness checks BLOCK-2 added
+(`pkb_reembed.py`'s pre-swap check and its `--resume` checkpoint check)
+compare ROW COUNTS — `shadow_row_count == total` and `shadow_row_count ==
+len(completed_paths)` — never the actual path *identity* or row
+*content*. `tests/test_pkb_reembed.py::
+test_shadow_verification_is_cardinality_only_documented_limitation` pins
+the concrete, reproduced blind spot: a `--resume` checkpoint that
+correctly names some real corpus paths as already-completed, backed by a
+shadow table that genuinely has rows at those same paths but with a
+**stale vector** (as if embedded from old file content and never
+re-verified), is trusted verbatim into the swapped-in live table. The
+counts are satisfied, so nothing discards it. (A related but already-
+closed scenario: a checkpoint naming entirely WRONG paths as completed is
+actually still caught today — `remaining` is computed by path-set
+membership against the real corpus, not by subtracting a count, so wrong
+paths cause every real row to be re-embedded and the final
+`shadow_row_count != total` check trips correctly. The surviving gap is
+narrower: matching paths, unverified content.)
+
+**What a future sprint should do:** add a
+`set(shadow_table.to_pandas()["path"]) == set(completed_paths)` check
+alongside the existing count checks (cheap — one more `to_pandas()`
+column read), and/or re-embed and diff a sample of "already completed"
+rows on `--resume` rather than trusting them unconditionally. The
+narrowest fully-correct fix would key resumption on a hash of each row's
+`embed_input` rather than path alone, so a file whose *content* changed
+between the interrupted run and the resume is also caught — currently
+neither the count check nor a hypothetical path-set check would catch
+that case either.
+
+---
+
+## Chat tab compute-source pills: honest-disabled, not send-path wired
+
+**Filed by:** `sprints/2026-08-11-two-slot-chat-models/` (explicit
+operator scope decision, made before implementation via AskUserQuestion
+— "Honest-disable" over building full multi-provider chat send in the
+same sprint).
+
+**The gap.** The Resident/Deep pickers' "Provider · run on" pills
+(Claude, NVIDIA, OpenRouter, HF, Custom) are real UI with a real,
+truthful disabled state (`sources[].wired`) — clicking a non-`my_machine`
+pill shows "not wired to chat send yet" instead of silently failing at
+send time the way it used to. But the send path itself
+(`/api/chat/stream` and friends) still only really talks to `my_machine`
+in practice; wiring an actual cloud round-trip through the two-slot chips
+was explicitly out of scope for this sprint.
+
+**What a future sprint should do:** wire at least one non-local source
+(Claude is the obvious first target — token-paste UX and
+`_provider_token`/`_fetch_provider_models` plumbing already exist for the
+gallery view) through to a real `/api/chat/stream` call, then flip that
+one source's `wired` flag. No owner or target date assigned yet.
+
+---
+
+## `arail.dbspec.ensure`'s Atlas-free replay has no CI job proving it stays in sync with `atlas schema diff`
+
+**Filed by:** `sprints/2026-08-10-arail2-persistence-instantiated/ARCHITECTURE.md`
+§8 "Tech debt" — required follow-up ticket #1 before merge.
+
+**The gap.** `arail.dbspec.ensure` is a second, hand-written schema-
+application path alongside the existing Atlas-driven `./arailctl db
+apply`. ARCHITECTURE.md test 4 ("after `ensure_db(apply=True)`, `atlas
+schema diff` reports no statements") is the proof that the two paths
+never diverge — but it is dev-only and skipped whenever the `atlas`
+binary is absent, which is every CI runner and every user machine
+(Assumption 1: atlas is a developer tool, not a user dependency). So the
+one test that would catch `ensure.py`'s replay logic drifting from a
+future `schema.hcl` change never actually runs in CI today.
+
+**What a future sprint should do:** add an `atlas`-bearing CI job
+(install the binary the way a maintainer would, `brew install
+ariga/tap/atlas` or the Linux equivalent) that runs `pytest -k
+test_schema_fidelity_atlas_diff` (or whatever the test ends up named)
+specifically, separate from the main test matrix so a missing `atlas`
+binary elsewhere doesn't silently skip real coverage.
+
+---
+
+## `start`'s DB readiness check warns-and-continues; promote to a hard gate once `arail.db` has a runtime reader
+
+**Filed by:** `sprints/2026-08-10-arail2-persistence-instantiated/ARCHITECTURE.md`
+§4.5 and §8 "Tech debt" — required follow-up ticket #2 before merge.
+
+**The gap.** `./arailctl start` calls `ensure_db(this_instance_data_dir,
+apply=True)` and, on `blocked`/`ahead`/`diverged`/`unavailable`, warns,
+names the exact fixing verb, and **continues booting** rather than
+refusing. This is deliberate for now: as of this sprint, nothing outside
+`src/arail/dbspec/` reads `arail.db` at runtime (verified by grep —
+`repo.py`, 500 lines, has zero runtime consumers), so gating boot on an
+inert store would trade a real outage for a theoretical one.
+
+**What a future sprint should do:** the moment any runtime code path
+starts reading `arail.db` (the first `repo.py` consumer, or any future
+feature built on the relational store), revisit `start`'s behavior on a
+non-`ok` DB state: it must become a hard readiness gate — `start` exits
+non-zero rather than booting a lab whose dependent service is broken.
+Until then, this warn-and-continue is the correct, disclosed call, not
+an oversight.
+
+---
+
+## `status --json=instances`'s byte-compatibility guard is self-referential, not a committed golden
+
+**Filed by:** `sprints/2026-08-10-arail2-persistence-instantiated/REVIEW.md`
+round 1, ASK-3 — non-blocking, filed per the review's own instruction.
+
+**The gap.** ARCHITECTURE.md's F7/test 27 called for `--json=instances`
+compared against a **committed golden file**, byte-for-byte. What shipped
+instead (`tests/cli/status_driver.sh`'s T12/T27 scenario) is an
+internal-consistency check: (a) no `db`/`origin` key ever appears in a
+`--json=instances` row, and (b) stripping those same keys back out of
+`--json`'s (full-mode) `.instances` reproduces `--json=instances`
+exactly. That's a real, useful property — it does catch this sprint's
+actual risk (the db/origin augmentation leaking into the byte-compatible
+mode) — but it's self-referential: a change that broke both modes
+**identically** (e.g. renamed `slug` to `id` in both renderers at once)
+would pass this check while still breaking every external script that
+parses `--json=instances`.
+
+**What a future sprint should do:** add a small committed golden file
+(a fixed instances-array fixture, or a snapshot of a known scenario's
+`--json=instances` output) and assert byte-for-byte equality against it,
+the way F7 originally specified — independent of whatever `--json=full`
+happens to produce in the same run.
+
+---
+
+## `tests/cli/status_driver.sh` (and the whole CLI-contract driver layer) cannot run in CI or any worktree without a real `.venv`
+
+**Filed by:** `sprints/2026-08-10-arail2-persistence-instantiated/REVIEW2.md`
+round 2 — "the meta-pattern... this is the second consecutive round where
+the shell layer's only real test hid something, and both times I found
+it by hand-running the driver against an external venv." Required action
+4 (partial — the other half is the `make_fake_venv` hardening entry
+below).
+
+**The gap.** `tests/cli/status_driver.sh` (and its siblings —
+`install_driver.sh`, `root_start_driver.sh`, etc.) self-skip entirely
+whenever no `.venv` with `arail` importable is found — which is every CI
+runner today and every builder worktree in this sprint's two rounds so
+far. That means the entire CLI-contract layer — the shell control flow
+that actually wires `ensure_db` into `install`/`start`/`status`, the
+exit-code contract, the byte-compatibility guarantees — has never once
+run in an automated, repeatable way. Both round 1 and round 2 of this
+sprint's review only caught real regressions (two broken test
+assertions in round 1; a live exit-code regression, T10/BLOCK-5, in
+round 2) because the architect hand-ran the driver against an external
+venv on their own machine. That is not a repeatable safety net.
+
+**What a future sprint should do:** give CI (or at minimum, the
+project's provisioned-checkout workflow) a real path to actually
+`pip install -e .` and run these drivers — not `pytest -k` skip-detection,
+an actual `.venv` build step ahead of the CLI-driver suite, gated behind
+whatever's cheapest (a dedicated CI job, a pre-commit hook on a
+provisioned machine, or at minimum a documented "run this before every
+merge" step in `docs/cli.md`/`AGENTS.md`). Until this exists, treat every
+change to `install.sh`/`start.sh`/`status.sh`/`scripts/lib/instances.sh`
+as unverified by CI regardless of how many unit tests pass.
+
+---
+
+## `tests/cli/lib.sh`'s `make_fake_venv` symlinks straight into the real venv's site-packages — no isolation
+
+**Filed by:** `sprints/2026-08-10-arail2-persistence-instantiated/REVIEW2.md`
+round 2, "The `make_fake_venv` footgun" section. Recommended follow-up,
+not required before merge — a prominent warning was added at the
+symlink site instead (`tests/cli/lib.sh:make_fake_venv`) as the
+required-before-merge mitigation.
+
+**The gap.** `make_fake_venv` does `ln -s "$REAL_VENV/lib" "$fake/.venv/lib"`
+— the ENTIRE `lib/` directory (site-packages and all) is one symlink
+into the real, operator-installed venv. Any test scenario that renames,
+edits, or writes through a path reached via that symlink mutates the
+real installation, not a fixture. A draft scenario during this sprint's
+round 2 did exactly this (renaming `ensure.py` to simulate an import
+failure) — caught and discarded before it ran, but the mistake is one
+`git blame`-invisible edit away from happening for real, and the fix
+(a comment) only helps someone who reads it.
+
+**What a future sprint should do (either, whichever is cheaper when
+someone can actually test it against a real venv):**
+1. **Per-package symlinks** — instead of symlinking the whole `lib/`
+   dir, create `$fake/.venv/lib/.../site-packages` as a REAL directory
+   and symlink each top-level package/module inside it individually.
+   A scenario that renames `arail/dbspec/ensure.py` inside the FAKE
+   tree only ever touches the fake symlink to that one file, never the
+   real `arail/` package directory itself, IF the scenario is careful
+   to `readlink` before renaming — still needs care, but shrinks the
+   blast radius from "the whole real venv" to "one file."
+2. **Read-only tree** — mount or `chmod`-protect the real venv's
+   `site-packages` (or a copy of it) so any write through the symlink
+   fails loudly (permission denied) instead of silently succeeding.
+   Simpler, but chmod'ing a symlink's target has surprising semantics
+   across platforms and needs verifying against a real venv before
+   shipping — not done in this round for exactly that reason (no
+   `.venv` available to test against safely).
+
+Not implemented this round because it touches shared test-harness
+infrastructure used by every CLI driver, and verifying it doesn't break
+anything requires a real `.venv` to run against — unavailable in this
+worktree, and the coordinator's constraints for this sprint explicitly
+forbid experimenting against the operator's real installation.
+
+---
+
+## `provisioning.evaluate_all` — a predicate can return an `Assertion` under another mechanism's key
+
+**Filed by:** `sprints/2026-08-10-arail2-persistence-instantiated/TEST_REPORT.md`
+round 4, QA-11 (LOW, cosmetic) — explicit coordinator ruling "file, do not
+fix" in round 5.
+
+**The gap.** QA-7 (round 4) closed the front door: `register()` now
+refuses a duplicate key. The back door is still open — a predicate
+registered under its own key may *return* an `Assertion` object whose
+`.key` field names a *different*, already-registered mechanism (e.g. a
+plugin registered as `"my_plugin"` whose predicate returns
+`Assertion("relational_store", "required", True, True, "all good", "")`).
+`evaluate_all` does not check that a returned `Assertion.key` matches
+the key it was registered under, so this produces two rows for one
+mechanism in `arail.provisioning/v1` and `doctor`'s printed table — one
+of them potentially a fabricated "healthy" row masking the real one.
+
+**Why this stays LOW / non-blocking:** it cannot flip an exit code.
+`doctor._FINDINGS` is a list and the degrade decision is `any(not
+f.ok and ...)` over all of them — the genuine failing row (registered
+under its real key) still degrades the run even if a duplicate,
+healthy-looking row also exists under the same key. It is a
+reporting-integrity wart (confusing output), not a silencing mask.
+
+**What a future sprint should do:** in `evaluate_all`, after confirming
+`isinstance(result, Assertion)` (QA-10's fix), also check
+`result.key == key` (the key it was registered under) and, on mismatch,
+either substitute a "key mismatch" finding (mirroring QA-10's
+non-Assertion handling) or force `result.key` back to the registered
+key before appending. `tests/test_qa_provisioning_generalize.py::test_a_predicate_cannot_impersonate_another_mechanisms_key`
+is already written against the correct behavior and is left failing on
+purpose — it will pass once this lands.
+
+---
+
+## `status.sh`'s human render gates the `db:` line on liveness only — ASK-6's remaining half
+
+**Filed by:** `sprints/2026-08-10-arail2-persistence-instantiated/TEST_REPORT.md`
+round 4, QA-13 (MEDIUM) — explicit coordinator ruling "file, do not fix"
+in round 5. Mitigated, not blocking.
+
+**The gap.** ASK-6's `--json`/`--json=full` half is fixed (round 4,
+`59947f4`): a tampered migration ledger (`diverged`) survives the
+missing-data-root suppression and correctly degrades a *live* lab to
+exit 3 with the reason present. What QA verified still doesn't match
+ARCHITECTURE.md §4.4's own contract text is the **human render**: on a
+tampered checkout with **nothing running** —
+
+```
+--json : root.db.state = "diverged", detail names the hash mismatch
+human  : nothing.  "root lab: not running — ./arailctl start"
+```
+
+`status.sh` gates the human `db:` line on `state == "live"` /
+`root_is_live`, but §4.4 says the line should print "only when the lab
+is up **or the state is not `ok`**" — i.e. a non-`ok` db state should be
+visible in the human view even for a lab that isn't currently running,
+which the code does not do. Verified in an independent topology (not
+just the ledger driver's own killed-PID scenario) so the finding isn't
+an artifact of driver plumbing.
+
+**Why this is mitigated, not a live safety hole:** `start` itself warns
+on `diverged` at boot (`start.sh`'s db-ensure step, `_instance_db_ensure`)
+— the moment the tampered SQL would actually be considered for replay,
+the operator sees a warning naming the exact verb. And the exit code
+`status` gives when nothing is running (`4`, "nothing running") is
+truthful on its own terms — it is not lying about liveness, it is simply
+not surfacing a fact about a stopped lab's database that ARCHITECTURE.md's
+own text says it should.
+
+**What a future sprint should do:** either (a) change `status.sh`'s
+human renderer to match §4.4's literal text — print the `db:` line
+whenever `state != "ok"`, regardless of liveness — and re-verify this
+doesn't reintroduce chatter on the many legitimate non-live, `pending`/
+`unavailable` (now correctly non-degrading) states this sprint's own
+BLOCK-5/ASK-6 work spent two rounds getting quiet; or (b) narrow
+ARCHITECTURE.md §4.4's contract text to match the code's actual,
+considered behavior (report non-`ok` db states in the human view only
+for a currently-live lab) and document why "nothing running" is treated
+as softer than "up but degraded" for this specific line. Either is
+defensible; shipping without choosing is not — same discipline BLOCK-5
+already established for the sibling suppression decision.
+
+---
+
+## `daemon_active()`'s Darwin-only guard makes `status` misreport a genuinely-supervised Gentoo/OpenRC lab as "foreground"
+
+**Filed by:** `sprints/2026-08-10-arail2-persistence-instantiated/ARCHITECTURE.md`
+§10, finding 1 (PR #181 CI, 2026-08-10) — required filing alongside the
+platform gate on `tests/cli/status_driver.sh`'s `T3/daemon-a`/
+`T3/daemon-b` scenarios.
+
+**The gap.** `scripts/lib/instances.sh:464`'s `daemon_active()` opens
+with `[[ "$(uname -s)" == "Darwin" ]] || return 1` — a guard installed
+because `scripts/install-daemon.sh:35` genuinely refuses to install
+launchd supervision on non-Darwin ("launchd supervision is macOS-only").
+That guard is correct for launchd specifically. But
+`scripts/gentoo-bootstrap.sh:182` installs OpenRC services
+(`rc-update add arail-portal default`) — so a Gentoo lab CAN be, and
+often IS, supervised, just not via launchd. `daemon_active()`'s
+Darwin-only early-return means `status` reports
+`supervision.mode: "foreground"` for such a lab regardless of whether
+OpenRC is actually running it — a genuine, pre-existing observability
+defect, unrelated to and out of scope for this sprint (persistence, not
+supervision).
+
+**Why this doesn't invalidate the platform gate on the test:** the gate
+on `T3/daemon-a`/`T3/daemon-b` is scoped narrowly to "launchd supervision
+cannot exist on Linux, so a scenario that plants a `LaunchAgents` plist
+and stubs `launchctl` cannot represent a reachable state there" — that
+claim is true regardless of this OpenRC gap. The gate is NOT "Linux has
+no supervision," and no comment or code in this sprint's changes asserts
+that; this ticket exists specifically so nobody mistakes the narrow gate
+for the broader (false) claim.
+
+**What a future sprint should do:** extend `daemon_active()` (or add a
+sibling check) to detect OpenRC supervision on Linux
+(`rc-service arail-portal status`, or equivalent — mirroring
+`gentoo-bootstrap.sh`'s own install path) and report `supervision.mode`
+accurately for that case, the same way the Darwin path already does for
+launchd. Any new CLI driver scenario for this should follow this
+episode's own lesson: gate the scenario on the platform the mechanism
+actually requires, and say so loudly if the test is skipped elsewhere
+(see `status_driver.sh`'s `skip_scenario()` helper, added for exactly
+this pattern).
+
+---
+
+## The CLI driver suite's CI coverage is narrower than "all of `tests/cli/*.sh`"
+
+**Filed by:** `sprints/2026-08-10-arail2-persistence-instantiated/ARCHITECTURE.md`
+§10 — "the still-open CI-runnable driver path from REVIEW3," which this
+sprint's PR #181 CI episode is itself the argument for.
+
+**What's already done:** `.github/workflows/db-ensure-ci.yml` (this
+sprint) wires four sprint-specific drivers into CI —
+`status_driver.sh`, `qa_db_collector_driver.sh`,
+`qa_db_seamless_driver.sh` (hard gates) and `qa_db_ledger_driver.sh`
+(`continue-on-error`, QA-13's one filed gap) — plus the sprint's Python
+QA suite, against a real `.venv` created in-job via `pip install -e
+".[dev]"`. That closes the specific, merge-blocking instance of this gap
+(QA-8: a driver run from the wrong source tree can report green while
+testing entirely different code).
+
+**What's still open.** The rest of `tests/cli/*.sh` —
+`install_driver.sh`, `root_start_driver.sh`, `restart_driver.sh`,
+`picker_driver.sh`, `warmup_driver.sh`, `verbs_driver.sh`,
+`color_driver.sh`, `reset_full_models_driver.sh`, `qa_edge_driver.sh`,
+and any future addition to this directory — has never run in CI at all.
+Every one of them self-skips silently without a `.venv` (the same
+`_cli_test_find_venv` pattern `status_driver.sh` uses), so a contributor
+who never happens to hand-run them locally against a real venv gets zero
+signal, on every PR, forever.
+
+**This episode is the argument for closing it.** PR #181's CI run
+surfaced a genuine, previously-undetected platform assumption
+(`T3/daemon-a`/`T3/daemon-b` encoding a macOS-only fixture with no
+gate) the moment the driver ran somewhere other than a macOS
+developer's own machine — exactly the class of defect a CI-invisible
+test layer cannot catch, on any driver, indefinitely. The four drivers
+now in CI are the ones this sprint happened to touch; the other nine are
+exposed to the identical risk and nothing currently guards them.
+
+**What a future sprint should do:** extend `.github/workflows/
+db-ensure-ci.yml` (or add a sibling workflow, matching its established
+`pip install -e ".[dev]"` + real-`.venv` shape) to run the remaining
+`tests/cli/*.sh` drivers, and audit each one for the same class of
+platform assumption `T3/daemon-a` had — a scenario is legitimate to gate
+on a platform only when the PRODUCT is gated at the same boundary and
+says so (this sprint's own standing rule, ARCHITECTURE.md §10); anything
+gated merely to make CI green needs fixing, not skipping.
+
+## Delete the boot-model deprecation shims (filed 2026-10-20, boot-model-autoresolve)
+
+`POST /api/models/settle` (alias for two pin writes, `Deprecation: true`
+header) and `model_defaults.write_defaults()` (shim to `write_pin`, emits
+`DeprecationWarning`) ship for one release only. Delete both in the
+release after the one that carries sprint 2026-10-20-boot-model-autoresolve,
+along with `tests/test_models_settle_endpoint.py`. Also: the chat gallery's
+`arail.chat._ollama_installed_models` still hardcodes port 11434 (the boot
+resolver honours `OLLAMA_PORT`); route it through the same helper.
+
+Also delete, in the same change (unforeseen debts recorded in the sprint's
+BUILD_LOG.md round 2 and REVIEW.md round 2):
+
+- **Two writers of tier0/tier1 seed state.** `store._seed_from_env`'s "env
+  wins only when env moved" fingerprint survives beside
+  `reconcile_from_resolution`. The latter keeps `seed_state` in step so the
+  former is inert after boot, but it is a second path that must stay
+  consistent. Remove the fingerprint for tier0/tier1 (and rewrite
+  `tests/registry/test_env_write_through.py` accordingly).
+- **Two locks instead of one.** `model_resolve.LOCK` and
+  `model_defaults._WRITE_LOCK` are always taken in that order, but nothing
+  enforces it (ARCHITECTURE.md FM13 specified one lock). Collapse to a single
+  lock once `write_defaults` is gone.
+
+## Boot-model sentinel and strip follow-ups (filed 2026-10-21, boot-model-autoresolve REVIEW round 2 ASKs)
+
+1. **`SENTINEL_MAX_AGE_S` (600 s) can mislabel a slow live deep load as a
+   crash.** A second instance booting while a >600 s load is still running
+   skips B with a false "crashed last boot" note (no double load). Measure a
+   cold 7B aerollm load on the slowest supported disk and set the bound to at
+   least 2x that, or refresh `started_at` as a heartbeat during the load.
+   (`src/arail/portal/model_warmth.py`)
+2. **macOS boot id includes a localtime-rendered ctime.** `sysctl -n
+   kern.boottime` returns `{ sec = N, usec = M } <ctime>`; a TZ/DST change
+   between `write_sentinel` and the check makes a live load read as stale
+   (inside the 10-minute window only). Compare only `sec`/`usec`.
+3. **`_warm_slot_b` appends `warm_deferred` to `last_resolution()["degraded"]`
+   without `model_resolve.LOCK`.** A concurrent pin re-resolve can replace
+   `_LAST` and the note is lost from the strip (nothing is corrupted). Append
+   under the lock or route the note through `resolve_and_apply` state.
+
+---
+
+## Autoresearch durability — the Tuning loop's git ledger over the long term
+
+**Filed by:** `docs/plans/autoresearch-integration.md` (2026-08-16 audit,
+branch `qukaizen/autoresearch-integration-plan-e1a5c3`), prompted by the
+operator question "is this really working for someone long term?"
+
+**The gap.** The Tuning loop (`src/arail/experiments/autoresearch.py` +
+`git_ops.py`) writes a branch-per-experiment ledger into the ARAIL
+checkout itself. Every safety rail on the *individual* operation is in
+place — 4-file whitelist, clean-tree gate, env flag, explicit staging,
+no push, no force, no reset. What is missing is any notion of the ledger
+as something that **accumulates**. Five hazards, all structural rather
+than observed (the loop has never been run end-to-end on the operator's
+machine — `git branch --list 'autoresearch/*'` returns 0 and no bench
+`.jsonl` exists):
+
+- ~~**H1 — baseline commit lands on the user's current branch.**~~
+  **FIXED 2026-08-16.** Baseline now commits on its own
+  `autoresearch/baseline-<ts>` branch; variants branch from that; the
+  loop restores the user's original branch in a `finally`. Guarded by a
+  `restore_to` sentinel so the restore (which runs `git checkout -- .`)
+  can never fire on the dirty-tree abort and eat the user's work. Four
+  regression tests in `tests/test_experiments.py`.
+- ~~**H2 — `./arailctl update` breaks after H1.**~~ **Resolved by the
+  H1 fix.** Remaining nicety: `./arailctl update` could detect and
+  explain pre-existing local commits instead of surfacing a raw
+  `git pull --ff-only` refusal.
+- ~~**H3 — `autoresearch/*` branches accumulate forever.**~~ **FIXED
+  2026-08-17** — `./arailctl autoresearch prune`, dry-run by default,
+  keep-gated (wins/current/unclassifiable/newest-N/young all survive),
+  re-validated at delete time, receipt-with-SHA written before each
+  deletion.
+- ~~**H4 — committed bench files grow without bound.**~~ **FIXED
+  2026-08-17** — `./arailctl autoresearch rotate`, dry-run by default,
+  archive-append + atomic replace, nothing discarded. Deliberately NOT
+  automatic inside the loop; see the plan doc for why, and for the cost.
+- **H5 — clean-tree gate vs. a blueprint people fork.**
+  `assert_clean_tree()` blocks the loop on any in-progress user edit.
+
+Plus a packaging note: `git_ops._repo_root()` walks four parents from
+`__file__`, which is correct for a checkout and for `pip install -e`, but
+lands outside any git repo under a non-editable install.
+
+**H0, found 2026-08-17 while building the H4 fix and more serious than
+any of the above: the loop could not complete a single pass.** Two of the
+four whitelisted paths live under `lab/data/`, which `.gitignore:42`
+excludes wholesale; `commit_experiment` ran a plain `git add` on them,
+which exits 1 and stages nothing, and `_run` uses `check=True`. That
+raised `CalledProcessError` from the baseline commit — the first commit
+of every pass, whose caller catches only `GitSafetyError`. Fixed by
+force-adding (safe because `-f` can only reach `ALLOWED_WRITABLE_FILES`;
+the membership check runs first). New `tests/test_git_ops_real_repo.py`
+drives real git and reproduces the original error if the `-f` is
+removed.
+
+**What's left.** H1/H2 were decided and fixed on 2026-08-16 (operator
+call: the loop writes only inside `autoresearch/`). H3, H4, H5 and the
+packaging note remain, and each is still gated on an operator decision
+that the audit could not make — §4 of the plan doc: branch/bench
+retention policy, whether the Researcher ever gets a git ledger (the
+never-created follow-up from
+`sprints/2026-05-11-experiment-branches/SPRINT.md:30`), whether
+`lab/data/experiments/` moves under the PKB root (clean-experience Gap 8,
+still unfiled elsewhere), and whether "no sharing story" is the intended
+end state for a local-first blueprint.
+
+**The highest-value remaining item is not on this list, and now has its
+own record: `docs/plans/test-suite-triage.md`.** H0 (the loop could not
+commit at all) survived because every git seam was stubbed and nobody was
+watching the red. Triage found 33 of 54 failures are cross-test
+pollution — they pass standalone — and that no CI job runs the full
+suite, which is the actual defect. The polluter is not yet identified;
+the triage records the reproduction and what is ruled out.
+
+**Also worth knowing.** The doc drift this audit found — README calling
+the Researcher a code-writing committer, `agent-loop.md` saying `git
+reset`, `tuning-loop.md` listing two whitelisted files — was fixed in the
+same branch. The remaining prose risk is that "autoresearch" still names
+two unrelated engines.
+
+---
+
+## Portal authentication
+
+**Filed by:** `sprints/2026-09-20-buddy-front-and-center/ARCHITECTURE.md`
+("The portal has no authentication — stated plainly").
+
+**The gap.** `onboarding_gate` middleware (`app.py:395`) is not auth: it
+blocks every surface only until a passphrase exists, then every request
+passes with no per-request credential check — no `Depends(`, no token
+compare, anywhere in `portal/app.py`. Default bind is `127.0.0.1`;
+`BIND_ADDR=0.0.0.0` is supported and explicitly accepted as an
+operator-opted-in exposure. `local_trust_boundary` gives DNS-rebinding and
+cross-site protection for *mutating* methods only. **Any process running
+as any user on the machine — and, on a widened bind, any host on the
+LAN — can read every portal GET.**
+
+**Why it wasn't done now.** The buddy-front-and-center sprint reduces the
+*amount of sensitive content* behind that surface (flight-recorder bodies
+off by default, redacted, capped, admin-gated) but does not add
+authentication — a materially larger, cross-cutting change (session
+tokens or equivalent, every route, every existing integration that assumes
+no auth) that deserves its own VISION/ARCHITECTURE pass, not a rider on an
+observability sprint.
+
+**What a future sprint needs to decide:** session-based auth vs. a
+bearer-token model; whether `LAB_MODE=hybrid` cloud-key flows need a
+different trust boundary than local-only; how a forked/renamed lab
+(`examples/peanut_farmer/`) inherits whatever the answer is without a
+hardcoded assumption about the product name.
+
+---
+
+## Seventeen `/api/admin/*` endpoints are not tier-gated at the API layer
+
+**Filed by:** `sprints/2026-09-20-buddy-front-and-center/BUILD_LOG.md`
+(S5's deviation #1), discovered while wiring the sprint's own new admin
+endpoints.
+
+**The gap.** `ARCHITECTURE.md`'s contract #6 cites `/api/admin/security`
+as existing precedent for "gated by `_require_surface('admin')`, which
+404s on minimalist." That citation does not match the code: grepping every
+`@app.get("/api/admin/...")` / `@app.post("/api/admin/...")` route in
+`portal/app.py` (17 of them, predating this sprint — components,
+check-updates, perf, cleanup, security, scheduler, models, ...) finds zero
+calls to `_require_surface("admin")`. Only the `/admin` **page** route
+itself is gated; its JSON API siblings are wide open regardless of tier.
+A minimalist user who knows or guesses a URL can call any of them.
+
+**Why it wasn't done now.** Out of this sprint's scope — this sprint's
+job was to instrument the chokepoint and gate its *own* four new
+endpoints correctly (done: `agent-lanes`, `agent-trace-stream`,
+`agent-trace/{id}`, `agents/hold`, `flight-recorder`, plus the three
+legacy-bodies endpoints), not to retrofit 17 unrelated, already-shipped
+endpoints. Fixing it now would have been exactly the scope expansion the
+sprint's own ledger warns against.
+
+**What a future sprint needs to decide:** whether all 17 get
+`_require_surface("admin")` in one pass (likely low-risk — they're
+already conceptually admin-only, just not enforced) or whether some are
+deliberately meant to be readable pre-tier-check for a reason not
+currently documented; a regression test parameterised over the full
+existing list (mirroring this sprint's own F13 pattern) would catch any
+future admin endpoint shipped without the gate too.
+
+---
+
+## The agent-inference gateway — gated on this sprint's own overlap measurement
+
+**Filed by:** `sprints/2026-09-20-buddy-front-and-center/VISION.md` (DE1),
+cut from P1's scope per the ledger.
+
+**The gap.** Agent calls never enter `inference_slot` — they run outside
+the queue that serialises chat/world-forge/etc. work. The brief originally
+asked for a single admission gateway that would also *order* agent calls
+behind interactive chat. VISION.md's V8 finding showed the real blast
+radius is ~11 sites (not ~5), 4 of them non-agent, 1 cross-process — the
+riskiest refactor in the whole three-phase programme — and cut it in favor
+of first building the read-only overlap counter this sprint actually
+shipped (`slot.overlap_pct`/`slot.samples` in
+`GET /api/admin/agent-lanes`, fed by `held_by_other` recorded at every
+agent call).
+
+**Why it wasn't done now.** Building the gateway before the
+instrumentation that tells you whether it's needed inverts D18 (the whole
+reason this sprint was ordered first). The overlap counter is that
+instrumentation; it now exists.
+
+**What a future sprint needs to decide, using DE1's pre-committed
+thresholds** (from a week of the operator's ordinary use, once
+`overlap_pct` has real samples): **< 5%** → defer the gateway indefinitely,
+the contention risk was theoretical; **5-25%** → build it after P2's brain
+bake-off, as originally planned; **> 25%** → promote it ahead of the
+Buddy panel (P3) and revisit the deferral itself as having been wrong.
+
+---
+
+## Pre-existing, flagged not fixed by the buddy-front-and-center sprint
+
+**Filed by:** `sprints/2026-09-20-buddy-front-and-center/ARCHITECTURE.md`
+("Where the spec is wrong or unbuildable as scoped", items 7 and 8) —
+found while reading the router/backend and cost-tracking code this sprint
+touched, explicitly not fixed because each is a behaviour change on a path
+this sprint does not otherwise touch.
+
+- **`MLXBackend.stream_complete` signature bug** (`router/backends.py:
+  330-332`): does not accept `system=`/`messages=`, but
+  `ModelRouter.stream_complete` (`router/core.py`) always passes both →
+  `TypeError` on any MLX streaming call through the router. Currently
+  unreachable in production (chat resolves through the registry to
+  Ollama/OpenAICompat), but this sprint's own S3 work
+  (`ARAIL_AGENT_STREAM_FAST`) makes agent-path streaming a live feature
+  for the first time — worth fixing before an MLX-backed agent path is
+  ever wired to stream.
+- **Concurrent `costs.json` write race**: the goal-parser child process
+  runs its own `cost_tracker` singleton against the *same* `costs.json`
+  as the parent, and `CostTracker._save()` is a non-atomic `write_text`.
+  Parent and child can race. Not introduced by this sprint and not
+  widened by it — `agent_trace.jsonl`'s append-only, one-writer-per-
+  process design (contract #9) is strictly safer than what `costs.json`
+  already does, which is why the trace store didn't repeat the mistake
+  rather than a reason to leave `costs.json` unfixed forever.
+
+**What a future sprint needs to decide:** whether the MLX signature bug
+gets a defensive fix now (cheap: accept and ignore the two kwargs, or
+route them through) or waits for an actual MLX-backed streaming caller to
+surface it; whether `costs.json`'s write path moves to the same
+temp-file-plus-`os.replace` pattern `agent_trace.py`/`activity.py`
+already use.
+
+---
+
+## `/api/agents/status`'s deprecated `tokens` alias — removal window
+
+**Filed by:** `sprints/2026-09-20-buddy-front-and-center/ARCHITECTURE.md`
+(contract #8, the V7 fix) and `BUILD_LOG.md` (S6).
+
+**The gap.** `GET /api/agents/status` now emits both `tokens_out` (new,
+correct — real usage from the trace ring) and `tokens` (deprecated alias,
+now carrying the *same corrected* value) because `agents.html` still reads
+`.tokens` in four places. The alias is meant to live for **one release**,
+not indefinitely.
+
+**What a future sprint needs to do:** once `agents.html` is confirmed to
+read `tokens_out` everywhere `tokens` was read (four `fmtTokens(...)`
+call sites plus the Researcher meta-line, already switched to prefer
+`tokens_out` this sprint but still falling back to `tokens`), drop the
+`tokens` key from the endpoint response and the fallback reads in the
+template.
+
+---
+
+## Buddy-front-and-center's BLOCK-review fix loop — filed as debt, not fixed
+
+**Filed by:** `sprints/2026-09-20-buddy-front-and-center/REVIEW.md`
+("Required actions before merge" → "File as debt (BACKLOG, not this
+sprint)"), during the fix loop that resolved B1–B6, D6, D8, F9, F13, and
+S1 (S1 was explicitly promoted to must-fix by the operator; the rest
+below were not).
+
+- **S2 — RESOLVED, see below.** ~~`src/arail/skills/goal_parser/__init__.py:250`:
+  `error_class=str(payload.get("error", "unknown"))[:80]` persists up to 80
+  chars of arbitrary child-process exception text to `agent_traces.jsonl`,
+  outside `redact.capture_body`'s reach, regardless of the flight recorder.~~
+  QA's TEST_REPORT.md demonstrated this live (an `Authorization: Bearer …`
+  fragment reaching disk with the recorder off, its finding **F2**) and it
+  was fixed, not filed again, in the QA fix loop that followed: an
+  allow-list on the parent (`_sanitize_error_class`,
+  `^[A-Za-z_][A-Za-z0-9_]*$`) plus a real `error_class` on the child for
+  every failure branch. See that sprint's BUILD_LOG.md Re-review index
+  for the commit and proving tests. Left here, struck through, so this
+  entry's own history is legible rather than silently deleted.
+- **S3** — Buddy's dream announcement (`_builtin_buddy.py`'s `dream()`)
+  puts up to 160 chars of raw model output into `activity.jsonl` via
+  `data={"preview": reflection[:160]}`, ungated by redaction and
+  independent of the flight recorder. **This is now LIVE, not merely
+  gated.** REVIEW.md R5 (re-review): the fix loop's own `dream()`
+  NameError fix (adding the missing `from arail.activity import
+  activity_log` import) was correct and in scope, but it activates a
+  path that had never once run to completion in production — on
+  pristine main, every call to `dream()` raised `NameError` before
+  reaching this emit, and `dream_daemon._dream_once` caught that
+  exception and logged a warn instead. After the fix loop, on an
+  unheld lab, `dream()` reaches this line and writes the preview every
+  night. The speech_gate added this same fix loop only silences it
+  while **held** — an unheld lab (the default) now has this line firing
+  for the first time ever. Not a `prompt_trace` body, so
+  `_has_legacy_body`/the legacy-bodies purge will never find it.
+  **QA must be told this directly, and must exercise the dream path
+  specifically**: (1) a "grep the whole DATA_DIR tree" pass can
+  legitimately hit a planted string here, and that is a real, now-live
+  finding, not a false positive; (2) everything in `dream()` after the
+  emit (`_recent_actions.append`, `_sync_workflow`, `return reflection`)
+  is also newly-reachable code that has never executed in production
+  and is therefore untested in practice, independent of this specific
+  leak.
+- **D1** — `ARAIL_AGENT_STREAM_FAST` removes the 120s total-generation
+  ceiling from Buddy's fast streamed calls (a `requests` per-read socket
+  timeout, not a total-duration timeout, once `stream=True`); undocumented.
+  Needs a bound plus a doc note on the behaviour change.
+- **D2** — no structural test asserts Ollama's streamed vs non-streamed
+  request bodies agree on everything except `stream`; add one so a future
+  edit to one path can't silently diverge from the other.
+- **D3** — `lanes_snapshot()` returns `user_defined`, `dropped_writes`,
+  `overlap_pct` that `admin.html` never renders; the trace drill-in
+  (`GET /api/admin/agent-trace/{id}`) has no UI entry point; `SYS_LANES`
+  is defined but neither emitted nor deleted.
+- **D5** — `_builtin_presence.py:127`'s thread should use whatever
+  `spawn_thread`/context-carrying helper the rest of the agents use (F3's
+  static guard would have caught this); document in `docs/agents.md` and
+  the Admin copy that a call which lost its attribution context is
+  visible in the trace but **not** covered by Hold.
+- **D7** — the admin SSE stream (`agent-trace-stream`) has no
+  backpressure/debounce behaviour defined for a fast-emitting lane; decide
+  how DE4's "kill line" number is measured against it.
+- **F2** — a disk-rotation failure in `_append_disk` is silently dropped;
+  should increment `dropped_writes` the same way a write failure does.
+- **W1's wall-clock SSE test** — promote the "within 2s" structural guard
+  (no `setInterval` near the lanes markup, pinned this fix loop) to an
+  actual timed `@pytest.mark.timing` test, plus a stronger `q.qsize()`
+  assertion on the subscriber queue than currently exists.
+- **conftest split** — the shared fixture doing both hermeticity
+  (DATA_DIR redirection) and ambient defaults (tier, etc.) should split
+  into two, so a test that only needs one doesn't have to reason about
+  the other.
+- **D8's remainder** — the `/api/agents/status` fallback loop bug, the
+  `calls_by_source` cardinality cap, streamed-response `model` provenance,
+  a missing trace on an abandoned stream, the purged-event UI string, and
+  registering `pytest.mark.perf` in `pyproject.toml` (currently an
+  unregistered marker warning).
+
+**What a future sprint needs to do:** S2 is resolved (see above); pick
+the rest up in order of the security/exposure gradient — S3 first (no
+code fix required, but it is a live leak, not a theoretical one — see
+above), then D1 (undocumented timeout-semantics change, already
+shipped), then the rest as capacity allows. QA must be briefed on S3
+before the next sprint's QA pass (both that the leak is real and now
+live, and that the dream path itself is newly-reachable and untested in
+practice), or a planted-string hit there will keep looking like a false
+positive.
+
+---
+
+## QA fix loop (TEST_REPORT.md, commit `9d0e083f`) — filed as debt, not fixed
+
+**Filed by:** `sprints/2026-09-20-buddy-front-and-center/TEST_REPORT.md`
+("Fix or file as debt (builder's call, not ship-blocking)"), during the
+fix loop that resolved F7, F8, F2 (TEST_REPORT.md's own numbering — a
+different finding from REVIEW.md's F2 above; disambiguated as "QA F2" in
+that fix loop's commits), F4, F5, F9 and, as a judgment call, F3. Three
+of TEST_REPORT.md's four "fix or file" items are filed here; F3 was
+fixed instead (see BUILD_LOG.md for why).
+
+- **QA F1** — `src/arail/redact.py:52-54`: a JSON-quoted
+  `{"api_key": "<16 chars>"}` value is not redacted. The assignment
+  pattern requires the key name to be followed by optional whitespace
+  then `:`/`=`; a quoted JSON key never is. A spec gap, not a build
+  defect — ARCHITECTURE.md #5's pattern list is implemented exactly as
+  specified. Fix: one `["']?` in the pattern.
+- **QA F6** — `src/arail/portal/app.py:6326`, `:6344`: malformed JSON on
+  `POST /api/admin/agents/hold` (and the recorder toggle) is a 500 —
+  `await request.json()` is unguarded. Curl-only, after the tier gate,
+  no information disclosed. Low severity. Fix: wrap the parse and
+  return 400 on `json.JSONDecodeError`.
+- **QA F10** — `config.PKB_ROOT` is not isolated by the conftest, so
+  tests write the developer's real `lab/pkb`, and
+  `dream_daemon._dream_once`'s "already dreamed today" check reads it —
+  meaning any test of `_dream_once` that does not patch
+  `_dream_file_for` silently no-ops on a machine that has dreamed today.
+  Same class of bug as `cost_tracker` (QA F9, fixed) and `activity_log`
+  — a process-global singleton/module constant bound before any fixture
+  runs. QA's own tests isolate it locally; the shared conftest fixture
+  should too.
+
+**What a future sprint needs to do:** QA F1 first (it is the only
+remaining redaction gap with a recorder-on, disk-write consequence — one
+regex character), then QA F10 (the next candidate in the same
+un-isolated-singleton family `_isolated_agent_observability_data_root`'s
+own docstring already names as recurring), then QA F6 (low severity,
+curl-only). QA's own TEST_REPORT.md notes worth carrying forward
+regardless of which item is picked up first: "un-isolated process-global
+singletons are this repo's recurring defect class" (three found in one
+sprint: `DATA_DIR`, `cost_tracker._data_path`, `PKB_ROOT`) and
+"'never raises' docstrings are a claim" (grep for the phrase, test each
+one with a non-`OSError` exception — this is exactly how QA F3 was
+found).
+
+---
+
+## Model Forge's logit path needs a non-bundled `unstable-api` runtime build
+
+**Filed by:** `sprints/2026-09-23-nucleus-sprint-1/ARCHITECTURE.md` §9
+"Added" #1 (F1).
+
+**The gap.** The pinned QueueLLM bundle ARAIL ships
+(`THIRD-PARTY-LICENSES/aerollm/BUNDLE.json`, `arail_release: v1.1.0`) is
+built with `--features extension-module` only — `Runtime.generate(logprobs=…)`
+and `Runtime.score()` are both `#[cfg(feature = "unstable-api")]` and raise
+`ValueError: logprobs is unstable per STABILITY.md` on the shipped binary.
+Logit-mode distillation (`nucleus build`'s Phase A) therefore cannot run
+against the default install at all; it needs a maintainer-local rebuild
+with `--features unstable-api` (ARCHITECTURE.md §10 commit 28, gated on
+operator decision Q1 = yes, out of this builder's scope per the task
+instructions).
+
+**What a future sprint needs to do:** either (a) re-pin ARAIL's bundle
+with `unstable-api` once QueueLLM promotes the R.2 logprobs path to
+stable — an outward-facing QueueLLM stability decision, not an ARAIL-side
+one — or (b) ship a second "forge" bundle alongside the default one,
+built with `unstable-api`, so `nucleus build` works out of the box
+without a maintainer-local cargo build. Until either lands, Gate B and
+item 10 (the real `qkz-linux-kernel` build) require commit 28's opt-in
+`ARAIL_AEROLLM_FEATURES=unstable-api ./arailctl deep rebuild` step.
+
+---
+
+## Nucleus's legacy-5 seal payload has no schema_version and is not JCS; the Python signer and Rust verifier already disagree
+
+**Filed by:** `sprints/2026-09-23-nucleus-sprint-1/ARCHITECTURE.md` §9
+"Added" #2 (F3) — also filed in `qukaizen-nucleus` per that doc's
+instruction.
+
+**The gap.** `arail.nucleus.cards.seal` signs exactly the 5-field legacy
+payload (`dna_id`, `pipeline_run_id`, `chain_hash`, `gate_results`,
+`timestamp`) because that's what the Nucleus Rust `qkz isotope verify`
+binary actually checks (confirmed live against the real binary at
+`qukaizen-nucleus/qkz/target/release/qkz`, T-SEAL-8). But Nucleus's OWN
+current Python signer (`NucleusDNAGenerator._build_signed_payload`,
+`nucleus/certifier/dna.py`) signs a **10-field** payload
+(`schema_version`, `lineage_id`, `model_version`, `base_model`,
+`regression_gate` added on top of the 5), so Nucleus's own current seals
+already fail its own Rust verifier — this is a pre-existing upstream
+defect, not something introduced by ARAIL's build against the contract.
+Neither payload format carries an RFC-8785 JCS guarantee; the Rust side's
+`PythonJsonFormatter` is a byte-for-byte reimplementation of CPython's
+`json.dumps(..., sort_keys=True)` default whitespace, which is fragile
+(any future change to either language's default JSON serialization
+breaks compatibility silently).
+
+**What a future sprint needs to do (in `qukaizen-nucleus`, per the
+architecture's own instruction):** move both the Python signer and the
+Rust verifier to a versioned payload (bump `SEAL_SCHEMA_VERSION`, have
+the verifier branch on it) using RFC-8785 JSON Canonicalization Scheme
+instead of a hand-matched formatter, then re-point ARAIL's `seal.py` at
+the new version once it's stable. Until then, ARAIL intentionally signs
+the narrower 5-field payload and does not attempt to also satisfy
+Nucleus's own 10-field Python verifier.
+
+---
+
+## Model Forge's worker duplicates a slice of the deep-runtime backend's init (thread pinning, KV budget)
+
+**Filed by:** `sprints/2026-09-23-nucleus-sprint-1/ARCHITECTURE.md` §9
+"Added" #3.
+
+**The gap.** `arail.nucleus.providers.queuellm.QueueLLMProvider`
+constructs `aerollm_api.Runtime(model_path, **kwargs)` directly, on a
+dedicated one-worker `ThreadPoolExecutor`, in a phase subprocess — the
+same "pin the unsendable Metal-backed handle to one worker thread"
+pattern the portal's own deep-mode backend
+(`src/arail/router/backends.py::AeroLLMBackend`) already implements, but
+duplicated rather than shared, because `AeroLLMBackend` is a process-wide
+singleton keyed by the `AEROLLM_MODEL` env var with no model parameter
+(F9) — it structurally cannot serve three different models (teacher,
+judge, student) in one Model Forge build.
+
+**What a future sprint should do:** extract a shared
+`queuellm_runtime_factory(model_path, **kw)` (thread-pinning + KV-budget
+construction logic only, no env-var-keyed singleton state) that both
+`AeroLLMBackend.__init__` and `QueueLLMProvider.__init__` call into, so
+the "unsendable handle, one pinned worker thread" invariant has one
+implementation instead of two that could drift.
+
+---
+
+## Model Forge real-runtime wiring (umbrella: MLX training cycle, teacher select, logprob probe, residency, judge, executable checks, hashes, provenance, Gate B preconditions)
+
+**Filed by:** builder session, sprints/2026-09-23-nucleus-sprint-1
+(BUILD_LOG.md deviation 8, the MLX training cycle, commit 18), expanded
+by REVIEW.md rounds 1–3. It is ARCHITECTURE.md §9 "Added" items 9 and 10.
+**Refreshed 2026-09-23 by QA** (REVIEW.md round 3, ASK A10 / R3-A10):
+stale lines were dropped, round-3 tickets were added, and each open item
+carries its QA test reference from TEST_REPORT.md where one exists.
+
+**Status as of the refresh.** Gate A (stub pipeline) is proven. Every
+item below is required before Gate B / item 10 unless marked otherwise.
+While B7 stands, `build.run()` refuses any non-stub build up front, so
+none of these gaps can produce a signed real card today. That is the
+only reason they are not merge-blocking.
+
+### Resolved since the original filing (removed from the list)
+
+- `tokenizer_parity` is now called from `certify.py` whenever both the
+  student and a concretely named teacher resolve. It defaults to `False`
+  with a reason for `teacher: auto`.
+- `pipeline_hash()` is now called from `certify.py`.
+- `training_hash` is a real content hash of the fuse output dir.
+- The LC judge is wired into PC for the stub path, with the judge ≠
+  teacher/student-base identity check before generation.
+
+### Still unwired for a real (non-stub) build
+
+- **Teacher auto-select.** `build.py` never calls
+  `models.select_teacher()`. `PA`/`PA2` resolve
+  `context.get("teacher_name", "")`, which is never written.
+- **Logprob capability probe.** `providers/queuellm.py`'s
+  `probe_logprobs_capability` is never called outside its own tests.
+- **MLX training cycle.** Detailed in the subsection below.
+- **Residency sampler.** The `residency.py` classifier is real, but no
+  sampler runs during a build, and `certify.py` hardcodes
+  `residency_status="unmeasured"`. See the decision item below: today
+  `unmeasured` does not block any decision.
+- **Real judge path.** `_score_open_lc` returns `not_run` when not stub.
+  Also: `fused_student_identity` is not passed to
+  `assert_judge_identity_distinct`.
+- **Executable checks.** No patch-generation task exists, so
+  `patch_applies`/`checkpatch_clean` are always `not_run`, and
+  `composite/v1-open` is auto-selected (capped at COMPATIBLE, §4.9).
+  Retire `v1-open` once patch generation exists. Also fix the `not_run`
+  reason text (round-2 **A7**): today it reads "not available in this
+  generic certify path"; it should say "no patch-generation task in
+  sprint 1; see BACKLOG".
+- **Open eval on cert items.** The LC judge runs on the 10 eyeball
+  prompts only. Move it onto cert items before a `patch_explanation`
+  entry is published (round-2 A10 list).
+- **Runtime provenance.** `runtime_names.runtime_provenance()` is never
+  called. It also hashes `aerollm_api/__init__.py` instead of the
+  extension `.so`, so `source` always reads `local-build` (round 1).
+- **`teacher_hash`.** It is still `best_effort_identity` (a cheap
+  identity or `unresolved:<name>`). Wire `models.content_hash()`.
+
+### Hash and yardstick precision (round-2 A4/A5)
+
+- **A4, `pipeline_hash`:** `training_hyperparams={"target":
+  fidelity_target}` is not a training hyperparameter. Record LoRA rank,
+  lr, cycles, and stop rule. `distill_params` lacks `renorm` and teacher
+  decoding.
+- **A4, `training_hash`:** it omits the adapter. `_dir_content_hash`
+  reads every file fully into memory; switch to the streaming, cached
+  `models.content_hash` before real fused weights exist.
+- **A5:** the `decoding` recorded in `eval_hash` is `Decoding()` at
+  certify time, not what the phases actually used. Record it in the
+  phase outputs and hash that. The existing decoding test perturbs only
+  the recorded side.
+- **Eyeball bytes read at certify time** (round-3 INFO). They are
+  hashed at certify, but PC judged them at PC time, so an edit in
+  between makes `eval_hash` describe prompts PC never judged. Hash them
+  into `metrics.json` at PC. QA pins the current behaviour:
+  `test_eval_hash_follows_eyeball_file_edited_between_pc_and_certify`
+  (xfail).
+- `decision_rule_id` stays `decision_rule/v1` even though `decide()`
+  gained the v1-open cap. That is acceptable because the cap keys on the
+  hashed `composite_formula_id`; say so in the §4.9 text.
+
+### Round-3 tickets
+
+- **R3-A3, LC estimator degenerate cases** (§9 item 10).
+  - `open_lc_judge.score` returns **0.5** whenever Δlen has zero
+    variance: all equal lengths, or a constant delta, including 10/10
+    wins. The 2×2 Hessian is singular on iteration 1.
+  - It returns **1.0** under quasi-separation at n = 10.
+  - Fix: fall back to the intercept-only fit (= raw win rate) when
+    `std(Δlen) == 0`, and add Firth/ridge regularisation or an explicit
+    `unreliable` flag under separation.
+  - QA pins all four probe cases as strict xfails in
+    `tests/nucleus/test_qa_round3.py` (`test_lc_*_degenerate_*`).
+- **R3-A4, preflight's protected-Buddy source mismatch** (§9 item 10).
+  - `runtime_names.buddy_deep_model_env_value()` prefers
+    `QUEUELLM_MODEL`, but `router/backends.py`'s `AeroLLMBackend` reads
+    only `AEROLLM_MODEL`.
+  - With `QUEUELLM_MODEL=<other>` and `AEROLLM_MODEL=<Buddy>`, preflight
+    advises dropping Buddy's actual model.
+  - With both unset, the backend default `Qwen2.5-7B-Instruct-4bit`
+    (also the `ai-engineer` judge target) is unprotected.
+  - Both are advisory text only (`nucleus plan` "WOULD REFUSE — Drop:
+    …"); nothing is evicted.
+  - Fix: protect both env values, plus the backend default when the
+    configured tier's deep backend is live.
+  - Also: `PreflightRefusal.__init__` still asserts the invariant on
+    display names against raw env strings. Check it by identity or
+    remove it.
+  - QA strict xfails: `test_preflight_protects_aerollm_model_when_queuellm_model_differs`,
+    `test_preflight_protects_backend_default_when_env_unset`,
+    `test_plan_output_never_advises_dropping_buddy_under_env_mismatch`.
+- **R3-A5, stub-laundering residuals.**
+  - Certify's stamp cross-check `continue`s past a missing
+    `phase_output/<phase>.json`. With `context.json` forged to
+    `stub: false` and every stamp deleted except a forged `fuse.json`,
+    the card is signed with the lab key and ledgered.
+  - Fix: refuse any missing `_WORKER_PHASES` stamp, and refuse
+    `stub: false` outright while B7 stands.
+  - Variant (b), all stamps forged, is the key-owner-can-sign-anything
+    case, not a key boundary, but the B7 refusal closes it too.
+  - QA strict xfails: `test_certify_refuses_when_phase_stamps_deleted`,
+    `test_certify_refuses_stub_false_while_b7_stands`.
+- **`run_certify` length.** 428 lines after three loops (§9 item 10).
+  Extract `_eval_hash_inputs`, `_assemble_card`, `_provenance_hashes`.
+
+### Decision and evaluation honesty
+
+- **`residency: unmeasured` permits CERTIFIED.** `decide()` caps only on
+  `violated`. Until the sampler runs, a non-v1-open card reaches
+  CERTIFIED with residency never measured. Decide whether `unmeasured`
+  caps at COMPATIBLE. QA pins current behaviour in
+  `test_decide_unmeasured_residency_does_not_cap`.
+- **Spike harness has no real provider** (round 1). `spike.py`'s real
+  path refuses, so the Gate B harness can't run on the M5 as-is. B3
+  "passes" via `classify([])` = `unmeasured`. B3 must never read "pass"
+  when residency was unmeasured on a real run.
+- **Contamination scope** (round 1):
+  - `certify.py` feeds only raw train corpus items; §4.9 requires
+    prompts + teacher outputs (`extract/*.npz` and teacher text).
+  - `contamination.py` holds every train doc's n-gram set in memory:
+    O(train), not O(cert), which misses the "1 M lines < 1 GB" target.
+  - Boundary: QA added `test_contamination_exactly_one_percent_blocks`
+    (8/800 blocks, as designed).
+  - Dates are compared as strings, so a timestamped date on the cutoff
+    day counts as a leak. Strict xfail:
+    `test_contamination_timestamp_on_cutoff_day_is_not_a_leak`.
+
+### Docs and UX (not Gate-B-blocking)
+
+- **A9:** non-fast `verify` can never exit 0 while `chain` is
+  `not_checked`, including for a trusted, untampered card. Document
+  this in `docs/nucleus.md` and print a one-line explanation under
+  `chain: not_checked`. Give the `tampered` badge a style in
+  `forge.html`. QA pins the exit code in
+  `test_cli_verify_non_fast_exits_3_even_when_everything_checkable_matches`.
+- **`--new-cert-version`** is undocumented in `docs/nucleus.md`, and
+  there is no preflight "cert set present" row, so a first build fails
+  at PA2, after Phase A.
+- **`/forge` on minimalist:** without `cryptography`, every badge reads
+  `invalid`. Render a neutral `unchecked` badge instead.
+- **`seal.py`:**
+  - The key file's owner is not checked (§6 #35 says "0600, owner").
+  - A malformed `public_key_hex` raises outside the `try`, so it
+    becomes exit 1 "internal error" instead of `signature: invalid`.
+    QA narrowed this: a malformed `signature_hex` is already handled.
+    Strict xfail: `test_malformed_public_key_hex_reports_invalid_exit_3`.
+- **Round-2 A6:** remove the false "score IDENTICALLY" comments in
+  `tests/nucleus/test_certify.py`. The fused and base stubs differ;
+  KNOWN_ISSUE there is fused 0.0625 < base 0.4167 mean F1.
+- **`baselines.base_student."closed.mean_f1"`** is written unrounded,
+  while every other card float has 6 dp. This is cosmetic (round-3 INFO).
+
+### Found by QA (2026-09-23, TEST_REPORT.md), all LOW
+
+- **F-QA-3, `$`-anchored validators accept a trailing newline.**
+  - Affected: `paths._BUILD_ID_RE`/`_SHARD_RE`/`_SEMVER_RE`,
+    `domain._SLUG_RE`, and `forge_api`'s copies. All use `re.match(r"^…$")`.
+  - No traversal is possible, but newline-bearing dir names can be minted.
+  - Fix: use `re.fullmatch` or `\Z`.
+  - Strict xfail: `test_validators_reject_trailing_newline`.
+- **F-QA-4, `build-report.md` is not covered by the seal.** `/forge`
+  renders it under the card's badge, so a hand-edited report still
+  shows `trusted`. Hash it into the card (or gate_results), or label it
+  "unsigned" in the viewer. Pinned by
+  `test_edited_build_report_is_not_covered_by_the_seal`.
+- **F-QA-5, `nucleus verify` never reads `seal.json`.** It checks only
+  the card's embedded `signed:` block, so a corrupted `seal.json` (the
+  file `qkz isotope verify` reads) goes unnoticed. Compare the two, or
+  verify both. Pinned by
+  `test_nucleus_verify_reads_the_card_seal_not_seal_json`.
+- **F-QA-6, `verify <shard>@<ver>` skips shard/semver validation**, so
+  `../../x@y` resolves outside FORGE_ROOT. It's read-only and
+  operator-supplied today, but must be fixed before the deferred MCP
+  tools pass model-chosen targets. Strict xfail:
+  `test_verify_shard_at_version_rejects_traversal`.
+- **F-QA-7, failure-mode grace.** Both cases fail closed with no card,
+  but neither names the fix the way a refusal would:
+  - `certify` on a well-formed but unknown build id prints
+    `internal error: [Errno 2] … context.json` with exit 1, where
+    `status` gives a plain "no such build" with exit 3.
+  - A missing `eval/metrics.json` likewise exits 1.
+
+  Pinned by `test_certify_unknown_but_well_formed_build_id_fails_without_traceback`
+  and `test_certify_missing_metrics_json_fails_closed_without_a_card`.
+
+### What a future sprint should do
+
+Wire the items above into `build.py`'s real-mode phase bodies and
+`certify.py`'s card assembly, in this order:
+
+1. Teacher auto-select, which unblocks a real Phase A.
+2. The logprob probe as a preflight row.
+3. The MLX training cycle (below).
+4. Residency sampling during PB/PC.
+5. The real judge and the LC estimator fix (R3-A3).
+6. Patch generation and executable checks, then retire v1-open.
+7. The A4/A5 hash precision fixes and runtime provenance.
+8. Close R3-A4 and R3-A5 before B7 is lifted.
+
+Verify each piece on the M5 alongside the `requires_mlx` markers. Flip
+the corresponding QA xfails to plain tests as each item lands, since
+they are strict and will fail loudly when fixed.
+
+---
+
+### The MLX training-cycle stub, specifically
+
+`train/mlx_kd.py` (commit 17) implements the per-step MLX loss/grad
+computation (`kd_train_step`) and model loading
+(`load_student_for_training`), matching `train/kd_loss.py`'s numpy
+reference.
+
+`build.py`'s `_phase_train` wires `arbitrage.run()` to a real trainer
+only for the stub path (`providers.stub.StubTrainer`). The real branch,
+`_mlx_train_cycle_fn`, always refuses with a clear message. That was a
+deliberate scope decision (Gate A needs only the stub path), not an
+oversight.
+
+**What a future sprint needs to do:** complete `_mlx_train_cycle_fn`:
+
+1. Read train shards from `run_dir/extract/*.npz` in batches.
+2. Call `train.mlx_kd.load_student_for_training` once per build, not
+   once per cycle.
+3. Run `kd_train_step` plus an `mlx.optimizers.Adam` (or similar) step
+   per batch.
+4. Checkpoint the adapter each cycle.
+5. Run a lightweight MLX-served, dev-only proxy eval (ARCHITECTURE.md
+   §3, `arbitrage.dev_eval_runtime: mlx`) to produce a real
+   `dev_proxy_composite`.
+
+Required before Gate B / item 10. Verify on the M5 alongside the
+`requires_mlx` markers.
+
+---
+
+## `tests/nucleus` combined with the full root test suite in one pytest process is order-dependent
+
+**Filed by:** builder session, `sprints/2026-09-23-nucleus-sprint-1/BUILD_LOG.md` "Review loop 4 (F3)",
+2026-09-24. Originally reported as TEST_REPORT.md finding F3 (round 1, `90fa766d`); this entry carries the
+follow-up root-cause evidence and the fallback taken (`ARCHITECTURE.md` §7.2).
+
+**The symptom.** Running `pytest tests -q` (the whole repo, ~350 root `tests/test_*.py` files plus
+`tests/dbspec tests/eval tests/nucleus tests/portal tests/registry tests/router tests/setup_ladder`, one
+process) fails 18 tests that pass in isolation and pass when run alone: `test_r1_r3_chat_models.py` ×4,
+`test_aerollm_model_ready.py` ×3, `test_deep_default_and_tier.py` ×2, `test_model_ux_phase0_warmth_probe.py`
+×2, `test_qa_model_ux_memory_and_eject_fidelity.py` ×2, `test_qa_provider_dropdown_paranoid.py` ×2,
+`test_b1_cloud_gallery_contract.py` ×1, `test_runtime_profile_api.py::test_post_emits_activity_event` ×1,
+plus `test_cli_qa_edge.py::test_q1_restart_…` in one of two paired runs. They pass when the same list runs
+without `tests/nucleus` present, and `tests/nucleus` + all 18 victim files together (582 items) also pass —
+the trigger needs `tests/nucleus` **and** the full ~350-file root prefix at the same time.
+
+**What this loop confirmed, precisely (evidence a future session can start from):**
+
+1. **The actual exception**, captured by wrapping `arail.portal.app._get_primary_router` with a scratch
+   pytest plugin and running the exact failing ordering once: `ModelRouter.__init__` picks the `mlx` backend
+   (Apple Silicon auto-detect) and `AeroLLMBackend.__init__`-equivalent MLX loader calls
+   `os.getenv("MODEL_NAME", "mlx-community/Qwen2.5-3B-Instruct-4bit")`, which returns the live string
+   `"ai-engineer:latest"` — an Ollama tag, not a HuggingFace repo id — so `mlx_lm.utils._download` raises
+   `HFValidationError: Repo id must use alphanumeric chars, '-', '_' or '.' ...`. `api_chat_models`'s
+   `except Exception` fallback then returns a 3-key payload, and every victim test's assertion on the missing
+   keys (`deep`, `gallery`, `optional_backends`, ...) is what actually fails.
+2. **`tests/nucleus` does not do this.** `grep -rn "arail.portal\|arail.registry\|arail.router" src/arail/nucleus
+   tests/nucleus` → zero hits (one unrelated docstring mention), and neither `arail.nucleus` nor
+   `tests/nucleus` sets `MODEL_NAME`/`MODEL_BACKEND`/`AEROLLM_MODEL` anywhere (grep confirmed). A
+   `pytest_runtest_setup` hookwrapper plugin that snapshots `MODEL_NAME`/`MODEL_BACKEND`/`AEROLLM_MODEL`/
+   `QUEUELLM_MODEL`/`ARAIL_MODELS_DIR`/`ARAIL_DATA_DIR` **before each test's own fixtures run** (i.e., only a
+   real leak from the *previous* test would show up) found **zero** leaks anywhere across a full
+   `tests/nucleus`-only run (443 passed, 4 skipped, 14 xfailed).
+3. **The two real, non-monkeypatch writers of `MODEL_NAME`/`AEROLLM_MODEL` are both outside `arail.nucleus`,
+   in `arail.model_defaults.apply()` (`src/arail/model_defaults.py:76,82,85`) and
+   `arail.portal.app._export_registry_env()` (`src/arail/portal/app.py:6899,6903`, called from the FastAPI
+   startup handler, i.e. on every `TestClient(app)` lifespan start) — both are **intentional, documented bare
+   `os.environ[...] =` writes that bypass `monkeypatch`** ("`apply()` writes MODEL_NAME/AEROLLM_MODEL straight
+   to os.environ — by design... monkeypatch's own teardown can't undo it", `tests/test_model_defaults.py`'s
+   own `_clean_env` docstring, which documents this exact failure signature happening once before, fixed by a
+   restore-by-hand fixture in that one file only). `_export_registry_env()` stamps `MODEL_NAME` from the
+   process-lifetime `arail.registry` singleton's tier0 entry — if that singleton is ever left holding
+   `model_id="ai-engineer:latest"`/`backend="ollama_native"` (the fixture default several `tests/registry/*`
+   tests set up) at the moment some *other* test's `TestClient(app)` triggers a fresh startup event, the next
+   `MODEL_NAME` env write is unconditional and untracked by that test's own `monkeypatch`.
+4. **Given (2) and (3), the likely mechanism is not a leak owned by `tests/nucleus`.** It is a pre-existing
+   test-isolation gap in `arail.portal.app`/`arail.model_defaults`/`arail.registry`'s bare-`os.environ`/
+   process-singleton pattern, which `tests/nucleus`'s ~40 real-subprocess-spawning tests only *expose* by
+   shifting wall-clock/thread/GC scheduling enough for the race to land badly — matching TEST_REPORT.md F3's
+   own characterization ("a resource-class interaction... not a state leak I can attribute to a specific line
+   in `tests/nucleus`").
+
+**Why not fixed this session.** The actual fix belongs in `arail.portal.app`/`arail.registry`/
+`arail.model_defaults` (restore-by-hand cleanup around every bare `os.environ` write and/or a reliable
+per-test registry-singleton reset, mirroring `tests/test_model_defaults.py`'s own `_clean_env` fixture) — files
+outside this sprint's scope (`sprints/2026-09-23-nucleus-sprint-1/BUILD_LOG.md`'s plan). Landing that fix here
+would be scope drift into a pre-existing, cross-cutting test-hygiene defect that predates and is independent of
+Model Forge.
+
+**Fallback landed instead:** `ARCHITECTURE.md` §7.2 documents that `tests/nucleus` must always run as its own
+pytest invocation (which `.github/workflows/nucleus-tests.yml` already does — there is no CI job anywhere that
+runs the combined full suite as one process) and that `pytest tests -q` is a local diagnostic only, not a merge
+gate.
+
+**What a future sprint should do:** reproduce step 1's failing ordering with the scratch diagnostic plugin
+above (`_get_primary_router` wrapped to print the real exception) and step 3's leads; add a `monkeypatch`-safe
+or restore-by-hand-cleaned wrapper around `arail.model_defaults.apply()` and
+`arail.portal.app._export_registry_env()`'s env writes, and/or a `reset_registry()` autouse fixture at the
+root `tests/conftest.py` level (not just `tests/registry/`), so the registry singleton can never survive
+between tests regardless of which file touches it.
+
+**QA round 2 correction (2026-09-24, TEST_REPORT.md "Round 2"). Point 4 above is wrong: there *is* a
+nucleus-owned trigger. It is a module, not an env var.** Step 2's snapshot covered env vars only. A
+`sys.modules` snapshot finds it:
+
+- **Nucleus imports `mlx_lm` in-process.** In the failing ordering, `mlx_lm` enters `sys.modules` during
+  `tests/nucleus/test_build_phases.py::test_build_run_end_to_end`. `build.run()` →
+  `preflight.run_preflight()`'s default capability probes → `preflight._probe_mlx_lm_version()` does a real
+  `import mlx_lm`, and it stays imported for the rest of the process. In the non-nucleus ordering, `mlx_lm`
+  is **not** in `sys.modules` when the first victim starts.
+- **The `MODEL_NAME` leak is not the differentiator.** The stray `MODEL_NAME="ai-engineer:latest"` write
+  happens **identically in both orderings**, after
+  `tests/test_aerollm_compute_source.py::test_select_aerollm_allowed_airgapped_when_built`.
+  `tests/test_models_boot_endpoint.py` resets it to `llama-ai-eng` before `test_r1_r3_chat_models.py` runs, so
+  at the r1_r3 victims `MODEL_NAME` is `llama-ai-eng` in both orderings.
+- **Decisive experiment.** Take the non-nucleus prefix (which passes) plus the victim file:
+  - put a no-op test first → **0/4** r1_r3 victims fail;
+  - put a single test that only calls `arail.nucleus.preflight._probe_mlx_lm_version()` first → **4/4** fail.
+
+So the nucleus-side condition is the preloaded `mlx_lm`, not scheduling or GC.
+
+**Mechanism:**
+
+1. With `mlx_lm` already in `sys.modules`, `router.core._is_importable("mlx_lm")` is a no-op success.
+2. `ModelRouter._auto_detect()` then returns `mlx`.
+3. The MLX backend is constructed from whatever `MODEL_NAME` holds (an Ollama tag either way) and raises.
+4. `api_chat_models` falls back to its 3-key payload.
+
+**Still undetermined:** why a *fresh* `import mlx_lm` at that point in the non-nucleus ordering does not lead
+to the same outcome. Most likely something in the root prefix makes the fresh import fail, or caches an
+earlier router. Either way it is outside nucleus.
+
+**Pinned by** `tests/nucleus/test_qa_round3.py::test_mlx_lm_version_probe_does_not_import_mlx_lm_into_the_process`
+(strict xfail; skipped where `mlx_lm` is absent, e.g. CI's ubuntu runner).
+
+**Two fixes, either sufficient for the nucleus half:**
+
+- **(a) production:** probe the version without importing: `importlib.util.find_spec("mlx_lm")` plus
+  `importlib.metadata.version("mlx_lm")`. This is also cheaper for `nucleus plan` on minimalist, since a real
+  `import mlx_lm` costs ~1.5 s and initialises Metal.
+- **(b) tests:** have `build.run` tests pass `capability_probes` or monkeypatch the probe.
+
+The fallback in §7.2 remains valid for CI: CI runs `tests/nucleus` alone, on ubuntu, where `_auto_detect`
+never picks `mlx`.
+
+---
+
+## Buddy always-on (S1): tech debt D1 to D14
+
+**Filed by:** `sprints/2026-10-20-buddy-always-on/` (ARCHITECTURE.md §10, filed at build step A9).
+Fourteen deliberate deferrals the design accepted knowingly. Each row names the trigger that pays it down.
+
+| # | Debt | Trigger that pays it down |
+|---|---|---|
+| D1 | **No OS boundary.** Buddy runs as the operator. S1 limits what the model can do, not what Buddy's own code can do. | The first tool that runs a command or writes outside Buddy's home: a container sprint. |
+| D2 | **Two hold flags** (Buddy's `<home>/state/hold.json` and ARAIL's `halt.json`); resume needs two desk actions. | S2's paperagents `arail-agent` runtime with `haltPath`, or one desk "resume Buddy and lab" control. |
+| D3 | **Unauthenticated portal routes** stay reachable by any local process, including a compromised Buddy. The edge is the portal's first per-request credential and closes none of that. | Any Buddy tool, or the container, or the portal-auth sprint, whichever comes first. |
+| D4 | **Fast-changing upstream seam.** Patches to nanobot plus a seam lock over the files Buddy depends on; every upstream release needs a review. | Disconfirming #5 (a rebase takes more than a day): re-evaluate the base. Upstream PRs shrink the patch set. |
+| D5 | **Private-method overrides** in `BuddyTelegramChannel`. | Upstream accepts a channel intake hook. |
+| D6 | **Turn metadata rides in a system-message header**, because nanobot's provider has no per-request metadata. | Upstream per-request headers or `extra_body`. |
+| D7 | **The edge flattens the conversation into one user prompt**; ARAIL's Ollama backend ignores `messages` and `temperature`. **Paid for the system message only (review round 1, R1-4c, 2026-10-20):** `OllamaNativeBackend` takes `system_as_message`, which the edge sets, so Buddy's persona is the model's `system` message and the Modelfile's own `SYSTEM` is no longer substituted (about 50 prompt tokens). History roles are still `### <role>` blocks in one user message, and `temperature` is still the Modelfile's 0.7. | An ARAIL backend task to send real chat messages and options. |
+| D8 | **Two Buddy loops** (the desk `BuddyAgent` and the phone) in one lane. | Disconfirming #6, or S2's "desk as a channel". |
+| D9 | **`agent_trace` v2**; 3D.EVAL reads v1 by name. | 3D.EVAL sprint 2: its adapter accepts v1 and v2. (Notice to 3D.EVAL is relayed by the orchestrator, not made from this repo.) |
+| D10 | **ARAIL's own `halt.json` fails open when corrupt**; only the Buddy edge compensates (`scheduler.halt_load_failed()`). | The next ARAIL hardening sprint. |
+| D11 | **`api.telegram.org` on the shared consent allowlist**; other ARAIL agents could auto-approve fetches there. | Per-agent consent scoping. |
+| D12 | **launchd logs in `~/.nanobot/logs/`** (nanobot's installer hard-codes the path). | Upstream log-path option, or Buddy's own plist writer. |
+| D13 | **Lanes `recent` is 50 records inside a 500-record ring.** Long sessions evict. | The W5-driven lanes rewrite. |
+| D14 | **Sleep detection relies on macOS clock semantics.** | Linux becomes a tested platform. |
+
+**Added during the build (BUILD_LOG.md "Architect feedback required"):**
+
+| # | Debt | Trigger |
+|---|---|---|
+| D15 | **Closed 2026-10-20.** The turn header could not be written by a `before_iteration` hook at nanobot v0.3.5 (the runner sends the compaction state's accepted copy of the system message). ARCHITECTURE Addendum A section A1 resolved it with no nanobot patch: `install()` (R8) wraps `agent.context.build_system_prompt` and `agent._build_transcript_input` on the live agent. | Closed by Addendum A section A1; proved by U-HDR-03 to 07 in qukaizen-buddy. |
+| D16 | **Buddy's `link.json` is a second cross-repo file shape** (`qukaizen-buddy.link/v1`), written by ARAIL and read by Buddy, outside the contract. | Move it into the contract the next time the contract version changes. |
+| D17 | **Admission-level refusals are coalesced** to one `edge_refused` event per code per 5 s, so a flood cannot flush the trace ring; the count is in `attrs`. | Per-caller rate limiting once the portal has real auth (D3). |
+| D18 | **The vendored contract is not declared as package data.** `pyproject.toml` is a frozen path of the QueueLLM rename sprint (`tests/test_queuellm_rename_frozen_surface.py`), so the `arail.buddy_host` JSON files are not listed there. ARAIL runs from a checkout (`pip install -e .`), where they are present; a built wheel would lack them and the portal would then start without the edge (it fails closed). | The first time ARAIL ships a wheel: add `"arail.buddy_host" = ["contract/*.json", "contract/conformance/*.json"]` to `[tool.setuptools.package-data]` and update that test's frozen list in the same change. |
+
+**Added by ARCHITECTURE Addendum A (2026-10-20), filed at the resumed build:**
+
+| # | Debt | Trigger that pays it down |
+|---|---|---|
+| D4 (grows) | **Sixteen seam-locked nanobot files** (was ten), two instance-level wraps, one of them on a private method (`AgentLoop._build_transcript_input`), and four more private overrides in the channel. | Unchanged, plus the two upstream-PR candidates in qukaizen-buddy's `UPSTREAM.md` (a per-request system-prompt provider; a caller-owned history window). |
+| D6 (same kind) | **The header still rides in the system message**; a wrapped `build_system_prompt` now composes it. | Upstream per-request metadata, or a system-prompt provider. |
+| D23 | **Three upstream WebUI gateway smoke tests are deselected under P0** (`tests/webui/test_gateway_webui_smoke.py`): P0 makes `python -m nanobot` Buddy-only and the tests spawn it. Coverage of nanobot's WebUI gateway path stays upstream's, not Buddy's. | Any sprint that enables the WebUI, the websocket channel or a second channel in Buddy (P0 then gets a narrower, tested form); and every pin move, where `UPSTREAM.md` records that the three passed at the bare new tag before P0 is re-applied. |
+| D24 | **`contextWindowTokens` is a switch, not a context size.** Buddy's nanobot is configured with 200,000 so that its model-calling compaction can never start; the edge's 24,000-character cap is the only real prompt limit, and the history window is sized to it. | ARAIL reports the brain's context size in the handshake; both limits are then derived from it. |
+| D25 | **nanobot's session store keeps every message until `/new`**; only replay is windowed (at most 8 messages and the character budget). | A retention policy in S2, or a session-size alarm. |
+| D26 | **The edge reports `finish_reason: stop` for token-capped answers**, a deviation from OpenAI: nanobot reads `length` as "continue" and calls again on a prompt it wrote (`runner.py:631-655`). A capped answer stays visible as `tokens_out == max_tokens`, and Buddy's parser turns truncated JSON into an abstain. | nanobot makes length recovery configurable. |
+| D27 | **Trace lines carry no hash**; only the approvals ledger does, so "a ledger line with a hash" (the harness page) holds for the action but not for turns. | Adopting the harness Loop module, or 3D.EVAL treating lanes as evidence. |
+
+**Found by the first run against a real server (I1, 2026-10-20):**
+
+| # | Debt | Trigger |
+|---|---|---|
+| D28 | **A lab that has not been onboarded answers every `/api` route, the edge's included, with `401 lab_not_onboarded`**, a body that is not a contract error, so Buddy cannot tell it from an unreachable lab and reports "The lab is not reachable". The TestClient tests never see it. It is correct (an un-onboarded lab is not usable) but unhelpful. | An `edge` error code for it in the next contract version, or an exemption of `/api/host/v1/` from the onboarding gate (a decision for the portal's owner). |
+
+**Found by the architect's review, round 1 (2026-10-20); the Buddy-side rows are D33 to D40 in `qukaizen-buddy/buddy/docs/DEBT.md`:**
+
+| # | Debt | Trigger that pays it down |
+|---|---|---|
+| D29 | **Retrieval is lexical** (Buddy's `world.py`); on the 20 dev questions the right card ranks first for 12, which is what bounds template mode. Filed in Buddy's DEBT.md; named here because the fix may be an edge route (embeddings), which is a contract change and so ARAIL's. | An embedding ranking, or the World authors' `aka` fields; scheduled with disconfirming #2's bake-off, not after it. |
+| D30 | **A model-using run varies by about two cases** because `temperature` is ignored (D7 above): `llama-ai-eng` answers at its Modelfile's 0.7. QA runs each mode at least twice. | The backend forwards options. |
+| D34 | **The contract's `gate_change` reasons have no "poller died".** Buddy closes its gate without a record. | The next contract version; re-vendor here with equal sha256. |
+| D35 | **The launchd log holds phone text, Telegram ids and usernames** (Buddy's `~/.nanobot/logs/`). The operator decides before S2 adds people. | See Buddy's DEBT.md. |
+| D36 | **Buddy's exec guard misses `_posixsubprocess.fork_exec`; `ctypes` bypasses its socket guard.** Not ARAIL's, but it is the layer under G1/G9 on the Mac. | Buddy's container sprint (D1). |
+| D41 | **The vendored contract's `PROVENANCE.json` names a Buddy commit that exists only on the builder's Mac** until `qukaizen/buddy-always-on` is pushed (review finding 7). Re-run `scripts/sync-buddy-contract.py --check` against the pushed ref. | **Before the ARAIL PR merges:** push the Buddy branch (or merge it) and re-check. Not done in build round 2: the instruction was to push nothing. |
+
+---
+
+## D-S4-1: the model's shell can read the portal credentials
+
+**Filed by:** `sprints/2026-10-25-buddy-s4-gateway-in-box/REVIEW.md` (ASK), after portal auth landed.
+
+opencode's model drives a shell that runs as the lab user. `lab/data/portal.token`, `portal.shim-token`
+and `.env` are 0600, which stops other users, not that shell. So Addendum A's "no portal credential in the
+model's reach" is true of what the lab *hands* opencode (only the `arl1s_` shim token), not of what the
+shell can *read*. Not a regression (the shell could always read `ARAIL_PASSWORD`).
+
+**Pay it by:** an OS-level boundary for the model shell: a separate user or a container with only the
+files it needs, the pattern Buddy's box uses (Buddy S3/S5).
+**Trigger:** opencode enabled on a shared or family machine outside the owner's own account, or any
+change that widens the shell's reach (new tools, network). Documented for users in `docs/PRIVACY.md`.
+
+---
+
+## QA-S4-2: the edge can co-bind next to a wildcard listener on its port
+
+**Filed by:** `sprints/2026-10-25-buddy-s4-gateway-in-box/TEST_REPORT.md` (low).
+
+`EdgeListener.start` sets `SO_REUSEADDR`. On macOS/BSD that lets it bind `127.0.0.1:P` while another process holds
+`0.0.0.0:P`, and it reports `listening`, not `port_in_use`. Loopback traffic goes to the edge, so Buddy is not misrouted
+today; the LAN address of the Mac reaches the other process. **Not a one-line fix:** dropping `SO_REUSEADDR` makes a
+launchd restart fail to rebind for about 60 s (TIME_WAIT), which would turn a normal restart into "edge off".
+**Pay it by:** a pre-flight `connect()` to `127.0.0.1:P` before binding (a listener that answers means port in use) or
+binding without REUSEADDR and retrying for 5 s. **Trigger:** S5 (the box dials this port, so a squatter matters), or any
+report of a second service on 8089. Pinned by a strict xfail in `tests/test_s4_qa_paranoid.py`.
+
+## S5: the edge has no server identity
+
+**Filed by:** TEST_REPORT.md (Network I/O row). A same-user process that pre-binds `127.0.0.1:8089` before ARAIL starts
+would receive Buddy's `bhc1_` credential; ARAIL logs `port_in_use` but Buddy does not authenticate the server.
+**Pay it by:** a server proof in the handshake (for example the lab signs a nonce with a key only ARAIL holds, pinned in
+`link.json`). **Trigger:** S5 start, because the box then routes to this port through a proxy.
+

@@ -11,6 +11,7 @@ intended feed URLs — the CI catch for that bug class.
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 from arail import world_mount as wm
@@ -28,9 +29,22 @@ def test_bundle_is_sealed_and_verifies():
 def test_bundle_is_not_a_catalog_default():
     """debt-finance ships as an opt-in example (personal-finance data),
     never auto-mounted on a fresh lab — must live under examples/worlds/,
-    not lab/worlds/."""
+    not lab/worlds/.
+
+    The guarantee is about what a FRESH CLONE gets, so it is asked of git
+    rather than of the filesystem. An operator who deliberately mounts
+    debt-finance has a copy in their own lab/worlds/ — that is the opt-in
+    working as designed, and asserting the path is absent instead failed on
+    exactly the labs that took the option.
+    """
     assert BUNDLE.exists()
-    assert not (REPO / "lab" / "worlds" / "debt-finance").exists()
+    tracked = subprocess.run(
+        ["git", "ls-files", "lab/worlds/debt-finance"],
+        cwd=REPO, capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    assert not tracked, (
+        "debt-finance is tracked under lab/worlds/ — it would auto-mount on a "
+        f"fresh clone. Tracked paths:\n{tracked}")
 
 
 def test_bundle_has_no_investing_category():

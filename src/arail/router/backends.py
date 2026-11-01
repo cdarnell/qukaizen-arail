@@ -94,6 +94,12 @@ class ModelResponse:
     # tokens written to cache this request (~1.25x cost). See ClaudeBackend.
     cache_read_input_tokens: int = 0
     cache_creation_input_tokens: int = 0
+    # Server-reported prefill time (sprint 2026-09-20-buddy-front-and-
+    # center, S3). Distinct from TTFT — see router/core.py's honesty
+    # contract: a client MUST NOT render this as TTFT. None on every
+    # backend that doesn't report it (only OllamaNativeBackend does today,
+    # from prompt_eval_duration).
+    prefill_ms: Optional[float] = None
 
 
 StreamResult = str | ModelResponse
@@ -178,8 +184,17 @@ class MLXBackend(BaseBackend):
             self._load = load
             self._generate = generate
             self._stream_generate = getattr(_mlx_lm, "stream_generate", None)
-        except ImportError:
-            raise ImportError("MLX not installed. Run: pip install mlx mlx-lm")
+        except ImportError as exc:
+            # Keep the real reason. "MLX not installed" is only one of the
+            # ways this import fails — a broken/partial install, an
+            # incompatible mlx/mlx-lm pair, or a sandbox that blocks the
+            # native extension all land here too, and reporting them all
+            # as "not installed" sends people to `pip install` for a
+            # problem pip already solved.
+            raise ImportError(
+                f"MLX backend unavailable: {exc}. "
+                "If mlx-lm is genuinely missing: pip install mlx mlx-lm"
+            ) from exc
 
         # New-style sampler factory is preferred; fall back to the old
         # `temp=` kwarg if we're on a pre-0.19 mlx-lm.
@@ -189,8 +204,10 @@ class MLXBackend(BaseBackend):
         except ImportError:  # pragma: no cover — only on old mlx-lm
             self._make_sampler = None
 
+        # Default kept under the primary ceiling (arail.registry.ceiling) —
+        # an unset MODEL_NAME must not silently resolve to an 8B+ model.
         self.model_name = os.getenv("MODEL_NAME",
-                                     "mlx-community/Qwen3-8B-4bit")
+                                     "mlx-community/Qwen2.5-3B-Instruct-4bit")
         # Allow local path first, fallback to hub name
         model_dir = os.path.join(os.getenv("ARAIL_MODELS_DIR", "lab/models"),
                                  self.model_name.split("/")[-1])
@@ -362,8 +379,10 @@ class CUDABackend(BaseBackend):
         import requests  # noqa: F811
         self._session = requests.Session()  # noqa-airgap: localhost-only (LOCAL_API_PORT target); post-guard Session — HTTPAdapter is monkeypatched at install_guard() time
         self.port = int(os.getenv("LOCAL_API_PORT", "8000"))
+        # Default kept under the primary ceiling (arail.registry.ceiling) —
+        # an unset MODEL_NAME must not silently resolve to an 8B+ model.
         self.model_name = os.getenv("MODEL_NAME",
-                                     "Qwen/Qwen3-8B")
+                                     "Qwen/Qwen2.5-3B-Instruct")
 
     def complete(self, prompt: str, max_tokens: int = 512,
                  temperature: float = 0.7,
@@ -498,6 +517,19 @@ class CPUBackend(BaseBackend):
                     "Download one — see README.md"
                 )
         self.model_name = os.path.basename(model_path)
+
+        # Answering-model ceiling (single chokepoint — see
+        # arail.registry.ceiling). This is the fix for the review finding
+        # that CPUBackend would silently load "sorted(rglob('*.gguf'))[0]"
+        # — an opaquely-named or oversized GGUF could become the answering
+        # model with no notice. Read real params from the file itself so an
+        # opaque filename can't dodge the check the way it dodges the
+        # name-regex parser.
+        from arail.registry.ceiling import resolve_answering_model
+        resolve_answering_model(
+            self.model_name, role="primary", backend="cpu", model_path=model_path,
+        )
+
         # L3: resolve context window at load time. Admin/chat set-ctx persists
         # to ARAIL_MODEL_CTX_OVERRIDES; _resolve_ctx_override reads it.
         # Default 4096 is the historical hard-coded value (R2: unchanged when
@@ -1390,7 +1422,7 @@ def _resolve_kv_budget() -> dict[str, Any]:
         available: int = int(vm.available)
     except Exception as exc:  # noqa: BLE001
         reason = (
-            f"psutil unavailable ({exc}); aerollm will auto-detect KV budget"
+            f"psutil unavailable ({exc}); QueueLLM will auto-detect KV budget"
         )
         return {
             "budget_bytes": None,
@@ -1410,7 +1442,7 @@ def _resolve_kv_budget() -> dict[str, Any]:
     if total == 0:
         return {
             "budget_bytes": None,
-            "reason": "psutil returned total=0; aerollm will auto-detect KV budget",
+            "reason": "psutil returned total=0; QueueLLM will auto-detect KV budget",
             "fields": {
                 "pct_used": pct,
                 "total_gib": 0.0,
@@ -1532,11 +1564,16 @@ class AeroLLMBackend(BaseBackend):
             from aerollm_api import Runtime  # type: ignore[import-untyped]
         except ImportError as e:
             raise ImportError(
-                "aerollm_api wheel not installed. Install the published wheel "
-                "with `./arailctl deep update`, or build from the local sibling "
-                "repo with `./arailctl deep rebuild` (set ARAIL_AEROLLM_REPO if "
-                "it's not at ~/ProJects/qukaizen-aerollm). Do NOT use `maturin develop` — "
-                "see scripts/setup.sh for why."
+                "aerollm_api not installed. Try, in order: "
+                "`./arailctl deep install` (fetches a checksummed prebuilt binary "
+                "from an ARAIL GitHub Release — no source repo or credentials "
+                "needed; this is the route for most people). Maintainer-only "
+                "alternatives: `./arailctl deep rebuild` (build from the local "
+                "sibling repo — set ARAIL_AEROLLM_REPO if it's not at "
+                "~/ProJects/qukaizen-queuellm) or `./arailctl deep update` (pip "
+                "install the published wheel from the private index, needs "
+                "credentials). Do NOT use `maturin develop` — see scripts/setup.sh "
+                "for why."
             ) from e
         # Surface the wheel version for `deep status` / health (best-effort).
         self.api_version = getattr(_aero_mod, "__version__", "unknown")
@@ -1565,7 +1602,7 @@ class AeroLLMBackend(BaseBackend):
             # repo IDs are the canonical 4-bit MLX conversions.
             hf_repo = "mlx-community/" + self.model_name
             raise RuntimeError(
-                f"AeroLLM model dir not found: {model_path}. "
+                f"QueueLLM model dir not found: {model_path}. "
                 f"Set AEROLLM_MODEL and/or ARAIL_MODELS_DIR, or "
                 f"download the checkpoint with `huggingface-cli download "
                 f"{hf_repo} --local-dir {model_path}`."
@@ -1587,9 +1624,32 @@ class AeroLLMBackend(BaseBackend):
         rt_kwargs: dict[str, Any] = {}
         if draft_path:
             rt_kwargs["draft_model"] = draft_path
-        ring_depth = os.getenv("AEROLLM_RING_DEPTH")
-        if ring_depth and ring_depth.isdigit() and int(ring_depth) > 0:
-            rt_kwargs["ring_depth"] = int(ring_depth)
+
+        # Ring depth (sprints/2026-08-11-two-slot-chat-models Part 4):
+        # AEROLLM_RING_DEPTH, if set at all, always wins — including "0" or
+        # an unparseable value, both of which mean "no eviction" per the
+        # existing contract (aerollm's own default: every block resident).
+        # Only when the env var is entirely absent does the runtime profile
+        # (interactive/balanced/throughput — see arail.runtime_profile)
+        # supply a value; profile changes only take effect on the NEXT
+        # Runtime construction, since ring_depth is construction-time-only.
+        ring_depth_env = os.getenv("AEROLLM_RING_DEPTH")
+        ring_depth_source: Optional[str] = None
+        if ring_depth_env is not None:
+            ring_depth_source = "env"
+            if ring_depth_env.isdigit() and int(ring_depth_env) > 0:
+                rt_kwargs["ring_depth"] = int(ring_depth_env)
+        else:
+            try:
+                from arail.runtime_profile import params as _rt_params
+                from arail.runtime_profile import resolve as _rt_resolve
+                _profile, _ = _rt_resolve()
+                _depth = _rt_params(_profile).get("aerollm_ring_depth")
+                ring_depth_source = f"profile:{_profile}"
+                if isinstance(_depth, int) and _depth > 0:
+                    rt_kwargs["ring_depth"] = _depth
+            except Exception:  # noqa: BLE001
+                ring_depth_source = None
 
         # KV cache budget — cap by *available* RAM, not just total, so a
         # busy box (Ollama + Chrome + portal already loaded) doesn't drive
@@ -1602,17 +1662,14 @@ class AeroLLMBackend(BaseBackend):
             rt_kwargs["kv_memory_budget"] = reasoning["budget_bytes"]
         self._emit_budget_activity(reasoning)
 
-        # TODO(runtime-profile): Once AeroLLM accepts construction-time
-        # ring_depth + batch from runtime profile, replace the env-only
-        # path above with:
-        #     from arail.runtime_profile import resolve, params
-        #     p = params(resolve()[0])
-        #     rt_kwargs.setdefault("ring_depth", p["aerollm_ring_depth"])
-        #     rt_kwargs.setdefault("batch", p["aerollm_batch"])
-        # Profile changes require a Runtime restart today (kwargs are
-        # construction-time); for per-call batch, thread a kwarg into
-        # complete() reading params(resolve()[0])["aerollm_batch"].
-        # Param table is the source of truth — tuning is config, not code.
+        # `aerollm_batch` is NOT a construction-time Runtime kwarg (unlike
+        # ring_depth) — it belongs on a per-call path into complete(),
+        # which doesn't accept a batch parameter today. Wiring that is a
+        # separate, larger change (every complete() call site); out of
+        # scope here. ring_depth is recorded for the chat UI's deep-slot
+        # display (sprints/2026-08-11-two-slot-chat-models Part 4/5).
+        self._ring_depth = rt_kwargs.get("ring_depth")
+        self._ring_depth_source = ring_depth_source
 
         self._model_path = model_path
         self._draft_path = draft_path
@@ -1839,6 +1896,55 @@ class AeroLLMBackend(BaseBackend):
 # ---------------------------------------------------------------------------
 # OllamaNativeBackend  (Ollama native /api/chat — carries options.num_ctx)
 # ---------------------------------------------------------------------------
+def _normalize_keep_alive(value: "str | int") -> "str | int":
+    """Coerce a keep_alive setting into something Ollama actually accepts.
+
+    Ollama reads a JSON *string* as a Go duration and a JSON *number* as
+    seconds. "5m" and 300 are both fine; a bare "-1" is not — Go rejects
+    it with `time: missing unit in duration "-1"` and the request 400s.
+    Operators reasonably write ARAIL_OLLAMA_KEEP_ALIVE=-1 meaning
+    "forever", so turn any bare integer into the number form and leave
+    real durations ("2h", "30s") untouched.
+
+    Called at the REQUEST boundary (complete/stream_complete), not only
+    inside _keep_alive: this bug class has shipped twice — first when the
+    pin value itself was the string "-1" (see tests/router/
+    test_keep_alive.py's CORRECTED note: every /api/chat call 400'd and
+    the whole local lane was dead), then again on a branch whose fork of
+    _keep_alive drifted from the fixed version. Whatever resolves the
+    value — this method, an env override, a subclass, a __new__-built
+    instance — the body that reaches Ollama can never carry a bare
+    numeric string.
+    """
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return value
+
+
+
+def _raise_for_status_with_detail(resp) -> None:
+    """``raise_for_status`` that keeps Ollama's own ``error`` text.
+
+    A bare "400 Bad Request" hid the real cause of the keep_alive bug;
+    the JSON body names it. Truncated to 160 chars; only the response
+    body is read, never request headers.
+    """
+    try:
+        resp.raise_for_status()
+    except Exception as exc:  # noqa: BLE001
+        detail = ""
+        try:
+            payload = resp.json()
+            if isinstance(payload, dict):
+                detail = str(payload.get("error") or "")
+        except Exception:  # noqa: BLE001
+            detail = ""
+        if detail:
+            raise type(exc)(f"{exc}: {detail[:160]}") from exc
+        raise
+
+
 class OllamaNativeBackend(OpenAICompatBackend):
     """Talks to Ollama's NATIVE /api/chat endpoint (not the OpenAI /v1 shim).
 
@@ -1872,18 +1978,77 @@ class OllamaNativeBackend(OpenAICompatBackend):
         self.backend_name = "ollama:native"
         self._num_ctx = _resolve_ctx_override(self.model_name, default=None)
 
-    @staticmethod
-    def _keep_alive() -> "str | None":
-        """Ollama keep_alive for every request ("2h" default, "" = omit).
+    def _keep_alive(self) -> "str | int | None":
+        """Ollama keep_alive for every request.
 
         Without it Ollama evicts the model ~5 min after the last call, so
-        the "resident" Tier 0 quietly went cold between interactions. 2h
-        (not -1) by default: pinning forever fights the aeroLLM preload's
-        0.60 memory-pressure ceiling and the 0.75 chat guard on small
-        boxes; operators can set ARAIL_OLLAMA_KEEP_ALIVE=-1 to pin.
+        the "resident" Tier 0 quietly went cold between interactions.
+
+        Resolution order:
+          1. ARAIL_OLLAMA_KEEP_ALIVE, if set at all (including "" — omit
+             keep_alive entirely, falling back to Ollama's own default).
+             An explicit operator override always wins.
+          2. -1 (int; pin forever) when ARAIL_RESIDENT_PIN is truthy
+             (default on) AND this instance's model is the registry's
+             tier0/resident entry — the "in the GPU at all times" story
+             the two-slot redesign (sprints/2026-08-11-two-slot-chat-
+             models Part 3) promises for the resident slot specifically.
+          3. "2h" otherwise (any other model, or pin disabled).
+
+        Pinned residency counts against the boot resolver's RAM budget
+        (A + B together stay under 0.60 x total RAM, A first), so a larger
+        resident model simply makes the resolver drop the deep slot rather
+        than fight the aeroLLM preload's memory-pressure ceiling. Only the
+        model that's actually the registry's tier0 pins -- every other Ollama
+        model (picked ad hoc from the rail, or used as a one-off) keeps the
+        old 2h behavior. ARAIL_RESIDENT_PIN=0 restores the pre-Part-3
+        default everywhere.
         """
-        value = os.getenv("ARAIL_OLLAMA_KEEP_ALIVE", "2h").strip()
-        return value or None
+        raw = os.getenv("ARAIL_OLLAMA_KEEP_ALIVE")
+        if raw is not None:
+            value = raw.strip()
+            if not value:
+                return None
+            return _normalize_keep_alive(value)
+        pin_enabled = os.getenv("ARAIL_RESIDENT_PIN", "1").strip().lower() \
+            not in ("0", "false", "no")
+        if pin_enabled and self._is_registry_tier0_model():
+            # int, not "-1". Ollama parses a STRING keep_alive as a Go
+            # duration, and "-1" has no unit — it answers 400
+            # {"error":"time: missing unit in duration \"-1\""} and the
+            # whole call fails. A JSON *number* is seconds, and negative
+            # means "keep loaded indefinitely", which is what pinning
+            # means here.
+            return -1
+        return "2h"
+
+    def _is_registry_tier0_model(self) -> bool:
+        """True iff this backend's model IS the registry's tier0/resident
+        entry. Best-effort: any registry hiccup (unloaded, corrupt file,
+        import failure) falls back to False — a broken registry must
+        never silently pin the wrong model forever, it should just leave
+        keep_alive at the old, safe 2h default."""
+        try:
+            from arail.registry import get_registry
+            from arail.registry.store import TIER0_ID
+            reg = get_registry()
+            reg._ensure_loaded()
+            entry = reg.entries.get(TIER0_ID)
+            if entry is None or entry.backend != "ollama_native":
+                return False
+            return self.model_name in (entry.model_id, f"{entry.model_id}:latest")
+        except Exception:  # noqa: BLE001
+            return False
+
+    @staticmethod
+    def _chat_messages(prompt: str, system: Optional[str], system_as_message: bool) -> list:
+        """The ``messages`` of the request. Default (every caller but the Buddy edge): ``system`` is prepended to the prompt and
+        the request has one user message, as it always had. ``system_as_message``: a ``system`` message, then the user message."""
+        if system and system_as_message:
+            return [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
+        if system:
+            prompt = f"{system}\n\n{prompt}"
+        return [{"role": "user", "content": prompt}]
 
     def _ollama_root(self) -> str:
         """Return the Ollama root URL (strip trailing /v1 from base_url)."""
@@ -1897,15 +2062,26 @@ class OllamaNativeBackend(OpenAICompatBackend):
                  top_p: Optional[float] = None,
                  *, system: Optional[str] = None,
                  messages: Optional[list] = None,
-                 think: Optional[bool] = None) -> ModelResponse:
-        if system:
-            prompt = f"{system}\n\n{prompt}"
+                 think: Optional[bool] = None,
+                 response_schema: Optional[dict] = None,
+                 system_as_message: bool = False) -> ModelResponse:
+        """``response_schema`` (sprint 2026-10-20-buddy-always-on, A4): a JSON
+        Schema sent as Ollama's ``format`` for grammar-constrained decoding.
+        None (every existing caller) adds nothing to the request body.
+
+        ``system_as_message`` (same sprint, R1-4c): send ``system`` as a real
+        ``system`` message instead of prepending it to the one user message.
+        With no system message in the request Ollama substitutes the Modelfile's
+        ``SYSTEM`` (``llama-ai-eng``: "You are an AI engineering assistant ..."),
+        so a persona prepended to the prompt is read as user text under a
+        different persona. Only the Buddy edge asks for it; False (every
+        existing caller) leaves the request bytes as they were."""
         start = time.time()
         num_ctx = getattr(self, "_num_ctx", None)  # F-NEW: defensive read
 
         body: dict = {
             "model": self.model_name,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": self._chat_messages(prompt, system, system_as_message),
             "stream": False,
         }
         # options.num_ctx / num_predict only included when set (else Ollama
@@ -1927,9 +2103,13 @@ class OllamaNativeBackend(OpenAICompatBackend):
         # keep their thinking traces.
         if think is not None:
             body["think"] = think
+        if response_schema is not None:
+            body["format"] = response_schema
         keep_alive = self._keep_alive()
         if keep_alive is not None:
-            body["keep_alive"] = keep_alive
+            # Wire guard: whatever produced the value, a bare numeric
+            # string must leave here as a JSON number (Ollama 400s "-1").
+            body["keep_alive"] = _normalize_keep_alive(keep_alive)
 
         resp = self._session.post(
             f"{self._ollama_root()}/api/chat",   # F-OLLAMA-SHIM: native endpoint
@@ -1938,10 +2118,12 @@ class OllamaNativeBackend(OpenAICompatBackend):
             json=body,
             timeout=120,
         )
-        resp.raise_for_status()
+        _raise_for_status_with_detail(resp)
         data = resp.json()
         # Ollama native response shape: {message: {role, content}, done: bool}
         text = (data.get("message") or {}).get("content") or ""
+        # prompt_eval_duration is nanoseconds; server-reported, never derived.
+        prefill_ns = data.get("prompt_eval_duration")
         return ModelResponse(
             text=text,
             model=data.get("model", self.model_name),
@@ -1949,6 +2131,7 @@ class OllamaNativeBackend(OpenAICompatBackend):
             backend="ollama_native",
             latency_ms=(time.time() - start) * 1000,
             cost_usd=0.0,
+            prefill_ms=(prefill_ns / 1_000_000.0) if prefill_ns is not None else None,
         )
 
     def stream_complete(self, prompt: str, max_tokens: int = 512,
@@ -1956,17 +2139,18 @@ class OllamaNativeBackend(OpenAICompatBackend):
                         top_p: Optional[float] = None,
                         *, system: Optional[str] = None,
                         messages: Optional[list] = None,
-                        think: Optional[bool] = None) -> Iterator[StreamResult]:
+                        think: Optional[bool] = None,
+                        response_schema: Optional[dict] = None,
+                        system_as_message: bool = False) -> Iterator[StreamResult]:
         """Symmetry with OpenAICompatBackend; chat path only calls complete().
-        Streams via /api/chat with stream:true, yields deltas then ModelResponse."""
-        if system:
-            prompt = f"{system}\n\n{prompt}"
+        Streams via /api/chat with stream:true, yields deltas then ModelResponse.
+        ``response_schema`` and ``system_as_message``: see complete()."""
         start = time.time()
         num_ctx = getattr(self, "_num_ctx", None)
 
         body: dict[str, Any] = {
             "model": self.model_name,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": self._chat_messages(prompt, system, system_as_message),
             "stream": True,
         }
         # See complete()'s comments: num_predict must be forwarded or Ollama
@@ -1981,12 +2165,16 @@ class OllamaNativeBackend(OpenAICompatBackend):
             body["options"] = options
         if think is not None:
             body["think"] = think
+        if response_schema is not None:
+            body["format"] = response_schema
         keep_alive = self._keep_alive()
         if keep_alive is not None:
-            body["keep_alive"] = keep_alive
+            # Wire guard — same rule as complete(); see _normalize_keep_alive.
+            body["keep_alive"] = _normalize_keep_alive(keep_alive)
 
         full_text = ""
         eval_count = 0
+        prefill_ns = None
         with self._session.post(
             f"{self._ollama_root()}/api/chat",
             headers={"Authorization": f"Bearer {self.api_key}",
@@ -1995,7 +2183,7 @@ class OllamaNativeBackend(OpenAICompatBackend):
             timeout=120,
             stream=True,
         ) as resp:
-            resp.raise_for_status()
+            _raise_for_status_with_detail(resp)
             for line in resp.iter_lines(decode_unicode=True):
                 if not line:
                     continue
@@ -2009,6 +2197,8 @@ class OllamaNativeBackend(OpenAICompatBackend):
                     yield delta
                 if data.get("eval_count"):
                     eval_count = int(data["eval_count"])
+                if data.get("prompt_eval_duration") is not None:
+                    prefill_ns = data["prompt_eval_duration"]
                 if data.get("done"):
                     break
 
@@ -2019,6 +2209,7 @@ class OllamaNativeBackend(OpenAICompatBackend):
             backend="ollama_native",
             latency_ms=(time.time() - start) * 1000,
             cost_usd=0.0,
+            prefill_ms=(prefill_ns / 1_000_000.0) if prefill_ns is not None else None,
         )
 
 

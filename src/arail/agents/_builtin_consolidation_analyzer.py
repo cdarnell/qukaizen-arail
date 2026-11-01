@@ -867,22 +867,30 @@ class ConsolidationAnalyzerAgent:
         self._last_run_at = time.time()
         self._save_state()
 
-        _host.emit(
-            AGENT_ID,
-            "Consolidation Analyzer produced a new finding — see "
-            f"{_relative_pointer(_findings_file())}",
-            "info",
-        )
-        if crossed_keys:
-            # Pointer-only, per ARCHITECTURE.md §6's convention — no rate,
-            # no dollar figure, no institution name in the activity stream.
-            # The actual numbers are already in the findings file above.
+        # F9 (ARCHITECTURE.md): the proactive-speech moment (the finding's
+        # framing sentence went through the model funnel above); gated
+        # separately from inference — the finding is still written, only
+        # the announcement is silenced while held.
+        from arail import agent_context
+        if agent_context.speech_gate(AGENT_ID):
             _host.emit(
                 AGENT_ID,
-                "Consolidation Analyzer: a candidate scenario crossed your "
-                f"alert-breakeven threshold — see {_relative_pointer(_findings_file())}",
+                "Consolidation Analyzer produced a new finding — see "
+                f"{_relative_pointer(_findings_file())}",
                 "info",
             )
+            if crossed_keys:
+                # Pointer-only, per ARCHITECTURE.md §6's convention — no
+                # rate, no dollar figure, no institution name in the
+                # activity stream. The actual numbers are already in the
+                # findings file above.
+                _host.emit(
+                    AGENT_ID,
+                    "Consolidation Analyzer: a candidate scenario crossed "
+                    "your alert-breakeven threshold — see "
+                    f"{_relative_pointer(_findings_file())}",
+                    "info",
+                )
 
 
 consolidation_analyzer = ConsolidationAnalyzerAgent()

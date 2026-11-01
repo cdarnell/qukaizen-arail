@@ -1,0 +1,599 @@
+{
+  "arms": [
+    "hash",
+    "nomic"
+  ],
+  "bootstrap_ci_95": {
+    "hi": 56.25,
+    "lo": 25.0,
+    "resamples": 10000,
+    "seed": 20260808
+  },
+  "corpus_manifest_sha256": "034940c342fb98264ad99cf1e3b747ecf729db84c91a916cc15cb6fcd1851208",
+  "delta_pp": 40.625,
+  "embedding_dim": 768,
+  "embedding_model": "nomic-embed-text",
+  "exact_token_detail": [
+    {
+      "expected_path": "sources/seeds/model-building/06-airllm-layer-streaming.md",
+      "hash_rank1": "sources/seeds/model-building/04-quantization-basics.md",
+      "id": "root-exact-001",
+      "nomic_rank1": "sources/seeds/model-building/06-airllm-layer-streaming.md",
+      "world": "root"
+    },
+    {
+      "expected_path": "skills/falsify-hypothesis/SKILL.md",
+      "hash_rank1": "agents/researcher/AGENT.md",
+      "id": "root-exact-002",
+      "nomic_rank1": "skills/falsify-hypothesis/SKILL.md",
+      "world": "root"
+    },
+    {
+      "expected_path": "agents/buddy/AGENT.md",
+      "hash_rank1": "sources/world-ai/terms/ipo.md",
+      "id": "ai-exact-001",
+      "nomic_rank1": "agents/buddy/AGENT.md",
+      "world": "ai"
+    },
+    {
+      "expected_path": "agents/sre/AGENT.md",
+      "hash_rank1": "sources/world-ai/terms/procedural-memory.md",
+      "id": "ai-exact-002",
+      "nomic_rank1": "agents/sre/AGENT.md",
+      "world": "ai"
+    },
+    {
+      "expected_path": "agents/experiments/2026-08-07_c83e0a76.md",
+      "hash_rank1": "sources/world-video-games/terms/xmp.md",
+      "id": "vg-exact-001",
+      "nomic_rank1": "agents/sre/state.json",
+      "world": "video-games"
+    },
+    {
+      "expected_path": "sources/world-video-games/terms/dlss.md",
+      "hash_rank1": "sources/world-video-games/terms/dlss.md",
+      "id": "vg-exact-002",
+      "nomic_rank1": "sources/world-video-games/terms/dlss.md",
+      "world": "video-games"
+    },
+    {
+      "expected_path": "skills/blended-apr-calc/SKILL.md",
+      "hash_rank1": "skills/falsify-hypothesis/SKILL.md",
+      "id": "df-exact-001",
+      "nomic_rank1": "skills/blended-apr-calc/SKILL.md",
+      "world": "debt-finance"
+    },
+    {
+      "expected_path": "sources/world-debt-finance/terms/debt-snowball-method.md",
+      "hash_rank1": "sources/world-debt-finance/world-debt-finance.md",
+      "id": "df-exact-002",
+      "nomic_rank1": "sources/world-debt-finance/terms/debt-snowball-method.md",
+      "world": "debt-finance"
+    },
+    {
+      "expected_path": "agents/librarian/AGENT.md",
+      "hash_rank1": "agents/sre/AGENT.md",
+      "id": "qukaizen-exact-001",
+      "nomic_rank1": "agents/librarian/AGENT.md",
+      "world": "qukaizen"
+    },
+    {
+      "expected_path": "sources/world-qukaizen/terms/wisdom-per-watt.md",
+      "hash_rank1": "sources/world-qukaizen/terms/compiled-knowledge.md",
+      "id": "qukaizen-exact-002",
+      "nomic_rank1": "sources/world-qukaizen/terms/wisdom-per-watt.md",
+      "world": "qukaizen"
+    }
+  ],
+  "exact_token_rank1": {
+    "hash": {
+      "correct": 1,
+      "total": 10
+    },
+    "nomic": {
+      "correct": 9,
+      "total": 10
+    }
+  },
+  "exact_tokens_sha256": "a659be0c54eba2d061bf314491ae17841b4925629d449d4252049f9d629dca8e",
+  "git_sha": "9362acdb5c8d43dd3557701a86cd952afcda5890",
+  "lancedb_version": "0.30.2",
+  "n_exact_tokens": 10,
+  "n_queries": 32,
+  "overlap_strata": {
+    "counts": {
+      "high": 21,
+      "low": 3,
+      "zero": 8
+    },
+    "recall5": {
+      "high": {
+        "hash": 0.6666666666666666,
+        "nomic": 1.0
+      },
+      "low": {
+        "hash": 0.6666666666666666,
+        "nomic": 1.0
+      },
+      "zero": {
+        "hash": 0.0,
+        "nomic": 0.625
+      }
+    }
+  },
+  "per_query": [
+    {
+      "hash_recall5": true,
+      "hash_rr10": 1.0,
+      "id": "root-001",
+      "nomic_recall5": true,
+      "nomic_rr10": 1.0,
+      "overlap": 0.0833,
+      "stratum": "high",
+      "world": "root"
+    },
+    {
+      "hash_recall5": true,
+      "hash_rr10": 1.0,
+      "id": "root-002",
+      "nomic_recall5": true,
+      "nomic_rr10": 1.0,
+      "overlap": 0.0682,
+      "stratum": "high",
+      "world": "root"
+    },
+    {
+      "hash_recall5": true,
+      "hash_rr10": 1.0,
+      "id": "root-003",
+      "nomic_recall5": true,
+      "nomic_rr10": 1.0,
+      "overlap": 0.0321,
+      "stratum": "low",
+      "world": "root"
+    },
+    {
+      "hash_recall5": true,
+      "hash_rr10": 0.5,
+      "id": "root-004",
+      "nomic_recall5": true,
+      "nomic_rr10": 1.0,
+      "overlap": 0.0481,
+      "stratum": "low",
+      "world": "root"
+    },
+    {
+      "hash_recall5": false,
+      "hash_rr10": 0.0,
+      "id": "root-005",
+      "nomic_recall5": true,
+      "nomic_rr10": 0.25,
+      "overlap": 0.0,
+      "stratum": "zero",
+      "world": "root"
+    },
+    {
+      "hash_recall5": false,
+      "hash_rr10": 0.0,
+      "id": "root-006",
+      "nomic_recall5": true,
+      "nomic_rr10": 0.3333333333333333,
+      "overlap": 0.0,
+      "stratum": "zero",
+      "world": "root"
+    },
+    {
+      "hash_recall5": false,
+      "hash_rr10": 0.1111111111111111,
+      "id": "root-007",
+      "nomic_recall5": true,
+      "nomic_rr10": 0.5,
+      "overlap": 0.0,
+      "stratum": "zero",
+      "world": "root"
+    },
+    {
+      "hash_recall5": false,
+      "hash_rr10": 0.0,
+      "id": "ai-001",
+      "nomic_recall5": true,
+      "nomic_rr10": 1.0,
+      "overlap": 0.0732,
+      "stratum": "high",
+      "world": "ai"
+    },
+    {
+      "hash_recall5": false,
+      "hash_rr10": 0.0,
+      "id": "ai-002",
+      "nomic_recall5": true,
+      "nomic_rr10": 0.5,
+      "overlap": 0.0896,
+      "stratum": "high",
+      "world": "ai"
+    },
+    {
+      "hash_recall5": false,
+      "hash_rr10": 0.0,
+      "id": "ai-003",
+      "nomic_recall5": true,
+      "nomic_rr10": 1.0,
+      "overlap": 0.1,
+      "stratum": "high",
+      "world": "ai"
+    },
+    {
+      "hash_recall5": true,
+      "hash_rr10": 1.0,
+      "id": "ai-004",
+      "nomic_recall5": true,
+      "nomic_rr10": 1.0,
+      "overlap": 0.1324,
+      "stratum": "high",
+      "world": "ai"
+    },
+    {
+      "hash_recall5": true,
+      "hash_rr10": 1.0,
+      "id": "ai-005",
+      "nomic_recall5": true,
+      "nomic_rr10": 0.5,
+      "overlap": 0.1231,
+      "stratum": "high",
+      "world": "ai"
+    },
+    {
+      "hash_recall5": false,
+      "hash_rr10": 0.0,
+      "id": "ai-006",
+      "nomic_recall5": true,
+      "nomic_rr10": 1.0,
+      "overlap": 0.1111,
+      "stratum": "high",
+      "world": "ai"
+    },
+    {
+      "hash_recall5": false,
+      "hash_rr10": 0.0,
+      "id": "ai-007",
+      "nomic_recall5": false,
+      "nomic_rr10": 0.0,
+      "overlap": 0.0,
+      "stratum": "zero",
+      "world": "ai"
+    },
+    {
+      "hash_recall5": false,
+      "hash_rr10": 0.0,
+      "id": "vg-001",
+      "nomic_recall5": true,
+      "nomic_rr10": 1.0,
+      "overlap": 0.0588,
+      "stratum": "high",
+      "world": "video-games"
+    },
+    {
+      "hash_recall5": false,
+      "hash_rr10": 0.0,
+      "id": "vg-002",
+      "nomic_recall5": true,
+      "nomic_rr10": 1.0,
+      "overlap": 0.0563,
+      "stratum": "high",
+      "world": "video-games"
+    },
+    {
+      "hash_recall5": true,
+      "hash_rr10": 1.0,
+      "id": "vg-003",
+      "nomic_recall5": true,
+      "nomic_rr10": 1.0,
+      "overlap": 0.1077,
+      "stratum": "high",
+      "world": "video-games"
+    },
+    {
+      "hash_recall5": true,
+      "hash_rr10": 1.0,
+      "id": "vg-004",
+      "nomic_recall5": true,
+      "nomic_rr10": 1.0,
+      "overlap": 0.1772,
+      "stratum": "high",
+      "world": "video-games"
+    },
+    {
+      "hash_recall5": false,
+      "hash_rr10": 0.0,
+      "id": "vg-005",
+      "nomic_recall5": false,
+      "nomic_rr10": 0.0,
+      "overlap": 0.0,
+      "stratum": "zero",
+      "world": "video-games"
+    },
+    {
+      "hash_recall5": false,
+      "hash_rr10": 0.0,
+      "id": "vg-006",
+      "nomic_recall5": true,
+      "nomic_rr10": 0.2,
+      "overlap": 0.0286,
+      "stratum": "low",
+      "world": "video-games"
+    },
+    {
+      "hash_recall5": true,
+      "hash_rr10": 1.0,
+      "id": "df-001",
+      "nomic_recall5": true,
+      "nomic_rr10": 1.0,
+      "overlap": 0.1489,
+      "stratum": "high",
+      "world": "debt-finance"
+    },
+    {
+      "hash_recall5": true,
+      "hash_rr10": 1.0,
+      "id": "df-002",
+      "nomic_recall5": true,
+      "nomic_rr10": 1.0,
+      "overlap": 0.18,
+      "stratum": "high",
+      "world": "debt-finance"
+    },
+    {
+      "hash_recall5": false,
+      "hash_rr10": 0.0,
+      "id": "df-003",
+      "nomic_recall5": true,
+      "nomic_rr10": 1.0,
+      "overlap": 0.0,
+      "stratum": "zero",
+      "world": "debt-finance"
+    },
+    {
+      "hash_recall5": true,
+      "hash_rr10": 0.5,
+      "id": "df-004",
+      "nomic_recall5": true,
+      "nomic_rr10": 1.0,
+      "overlap": 0.0851,
+      "stratum": "high",
+      "world": "debt-finance"
+    },
+    {
+      "hash_recall5": false,
+      "hash_rr10": 0.0,
+      "id": "df-005",
+      "nomic_recall5": true,
+      "nomic_rr10": 0.2,
+      "overlap": 0.0,
+      "stratum": "zero",
+      "world": "debt-finance"
+    },
+    {
+      "hash_recall5": true,
+      "hash_rr10": 1.0,
+      "id": "df-006",
+      "nomic_recall5": true,
+      "nomic_rr10": 1.0,
+      "overlap": 0.2,
+      "stratum": "high",
+      "world": "debt-finance"
+    },
+    {
+      "hash_recall5": true,
+      "hash_rr10": 0.25,
+      "id": "qukaizen-001",
+      "nomic_recall5": true,
+      "nomic_rr10": 0.5,
+      "overlap": 0.0702,
+      "stratum": "high",
+      "world": "qukaizen"
+    },
+    {
+      "hash_recall5": false,
+      "hash_rr10": 0.14285714285714285,
+      "id": "qukaizen-002",
+      "nomic_recall5": true,
+      "nomic_rr10": 0.3333333333333333,
+      "overlap": 0.0822,
+      "stratum": "high",
+      "world": "qukaizen"
+    },
+    {
+      "hash_recall5": true,
+      "hash_rr10": 1.0,
+      "id": "qukaizen-003",
+      "nomic_recall5": true,
+      "nomic_rr10": 0.5,
+      "overlap": 0.1231,
+      "stratum": "high",
+      "world": "qukaizen"
+    },
+    {
+      "hash_recall5": true,
+      "hash_rr10": 0.2,
+      "id": "qukaizen-004",
+      "nomic_recall5": true,
+      "nomic_rr10": 1.0,
+      "overlap": 0.1099,
+      "stratum": "high",
+      "world": "qukaizen"
+    },
+    {
+      "hash_recall5": true,
+      "hash_rr10": 1.0,
+      "id": "qukaizen-005",
+      "nomic_recall5": true,
+      "nomic_rr10": 1.0,
+      "overlap": 0.1618,
+      "stratum": "high",
+      "world": "qukaizen"
+    },
+    {
+      "hash_recall5": false,
+      "hash_rr10": 0.0,
+      "id": "qukaizen-006",
+      "nomic_recall5": false,
+      "nomic_rr10": 0.16666666666666666,
+      "overlap": 0.0,
+      "stratum": "zero",
+      "world": "qukaizen"
+    }
+  ],
+  "per_world_recall5": {
+    "hash": {
+      "ai": 0.2857142857142857,
+      "debt-finance": 0.6666666666666666,
+      "qukaizen": 0.6666666666666666,
+      "root": 0.5714285714285714,
+      "video-games": 0.3333333333333333
+    },
+    "nomic": {
+      "ai": 0.8571428571428571,
+      "debt-finance": 1.0,
+      "qukaizen": 0.8333333333333334,
+      "root": 1.0,
+      "video-games": 0.8333333333333334
+    }
+  },
+  "pooled_mrr10": {
+    "hash": 0.4282490079365079,
+    "nomic": 0.7182291666666666
+  },
+  "pooled_recall5": {
+    "hash": 0.5,
+    "nomic": 0.90625
+  },
+  "queries_sha256": "546bf567ef1484bd12cbceb88b165ed7f393981d0563a1dec12b5e00b1975a96",
+  "rank1_losses": [],
+  "row_counts": {
+    "ai": 381,
+    "debt-finance": 82,
+    "qukaizen": 71,
+    "root": 37,
+    "video-games": 318
+  },
+  "schema": "arail.retrieval_ab/v1",
+  "throughput": {
+    "hash": {
+      "ai": {
+        "batch_latencies_sec": [],
+        "rows": 381,
+        "rows_per_sec": 17893.939668097228,
+        "wall_clock_sec": 0.021292124991305172
+      },
+      "debt-finance": {
+        "batch_latencies_sec": [],
+        "rows": 82,
+        "rows_per_sec": 13188.58063792816,
+        "wall_clock_sec": 0.006217499991180375
+      },
+      "qukaizen": {
+        "batch_latencies_sec": [],
+        "rows": 71,
+        "rows_per_sec": 11375.470641336746,
+        "wall_clock_sec": 0.006241499999305233
+      },
+      "root": {
+        "batch_latencies_sec": [],
+        "rows": 37,
+        "rows_per_sec": 7214.936860527461,
+        "wall_clock_sec": 0.005128250006237067
+      },
+      "video-games": {
+        "batch_latencies_sec": [],
+        "rows": 318,
+        "rows_per_sec": 9458.479730045194,
+        "wall_clock_sec": 0.03362062499218155
+      }
+    },
+    "nomic": {
+      "ai": {
+        "batch_latencies_sec": [
+          0.42697329200746026,
+          0.2696872920059832,
+          0.21600712501094677,
+          0.2161825420043897,
+          0.21763841601205058,
+          0.20932054100558162,
+          0.2215492079994874,
+          0.21626558300340548,
+          0.21643875000881962,
+          0.21547787499730475,
+          0.21456191700417548,
+          0.2125638340075966
+        ],
+        "batch_p50_sec": 0.21626558300340548,
+        "batch_p95_sec": 0.42697329200746026,
+        "rows": 381,
+        "rows_per_sec": 133.5581347872773,
+        "wall_clock_sec": 2.8526903329911875
+      },
+      "debt-finance": {
+        "batch_latencies_sec": [
+          0.4029026249918388,
+          0.25219112499326,
+          0.13361604099918623
+        ],
+        "batch_p50_sec": 0.25219112499326,
+        "batch_p95_sec": 0.4029026249918388,
+        "rows": 82,
+        "rows_per_sec": 103.9666170389424,
+        "wall_clock_sec": 0.7887147080036812
+      },
+      "qukaizen": {
+        "batch_latencies_sec": [
+          0.40386929200030863,
+          0.24850887499633245,
+          0.07089320899103768
+        ],
+        "batch_p50_sec": 0.24850887499633245,
+        "batch_p95_sec": 0.40386929200030863,
+        "rows": 71,
+        "rows_per_sec": 98.16454763173545,
+        "wall_clock_sec": 0.7232753749995027
+      },
+      "root": {
+        "batch_latencies_sec": [
+          0.5747030829952564,
+          0.07372508398839273
+        ],
+        "batch_p50_sec": 0.5747030829952564,
+        "batch_p95_sec": 0.5747030829952564,
+        "rows": 37,
+        "rows_per_sec": 57.06068464496942,
+        "wall_clock_sec": 0.6484324580087559
+      },
+      "video-games": {
+        "batch_latencies_sec": [
+          0.4545985829900019,
+          0.8491110830073012,
+          0.42704075000074226,
+          0.3649892079993151,
+          0.45671745800063945,
+          0.43186045800393913,
+          0.40621524999733083,
+          0.3883927080023568,
+          0.21314974999404512,
+          0.2168512080097571
+        ],
+        "batch_p50_sec": 0.42704075000074226,
+        "batch_p95_sec": 0.8491110830073012,
+        "rows": 318,
+        "rows_per_sec": 75.55339147512922,
+        "wall_clock_sec": 4.2089440830022795
+      }
+    }
+  },
+  "verdict": "PASS",
+  "worlds": [
+    "root",
+    "ai",
+    "video-games",
+    "debt-finance",
+    "qukaizen"
+  ]
+}

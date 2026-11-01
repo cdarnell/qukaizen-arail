@@ -203,7 +203,50 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ./arailctl doctor > ci-artifacts/doctor.log 2>&1
+          # ARCHITECTURE.md §10 (operator ruling, PR #181 CI, "fix 2"): this
+          # golden-path lab ships 8 seed PKB pages tracked in git, so this
+          # checkout is ALWAYS in the QA-6 condition — content exists,
+          # nothing has been approved — and `doctor` CORRECTLY reports
+          # `kb_gate` as a required, degraded finding (exit 3) for that
+          # genuinely-un-approved corpus. Of the three ways to make this
+          # step exit 0: approving the seed content in CI would be CI
+          # fabricating consent (ruled out — the architect named it
+          # explicitly, and the 2026-08-09 compiled-kb-bootstrap sprint
+          # forbids automatic approval outright); deleting the seed content
+          # would destroy a fixture other assertions may depend on. The
+          # operator chose the third: stop requiring exit 0 here. DO NOT
+          # "fix" this by approving something in this step — that is
+          # exactly the policy violation this comment exists to prevent.
+          #
+          # What still fails the step: doctor's documented exit-code
+          # contract (arailctl's own `doctor` case, ARCHITECTURE.md
+          # §12/§13) is 0 healthy / 1 broken (no .venv, an import failure,
+          # a required binary missing) / 2 bad flag / 3 degraded. Only 0
+          # and 3 are accepted here as "doctor ran and reported honestly."
+          # 1, 2, or anything else (a crash, a signal, no output at all)
+          # still fails the build — no bare `|| true`, which would let a
+          # genuine crash pass silently and would be this sprint's own
+          # "declared but never instantiated, and nobody's watching"
+          # defect class one more time, just moved into CI wiring.
+          doctor_rc=0
+          ./arailctl doctor > ci-artifacts/doctor.log 2>&1 || doctor_rc=$?
+          echo "doctor exited ${doctor_rc}"
+          if [[ ! -s ci-artifacts/doctor.log ]]; then
+            echo "::error::doctor produced no report at all (ci-artifacts/doctor.log is empty)"
+            exit 1
+          fi
+          case "$doctor_rc" in
+            0)
+              echo "doctor: healthy"
+              ;;
+            3)
+              echo "::warning::doctor exited 3 (degraded) — expected on this golden path (unapproved seed PKB content, kb_gate); see ci-artifacts/doctor.log"
+              ;;
+            *)
+              echo "::error::doctor exited ${doctor_rc} (only 0 or 3 are accepted here) — see ci-artifacts/doctor.log"
+              exit "$doctor_rc"
+              ;;
+          esac
 
       - name: Start lab services
         shell: bash

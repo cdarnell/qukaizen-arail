@@ -1,0 +1,19 @@
+# PII deny-list for eval/retrieval/{queries,exact_tokens}.yaml `evidence` /
+# `author_note` excerpts. This is a public MIT repo; committed excerpts must
+# never carry the operator's or anyone's personal financial or contact data.
+#
+# One regex per non-comment, non-blank line, matched against each excerpt
+# string (case-insensitive). tests/eval/test_retrieval_fixture.py loads this
+# file and rejects any excerpt matching any pattern here, IN ADDITION to the
+# built-in checks (email address, digit run >= 6, currency amount with >= 4
+# significant digits) in ARCHITECTURE.md F1.5.
+\bssn\b
+\bsocial security\b
+\brouting number\b
+\baccount number\b
+\bcard number\b
+\bcvv\b
+\bapr\s*[:=]?\s*\d
+\bcredit score\b
+\$\s?\d{1,3}(,\d{3})+(\.\d+)?
+\b\d{3}-\d{2}-\d{4}\b

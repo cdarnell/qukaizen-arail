@@ -28,6 +28,14 @@ the semaphore capacity.  Set higher only when you have confirmed that
 the router supports concurrent calls without thrashing (e.g. multiple
 CPU threads / GPUs).  Single-worker uvicorn (the default) means this
 is a process-wide limit.
+
+``ARAIL_INFERENCE_SLOT_TIMEOUT_S`` — float seconds, default 300.  Max
+time a caller waits to *acquire* a slot before ``inference_slot`` raises
+``InferenceSlotTimeout``. With capacity 1 (the default), one stuck
+backend call previously blocked every other chat/agent/admin caller
+indefinitely (Phase 1 review finding #19 — no acquire timeout existed
+at all). This does not bound how long the call *inside* the slot may
+run; it only guarantees waiters don't queue forever behind a hang.
 """
 
 from __future__ import annotations
@@ -59,6 +67,7 @@ FAST_PATH_PREFIXES: tuple[str, ...] = (
     "/api/admin/perf",
     "/api/admin/cleanup",
     "/api/admin/security",
+    "/api/admin/agent-lanes",
     "/api/pkb/",
     "/api/research/",
     "/static/",
@@ -84,6 +93,16 @@ _INFLIGHT_BY_LABEL: dict[str, int] = {}
 _COMPLETED_BY_LABEL: dict[str, int] = {}
 
 
+class InferenceSlotTimeout(TimeoutError):
+    """Raised when a caller waits longer than ARAIL_INFERENCE_SLOT_TIMEOUT_S
+    to acquire an inference slot — i.e. a request already holding the slot
+    is stuck. Callers already wrap ``inference_slot`` in a broad
+    ``except Exception`` that surfaces a loud error to the user (see
+    ``_run_chat_completion[_stream]`` in app.py), so raising here turns a
+    silent, permanent hang into a visible, recoverable failure.
+    """
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -99,6 +118,21 @@ def _capacity() -> int:
     except (ValueError, TypeError):
         return 1
     return max(1, min(4, val))
+
+
+def _acquire_timeout_s() -> float:
+    """Read ARAIL_INFERENCE_SLOT_TIMEOUT_S, default 300s.
+
+    Malformed, empty, or non-positive values silently fall back to the
+    default rather than disabling the timeout — a hang here is exactly
+    the failure mode this exists to prevent.
+    """
+    raw = os.getenv("ARAIL_INFERENCE_SLOT_TIMEOUT_S", "").strip()
+    try:
+        val = float(raw)
+    except (ValueError, TypeError):
+        return 300.0
+    return val if val > 0 else 300.0
 
 
 def _get_semaphore() -> asyncio.Semaphore:
@@ -142,9 +176,30 @@ def _label_stats(samples: dict[str, deque[float]]) -> dict[str, dict]:
 # Public API
 # ---------------------------------------------------------------------------
 
+def _effective_acquire_timeout_s(override: float | None) -> float:
+    """The per-call override if it is a positive finite number, else the global
+    one. A bad override never disables the timeout."""
+    if override is None:
+        return _acquire_timeout_s()
+    try:
+        val = float(override)
+    except (ValueError, TypeError):
+        return _acquire_timeout_s()
+    if val != val or val <= 0 or val == float("inf"):
+        return _acquire_timeout_s()
+    return val
+
+
 @asynccontextmanager
-async def inference_slot(label: str = "chat") -> AsyncIterator[None]:
+async def inference_slot(
+    label: str = "chat", *, acquire_timeout_s: float | None = None
+) -> AsyncIterator[None]:
     """Acquire one inference slot. Records wait_ms + run_ms per label.
+
+    ``acquire_timeout_s`` (keyword-only) shortens this caller's wait for a
+    slot; ``None`` keeps the global ``ARAIL_INFERENCE_SLOT_TIMEOUT_S``. The
+    Buddy edge passes 8 so a phone question hears "the lab's model is busy"
+    instead of queueing behind a chat turn for minutes.
 
     Postcondition: the slot is always released, even if the body raises.
     The ``try/finally`` guarantees that a handler exception never deadlocks
@@ -171,7 +226,19 @@ async def inference_slot(label: str = "chat") -> AsyncIterator[None]:
     _PENDING += 1
     t_wait_start = perf_counter()
 
-    await sem.acquire()
+    try:
+        await asyncio.wait_for(
+            sem.acquire(), timeout=_effective_acquire_timeout_s(acquire_timeout_s)
+        )
+    except asyncio.TimeoutError:
+        _PENDING -= 1
+        waited_s = perf_counter() - t_wait_start
+        raise InferenceSlotTimeout(
+            f"Timed out after {waited_s:.0f}s waiting for an inference "
+            f"slot (label={label!r}). A request ahead of this one appears "
+            f"stuck — its backend call may have hung. Try again in a "
+            f"moment; if this repeats, restart the lab."
+        ) from None
 
     t_wait_end = perf_counter()
     _PENDING -= 1
@@ -235,6 +302,30 @@ def snapshot() -> dict:
         "wait_ms": _label_stats(_WAIT_SAMPLES),
         "run_ms": _label_stats(_RUN_SAMPLES),
         "fast_path_ms": fast_stats,
+    }
+
+
+def slot_pressure() -> dict:
+    """Cheap read for the agent-trace chokepoint: capacity/in_flight/pending
+    only, no percentile computation.
+
+    ``snapshot()`` sorts up to 256 floats per label per call — ~50-200 µs,
+    the wrong cost to add to every agent inference. This reads three module
+    globals instead. ``held_by_other = in_flight > 0`` is the caller's job
+    (agent calls are never themselves *in* the slot — V3 — so any non-zero
+    ``in_flight`` here is necessarily someone else's chat/world-forge/etc.
+    call).
+
+    Known imprecision, stated not hidden: ``_INFLIGHT`` is a plain int
+    mutated from the event-loop thread and read here, possibly from a
+    ``to_thread`` worker — an individual sample may be stale by
+    microseconds. Acceptable for a percentage over hundreds of samples; a
+    lock on this hot path would be the wrong trade.
+    """
+    return {
+        "capacity": _capacity(),
+        "in_flight": _INFLIGHT,
+        "pending": _PENDING,
     }
 
 

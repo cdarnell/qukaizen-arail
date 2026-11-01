@@ -66,6 +66,12 @@ def available() -> bool:
         return False
 
 
+class VectorSearchError(Exception):
+    """Raised by :meth:`VectorIndex.search_vector` on a backend failure —
+    see that method's docstring. Distinguishable from a genuine zero-hit
+    result, which is ``[]``, never this exception."""
+
+
 class VectorIndex:
     """Thin wrapper around a single LanceDB table.
 
@@ -175,6 +181,61 @@ class VectorIndex:
             return 0
         return len(materialized)
 
+    def search_vector(
+        self,
+        vector: list[float],
+        *,
+        k: int = 5,
+        min_score: float = 0.0,
+        where: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return up to ``k`` nearest rows for an already-computed query
+        vector — same post-processing as :meth:`search`, but skips this
+        module's own ``hash_embedding`` for callers using a different
+        embedding provider (e.g. ``arail.dbspec.embed``, at a different
+        dimension). Added for the Tier 1.2 embedder swap (boundary #6
+        amended in ``sprints/2026-08-08-arail2-tier1-integration/REVIEW2.md``
+        to permit exactly this one additive method — there was previously
+        no way to hand ``VectorIndex`` a precomputed vector, which is why
+        callers had grown their own duplicate of this post-processing).
+
+        Raises :class:`VectorSearchError` on any backend failure — a
+        missing table, a dimension mismatch, or any other LanceDB error —
+        deliberately distinguishable from a genuine zero-hit result
+        (``[]``). :meth:`search` catches it to preserve its own long-
+        standing failsoft contract; callers that need to tell "no hits"
+        apart from "this table is broken" (e.g. to decide whether to
+        surface a degraded status) should call this method directly and
+        catch :class:`VectorSearchError` themselves.
+        """
+        table = self._table()
+        if table is None:
+            raise VectorSearchError(f"table {self.name!r} not found at {self.db_path}")
+        try:
+            # L2-normalized vectors: squared-L2 distance lies in [0, 4],
+            # with 0 meaning identical and 2 meaning orthogonal. Convert to
+            # a [0, 1] similarity = 1 - dist/2 so consumers have a single
+            # intuitive score regardless of metric choice. (Both hash
+            # vectors and Ollama's nomic-embed-text vectors are unit-norm,
+            # so this holds for either embedder.)
+            q = table.search(vector)
+            if where:
+                q = q.where(where)
+            hits = q.limit(max(1, k)).to_list()
+        except Exception as exc:  # noqa: BLE001
+            raise VectorSearchError(str(exc)) from exc
+
+        out: list[dict[str, Any]] = []
+        for h in hits:
+            dist = float(h.get("_distance", 2.0))
+            score = max(0.0, min(1.0, 1.0 - dist / 2.0))
+            if score < min_score:
+                continue
+            row = {kk: vv for kk, vv in h.items() if kk not in ("vector", "_distance")}
+            row["score"] = round(score, 4)
+            out.append(row)
+        return out
+
     def search(
         self,
         query: str,
@@ -187,34 +248,15 @@ class VectorIndex:
 
         Each row gets a ``score`` field in [0, 1] derived from the LanceDB
         distance (1 - distance, clamped). Rows below ``min_score`` are
-        dropped. Returns [] if the table is missing or LanceDB raised.
+        dropped. Returns [] if the table is missing or LanceDB raised —
+        this method's failsoft contract is unchanged; it delegates to
+        :meth:`search_vector` and swallows :class:`VectorSearchError`.
         """
-        table = self._table()
-        if table is None:
-            return []
         vec = hash_embedding(query, dim=self.dim)
         try:
-            # L2-normalized hash vectors: squared-L2 distance lies in
-            # [0, 4], with 0 meaning identical and 2 meaning orthogonal.
-            # Convert to a [0, 1] similarity = 1 - dist/2 so consumers
-            # have a single intuitive score regardless of metric choice.
-            q = table.search(vec)
-            if where:
-                q = q.where(where)
-            hits = q.limit(max(1, k)).to_list()
-        except Exception:
+            return self.search_vector(vec, k=k, min_score=min_score, where=where)
+        except VectorSearchError:
             return []
-
-        out: list[dict[str, Any]] = []
-        for h in hits:
-            dist = float(h.get("_distance", 2.0))
-            score = max(0.0, min(1.0, 1.0 - dist / 2.0))
-            if score < min_score:
-                continue
-            row = {k: v for k, v in h.items() if k not in ("vector", "_distance")}
-            row["score"] = round(score, 4)
-            out.append(row)
-        return out
 
     def count(self) -> int:
         table = self._table()

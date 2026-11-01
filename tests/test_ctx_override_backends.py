@@ -43,14 +43,19 @@ def test_cpu_backend_default_n_ctx_is_4096(monkeypatch, tmp_path):
             captured["n_ctx"] = n_ctx
             captured["model_path"] = model_path
 
-    # Create a fake .gguf file so CPUBackend's path resolution succeeds
+    # Create a fake .gguf file so CPUBackend's path resolution succeeds.
+    # Named with a parseable "3B" so the answering-model ceiling
+    # (arail.registry.ceiling, primary role requires known params < 8B)
+    # doesn't refuse it outright — the fake file has no real GGUF metadata
+    # for the ceiling to read, so the name-regex fallback must resolve to
+    # something under the ceiling for CPUBackend construction to succeed.
     models_dir = tmp_path / "lab" / "models"
     models_dir.mkdir(parents=True)
-    gguf_file = models_dir / "test-model.gguf"
+    gguf_file = models_dir / "test-model-3b.gguf"
     gguf_file.write_bytes(b"fake")
 
     monkeypatch.setenv("ARAIL_MODELS_DIR", str(models_dir))
-    monkeypatch.setenv("MODEL_NAME", "test-model")
+    monkeypatch.setenv("MODEL_NAME", "test-model-3b")
 
     # Inject a fake llama_cpp module into sys.modules
     import types

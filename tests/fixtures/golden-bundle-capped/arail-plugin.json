@@ -1,0 +1,17 @@
+{
+  "name": "qukaizen/dac-world-golden-capped",
+  "type": "world",
+  "description": "DaC WorldBundle for Golden Capped Fixture — 300 terms, mountable in ARAIL.",
+  "version": "1.0.0",
+  "dac": {
+    "schema": "dac.arail-plugin/v1",
+    "world": "golden-capped",
+    "world_sha256": "f456246d4fad23187782e1dbf91eea74dba9fe5fb5cd330936c780b9bd1b498e",
+    "bundle": ".",
+    "provides": {
+      "capabilities": "capabilities.json",
+      "skill": "SKILL.md",
+      "bundle_manifest": "manifest.json"
+    }
+  }
+}

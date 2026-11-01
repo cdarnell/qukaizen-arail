@@ -11,6 +11,7 @@ audience: beginner
 related:
   - agents
   - BUDDY
+  - agent-loop
 buddy_prompt: "Walk me through what an agent loop does, using the lab I'm in as the example."
 ---
 # Agents, explained

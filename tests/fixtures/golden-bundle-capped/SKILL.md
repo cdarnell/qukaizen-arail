@@ -1,0 +1,575 @@
+---
+title: "Golden Capped Fixture"
+id: world-golden-capped
+name: "Golden Capped Fixture"
+domain: golden-capped
+version: "1.0.0"
+tags: [world, knowledge, golden-capped]
+when_to_use:
+  - When the user asks about Golden Capped Fixture or its declared categories
+  - When grounding a claim that falls inside this World's domain
+when_not_to_use:
+  - When the question is outside this World's declared categories
+  - When a claim cannot be tied to one of this World's sourced terms (say so; don't invent)
+---
+This lab studies Golden Capped Fixture. This World was DREAMED by a model — terms are model-asserted and UNVERIFIED. Hypotheses and answers stay within the declared categories (alpha, beta).
+
+This World was DREAMED by a model — terms are model-asserted and UNVERIFIED.
+
+_This World has 300 terms; the 273 most connected are shown here. The full glossary lives in the Knowledge Base._
+
+_Answer only from the terms below. Every term lists its source. If a question cannot be answered from these terms, say the World does not cover it — do not invent._
+
+### Alpha
+
+- **Capped Term 0000** (`capped-term-0000`) — A deterministic fixture term number 0000 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0002** (`capped-term-0002`) — A deterministic fixture term number 0002 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0004** (`capped-term-0004`) — A deterministic fixture term number 0004 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0006** (`capped-term-0006`) — A deterministic fixture term number 0006 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0008** (`capped-term-0008`) — A deterministic fixture term number 0008 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0010** (`capped-term-0010`) — A deterministic fixture term number 0010 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0012** (`capped-term-0012`) — A deterministic fixture term number 0012 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0014** (`capped-term-0014`) — A deterministic fixture term number 0014 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0016** (`capped-term-0016`) — A deterministic fixture term number 0016 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0018** (`capped-term-0018`) — A deterministic fixture term number 0018 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0020** (`capped-term-0020`) — A deterministic fixture term number 0020 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0022** (`capped-term-0022`) — A deterministic fixture term number 0022 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0024** (`capped-term-0024`) — A deterministic fixture term number 0024 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0026** (`capped-term-0026`) — A deterministic fixture term number 0026 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0028** (`capped-term-0028`) — A deterministic fixture term number 0028 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0030** (`capped-term-0030`) — A deterministic fixture term number 0030 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0032** (`capped-term-0032`) — A deterministic fixture term number 0032 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0034** (`capped-term-0034`) — A deterministic fixture term number 0034 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0036** (`capped-term-0036`) — A deterministic fixture term number 0036 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0038** (`capped-term-0038`) — A deterministic fixture term number 0038 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0040** (`capped-term-0040`) — A deterministic fixture term number 0040 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0042** (`capped-term-0042`) — A deterministic fixture term number 0042 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0044** (`capped-term-0044`) — A deterministic fixture term number 0044 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0046** (`capped-term-0046`) — A deterministic fixture term number 0046 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0048** (`capped-term-0048`) — A deterministic fixture term number 0048 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0050** (`capped-term-0050`) — A deterministic fixture term number 0050 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0052** (`capped-term-0052`) — A deterministic fixture term number 0052 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0054** (`capped-term-0054`) — A deterministic fixture term number 0054 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0056** (`capped-term-0056`) — A deterministic fixture term number 0056 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0058** (`capped-term-0058`) — A deterministic fixture term number 0058 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0060** (`capped-term-0060`) — A deterministic fixture term number 0060 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0062** (`capped-term-0062`) — A deterministic fixture term number 0062 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0064** (`capped-term-0064`) — A deterministic fixture term number 0064 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0066** (`capped-term-0066`) — A deterministic fixture term number 0066 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0068** (`capped-term-0068`) — A deterministic fixture term number 0068 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0070** (`capped-term-0070`) — A deterministic fixture term number 0070 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0072** (`capped-term-0072`) — A deterministic fixture term number 0072 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0074** (`capped-term-0074`) — A deterministic fixture term number 0074 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0076** (`capped-term-0076`) — A deterministic fixture term number 0076 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0078** (`capped-term-0078`) — A deterministic fixture term number 0078 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0080** (`capped-term-0080`) — A deterministic fixture term number 0080 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0082** (`capped-term-0082`) — A deterministic fixture term number 0082 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0084** (`capped-term-0084`) — A deterministic fixture term number 0084 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0086** (`capped-term-0086`) — A deterministic fixture term number 0086 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0088** (`capped-term-0088`) — A deterministic fixture term number 0088 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0090** (`capped-term-0090`) — A deterministic fixture term number 0090 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0092** (`capped-term-0092`) — A deterministic fixture term number 0092 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0094** (`capped-term-0094`) — A deterministic fixture term number 0094 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0096** (`capped-term-0096`) — A deterministic fixture term number 0096 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0098** (`capped-term-0098`) — A deterministic fixture term number 0098 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0100** (`capped-term-0100`) — A deterministic fixture term number 0100 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0102** (`capped-term-0102`) — A deterministic fixture term number 0102 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0104** (`capped-term-0104`) — A deterministic fixture term number 0104 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0106** (`capped-term-0106`) — A deterministic fixture term number 0106 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0108** (`capped-term-0108`) — A deterministic fixture term number 0108 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0110** (`capped-term-0110`) — A deterministic fixture term number 0110 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0112** (`capped-term-0112`) — A deterministic fixture term number 0112 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0114** (`capped-term-0114`) — A deterministic fixture term number 0114 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0116** (`capped-term-0116`) — A deterministic fixture term number 0116 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0118** (`capped-term-0118`) — A deterministic fixture term number 0118 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0120** (`capped-term-0120`) — A deterministic fixture term number 0120 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0122** (`capped-term-0122`) — A deterministic fixture term number 0122 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0124** (`capped-term-0124`) — A deterministic fixture term number 0124 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0126** (`capped-term-0126`) — A deterministic fixture term number 0126 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0128** (`capped-term-0128`) — A deterministic fixture term number 0128 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0130** (`capped-term-0130`) — A deterministic fixture term number 0130 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0132** (`capped-term-0132`) — A deterministic fixture term number 0132 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0134** (`capped-term-0134`) — A deterministic fixture term number 0134 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0136** (`capped-term-0136`) — A deterministic fixture term number 0136 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0138** (`capped-term-0138`) — A deterministic fixture term number 0138 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0140** (`capped-term-0140`) — A deterministic fixture term number 0140 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0142** (`capped-term-0142`) — A deterministic fixture term number 0142 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0144** (`capped-term-0144`) — A deterministic fixture term number 0144 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0146** (`capped-term-0146`) — A deterministic fixture term number 0146 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0148** (`capped-term-0148`) — A deterministic fixture term number 0148 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0150** (`capped-term-0150`) — A deterministic fixture term number 0150 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0152** (`capped-term-0152`) — A deterministic fixture term number 0152 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0154** (`capped-term-0154`) — A deterministic fixture term number 0154 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0156** (`capped-term-0156`) — A deterministic fixture term number 0156 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0158** (`capped-term-0158`) — A deterministic fixture term number 0158 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0160** (`capped-term-0160`) — A deterministic fixture term number 0160 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0162** (`capped-term-0162`) — A deterministic fixture term number 0162 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0164** (`capped-term-0164`) — A deterministic fixture term number 0164 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0166** (`capped-term-0166`) — A deterministic fixture term number 0166 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0168** (`capped-term-0168`) — A deterministic fixture term number 0168 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0170** (`capped-term-0170`) — A deterministic fixture term number 0170 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0172** (`capped-term-0172`) — A deterministic fixture term number 0172 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0174** (`capped-term-0174`) — A deterministic fixture term number 0174 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0176** (`capped-term-0176`) — A deterministic fixture term number 0176 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0178** (`capped-term-0178`) — A deterministic fixture term number 0178 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0180** (`capped-term-0180`) — A deterministic fixture term number 0180 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0182** (`capped-term-0182`) — A deterministic fixture term number 0182 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0184** (`capped-term-0184`) — A deterministic fixture term number 0184 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0186** (`capped-term-0186`) — A deterministic fixture term number 0186 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0188** (`capped-term-0188`) — A deterministic fixture term number 0188 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0190** (`capped-term-0190`) — A deterministic fixture term number 0190 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0192** (`capped-term-0192`) — A deterministic fixture term number 0192 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0194** (`capped-term-0194`) — A deterministic fixture term number 0194 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0196** (`capped-term-0196`) — A deterministic fixture term number 0196 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0198** (`capped-term-0198`) — A deterministic fixture term number 0198 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0200** (`capped-term-0200`) — A deterministic fixture term number 0200 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0202** (`capped-term-0202`) — A deterministic fixture term number 0202 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0204** (`capped-term-0204`) — A deterministic fixture term number 0204 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0206** (`capped-term-0206`) — A deterministic fixture term number 0206 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0208** (`capped-term-0208`) — A deterministic fixture term number 0208 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0210** (`capped-term-0210`) — A deterministic fixture term number 0210 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0212** (`capped-term-0212`) — A deterministic fixture term number 0212 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0214** (`capped-term-0214`) — A deterministic fixture term number 0214 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0216** (`capped-term-0216`) — A deterministic fixture term number 0216 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0218** (`capped-term-0218`) — A deterministic fixture term number 0218 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0220** (`capped-term-0220`) — A deterministic fixture term number 0220 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0222** (`capped-term-0222`) — A deterministic fixture term number 0222 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0224** (`capped-term-0224`) — A deterministic fixture term number 0224 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0226** (`capped-term-0226`) — A deterministic fixture term number 0226 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0228** (`capped-term-0228`) — A deterministic fixture term number 0228 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0230** (`capped-term-0230`) — A deterministic fixture term number 0230 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0232** (`capped-term-0232`) — A deterministic fixture term number 0232 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0234** (`capped-term-0234`) — A deterministic fixture term number 0234 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0236** (`capped-term-0236`) — A deterministic fixture term number 0236 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0238** (`capped-term-0238`) — A deterministic fixture term number 0238 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0240** (`capped-term-0240`) — A deterministic fixture term number 0240 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0242** (`capped-term-0242`) — A deterministic fixture term number 0242 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0244** (`capped-term-0244`) — A deterministic fixture term number 0244 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0246** (`capped-term-0246`) — A deterministic fixture term number 0246 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0248** (`capped-term-0248`) — A deterministic fixture term number 0248 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0250** (`capped-term-0250`) — A deterministic fixture term number 0250 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0252** (`capped-term-0252`) — A deterministic fixture term number 0252 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0254** (`capped-term-0254`) — A deterministic fixture term number 0254 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0256** (`capped-term-0256`) — A deterministic fixture term number 0256 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0258** (`capped-term-0258`) — A deterministic fixture term number 0258 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0260** (`capped-term-0260`) — A deterministic fixture term number 0260 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0262** (`capped-term-0262`) — A deterministic fixture term number 0262 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0264** (`capped-term-0264`) — A deterministic fixture term number 0264 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0266** (`capped-term-0266`) — A deterministic fixture term number 0266 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0268** (`capped-term-0268`) — A deterministic fixture term number 0268 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0270** (`capped-term-0270`) — A deterministic fixture term number 0270 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0272** (`capped-term-0272`) — A deterministic fixture term number 0272 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+
+### Beta
+
+- **Capped Term 0001** (`capped-term-0001`) — A deterministic fixture term number 0001 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0003** (`capped-term-0003`) — A deterministic fixture term number 0003 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0005** (`capped-term-0005`) — A deterministic fixture term number 0005 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0007** (`capped-term-0007`) — A deterministic fixture term number 0007 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0009** (`capped-term-0009`) — A deterministic fixture term number 0009 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0011** (`capped-term-0011`) — A deterministic fixture term number 0011 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0013** (`capped-term-0013`) — A deterministic fixture term number 0013 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0015** (`capped-term-0015`) — A deterministic fixture term number 0015 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0017** (`capped-term-0017`) — A deterministic fixture term number 0017 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0019** (`capped-term-0019`) — A deterministic fixture term number 0019 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0021** (`capped-term-0021`) — A deterministic fixture term number 0021 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0023** (`capped-term-0023`) — A deterministic fixture term number 0023 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0025** (`capped-term-0025`) — A deterministic fixture term number 0025 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0027** (`capped-term-0027`) — A deterministic fixture term number 0027 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0029** (`capped-term-0029`) — A deterministic fixture term number 0029 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0031** (`capped-term-0031`) — A deterministic fixture term number 0031 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0033** (`capped-term-0033`) — A deterministic fixture term number 0033 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0035** (`capped-term-0035`) — A deterministic fixture term number 0035 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0037** (`capped-term-0037`) — A deterministic fixture term number 0037 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0039** (`capped-term-0039`) — A deterministic fixture term number 0039 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0041** (`capped-term-0041`) — A deterministic fixture term number 0041 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0043** (`capped-term-0043`) — A deterministic fixture term number 0043 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0045** (`capped-term-0045`) — A deterministic fixture term number 0045 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0047** (`capped-term-0047`) — A deterministic fixture term number 0047 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0049** (`capped-term-0049`) — A deterministic fixture term number 0049 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0051** (`capped-term-0051`) — A deterministic fixture term number 0051 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0053** (`capped-term-0053`) — A deterministic fixture term number 0053 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0055** (`capped-term-0055`) — A deterministic fixture term number 0055 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0057** (`capped-term-0057`) — A deterministic fixture term number 0057 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0059** (`capped-term-0059`) — A deterministic fixture term number 0059 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0061** (`capped-term-0061`) — A deterministic fixture term number 0061 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0063** (`capped-term-0063`) — A deterministic fixture term number 0063 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0065** (`capped-term-0065`) — A deterministic fixture term number 0065 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0067** (`capped-term-0067`) — A deterministic fixture term number 0067 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0069** (`capped-term-0069`) — A deterministic fixture term number 0069 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0071** (`capped-term-0071`) — A deterministic fixture term number 0071 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0073** (`capped-term-0073`) — A deterministic fixture term number 0073 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0075** (`capped-term-0075`) — A deterministic fixture term number 0075 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0077** (`capped-term-0077`) — A deterministic fixture term number 0077 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0079** (`capped-term-0079`) — A deterministic fixture term number 0079 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0081** (`capped-term-0081`) — A deterministic fixture term number 0081 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0083** (`capped-term-0083`) — A deterministic fixture term number 0083 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0085** (`capped-term-0085`) — A deterministic fixture term number 0085 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0087** (`capped-term-0087`) — A deterministic fixture term number 0087 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0089** (`capped-term-0089`) — A deterministic fixture term number 0089 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0091** (`capped-term-0091`) — A deterministic fixture term number 0091 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0093** (`capped-term-0093`) — A deterministic fixture term number 0093 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0095** (`capped-term-0095`) — A deterministic fixture term number 0095 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0097** (`capped-term-0097`) — A deterministic fixture term number 0097 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0099** (`capped-term-0099`) — A deterministic fixture term number 0099 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0101** (`capped-term-0101`) — A deterministic fixture term number 0101 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0103** (`capped-term-0103`) — A deterministic fixture term number 0103 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0105** (`capped-term-0105`) — A deterministic fixture term number 0105 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0107** (`capped-term-0107`) — A deterministic fixture term number 0107 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0109** (`capped-term-0109`) — A deterministic fixture term number 0109 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0111** (`capped-term-0111`) — A deterministic fixture term number 0111 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0113** (`capped-term-0113`) — A deterministic fixture term number 0113 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0115** (`capped-term-0115`) — A deterministic fixture term number 0115 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0117** (`capped-term-0117`) — A deterministic fixture term number 0117 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0119** (`capped-term-0119`) — A deterministic fixture term number 0119 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0121** (`capped-term-0121`) — A deterministic fixture term number 0121 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0123** (`capped-term-0123`) — A deterministic fixture term number 0123 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0125** (`capped-term-0125`) — A deterministic fixture term number 0125 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0127** (`capped-term-0127`) — A deterministic fixture term number 0127 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0129** (`capped-term-0129`) — A deterministic fixture term number 0129 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0131** (`capped-term-0131`) — A deterministic fixture term number 0131 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0133** (`capped-term-0133`) — A deterministic fixture term number 0133 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0135** (`capped-term-0135`) — A deterministic fixture term number 0135 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0137** (`capped-term-0137`) — A deterministic fixture term number 0137 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0139** (`capped-term-0139`) — A deterministic fixture term number 0139 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0141** (`capped-term-0141`) — A deterministic fixture term number 0141 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0143** (`capped-term-0143`) — A deterministic fixture term number 0143 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0145** (`capped-term-0145`) — A deterministic fixture term number 0145 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0147** (`capped-term-0147`) — A deterministic fixture term number 0147 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0149** (`capped-term-0149`) — A deterministic fixture term number 0149 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0151** (`capped-term-0151`) — A deterministic fixture term number 0151 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0153** (`capped-term-0153`) — A deterministic fixture term number 0153 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0155** (`capped-term-0155`) — A deterministic fixture term number 0155 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0157** (`capped-term-0157`) — A deterministic fixture term number 0157 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0159** (`capped-term-0159`) — A deterministic fixture term number 0159 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0161** (`capped-term-0161`) — A deterministic fixture term number 0161 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0163** (`capped-term-0163`) — A deterministic fixture term number 0163 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0165** (`capped-term-0165`) — A deterministic fixture term number 0165 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0167** (`capped-term-0167`) — A deterministic fixture term number 0167 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0169** (`capped-term-0169`) — A deterministic fixture term number 0169 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0171** (`capped-term-0171`) — A deterministic fixture term number 0171 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0173** (`capped-term-0173`) — A deterministic fixture term number 0173 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0175** (`capped-term-0175`) — A deterministic fixture term number 0175 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0177** (`capped-term-0177`) — A deterministic fixture term number 0177 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0179** (`capped-term-0179`) — A deterministic fixture term number 0179 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0181** (`capped-term-0181`) — A deterministic fixture term number 0181 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0183** (`capped-term-0183`) — A deterministic fixture term number 0183 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0185** (`capped-term-0185`) — A deterministic fixture term number 0185 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0187** (`capped-term-0187`) — A deterministic fixture term number 0187 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0189** (`capped-term-0189`) — A deterministic fixture term number 0189 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0191** (`capped-term-0191`) — A deterministic fixture term number 0191 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0193** (`capped-term-0193`) — A deterministic fixture term number 0193 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0195** (`capped-term-0195`) — A deterministic fixture term number 0195 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0197** (`capped-term-0197`) — A deterministic fixture term number 0197 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0199** (`capped-term-0199`) — A deterministic fixture term number 0199 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0201** (`capped-term-0201`) — A deterministic fixture term number 0201 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0203** (`capped-term-0203`) — A deterministic fixture term number 0203 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0205** (`capped-term-0205`) — A deterministic fixture term number 0205 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0207** (`capped-term-0207`) — A deterministic fixture term number 0207 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0209** (`capped-term-0209`) — A deterministic fixture term number 0209 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0211** (`capped-term-0211`) — A deterministic fixture term number 0211 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0213** (`capped-term-0213`) — A deterministic fixture term number 0213 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0215** (`capped-term-0215`) — A deterministic fixture term number 0215 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0217** (`capped-term-0217`) — A deterministic fixture term number 0217 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0219** (`capped-term-0219`) — A deterministic fixture term number 0219 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0221** (`capped-term-0221`) — A deterministic fixture term number 0221 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0223** (`capped-term-0223`) — A deterministic fixture term number 0223 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0225** (`capped-term-0225`) — A deterministic fixture term number 0225 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0227** (`capped-term-0227`) — A deterministic fixture term number 0227 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0229** (`capped-term-0229`) — A deterministic fixture term number 0229 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0231** (`capped-term-0231`) — A deterministic fixture term number 0231 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0233** (`capped-term-0233`) — A deterministic fixture term number 0233 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0235** (`capped-term-0235`) — A deterministic fixture term number 0235 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0237** (`capped-term-0237`) — A deterministic fixture term number 0237 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0239** (`capped-term-0239`) — A deterministic fixture term number 0239 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0241** (`capped-term-0241`) — A deterministic fixture term number 0241 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0243** (`capped-term-0243`) — A deterministic fixture term number 0243 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0245** (`capped-term-0245`) — A deterministic fixture term number 0245 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0247** (`capped-term-0247`) — A deterministic fixture term number 0247 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0249** (`capped-term-0249`) — A deterministic fixture term number 0249 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0251** (`capped-term-0251`) — A deterministic fixture term number 0251 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0253** (`capped-term-0253`) — A deterministic fixture term number 0253 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0255** (`capped-term-0255`) — A deterministic fixture term number 0255 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0257** (`capped-term-0257`) — A deterministic fixture term number 0257 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0259** (`capped-term-0259`) — A deterministic fixture term number 0259 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0261** (`capped-term-0261`) — A deterministic fixture term number 0261 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0263** (`capped-term-0263`) — A deterministic fixture term number 0263 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0265** (`capped-term-0265`) — A deterministic fixture term number 0265 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0267** (`capped-term-0267`) — A deterministic fixture term number 0267 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0269** (`capped-term-0269`) — A deterministic fixture term number 0269 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+- **Capped Term 0271** (`capped-term-0271`) — A deterministic fixture term number 0271 used to exercise the measured-size capped-selection path.
+  - Source: model:test
+
+<!-- dac:world_sha256 f456246d4fad23187782e1dbf91eea74dba9fe5fb5cd330936c780b9bd1b498e -->

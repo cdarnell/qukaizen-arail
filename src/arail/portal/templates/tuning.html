@@ -125,45 +125,6 @@
   #tn-sched-status.ok   { color: var(--positive); }
   #tn-sched-status.warn { color: var(--warn); }
 
-  /* AirLLM vs AeroLLM comparison block. Lives between hero and tabs.
-     Numbers are *expected* gains pending the perf harness; clearly
-     labeled as projected so we don't oversell. */
-  .vs-wrap { margin: 4px 0 22px; }
-  .vs-head { display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin: 0 0 10px; flex-wrap: wrap; }
-  .vs-head h2 { margin:0; display:inline; font-size:14px; font-family:var(--font-mono); font-weight:500;
-                text-transform:var(--label-transform); letter-spacing:var(--label-tracking); color:var(--text-muted); }
-  .vs-head .vs-note { font-size:11px; color:var(--text-muted); }
-  .vs-grid { display:grid; gap:14px; grid-template-columns: 1fr 1fr; }
-  @media (max-width: 720px) { .vs-grid { grid-template-columns: 1fr; } }
-  .vs-card { border:1px solid var(--border); border-radius:var(--radius-m); padding:14px 16px; background:var(--surface); position:relative; }
-  .vs-card.air  { border-color:var(--border); }
-  .vs-card.aero { border-color:var(--positive-a28); box-shadow: 0 6px 22px rgba(0,0,0,0.35); }
-  .vs-title { display:flex; align-items:baseline; gap:8px; }
-  .vs-title h3 { margin:0; font-size:15px; color:var(--text-strong); }
-  .vs-title .pill { font-size:10px; font-family:var(--font-mono); font-weight:500; padding:2px 7px;
-                border-radius:var(--radius-pill); letter-spacing:var(--label-tracking); text-transform:var(--label-transform); }
-  .vs-card.air  .pill { background:var(--surface2); color:var(--text-muted); border:1px solid var(--border-strong); }
-  .vs-card.aero .pill { background:var(--positive-a08); color:var(--positive); border:1px solid var(--positive-a28); }
-  .vs-tag { font-size:11px; color:var(--text-muted); margin-top:2px; }
-  .vs-rows { margin-top: 12px; display: grid; gap: 8px; }
-  .vs-row { display:grid; grid-template-columns: 130px 1fr auto; gap:10px; align-items:center; font-size:12.5px; }
-  .vs-row .lbl { color:var(--text-muted); }
-  .vs-row .bar { height:6px; background:var(--surface2); border-radius:var(--radius-pill); overflow:hidden; }
-  .vs-row .bar > span { display:block; height:100%; background:color-mix(in srgb, var(--accent2) 45%, transparent); }
-  .vs-card.aero .vs-row .bar > span { background: var(--accent2); }
-  .vs-row .num { font-family:var(--font-mono); font-variant-numeric: tabular-nums; color:var(--text); min-width: 80px; text-align:right; }
-  .vs-gainx { color: var(--positive); font-weight: 600; }
-  .vs-foot { margin-top: 12px; padding-top: 10px; border-top:1px dashed var(--border); font-size:11.5px; color:var(--text-muted); line-height:1.5; }
-  .vs-foot strong { color:var(--positive); }
-  .vs-tech { margin-top: 14px; }
-  .vs-tech h2 { display:inline; font-size:13px; font-family:var(--font-mono); font-weight:500;
-                text-transform:var(--label-transform); letter-spacing:var(--label-tracking); color:var(--text-muted); margin:0 0 8px; }
-  .vs-tech-grid { display:grid; gap:10px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
-  .vs-tech-card { border:1px solid var(--border); border-radius:var(--radius-m); padding:10px 12px; background:var(--surface); }
-  .vs-tech-card h4 { margin:0 0 4px; font-size:12.5px; color:var(--text-strong); }
-  .vs-tech-card .gain { font-size:11px; color:var(--positive); font-weight:600; letter-spacing:0.04em; }
-  .vs-tech-card p { margin:6px 0 0; font-size:11.5px; color:var(--text-muted); line-height:1.5; }
-
   details.tn-know  { margin-top: 12px; }
   details.tn-know summary { cursor: pointer; color: var(--text-muted); font-size: 12px; }
   details.tn-know code    { font-size: 11px; }
@@ -180,8 +141,8 @@
   <div class="tn-note-weights">
     <b>This tunes inference speed, not model weights.</b> Tuning sweeps runtime
     knobs to make a large model <i>run faster</i> on your hardware — it does not
-    train or fine-tune a model. To build/distill a model, use the
-    <a href="/build">Model Building</a> tab.
+    train or fine-tune a model. To build/distill a model, use
+    <code>arailctl nucleus build</code> (see the <a href="/forge">Model Forge</a> tab).
   </div>
 
   <div class="tn-hero">
@@ -200,8 +161,8 @@
 
   <!-- ── Runtime profile ────────────────────────────────────────────
        Reconciles three signals (manual override, presence, time-of-day)
-       into one mode + source. AirLLM caps max_tokens by mode today;
-       AeroLLM picks up ring_depth + batch when it lands. -->
+       into one mode + source. AeroLLM caps max_tokens by mode today;
+       ring_depth + batch knobs pick up as the runtime matures. -->
   <div id="runtime-profile" class="rp-card">
     <div class="rp-head">
       <h2>Runtime profile</h2>
@@ -357,99 +318,31 @@
   })();
   </script>
 
-  <!-- ── AirLLM vs AeroLLM comparison ───────────────────────────────
-       Expected/projected gains. Replace these once the perf harness
-       (single-stream + batch + spec-decode) lands real numbers.
-       PROPOSAL §3.6: collapsed by default — most users don't need
-       to read the projected-perf cards on every visit. -->
-  <details class="vs-wrap" id="vs-wrap">
-    <summary class="vs-head">
-      <h2 id="vs-title">Architecture &amp; projected performance</h2>
-      <span class="vs-note" id="vs-note">Projected · pending benchmark harness · 70B-class model on consumer NVMe + a single GPU/Apple-silicon host</span>
-    </summary>
-    <div class="vs-grid">
-      <div class="vs-card air">
-        <div class="vs-title">
-          <h3>AirLLM</h3>
-          <span class="pill">baseline</span>
-        </div>
-        <div class="vs-tag">Sequential layer streaming. Read → compute → evict, one layer at a time.</div>
-        <div class="vs-rows" data-engine="airllm">
-          <div class="vs-row" data-workload="single_stream"><span class="lbl">Single-stream</span><span class="bar"><span style="width:18%"></span></span><span class="num">~0.2 tok/s</span></div>
-          <div class="vs-row" data-workload="batch_64"><span class="lbl">Batch (B=64)</span><span class="bar"><span style="width:18%"></span></span><span class="num">~0.2 tok/s</span></div>
-          <div class="vs-row" data-workload="spec_decode"><span class="lbl">Spec-decode</span><span class="bar"><span style="width:0%"></span></span><span class="num">—</span></div>
-          <div class="vs-row"><span class="lbl">I/O ↔ compute</span><span class="bar"><span style="width:18%"></span></span><span class="num">serial</span></div>
-        </div>
-        <div class="vs-foot">Reference implementation. Disk-bandwidth bound; compute idles while the next layer loads.</div>
-      </div>
-
-      <div class="vs-card aero">
-        <div class="vs-title">
-          <h3>AeroLLM</h3>
-          <span class="pill">★ performant</span>
-        </div>
-        <div class="vs-tag">Prefetch threading + amortized batch + speculative decoding. Same hardware.</div>
-        <div class="vs-rows" data-engine="aerollm">
-          <div class="vs-row" data-workload="single_stream"><span class="lbl">Single-stream</span><span class="bar"><span style="width:55%"></span></span><span class="num">~0.6–1.2 tok/s <strong class="vs-gainx">3–6×</strong></span></div>
-          <div class="vs-row" data-workload="batch_64"><span class="lbl">Batch (B=64)</span><span class="bar"><span style="width:96%"></span></span><span class="num">~10–20 tok/s/prompt <strong class="vs-gainx">50–100×</strong></span></div>
-          <div class="vs-row" data-workload="spec_decode"><span class="lbl">Spec-decode</span><span class="bar"><span style="width:70%"></span></span><span class="num">2–4 tok/step <strong class="vs-gainx">2–4×</strong></span></div>
-          <div class="vs-row"><span class="lbl">I/O ↔ compute</span><span class="bar"><span style="width:90%"></span></span><span class="num">overlapped</span></div>
-        </div>
-        <div class="vs-foot">Stacked end-to-end: <strong>~30–100× aggregate throughput</strong> on batch workloads vs AirLLM, with single-stream latency cut by <strong>3–6×</strong>. Same NVMe, same GPU.</div>
-      </div>
-    </div>
-
-    <details class="vs-tech">
-      <summary><h2>Where the gains come from</h2></summary>
-      <div class="vs-tech-grid">
-        <div class="vs-tech-card">
-          <h4>Prefetch threading <span class="gain">+1.5–2×</span></h4>
-          <p>Layer N+1 reads from NVMe on a background thread while layer N runs on GPU. Hides compute behind the I/O wall — single-stream latency drops without changing arithmetic.</p>
-        </div>
-        <div class="vs-tech-card">
-          <h4>Batch inference <span class="gain">+30–100×</span></h4>
-          <p>One layer read amortized across many prompts. Disk traffic stays flat as B grows; throughput scales linearly until the GPU saturates. The big win for offline/research workloads with thousands of prompts.</p>
-        </div>
-        <div class="vs-tech-card">
-          <h4>Speculative decoding <span class="gain">+2–4×</span></h4>
-          <p>A small draft model proposes K tokens; the streamed model verifies them in a single forward pass. Accepts ~2–4 tokens per pass on typical prompts — fewer disk reads per emitted token.</p>
-        </div>
-        <div class="vs-tech-card">
-          <h4>Layer-bundle replay <span class="gain">cache wins</span></h4>
-          <p>Hot layers stay resident across prompts; cold layers stream. Replay bundles let identical prefixes skip recomputation. Compounds with batch and spec-decode.</p>
-        </div>
-      </div>
-    </details>
-  </details>
-
   <!-- ── View tabs ───────────────────────────────────────────────────
-       Default: AirLLM MLX is the only visible tab. Flip LAB_SHOW_AEROLLM=1
-       in .env to expose the AeroLLM MLX + CUDA tabs (for the operator
-       running AeroLLM alongside or in place of AirLLM). The view registry
-       in JS keeps all three views regardless — only the buttons hide. -->
+       Default: AeroLLM MLX is the only visible tab. Flip LAB_SHOW_AEROLLM=1
+       in .env to expose the AeroLLM CUDA tab (for the operator running
+       the CUDA runtime alongside MLX). The view registry in JS keeps
+       both views regardless — only the buttons hide. -->
   <div class="tn-tabs" role="tablist">
-    <button class="tn-tab active" data-view="airllm-mlx" role="tab">
-      AirLLM MLX <span class="tn-tab-note">· Apple silicon · default</span>
+    <button class="tn-tab active" data-view="aerollm-mlx" role="tab">
+      QueueLLM MLX <span class="tn-tab-note">· Apple silicon · default</span>
     </button>
     {% if show_aerollm %}
-    <button class="tn-tab" data-view="aerollm-mlx" role="tab">
-      AeroLLM MLX <span class="tn-tab-note">· experimental · unified memory</span>
-    </button>
     <button class="tn-tab" data-view="aerollm-cuda" role="tab">
-      AeroLLM CUDA <span class="tn-tab-note">· experimental · 1 TB class</span>
+      QueueLLM CUDA <span class="tn-tab-note">· experimental · 1 TB class</span>
     </button>
     {% endif %}
   </div>
 
   <!-- ── Framing card ────────────────────────────────────────────────
-       AirLLM streams transformer layers from disk so a 70B-class
+       AeroLLM streams transformer layers from disk so a 70B-class
        model fits on modest unified-memory hardware. Measurements
        land in lab/data/mlx-bench.jsonl. -->
   <div class="tn-card tn-framing-card" id="tn-framing-card">
     <div class="tn-framing-row">
       <span class="tn-framing-icon">🧪</span>
       <div class="tn-meta tn-framing-body" id="tn-framing-body">
-        <strong class="tn-strong">AirLLM — layer streaming on Apple silicon.</strong>
+        <strong class="tn-strong">QueueLLM — layer streaming on Apple silicon.</strong>
         Each transformer layer is loaded from NVMe into unified
         memory, executed by MLX kernels in place, then evicted
         before the next layer streams in. Lets a 70B-class model
@@ -601,7 +494,7 @@
       </g>
     </svg>
 
-    <!-- ── AeroLLM CUDA reference diagram (the 3-tier flow) ────── -->
+    <!-- ── AeroLLM CUDA diagram (the 3-tier flow) ────── -->
     <svg id="tn-arch-aerollm" class="tn-arch-svg"
          viewBox="0 0 1000 520">
       <defs>
@@ -857,22 +750,20 @@
   const $ = (id) => document.getElementById(id);
   const fmt = (n, d = 3) => (n == null ? "—" : Number(n).toFixed(d));
 
-  // View selection — blueprint ships with one visible view (airllm-mlx).
-  // The AeroLLM views remain in the registry so JS state, tests, and the
-  // legacy aerollm tuning backend keep working; they're just not exposed
-  // in the tab strip. Re-add the buttons in the tab markup when the
-  // AeroLLM Rust runtime is ready to demo.
-  const VIEWS = ["airllm-mlx", "aerollm-mlx", "aerollm-cuda"];
+  // View selection — blueprint ships with one visible view (aerollm-mlx).
+  // The CUDA view stays in the registry so JS state and the aerollm-cuda
+  // tuning backend keep working; it's just not exposed in the tab strip
+  // until LAB_SHOW_AEROLLM=1.
+  const VIEWS = ["aerollm-mlx", "aerollm-cuda"];
   const VIEW_BACKEND = {
-    "airllm-mlx":   "mlx",
     "aerollm-mlx":  "mlx",
     "aerollm-cuda": "aerollm",
   };
   const VIEW_META = {
-    "airllm-mlx": {
-      heroTitle: "AirLLM MLX \u2014 tune the deep model on Apple silicon",
+    "aerollm-mlx": {
+      heroTitle: "QueueLLM MLX \u2014 tune the deep model on Apple silicon",
       archDiagram: "mlx",
-      archTitle: "Architecture \u2014 AirLLM unified-memory streaming",
+      archTitle: "Architecture \u2014 QueueLLM unified-memory streaming",
       archBlurb: ("Layers live on NVMe. A <em>rotating window</em> of the current "
        + "layer is mmap'd into unified memory; MLX kernels read it "
        + "<em>in place</em> (no PCIe copy \u2014 that stage doesn't exist on "
@@ -880,35 +771,28 @@
        + "<code>quantized_kv_start</code>; prefill chunks via "
        + "<code>prefill_step_size</code>; prefixes reuse via the prompt "
        + "cache. These are the levers our knobs reach."),
-      framingBody: ("<strong class=\"tn-strong\">AirLLM \u2014 layer streaming on Apple silicon.</strong> "
+      framingBody: ("<strong class=\"tn-strong\">QueueLLM \u2014 layer streaming on Apple silicon.</strong> "
        + "Each transformer layer is loaded from NVMe into unified memory, executed by MLX kernels in "
        + "place, then evicted before the next layer streams in. Lets a 70B-class model run on hardware "
        + "that can't hold the full weights at once. "
        + "<br><span class=\"tn-dim\">Measurements land in <code>lab/data/mlx-bench.jsonl</code>.</span>"),
     },
-    "aerollm-mlx": {
-      heroTitle: "AeroLLM MLX \u2014 (experimental, dormant)",
-      archDiagram: "mlx",
-      archTitle: "Architecture \u2014 MLX unified-memory streaming",
-      archBlurb: ("AeroLLM is the planned Rust runtime. Same MLX pipeline as AirLLM but with "
-       + "multi-threaded prefetch to hide disk latency. Currently dormant in this blueprint."),
-      framingBody: ("<strong class=\"tn-strong\">AeroLLM \u2014 (dormant).</strong> "
-       + "View kept for back-compat with existing tuning data."),
-    },
     "aerollm-cuda": {
-      heroTitle: "AeroLLM CUDA \u2014 (experimental, dormant)",
+      heroTitle: "QueueLLM CUDA \u2014 tune the deep model on a CUDA host",
       archDiagram: "aerollm",
-      archTitle: "Architecture \u2014 AeroLLM CUDA 3-tier streaming",
-      archBlurb: ("Reference diagram for the AeroLLM CUDA path (1 TB class on a 24 GB card). "
-       + "Dormant in this blueprint."),
-      framingBody: ("<strong class=\"tn-strong\">AeroLLM CUDA \u2014 (dormant).</strong> "
-       + "Diagram is illustrative; no active loop."),
+      archTitle: "Architecture \u2014 QueueLLM CUDA 3-tier streaming",
+      archBlurb: ("Reference diagram for the QueueLLM CUDA path (1 TB class on a 24 GB card): "
+       + "layers stream SSD \u2192 CPU RAM buffer \u2192 GPU VRAM, with a background prefetch "
+       + "thread keeping the next layer ready before the current one finishes."),
+      framingBody: ("<strong class=\"tn-strong\">QueueLLM CUDA \u2014 layer streaming on a discrete GPU.</strong> "
+       + "Layers stream from SSD into a CPU RAM buffer, then across PCIe into GPU VRAM for "
+       + "compute, then are freed. Lets a 1 TB-class model run on a single consumer GPU."),
     },
   };
 
   function currentView() {
-    const v = localStorage.getItem("arail.tuning.view") || "airllm-mlx";
-    return VIEWS.includes(v) ? v : "airllm-mlx";
+    const v = localStorage.getItem("arail.tuning.view") || "aerollm-mlx";
+    return VIEWS.includes(v) ? v : "aerollm-mlx";
   }
   function currentBackend() {
     return VIEW_BACKEND[currentView()] || "mlx";
@@ -1252,85 +1136,6 @@
       const state = await jget("/api/tuning/autoresearch/status");
       paintState(state);
     } catch (e) { console.warn(e); }
-    // Projected → measured swap. Endpoint returns {rows: []} when the
-    // perf harness hasn't been run yet, in which case we leave the
-    // hand-authored projected numbers alone.
-    loadPerfSummary().catch(e => console.warn(e));
-  }
-
-  // ─── AirLLM-vs-AeroLLM projected → measured swap ─────────────────
-  // Fires from refresh(). Replaces the static "~0.2 tok/s" / "~10–20
-  // tok/s/prompt" rows in .vs-grid when /api/perf/summary returns
-  // measured numbers; falls through (silently) when the harness
-  // hasn't produced a JSONL yet. The page is fine without it.
-  function fmtTokSec(v) {
-    if (v == null) return null;
-    if (v >= 100) return v.toFixed(0) + " tok/s";
-    if (v >= 10)  return v.toFixed(1) + " tok/s";
-    return v.toFixed(2) + " tok/s";
-  }
-  function paintPerfRow(engine, workloadId, value, ratio, peakAcrossEngines) {
-    // Find the .vs-row inside .vs-rows[data-engine=engine] for this
-    // workload. Only update the .num text and bar width — we don't
-    // touch the label or any sibling rows.
-    const rowsEl = document.querySelector('.vs-rows[data-engine="' + engine + '"]');
-    if (!rowsEl) return;
-    const row = rowsEl.querySelector('.vs-row[data-workload="' + workloadId + '"]');
-    if (!row) return;
-    const num = row.querySelector('.num');
-    const barFill = row.querySelector('.bar > span');
-    if (!num || !barFill) return;
-    const text = fmtTokSec(value);
-    if (text == null) {
-      // Measured cell was null (stub or missing); leave the projected
-      // value in place rather than rendering a misleading "—".
-      return;
-    }
-    let html = text;
-    if (engine === "aerollm" && ratio && ratio >= 1.5) {
-      html += ' <strong class="vs-gainx">' + ratio.toFixed(1) + '×</strong>';
-    }
-    num.innerHTML = html;
-    // Bar width: scale against the larger of the two engines so the
-    // visual ratio matches the numeric ratio.
-    if (peakAcrossEngines && peakAcrossEngines > 0) {
-      const pct = Math.max(4, Math.min(100, (value / peakAcrossEngines) * 100));
-      barFill.style.width = pct.toFixed(0) + "%";
-    }
-  }
-  async function loadPerfSummary() {
-    let summary;
-    try {
-      const r = await fetch("/api/perf/summary");
-      if (!r.ok) return;
-      summary = await r.json();
-    } catch (e) { return; }
-    const rows = (summary && summary.rows) || [];
-    if (!rows.length) return;  // keep projected text
-    let painted = 0;
-    for (const r of rows) {
-      const wid = r.workload_id;
-      const peak = Math.max(r.airllm || 0, r.aerollm || 0);
-      if (r.airllm != null) {
-        paintPerfRow("airllm",  wid, r.airllm,  null,    peak);
-      }
-      if (r.aerollm != null) {
-        paintPerfRow("aerollm", wid, r.aerollm, r.ratio, peak);
-      }
-      if (r.airllm != null || r.aerollm != null) painted++;
-    }
-    if (painted > 0) {
-      const title = document.getElementById("vs-title");
-      const note  = document.getElementById("vs-note");
-      if (title) title.textContent = "AirLLM vs AeroLLM — measured performance";
-      if (note) {
-        const date = (summary.as_of || "").slice(0, 10) || "today";
-        const hw   = summary.hardware_id || "host";
-        const sha  = summary.git_sha ? (" · git " + summary.git_sha) : "";
-        const part = painted < rows.length ? (" · " + painted + "/" + rows.length + " workloads") : "";
-        note.textContent = "Measured · " + hw + " · " + date + part + sha;
-      }
-    }
   }
 
   async function captureBaseline() {

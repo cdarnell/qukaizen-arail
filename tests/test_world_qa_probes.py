@@ -194,6 +194,11 @@ def test_framing_cap_enforced_on_overlong_domain(tmp_path, monkeypatch):
     wm.mount(bdir, data_dir=data_dir, pkb_root=pkb_root)
     monkeypatch.setattr(wm, "_default_data_dir", lambda: data_dir)
     from arail.agents import _builtin_buddy as bud
+    # Isolate the goal store: a real lab may have an active goal whose text
+    # ("...study partner...") contributes its own X/Y characters on top of
+    # the truncated framing fields, breaking the character-count assertion
+    # below. The goal is irrelevant to this test's purpose (framing cap).
+    monkeypatch.setattr(bud._host, "get_current_goal", lambda: None)
     block = bud._world_framing_block()
     assert block.count("X") <= bud._MAX_WORLD_DOMAIN_FRAMING
     assert block.count("Y") <= bud._MAX_WORLD_VOCAB_REGISTER

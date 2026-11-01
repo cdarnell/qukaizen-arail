@@ -107,7 +107,7 @@ def test_single_write_latency_under_4s(tmp_path: Path, trial: int):
         db.create_table("pkb_pages", data=[{
             "path": "_seed.md",
             "name": "_seed.md",
-            "vector": hash_embedding("seed"),
+            "vector": hash_embedding("seed", dim=768),
             "mtime": 0.0,
             "source_kind": "user",
         }], mode="overwrite")

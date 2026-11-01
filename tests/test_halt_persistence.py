@@ -12,6 +12,7 @@ def _simulate_restart() -> None:
     with scheduler._halt_lock:
         scheduler._halted = False
         scheduler._halt_loaded = False
+        scheduler._halt_changed_at = None
 
 
 def test_halt_survives_restart():
@@ -43,3 +44,23 @@ def test_corrupt_halt_file_fails_open():
     _simulate_restart()
     # Corrupt file → not halted (fail open: never brick the lab), no raise.
     assert scheduler.jobs_halted() is False
+
+
+def test_halt_changed_at_survives_restart():
+    """agent_context.hold_state()'s "changed_at" (sprint 2026-09-20-
+    buddy-front-and-center) reads scheduler.halt_changed_at(), which must
+    survive a restart the same way the halted flag itself does."""
+    assert scheduler.halt_changed_at() is None
+    scheduler.halt_all_jobs()
+    stamped = scheduler.halt_changed_at()
+    assert stamped is not None
+
+    _simulate_restart()
+    assert scheduler.halt_changed_at() == stamped
+
+
+def test_halt_changed_at_cleared_on_resume():
+    scheduler.halt_all_jobs()
+    assert scheduler.halt_changed_at() is not None
+    scheduler.resume_all_jobs()
+    assert scheduler.halt_changed_at() is None

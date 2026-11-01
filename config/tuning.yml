@@ -65,7 +65,7 @@ knobs:
         # Add specific branch/tag refs here when sweeping between
         # AeroLLM versions. Agent cannot invent URLs.
       rationale: |
-        Which AeroLLM build to install. Swapping refs is the biggest
+        Which QueueLLM build to install. Swapping refs is the biggest
         lever — real code changes live in the upstream repo. The
         agent is allowed to pick from this list only.
   aerollm_compression:
@@ -94,7 +94,7 @@ knobs:
     schema:
       type: bool
       rationale: |
-        Whether AeroLLM's prefetch worker runs. On hides disk latency
+        Whether QueueLLM's prefetch worker runs. On hides disk latency
         behind compute; off forces serial layer loading for a clean
         baseline.
   prefetch_lookahead:

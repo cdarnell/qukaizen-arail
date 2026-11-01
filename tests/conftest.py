@@ -12,9 +12,37 @@ monkeypatch the env var back to empty.
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
 
 import pytest
+
+# ---------------------------------------------------------------------------
+# Package-source isolation — MUST run before any `import arail.*`.
+#
+# `arail` is installed editable (`pip install -e .`) against the checkout it
+# was installed FROM. A git worktree is a separate checkout of a different
+# branch/commit; its own `pip install -e .` was never (re-)run, so the
+# editable install's .pth file still points at the ORIGINAL checkout's
+# `src/`. Without this, every test file that doesn't carry its own explicit
+# `sys.path.insert(0, .../src)` boilerplate silently imports `arail` from
+# that other checkout — exercising code this worktree never touched, and
+# missing every change this worktree DID make. (Discovered running the two-
+# slot chat model redesign, sprints/2026-08-11-two-slot-chat-models: a
+# `tests/registry/` run passed cleanly while testing code with none of that
+# sprint's changes — `arail.portal.app` had no `_chat_slots_payload`
+# attribute at all, `hasattr` confirmed it — because nothing in that
+# directory ever pointed sys.path at this checkout.) Once ANY module of a
+# package is imported, Python caches it for the rest of the process — so
+# this must win the race and run before the FIRST `import arail` anywhere
+# in the session, which means here, at the top of the root conftest, ahead
+# of the .env isolation below (that isolation only protects `arail.config`'s
+# import-time load_dotenv() call, not module resolution itself).
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_SRC_DIR = os.path.join(_REPO_ROOT, "src")
+if _SRC_DIR in sys.path:
+    sys.path.remove(_SRC_DIR)
+sys.path.insert(0, _SRC_DIR)
 
 # ---------------------------------------------------------------------------
 # Session-level .env isolation — MUST run before any `import arail.*`.
@@ -109,6 +137,48 @@ def _isolated_env_file(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def _hermetic_boot_models(request, monkeypatch, tmp_path):
+    """Keep the portal's boot model resolution/warm off the real machine.
+
+    Starting the app (``with TestClient(app)``) now resolves the two model
+    slots and warms them by default (sprints/2026-10-20-boot-model-
+    autoresolve). Tests must never talk to a developer's real Ollama or load
+    weights, so: warm is off (ARAIL_BOOT_WARM=0) and the resolver's two
+    network reads report "Ollama unreachable". Tests that exercise the
+    resolver patch these themselves (their patch runs after this one);
+    ``@pytest.mark.real_resolver_net`` opts out entirely.
+    """
+    # The resolver stamps MODEL_NAME / AEROLLM_MODEL (and remembers the .env
+    # values in ARAIL_ENV_PREF_*) straight into os.environ, bypassing
+    # monkeypatch -- restore them by hand, as isolated_secrets does.
+    _stamped = ("MODEL_NAME", "AEROLLM_MODEL", "ARAIL_ENV_PREF_A", "ARAIL_ENV_PREF_B")
+    saved = {k: os.environ.get(k) for k in _stamped}
+    os.environ.pop("ARAIL_ENV_PREF_A", None)
+    os.environ.pop("ARAIL_ENV_PREF_B", None)
+    if not request.node.get_closest_marker("real_resolver_net"):
+        monkeypatch.setenv("ARAIL_BOOT_WARM", "0")
+        from arail import model_resolve
+        monkeypatch.setattr(model_resolve, "_fetch_ollama_tags", lambda: None)
+        monkeypatch.setattr(model_resolve, "_fetch_capabilities", lambda name: None)
+    # Pins/cache and the crash sentinel are per-test, never the session's or
+    # a developer's real files.
+    monkeypatch.setenv("ARAIL_MODEL_DEFAULTS_FILE",
+                       str(tmp_path / "model_defaults.yaml"))
+    from arail.portal import model_warmth as _mw
+    monkeypatch.setattr(_mw, "sentinel_path",
+                        lambda: tmp_path / ".aerollm_boot_warm.inflight")
+    from arail import model_resolve as _mr
+    _mr.last_resolution().clear()
+    yield
+    _mr.last_resolution().clear()
+    for k, v in saved.items():
+        if v is None:
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = v
+
+
+@pytest.fixture(autouse=True)
 def _no_ambient_lab_mode_env(monkeypatch):
     """Delete (and restore after the test) the lab-mode/identity env keys.
 
@@ -158,6 +228,96 @@ def _allow_testclient_host(monkeypatch):
     non-loopback Host header.
     """
     monkeypatch.setenv("ARAIL_ALLOWED_HOSTS", "testserver")
+
+
+PORTAL_TEST_TOKEN = "arl1_" + "A" * 43  # fixed and obviously fake; never a real token
+
+
+def _write_0600(path, text):
+    """Write ``text`` to ``path`` with mode 0600 and return the path."""
+    path.write_text(text + "\n")
+    path.chmod(0o600)
+    return path
+
+
+@pytest.fixture
+def portal_bearer():
+    """Headers carrying the test bearer, for clients that are not a Starlette TestClient
+    (``httpx.ASGITransport`` callers pass ``headers=portal_bearer``)."""
+    return {"Authorization": f"Bearer {PORTAL_TEST_TOKEN}"}
+
+
+_bearer_active = {"on": False}
+_send_patched = {"done": False}
+
+
+def _patch_testclient_send_once():
+    """Wrap ``TestClient.send`` once per process; the wrapper is a no-op unless a test has the
+    bearer switched on. Patching ``send`` (not ``__init__``) also covers module- and
+    session-scoped clients, which are built before any function-scoped fixture runs."""
+    if _send_patched["done"]:
+        return
+    try:
+        import httpx
+        from starlette.testclient import TestClient
+    except ImportError:
+        # A minimal CI job (no httpx/starlette) builds no TestClient, so there is
+        # nothing to wrap and no portal test can run there.
+        return
+
+    orig_send = httpx.Client.send
+
+    def send(self, request, **kw):
+        # /api/host/v1/* has its own bhc1_ credential; a portal bearer there would turn
+        # "credential_missing" into "credential_invalid".
+        if (_bearer_active["on"] and "authorization" not in request.headers
+                and not request.url.path.startswith("/api/host/v1/")):
+            request.headers["Authorization"] = f"Bearer {PORTAL_TEST_TOKEN}"
+        return orig_send(self, request, **kw)
+
+    TestClient.send = send
+    _send_patched["done"] = True
+
+
+@pytest.fixture(autouse=True)
+def _portal_bearer_for_tests(request, monkeypatch, tmp_path):
+    """Give every ``TestClient`` request the portal bearer, so ~7k tests keep working unedited.
+
+    Portal auth (ARAIL D3, sprint 2026-10-25-buddy-s4-gateway-in-box) requires a credential on
+    every route. Rather than a test-mode switch (an env flag that disables auth is one ``.env``
+    line from shipping), this fixture points ``auth.token_path`` at a real 0600 file holding a
+    fixed fake token and makes ``TestClient`` add an ``Authorization`` header to any request
+    that has none. Existing tests therefore pass through the REAL bearer check, not a bypass. A
+    test that sends its own ``Authorization`` keeps it; a test of auth itself opts out with
+    ``@pytest.mark.real_auth`` and uses ``logged_in_client`` or its own headers.
+
+    Debt TD4: patching ``TestClient.send`` is clever; if it ever bites, the fallback is an
+    explicit ``portal_client`` fixture and a mechanical rewrite of the 136 files.
+    """
+    from arail import config as arail_config
+    from arail.portal import auth as portal_auth
+
+    # No test may write session or token state into the real lab/data, or leak a login lockout
+    # or a cached session store into the next test.
+    monkeypatch.setattr(portal_auth, "_stores", {})
+    monkeypatch.setattr(portal_auth, "limiter", portal_auth.LoginLimiter())
+    monkeypatch.setattr(portal_auth, "device_limiters", {})
+    # A test that enters a TestClient context runs the portal's startup hook; that must never bind
+    # the real Buddy edge port. Edge tests choose their own free port.
+    monkeypatch.setenv("ARAIL_EDGE_PORT", "0")
+    if request.node.get_closest_marker("real_auth"):
+        monkeypatch.setattr(arail_config, "DATA_DIR", tmp_path / "portal_data")
+        yield
+        return
+    token_file = _write_0600(tmp_path / "portal.token", PORTAL_TEST_TOKEN)
+    monkeypatch.setattr(portal_auth, "token_path", lambda: token_file)
+    monkeypatch.setattr(portal_auth, "sessions_path", lambda: tmp_path / "portal_sessions.json")
+    _patch_testclient_send_once()
+    _bearer_active["on"] = True
+    try:
+        yield
+    finally:
+        _bearer_active["on"] = False
 
 
 @pytest.fixture(autouse=True)
@@ -219,6 +379,129 @@ def _no_ambient_world_mount(monkeypatch, tmp_path_factory):
 
 
 @pytest.fixture(autouse=True)
+def _isolated_agent_observability_data_root(monkeypatch, tmp_path):
+    """Isolate agent_trace / flight-recorder / agent_context state per test
+    (sprint 2026-09-20-buddy-front-and-center hermeticity fix).
+
+    Since that sprint, ``ModelRouter.complete()``/``.stream_complete()`` —
+    the single chokepoint every agent (and chat) inference call already
+    went through — now writes an ``agent_trace`` record on every call, and
+    may capture a body when the flight recorder is on. Both persist to
+    ``DATA_DIR`` (lazily resolved per call, by design — see
+    ``agent_trace.py``'s module docstring — specifically so a fixture like
+    this one can redirect it). Without this, ANY test anywhere in the
+    suite that drives a real ``ModelRouter`` — not just the sprint's own
+    new test files — writes into the developer's actual
+    ``lab/data/agent_traces.jsonl`` / ``flight_recorder.json``, following
+    the same pre-existing pattern as ``_no_ambient_halt_flag`` /
+    ``_no_ambient_window_override`` above, just for a data root instead of
+    a single file.
+
+    ``activity.py``'s ``LOG_FILE`` is the one exception in this family
+    that is NOT resolved lazily — it is a module-level constant bound to
+    the real ``config.DATA_DIR`` at ``activity.py``'s import time.
+    Monkeypatching ``activity_mod.LOG_FILE`` still works for *future*
+    ``.emit()`` disk writes (the method does a fresh global lookup of
+    ``LOG_FILE`` on every call, not a value captured once at
+    construction) — but the module-level ``activity_log`` singleton
+    itself is a specific object every other module already holds a direct
+    reference to (``from arail.activity import activity_log``), typically
+    imported during collection, well before any fixture runs. Setting
+    ``ActivityLog._instance = None`` does **not** reset that — it only
+    affects a *future* ``ActivityLog()`` call, and nothing in the
+    codebase makes one after the first (confirmed the hard way: an
+    earlier version of this fixture did exactly that and still leaked
+    200 stale in-memory events into every test). The only thing that
+    actually clears the singleton every other module already points at
+    is mutating its buffer in place — the same technique
+    ``test_autoresearch_e2e_fake_aerollm.py``'s local ``_fresh_events()``
+    helper already uses. This matters to this sprint specifically because
+    ``GET /api/agents/status`` (the V7 fix) reads ``activity_log.recent()``
+    as a fallback when an agent has no trace yet — an unisolated buffer
+    leaks real, accumulated activity into that fallback's numbers.
+
+    Also isolates ``cost_tracker`` (QA F9, TEST_REPORT.md). Same class of
+    bug as ``activity_log`` above: ``CostTracker.__new__`` returns a
+    process-global singleton, and ``__init__`` binds ``_data_path`` from
+    ``config.DATA_DIR`` once — but only the *first* time, guarded by
+    ``self._initialized`` — so simply monkeypatching ``config.DATA_DIR``
+    later, the way this fixture already does, has no effect on a
+    ``CostTracker`` constructed before this fixture ran (i.e. at import
+    time, on every module that did ``from arail.costs import
+    cost_tracker``). Every test that drives a real ``ModelRouter`` bills
+    this singleton to the real ``lab/data/costs.json``; this sprint's own
+    per-agent ``source=`` attribution (contract #8) made that pollution
+    directly visible on the cost page instead of an anonymous "cloud"
+    bucket, and — because recap's ``$5`` cost ceiling
+    (``RECAP_COST_CEILING_USD``) reads ``cost_tracker.total_billed_usage_
+    usd``, a real, accumulating number — running the suite enough times
+    exhausts it and 21 of ``test_recap_{core,paranoid,robotouille_
+    mock}.py``'s tests fail with ``COST_EXCEEDED``, on a worktree that has
+    simply been used, no code change required to reproduce.
+
+    Forcing ``_initialized = False`` then calling ``__init__()`` again
+    (rather than replacing ``cost_tracker`` with a new instance, which —
+    per the ``activity_log`` lesson just above — every other module's
+    already-bound reference would not see) re-runs the whole constructor
+    against the by-then-patched ``config.DATA_DIR``: every accumulator
+    (``total_calls``, ``total_billed_usage_usd``, ``calls_by_source``,
+    etc.) goes back to its own zero-state and ``_data_path`` is rebound
+    to this test's ``tmp_path``, in one call, immune to a future
+    accumulator being added to ``__init__`` and forgotten here.
+
+    A companion default this redirect requires: ``portal/app.py``'s
+    one-shot World nudge (``_world_prompt_pending()``) checks whether
+    ``DATA_DIR / ".world-prompt-seen"`` exists to decide whether to render
+    the dashboard's onboarding nudge instead of the normal page chrome.
+    Before this fixture existed, most page-rendering tests were
+    incidentally reading the real, already-dismissed marker on the
+    developer's machine — an always-empty ``tmp_path`` makes every such
+    request look like a brand-new, never-onboarded lab instead, which
+    broke `tests/portal/test_base_template_smoke.py` AND
+    `tests/test_boot_overlay.py` (confirmed: both fail, even standalone,
+    without this). Pre-seeding "already seen" as the default restores the
+    ambient state those (and presumably other, not-yet-found) tests
+    already unknowingly depended on.
+
+    The one place that default is *wrong*: a test specifically about the
+    marker's absence. `tests/test_onboarding.py::test_dashboard_unblocks_
+    after_onboarding` is exactly that, and — like `tests/test_world_
+    first_impression.py`'s tests already do for the same reason —
+    explicitly monkeypatches `portal.app._world_prompt_marker` to a
+    guaranteed-absent path of its own, which wins over this fixture's
+    default regardless of `DATA_DIR`. A global fixture deciding an
+    ambient default is fine; a global fixture deciding it for the ONE
+    test that is *about* that state is the bug this docstring's git
+    history is a cautionary tale of (an earlier version of this fixture
+    got exactly this backwards twice: first by not seeding at all, then
+    by seeding only in one unrelated test module instead of here).
+    """
+    from arail import agent_context, agent_trace, config
+    from arail import activity as activity_mod
+    from arail.costs import cost_tracker
+
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    (tmp_path / ".world-prompt-seen").touch()
+    monkeypatch.setattr(activity_mod, "LOG_FILE", tmp_path / "activity.jsonl")
+    activity_mod.activity_log._buffer.clear()
+
+    agent_context._reset_for_tests()
+    agent_trace._reset_for_tests()
+    # QA F9: force a full re-__init__ against the now-patched DATA_DIR --
+    # see the docstring above for why a fresh CostTracker() would not do
+    # (every other module's `from arail.costs import cost_tracker` import
+    # would keep pointing at the old, unpatched object).
+    cost_tracker._initialized = False
+    cost_tracker.__init__()
+
+    yield
+
+    agent_context._reset_for_tests()
+    agent_trace._reset_for_tests()
+    activity_mod.activity_log._buffer.clear()
+
+
+@pytest.fixture(autouse=True)
 def _reset_egress_guard():
     """Reset the egress guard to un-installed state between tests.
 
@@ -236,3 +519,50 @@ def _reset_egress_guard():
         arail.egress._reset_for_tests()
     except Exception:  # noqa: BLE001
         pass  # If egress hasn't been imported yet, nothing to reset.
+
+
+@pytest.fixture(autouse=True)
+def _stub_embedding_provider(request, monkeypatch):
+    """Stub ``arail.dbspec.embed.embed_documents``/``embed_query`` with a
+    fast, deterministic, network-free fake — UNLESS the test is marked
+    ``@pytest.mark.requires_ollama``, in which case real Ollama is used.
+
+    This exists because Tier 1.2 (arail2-tier1-integration sprint) wires
+    ``pkb.index_all``/``_semantic_search`` to call the real embedding
+    provider. Without this fixture, every pre-existing test that exercises
+    those code paths without its own mock would suddenly need a reachable
+    Ollama with ``nomic-embed-text`` pulled — turning unit tests into
+    integration tests and reproducing FM18 (a CI runner with no Ollama
+    goes red) far outside the eval harness this fixture mode was designed
+    for. The stub reuses ``vector_index.hash_embedding`` at the spec's
+    declared dimension so callers see vectors of the right shape without
+    a network call; it says nothing about retrieval *quality* — that
+    question is answered once, honestly, by
+    ``scripts/eval/retrieval_ab.py`` (see
+    ``sprints/2026-08-08-arail2-tier1-integration/RESULTS.md``), not by
+    every unit test re-deciding it.
+    """
+    if "requires_ollama" in request.node.keywords:
+        yield
+        return
+    try:
+        from arail.dbspec import embed as embed_mod
+        from arail.dbspec.generated.models_registry import EMBEDDING_DIM
+        from arail.vector_index import hash_embedding
+    except Exception:  # noqa: BLE001
+        yield
+        return
+
+    def _fake_embed_documents(texts):
+        return [hash_embedding(t, dim=EMBEDDING_DIM) for t in texts]
+
+    def _fake_embed_query(text):
+        return hash_embedding(text, dim=EMBEDDING_DIM)
+
+    def _fake_embed(text):
+        return hash_embedding(text, dim=EMBEDDING_DIM)
+
+    monkeypatch.setattr(embed_mod, "embed_documents", _fake_embed_documents)
+    monkeypatch.setattr(embed_mod, "embed_query", _fake_embed_query)
+    monkeypatch.setattr(embed_mod, "embed", _fake_embed)
+    yield

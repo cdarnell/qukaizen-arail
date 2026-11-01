@@ -320,22 +320,21 @@ def test_installed_but_cold_ollama_row_is_not_marked_warm():
 # ===========================================================================
 
 def test_rail_eject_button_is_offered_only_on_the_ollama_runtime():
-    """QA-1, fixed: establish the SET of model types the UI offers a real
-    Unload button on. The rail card now gates the working "eject" button
-    (title 'Free this model from VRAM/RAM') on `!isDeep && canFree`, where
-    `canFree = m.runtime === 'ollama'` — the only runtime `/api/chat/eject`
-    can actually free. A warm non-ollama, non-deep row (mlx, mlx-openai,
-    cpu, cuda) instead renders a disabled "can't hot-free" affordance, so
-    the UI no longer promises a free it cannot deliver."""
+    """QA-1, relocated (sprints/2026-08-11-two-slot-chat-models Phase 5):
+    the per-row rail card this test originally pinned is gone — eject now
+    lives on the resident chip itself (#resident-eject-btn), shown/hidden
+    by updateChipWarmState(). The property QA-1 established still holds:
+    the resident chip's eject is gated to the ollama runtime specifically
+    (the only one /api/chat/eject can actually free in-process). The old
+    disabled "can't hot-free" row affordance has no chip equivalent — a
+    non-freeable warm resident model (mlx/cpu/cuda) just doesn't show an
+    eject control at all, which is still honest (no false promise), just
+    via omission rather than a disabled/explained button."""
     text = _chat_html_text()
-    assert 'data-act="eject"' in text
-    assert "const canFree = m.runtime === 'ollama';" in text, (
-        "QA-1 fix not found — the rail eject button should be gated to "
+    assert 'id="resident-eject-btn"' in text
+    assert "if (ejectA) ejectA.hidden = !(warmA && State.currentRuntime === 'ollama');" in text, (
+        "QA-1 fix not found — the resident chip's eject should be gated to "
         "the ollama runtime specifically"
-    )
-    assert 'data-act="eject-unavailable"' in text and "can't hot-free" in text, (
-        "warm non-freeable runtimes should render a disabled, honest "
-        "affordance instead of a working-looking eject button"
     )
 
 
@@ -362,20 +361,19 @@ def test_eject_endpoint_never_reports_false_success_for_any_ui_runtime(monkeypat
 
 
 def test_mlx_openai_unload_button_no_longer_overpromises():
-    """QA-1, fixed: an mlx-openai row no longer renders a working-looking
-    Unload button. The endpoint stays honest (unchanged), and the rail's
-    render-time `canFree` gate (see test above) means a warm mlx-openai
-    row gets the disabled "can't hot-free" affordance instead of one
-    titled 'Free this model from VRAM/RAM' — the button's promise and the
-    endpoint's capability now agree for this model type."""
+    """QA-1, relocated (sprints/2026-08-11-two-slot-chat-models Phase 5):
+    the endpoint stays honest (unchanged) — a warm mlx-openai resident
+    model still gets ok:false + a restart note. The chip-level gate (see
+    test above) means the resident chip's eject control isn't even shown
+    for a non-ollama runtime, so there's no working-looking button whose
+    promise could disagree with the endpoint's real capability."""
     client, _ = _client()
     body = client.post("/api/chat/eject", json={"runtime": "mlx-openai"}).json()
     assert body["ok"] is False
     assert body["freed"] == []
     assert any("restart" in n.lower() for n in body["notes"])
     text = _chat_html_text()
-    assert "const canFree = m.runtime === 'ollama';" in text
-    assert "can't hot-free" in text
+    assert "if (ejectA) ejectA.hidden = !(warmA && State.currentRuntime === 'ollama');" in text
 
 
 @_daemon
@@ -514,27 +512,116 @@ def test_eject_ollama_passes_model_as_argv_not_shell_string(monkeypatch):
 
 
 # ===========================================================================
+# Keep-watch suppression on eject (sprints/2026-08-11-two-slot-chat-models
+# Part 3) — a successful eject of the RESIDENT model must not have the
+# background loop immediately re-warm it right back; ejecting some OTHER
+# installed model must not suppress keep-watch on the resident slot at all.
+# ===========================================================================
+
+def test_ejecting_the_resident_model_suppresses_keepwatch(monkeypatch):
+    import arail.portal.app as app_mod
+    from arail.portal import model_warmth
+
+    monkeypatch.setenv("MODEL_NAME", "llama-ai-eng:latest")
+    monkeypatch.setattr(
+        app_mod, "_validate_local_model_id_relaxed", lambda m: (True, "")
+    )
+
+    class _Done:
+        returncode = 0
+        stderr = ""
+        stdout = "stopped"
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: _Done())
+
+    called = []
+    monkeypatch.setattr(model_warmth, "suppress_tier0_keepwatch", lambda *a, **k: called.append(1))
+
+    client, _ = _client()
+    body = client.post(
+        "/api/chat/eject", json={"runtime": "ollama", "model": "llama-ai-eng:latest"}
+    ).json()
+
+    assert body["ok"] is True
+    assert called == [1], "ejecting the resident model must suppress keep-watch"
+
+
+def test_ejecting_a_different_model_does_not_suppress_keepwatch(monkeypatch):
+    """Ejecting some other installed Ollama model — not the resident slot
+    — must leave keep-watch alone; it only guards the resident model."""
+    import arail.portal.app as app_mod
+    from arail.portal import model_warmth
+
+    monkeypatch.setenv("MODEL_NAME", "llama-ai-eng:latest")
+    monkeypatch.setattr(
+        app_mod, "_validate_local_model_id_relaxed", lambda m: (True, "")
+    )
+
+    class _Done:
+        returncode = 0
+        stderr = ""
+        stdout = "stopped"
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: _Done())
+
+    called = []
+    monkeypatch.setattr(model_warmth, "suppress_tier0_keepwatch", lambda *a, **k: called.append(1))
+
+    client, _ = _client()
+    body = client.post(
+        "/api/chat/eject", json={"runtime": "ollama", "model": "some-other-model:latest"}
+    ).json()
+
+    assert body["ok"] is True
+    assert called == [], "ejecting a non-resident model must not suppress resident keep-watch"
+
+
+def test_failed_eject_does_not_suppress_keepwatch(monkeypatch):
+    """Nothing was actually frozen — suppressing keep-watch for a failed
+    eject would just make the resident model incorrectly stay cold."""
+    import arail.portal.app as app_mod
+    from arail.portal import model_warmth
+
+    monkeypatch.setenv("MODEL_NAME", "llama-ai-eng:latest")
+    monkeypatch.setattr(
+        app_mod, "_validate_local_model_id_relaxed", lambda m: (True, "")
+    )
+
+    class _Failed:
+        returncode = 1
+        stderr = "no such model"
+        stdout = ""
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: _Failed())
+
+    called = []
+    monkeypatch.setattr(model_warmth, "suppress_tier0_keepwatch", lambda *a, **k: called.append(1))
+
+    client, _ = _client()
+    body = client.post(
+        "/api/chat/eject", json={"runtime": "ollama", "model": "llama-ai-eng:latest"}
+    ).json()
+
+    assert body["ok"] is False
+    assert called == []
+
+
+# ===========================================================================
 # (b) REGRESSION — HON-1: rail-card eject clears the warm dot before it
 # confirms the eject succeeded (already filed as a dated follow-up; pinned
 # here as a concrete, reproducible defect so it cannot silently persist).
 # ===========================================================================
 
 def test_hon1_rail_eject_only_clears_warm_dot_on_confirmed_success():
-    """HON-1 (REVIEW.md #2), fixed: the rail-card eject handler now gates
-    `State.warmModels.delete(m.id)` on `d.ok`, matching the active-card
-    path. A runtime whose eject returns ok:false (mlx-openai, cpu, cuda, a
-    failed ollama stop) no longer flips the warm dot to cold — the dot
-    only clears once the endpoint confirms something was actually freed."""
-    import re
+    """HON-1 (REVIEW.md #2), relocated (sprints/2026-08-11-two-slot-chat-
+    models Phase 5): the separate rail-card/active-card eject handlers
+    this test pinned as a matching pair are gone, unified into one shared
+    ejectModel(side) that both chips call. A runtime whose eject returns
+    ok:false (mlx-openai, cpu, cuda, a failed ollama stop) still must not
+    flip the warm dot to cold — the dot only clears once the endpoint
+    confirms something was actually freed."""
     text = _chat_html_text()
-    normalized = re.sub(r"\s+", " ", text)
-
-    # Rail-card handler: the delete is now gated behind `if (d.ok)`.
-    assert "if (d.ok) State.warmModels.delete(m.id);" in normalized, (
-        "HON-1 fix not found — rail-card eject should only clear the warm "
-        "dot when d.ok is true"
-    )
-    # Active-card handler still uses the correct pattern too:
     assert "if (d.ok) {" in text and "if (model) State.warmModels.delete(model);" in text, (
-        "active-card eject should still gate warmModels.delete on d.ok"
+        "HON-1 fix not found — ejectModel should only clear the warm dot "
+        "when d.ok is true"
     )

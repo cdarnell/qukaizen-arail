@@ -15,7 +15,7 @@
       <button type="button" class="kb-scope-chip" data-scope="brain" aria-selected="true"
               data-api="/api/wiki/graph?scope=brain"
               data-empty="Nothing approved yet — approve candidates below to grow the brain."
-              data-legend='[{"label":"World terms","color":"var(--accent2)"},{"label":"Approved","color":"var(--positive)"},{"label":"Candidates (pending)","color":"var(--text-muted)","ghost":true}]'
+              data-legend='[{"label":"World terms","color":"var(--accent2)","key":"world"},{"label":"Approved","color":"var(--positive)","key":"approved"},{"label":"Candidates (pending)","color":"var(--text-muted)","ghost":true,"key":"candidate"}]'
               title="What the lab knows: World terms + approved knowledge + pending candidates">Brain<span class="kb-scope-count" data-scope-count="brain"></span></button>
       <button type="button" class="kb-scope-chip" data-scope="world" aria-selected="false" id="kb-scope-world" hidden
               data-api=""
@@ -25,7 +25,7 @@
       <button type="button" class="kb-scope-chip" data-scope="all" aria-selected="false"
               data-api="/api/wiki/graph"
               data-empty="No pages yet — drop a document in the Library to start."
-              data-legend='[{"label":"Sources","color":"var(--accent2)"},{"label":"Agents","color":"var(--positive)"},{"label":"Notes","color":"var(--info)"},{"label":"Compiled","color":"var(--warn)"},{"label":"Docs","color":"var(--danger)"},{"label":"Inference","color":"var(--text-muted)"}]'
+              data-legend='[{"label":"Sources","color":"var(--accent2)","key":"sources"},{"label":"Agents","color":"var(--positive)","key":"agents"},{"label":"Notes","color":"var(--info)","key":"notes"},{"label":"Compiled","color":"var(--warn)","key":"compiled"},{"label":"Docs","color":"var(--danger)","key":"docs"},{"label":"Inference","color":"var(--text-muted)","key":"inference"}]'
               title="Every wiki page — including raw uploads and generated reference">Everything<span class="kb-scope-count" data-scope-count="all"></span></button>
     </div>
     <a class="btn btn-sm btn-ghost" href="/wiki/graph?scope=brain" target="_blank" rel="noopener"
@@ -62,9 +62,9 @@
     "inference":"⊕"
   } %}
   {% set legend_groups = [
-    {"label": "World terms", "color": "var(--accent2)"},
-    {"label": "Approved",    "color": "var(--positive)"},
-    {"label": "Candidates (pending)", "color": "var(--text-muted)", "ghost": True}
+    {"label": "World terms", "color": "var(--accent2)", "key": "world"},
+    {"label": "Approved",    "color": "var(--positive)", "key": "approved"},
+    {"label": "Candidates (pending)", "color": "var(--text-muted)", "ghost": True, "key": "candidate"}
   ] %}
   {% include "_graph_canvas.html" %}
 </section>

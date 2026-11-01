@@ -402,9 +402,11 @@ a wide size range so you can pick one that matches your hardware.
 
 ## How it's wired
 
-`MODEL_NAME=mlx-community/Qwen3-8B-4bit` (MLX default).
-`MODEL_NAME=Qwen/Qwen3-8B` (CUDA / HuggingFace default).
-`AIRLLM_MODEL=meta-llama/Llama-3.1-70B` (AirLLM deep-research default).
+`MODEL_NAME=mlx-community/Qwen2.5-3B-Instruct-4bit` (MLX default — kept under
+the primary answering-model ceiling; see `arail.registry.ceiling`).
+`MODEL_NAME=Qwen/Qwen2.5-3B-Instruct` (CUDA / HuggingFace default).
+`AEROLLM_MODEL=Qwen2.5-7B-Instruct-4bit` (QueueLLM secondary — larger models
+are fine here, capped by discovered hardware, not by the primary ceiling).
 
 Source: <https://qwenlm.github.io/blog/qwen3/>
 """

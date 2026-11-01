@@ -265,6 +265,15 @@ class LibrarianAgent:
 
     @staticmethod
     def _emit(message: str, level: str, data: Optional[dict] = None) -> None:
+        # F9 (ARCHITECTURE.md): the single funnel for everything Librarian
+        # says proactively (growth/scout/horizon-watch announcements) —
+        # gated here rather than at each caller.
+        try:
+            from arail import agent_context
+            if not agent_context.speech_gate("librarian"):
+                return
+        except Exception:  # noqa: BLE001
+            pass
         try:
             from arail.activity import activity_log
             activity_log.emit("librarian", message, level, data)

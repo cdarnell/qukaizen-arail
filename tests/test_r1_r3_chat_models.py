@@ -33,6 +33,16 @@ def _make_client(monkeypatch):
     """Build a TestClient with minimal env so /api/chat/models works."""
     from fastapi.testclient import TestClient
     monkeypatch.setenv("LAB_MODE", "airgapped")
+    # Isolate the process-wide model registry — /api/chat/models reads
+    # get_registry() to build `slots` (sprints/2026-08-11-two-slot-chat-
+    # models); without this a test run would read/pollute the real
+    # lab/data/model_registry.json. Same convention as
+    # tests/registry/conftest.py's tmp_registry.
+    import tempfile
+    from arail.registry import core as reg_core
+    tmp_dir = tempfile.mkdtemp(prefix="arail-r1r3-registry-")
+    monkeypatch.setenv("ARAIL_MODEL_REGISTRY_FILE", os.path.join(tmp_dir, "model_registry.json"))
+    reg_core.reset_registry()
     from arail.portal.app import app
     return TestClient(app, raise_server_exceptions=False)
 
@@ -41,12 +51,15 @@ R1_REQUIRED_TOP_KEYS = {
     "backend", "provider", "current", "models", "switchable",
     "local_models", "install_hint", "optional_backends",
     "default_optional_backend", "deep", "gallery", "compact",
-    "onboarding", "local_model_entries", "fit", "model_load",
+    "onboarding", "local_model_entries", "fit", "model_load", "slots",
 }
 # NOTE: top-level "hardware" was DELETED (sprint 2026-07-20-model-ux-unification,
 # §2.1/BLOCK-1) — it's now nested at compact.hardware, the only place the
 # frontend reads it. See test_r1_hardened_golden_snapshot.py for the
 # compact.hardware coverage.
+#
+# NOTE: top-level "slots" was ADDED (sprint 2026-08-11-two-slot-chat-models)
+# — the two-slot model (resident/deep), read from the registry.
 
 R1_REQUIRED_GALLERY_KEYS = {"installed", "catalog", "runtime_counts"}
 

@@ -12,9 +12,13 @@ checked `installed` — kept defaulting to a selection guaranteed to fail
 with "AeroLLM model dir not found."
 
 This suite pins the real, disk-backed check and its two response fields.
-The client-side half (chat.html's setCompare() now also requiring
-`model_ready`, not just `installed`) is covered by source-level
-assertions here since it's plain JS with no server round-trip.
+The client-side half was originally the `deepEntries`-filtered auto-pick
+in `setCompare()`; sprints/2026-08-11-two-slot-chat-models Phase 5
+replaced `deepEntries` with the server's own `slots.deep` block and a
+dedicated Deep picker (`renderDeepPicker`/`selectDeepModel`) — the
+`model_ready`-gates-auto-pick property now lives in `setCompare()`
+reading `State.deepSlot.model_ready` directly, still covered here by
+source-level assertions since it's plain JS with no server round-trip.
 """
 from __future__ import annotations
 
@@ -121,22 +125,30 @@ def test_optional_backends_aerollm_entry_carries_model_ready(client, monkeypatch
 # Client-side gating — source-level (plain JS, no server round-trip)
 # ---------------------------------------------------------------------------
 
-def test_deepentries_carry_model_ready_through_to_state_models():
-    assert "model_ready: !!o.model_ready" in CHAT_HTML
+def test_deep_slot_carries_model_ready_through_to_client_state():
+    """Successor to the deepEntries version: State.deepSlot (populated in
+    init() from the server's slots.deep block) is what setCompare() reads
+    now — there's no longer a filtered model LIST to carry the field
+    through, just the one deep-slot object."""
+    assert "State.deepSlot = (d.slots && d.slots.deep) || null;" in CHAT_HTML
 
 
 def test_setcompare_autopick_requires_model_ready_not_just_installed():
-    assert "m.badge === 'deep' && m.installed && m.model_ready" in CHAT_HTML, (
+    assert "if (deep.model_ready) {" in CHAT_HTML, (
         "the auto-pick filter must require model_ready, not just "
         "installed — that's the entire fix"
     )
+    # And the negative: installed-but-not-ready must NOT take the
+    # model_ready branch (a separate, explicit "not downloaded" message).
+    assert "} else if (!deep.installed) {" in CHAT_HTML
 
 
 def test_setcompare_never_falls_back_to_a_broken_default_silently():
     """When nothing deep is truly ready, the honest message must
     distinguish 'not built' from 'built but no model downloaded' — never
     silently pick something and claim success."""
-    assert "no deep model is downloaded yet" in CHAT_HTML
+    assert "the deep model isn’t downloaded yet" in CHAT_HTML
+    assert "QueueLLM isn’t built" in CHAT_HTML
 
 
 def test_comparison_strip_never_displays_deep_model_as_a_silent_fallback():

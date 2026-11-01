@@ -9,7 +9,7 @@
       "interface": {
         "kind": "knowledge-grounding",
         "world": "ai",
-        "world_sha256": "df6b682da2dec3694cc5df543a6085016a41940ec20a2c6bae7a52b0e24e175f",
+        "world_sha256": "c1914ba993a75f2f9cfa0dc3b08f91f50a2d27f1e5ae7b1487930f2665f29d4b",
         "categories": [
           "architecture",
           "care-actions",
@@ -26,8 +26,8 @@
           "symptoms",
           "training"
         ],
-        "term_count": 331,
-        "provenance_tier": "sourced"
+        "term_count": 339,
+        "provenance_tier": "mixed"
       }
     },
     {
@@ -38,7 +38,7 @@
         "kind": "knowledge-grounding",
         "world": "ai",
         "category": "architecture",
-        "term_count": 70
+        "term_count": 72
       }
     },
     {
@@ -71,7 +71,7 @@
         "kind": "knowledge-grounding",
         "world": "ai",
         "category": "fine-tuning",
-        "term_count": 29
+        "term_count": 30
       }
     },
     {
@@ -82,7 +82,7 @@
         "kind": "knowledge-grounding",
         "world": "ai",
         "category": "formats-runtime",
-        "term_count": 15
+        "term_count": 16
       }
     },
     {
@@ -93,7 +93,7 @@
         "kind": "knowledge-grounding",
         "world": "ai",
         "category": "fundamentals",
-        "term_count": 39
+        "term_count": 42
       }
     },
     {
@@ -104,7 +104,7 @@
         "kind": "knowledge-grounding",
         "world": "ai",
         "category": "inference",
-        "term_count": 16
+        "term_count": 17
       }
     },
     {
@@ -148,7 +148,7 @@
         "kind": "knowledge-grounding",
         "world": "ai",
         "category": "qukaizen",
-        "term_count": 25
+        "term_count": 22
       }
     },
     {
@@ -159,7 +159,7 @@
         "kind": "knowledge-grounding",
         "world": "ai",
         "category": "rl-alignment",
-        "term_count": 21
+        "term_count": 22
       }
     },
     {
@@ -181,7 +181,7 @@
         "kind": "knowledge-grounding",
         "world": "ai",
         "category": "training",
-        "term_count": 45
+        "term_count": 47
       }
     }
   ]

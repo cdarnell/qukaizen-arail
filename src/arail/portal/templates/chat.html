@@ -272,6 +272,9 @@
        Rendered from static model metadata (model_specs); never an LLM call. */
     .compare-strip { display: flex; flex-wrap: wrap; gap: var(--s-2);
       margin-bottom: var(--s-2); font-size: var(--fs-xs); }
+    /* Same [hidden] clobber as .col above — the flex display wins over the
+       browser default unless forced back off explicitly. */
+    .compare-strip[hidden] { display: none !important; }
     .compare-strip .cs-col { flex: 1 1 0; min-width: 0; border: 1px solid var(--border);
       border-radius: var(--radius-s); padding: var(--s-2);
       background: var(--surface2); }
@@ -875,6 +878,7 @@
     .picker-pop .section .hw { color: var(--text); text-transform: none; letter-spacing: 0; font-size: var(--fs-xs); }
     .picker-pop .opt {
       display: flex;
+      flex-wrap: wrap;
       align-items: center;
       justify-content: space-between;
       gap: var(--s-3);
@@ -906,6 +910,52 @@
     }
     .picker-pop .source-pill.active { color: var(--accent); border-color: var(--accent-a28); background: var(--accent-a08); }
     .picker-pop .source-pill.unavailable { opacity: 0.5; cursor: help; }
+
+    /* ── Resident/Deep picker additions (sprints/2026-08-11-two-slot-
+       chat-models Phase 5) ── */
+    .picker-pop .opt.ineligible { cursor: not-allowed; opacity: 0.55; }
+    .picker-pop .opt.ineligible:hover { background: none; }
+    .picker-pop .opt-reason {
+      flex-basis: 100%; font-size: var(--fs-xs); color: var(--text-muted);
+      padding-top: 2px;
+    }
+    .picker-pop .attribution-badge {
+      font-size: var(--fs-xs); color: var(--text-muted); border: 1px solid var(--border);
+      border-radius: 999px; padding: 0 0.4rem; margin-left: var(--s-1);
+    }
+    .picker-pop .show-larger {
+      display: block; width: calc(100% - 2 * var(--s-4)); margin: var(--s-1) var(--s-4);
+      padding: 0.4rem var(--s-3); text-align: center;
+      font-size: var(--fs-xs); color: var(--text-muted);
+      border: 1px dashed var(--border); border-radius: var(--radius-s);
+      background: transparent; cursor: pointer; font-family: var(--font-mono);
+    }
+    .picker-pop .show-larger:hover { color: var(--text-strong); border-color: var(--border-strong); }
+    .picker-pop .install-row {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: var(--s-2); padding: 0.4rem var(--s-4);
+      font-size: var(--fs-xs); color: var(--text-muted);
+    }
+    .picker-pop .install-row .reveal-cmd {
+      color: var(--accent2); cursor: pointer; text-decoration: underline dotted;
+      background: none; border: none; font-family: var(--font-mono); font-size: var(--fs-xs);
+    }
+    .picker-pop .install-row code {
+      display: block; margin-top: 2px; font-size: var(--fs-xs);
+      background: var(--surface2); border-radius: var(--radius-s); padding: 2px 6px;
+      word-break: break-all;
+    }
+    .picker-pop .regime-note {
+      padding: var(--s-2) var(--s-4); font-size: var(--fs-xs); color: var(--text-muted);
+      border-top: 1px solid var(--border); margin-top: var(--s-1);
+    }
+    .picker-pop .lock-notice {
+      padding: var(--s-3) var(--s-4); font-size: var(--fs-sm); color: var(--text-strong);
+    }
+    .picker-pop .lock-notice .upgrade-cmd {
+      display: block; margin-top: var(--s-2); font-size: var(--fs-xs); color: var(--accent2);
+      background: var(--surface2); border-radius: var(--radius-s); padding: 4px 8px;
+    }
 
     .fit-chip {
       font-size: var(--fs-xs);
@@ -1256,104 +1306,6 @@
     .ref-foot { font-size: var(--fs-xs); color: var(--text-muted); margin-top: var(--s-3); padding-top: var(--s-2); border-top: 1px dashed var(--border); line-height: 1.5; }
     .ref-foot code { color: var(--accent2); }
 
-    /* ── Left rail: model cards ─────────────────────────────────── */
-    .rail-list { padding: var(--s-2) var(--s-2); display: flex; flex-direction: column; gap: var(--s-2); }
-    .rail-empty { color: var(--text-muted); font-size: var(--fs-xs); padding: var(--s-2); }
-    .model-card {
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-left: 3px solid transparent;
-      border-radius: var(--radius-m);
-      padding: var(--s-2) var(--s-3);
-      cursor: pointer;
-      transition: border-color 0.12s, background 0.12s;
-    }
-    .model-card:hover { border-color: var(--border-strong); background: var(--surface2); }
-    .model-card.current {
-      border-color: var(--accent-a28);
-      border-left-color: var(--accent);
-      background: var(--accent-a08);
-    }
-    .model-card .mc-row {
-      display: flex; align-items: center; justify-content: space-between; gap: var(--s-2);
-    }
-    .model-card .mc-name {
-      font-size: var(--fs-sm); font-weight: 600; color: var(--text-strong);
-      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1;
-    }
-    .model-card .mc-meta {
-      display: flex; align-items: center; gap: var(--s-1);
-      margin-top: 2px;
-      font-size: 0.65rem; color: var(--text-muted);
-    }
-    .model-card .mc-meta .runtime { color: var(--accent2); }
-    .model-card .mc-meta .dot { color: var(--border-strong); }
-    .model-card .mc-actions {
-      display: none;
-      gap: var(--s-1);
-      margin-top: var(--s-2);
-    }
-    .model-card:hover .mc-actions, .model-card.current .mc-actions { display: flex; }
-    .model-card .mc-act {
-      flex: 1;
-      background: transparent;
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      color: var(--text-muted);
-      font-family: var(--font-mono);
-      font-size: 0.6rem;
-      text-transform: var(--label-transform);
-      letter-spacing: 0.08em;
-      padding: 2px 6px;
-      cursor: pointer;
-    }
-    .model-card .mc-act.primary:hover   { color: var(--accent);  border-color: var(--accent-a28);  background: var(--accent-a08);  }
-    .model-card .mc-act.secondary:hover { color: var(--info); border-color: var(--info-a28); background: var(--info-a08); }
-    .model-card .mc-act.disabled, .model-card .mc-act:disabled {
-      opacity: 0.45; cursor: help; color: var(--text-muted) !important;
-      border-color: var(--border) !important; background: transparent !important;
-    }
-
-    /* Active-card eject + swap actions */
-    .active-actions {
-      display: flex; gap: var(--s-2);
-      margin-top: var(--s-3);
-      padding-top: var(--s-2);
-      border-top: 1px dashed var(--border);
-    }
-    .active-actions .mc-act, .mc-act.eject, .mc-act.swap {
-      background: transparent;
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      color: var(--text-muted);
-      font-family: var(--font-mono);
-      font-size: var(--fs-xs);
-      letter-spacing: 0.05em;
-      padding: 0.3rem 0.6rem;
-      cursor: pointer;
-      transition: all 0.12s;
-    }
-    .mc-act.eject:hover { color: var(--danger); border-color: var(--danger-a28); background: var(--danger-a08); }
-    .mc-act.swap:hover  { color: var(--accent); border-color: var(--accent-a28); background: var(--accent-a08); }
-    .mc-act.load        { color: var(--accent); border-color: var(--accent-a28); background: var(--accent-a08); }
-    .mc-act.load:hover  { color: var(--text-strong); background: var(--accent-a16); }
-
-    /* Warm/cold indicator on every model card */
-    .model-card .warm-dot {
-      display: inline-block; width: 8px; height: 8px; border-radius: 50%;
-      background: var(--border-strong); margin-right: var(--s-2);
-      vertical-align: middle;
-    }
-    .model-card.warm .warm-dot {
-      background: var(--positive); box-shadow: 0 0 8px currentColor;
-      animation: warm-pulse 2.6s ease-in-out infinite;
-    }
-    @keyframes warm-pulse { 50% { opacity: 0.55; } }
-    .model-card .warm-label {
-      color: var(--positive); font-weight: 700; font-size: 0.55rem; letter-spacing: 0.1em;
-    }
-    .model-card .cold-label { color: var(--text-muted); font-size: 0.55rem; letter-spacing: 0.1em; }
-
     /* Telemetry warm-pill chip */
     .warm-pill {
       display: inline-block;
@@ -1367,7 +1319,12 @@
       margin-right: 4px;
     }
 
-    /* ── Column quickbar chip (model name only — picking lives in the rail) ── */
+    /* ── Slot chip: trigger + dropdown (sprints/2026-08-11-two-slot-chat-
+       models Phase 5). Combines .picker's interactive/popup mechanics
+       (position:relative, .open state, .picker-pop child) with the
+       original .col-chip pill-with-dot visual identity — one element,
+       both rulesets. The dot now reflects REAL warm state via a .warm
+       modifier instead of always being lit. ── */
     .col-chip {
       display: inline-flex; align-items: center; gap: var(--s-2);
       padding: 0.3rem 0.7rem;
@@ -1376,15 +1333,44 @@
       border-radius: var(--radius-pill);
       font-family: var(--font-mono);
     }
+    .col-chip.picker { cursor: pointer; max-width: none; user-select: none; }
+    .col-chip.picker:hover { border-color: var(--accent2); }
+    .col-chip.picker.open { border-color: var(--accent2); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent2) 18%, transparent); }
+    .col-chip.picker.locked { cursor: not-allowed; opacity: 0.72; }
     .col-chip::before {
       content: '';
       width: 6px; height: 6px;
       border-radius: 50%;
-      background: var(--accent2);
+      background: var(--border-strong);
       flex-shrink: 0;
+      transition: background-color 0.15s;
     }
+    .col-chip.warm::before {
+      background: var(--positive); box-shadow: 0 0 8px currentColor;
+      animation: warm-pulse 2.6s ease-in-out infinite;
+    }
+    @keyframes warm-pulse { 50% { opacity: 0.55; } }
     .col-chip .chip-name { color: var(--accent2); font-weight: 600; font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
     .col-chip .chip-hint { color: var(--text-muted); font-size: var(--fs-xs); }
+    .col-chip .chip-caret { color: var(--text-muted); font-size: 0.7em; margin-left: 1px; }
+    .col-chip .chip-eject {
+      margin-left: var(--s-1);
+      color: var(--text-muted);
+      font-size: var(--fs-xs);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-s);
+      padding: 0 0.35rem;
+      background: transparent;
+      font-family: var(--font-mono);
+      cursor: pointer;
+    }
+    .col-chip .chip-eject:hover { color: var(--danger); border-color: var(--danger-a28); background: var(--danger-a08); }
+    /* The picker popup anchors off the chip itself now (not a bare
+       .picker) — same .picker-pop rules apply since the class is shared,
+       except the chip sits near the TOP of the page (unlike .picker's
+       original bottom-anchored composer-toolbar use), so flip the popup
+       to open downward instead of upward off-screen. */
+    .col-chip .picker-pop { left: 0; top: calc(100% + 6px); bottom: auto; }
 
     /* ── System prompt textarea ─────────────────────────────────── */
     .sys-prompt-ta, .tunable textarea {
@@ -1505,7 +1491,6 @@
     .rc-prose { font-size: var(--fs-sm); line-height: 1.55; }
     .rc-text { color: var(--text); }
     .mt-2 { margin-top: var(--s-2); }
-    .mc-name.live { color: var(--accent2); }
     .desc-sep { color: var(--border-strong); }
     .rc-note.stats-note, .stats-body { margin-top: .5em; }
     .seg.seg-error { color: var(--danger); }
@@ -1528,7 +1513,7 @@
     }
 
     @media (prefers-reduced-motion: reduce) {
-      .rail-card.flash, .tunable.tunable-changed, .model-card.warm .warm-dot,
+      .rail-card.flash, .tunable.tunable-changed, .col-chip.warm::before,
       .mic-btn.recording, .msg .body .caret { animation: none; }
       .drawer, .drawer-back { transition: none; }
     }
@@ -1558,7 +1543,7 @@
       </span>
       <button class="icon-btn" id="btn-conn" title="Connections (tokens)">⚙ Connections</button>
       <a class="icon-btn" href="/docs/tunables.md" target="_blank" title="Glossary of every tunable">📖 Glossary</a>
-      <button class="icon-btn" id="btn-toggle-left"  title="Scroll to model rail">◧ Models</button>
+      <button class="icon-btn" id="btn-toggle-left"  title="Open the resident model picker (⌘K)">◧ Models</button>
       <button class="icon-btn" id="btn-toggle-right" title="Scroll to tunables">Tunables ◨</button>
     </header>
 
@@ -1569,10 +1554,13 @@
         <!-- ── Column A (primary) ── -->
         <section class="col" data-col="A">
           <div class="col-quickbar">
-            <div class="col-chip" id="col-chip-A" title="1st inference — the small model resident on your GPU. Fast, always-on.">
-              <span class="qb-label">1st · on-GPU</span>
+            <div class="col-chip picker" id="model-picker" tabindex="0" role="button" aria-haspopup="true"
+                 title="Resident model — pinned in the GPU at all times. Click to change, ⌘K to focus.">
+              <span class="qb-label">Resident</span>
               <span class="chip-name" id="picker-label">loading…</span>
-              <span class="chip-hint">← pick from rail</span>
+              <button class="chip-eject" id="resident-eject-btn" type="button" title="Free this model from VRAM/RAM" hidden>eject</button>
+              <span class="chip-caret">▾</span>
+              <div class="picker-pop" id="picker-pop"></div>
             </div>
             <div class="qb-slider" data-quickkey="temperature">
               <span class="qb-label">temp</span>
@@ -1583,11 +1571,8 @@
             <label class="stream-toggle compact">
               <input type="checkbox" id="stream-toggle-A" checked> stream
             </label>
-            <button class="icon-btn compact" id="btn-compare" title="Add a second model side-by-side">+ Compare</button>
+            <button class="icon-btn compact" id="btn-compare" title="Run the deep model side-by-side">+ Compare</button>
           </div>
-          <!-- Hidden legacy picker shell — JS still references these IDs but the
-               popup is gone. The chip above is the visible affordance now. -->
-          <div id="model-picker" hidden><div id="picker-pop"></div></div>
 
           <!-- Wired post-Phase-0b (disconfirming-evidence #1 fired
                immediately: fidelity alone left the load experience
@@ -1621,10 +1606,13 @@
         <!-- ── Column B (secondary, hidden until Compare) ── -->
         <section class="col" data-col="B" hidden>
           <div class="col-quickbar">
-            <div class="col-chip" id="col-chip-B" title="2nd inference — aeroLLM. Keeps a frontier (70B+) model resident so it coexists with your on-GPU model. Slower per-token, far bigger brain.">
-              <span class="qb-label">2nd · aeroLLM</span>
+            <div class="col-chip picker" id="model-picker-B" tabindex="0" role="button" aria-haspopup="true"
+                 title="Deep model — served by QueueLLM, fully resident once loaded. Click to change.">
+              <span class="qb-label">Deep · QueueLLM</span>
               <span class="chip-name" id="picker-label-B">—</span>
-              <span class="chip-hint">resident · slower · big params</span>
+              <button class="chip-eject" id="deep-eject-btn" type="button" title="Free this model from VRAM/RAM" hidden>eject</button>
+              <span class="chip-caret">▾</span>
+              <div class="picker-pop" id="picker-pop-B"></div>
             </div>
             <div class="qb-slider" data-quickkey="temperature">
               <span class="qb-label">temp</span>
@@ -1637,7 +1625,6 @@
             </label>
             <button class="icon-btn compact close-compare-btn" id="btn-compare-close" title="Close the 2nd inference column">✕ close</button>
           </div>
-          <div id="model-picker-B" hidden><div id="picker-pop-B"></div></div>
 
           <div class="transcript" id="transcript-B">
             <div class="empty">
@@ -1672,18 +1659,9 @@
 
     </div><!-- /.studio-main -->
 
-    <!-- ── ACTIVE MODELS STRIP (full-width, just under the chat) ────── -->
-    <section class="active-strip" id="active-strip">
-      <div class="rail-card">
-        <div class="rc-head">
-          <span>Active model A · primary</span>
-          <span id="active-mini-fit"></span>
-        </div>
-        <div class="rc-body" id="active-card">
-          <div class="rc-loading">loading…</div>
-        </div>
-      </div>
-    </section>
+    <!-- Active-model strip removed (sprints/2026-08-11-two-slot-chat-
+         models Phase 5) — it duplicated what the two slot chips now show
+         directly (name, warm state, eject) with no scroll required. -->
 
     <!-- ── ADVANCED TUNABLES (collapsible — both rows live inside) ──── -->
     <details class="advanced-tunables" id="advanced-tunables">
@@ -1766,31 +1744,11 @@
         </div>
       </div>
 
-      <!-- (Active model card moved to its own full-width strip just
-           below the chat — see #active-strip above.) -->
-
-      <div class="rail-card">
-        <!-- F-HEADER: no "(<= 8B)" — this column also renders the real
-             gemma-4-26b-a4b MoE row (13.4 GB resident) once installed;
-             the size claim was a static lie the real fit chip contradicts. -->
-        <div class="rc-head"><span>Local · GPU</span><span class="count" id="count-local">0</span></div>
-        <div id="rail-models-local" class="rail-list"></div>
-      </div>
-
-      <div class="rail-card">
-        <!-- F-HEADER twin: aeroLLM keeps the deep model RESIDENT once
-             loaded (not streamed from disk per-token) — AERO_MOE_SELECT
-             (real expert-streaming) is off and absent from src/. Only
-             AirLLM (the opt-in CUDA/x86 backend) actually layer-streams. -->
-        <div class="rc-head"><span>Local · aeroLLM</span><span class="count" id="count-deep">0</span></div>
-        <div id="rail-models-deep" class="rail-list"></div>
-        <div class="rc-body tight-top">
-          <div class="rc-note">
-            Large models kept resident by AeroLLM once loaded.
-            Set <code class="inline-path">AEROLLM_MODEL</code> in <code class="inline-path">.env</code>.
-          </div>
-        </div>
-      </div>
+      <!-- Below-the-fold model rail removed (sprints/2026-08-11-two-slot-
+           chat-models Phase 5) — picking a model now happens at the two
+           slot chips in the chat header (click, or ⌘K for the resident
+           slot), not by scrolling down to a rail. See renderResidentPicker
+           / renderDeepPicker. -->
 
       <div class="rail-card">
         <div class="rc-head" title="Where this chat runs — your local machine or a cloud provider"><span>Provider · run on</span></div>
@@ -1857,13 +1815,13 @@
             <ul class="ref-list">
               <li><code class="inline-path">src/arail/model_specs.py</code><span class="ref-note">add params · license · benchmarks · notes</span></li>
               <li><code class="inline-path">src/arail/chat/__init__.py</code><span class="ref-note">gallery_view() / detect_installed_models() — how models get scanned + rendered for the picker</span></li>
-              <li><code class="inline-path">src/arail/router/backends.py</code><span class="ref-note">backend adapters (MLX, Ollama, AeroLLM, Claude, …)</span></li>
+              <li><code class="inline-path">src/arail/router/backends.py</code><span class="ref-note">backend adapters (MLX, Ollama, QueueLLM, Claude, …)</span></li>
             </ul>
           </div>
           <div class="ref-group">
             <div class="ref-h">deep backends</div>
             <ul class="ref-list">
-              <li><a href="https://github.com/cdarnell/aerollm" target="_blank" rel="noopener noreferrer">AeroLLM ↗</a><span class="ref-note">ARAIL's Rust runtime for 30B+ local models, kept resident once loaded · set <code>AEROLLM_MODEL</code></span></li>
+              <li><a href="https://github.com/cdarnell/qukaizen-queuellm" target="_blank" rel="noopener noreferrer">QueueLLM ↗</a><span class="ref-note">ARAIL's Rust runtime for 30B+ local models, kept resident once loaded · set <code>AEROLLM_MODEL</code></span></li>
             </ul>
           </div>
           <div class="ref-group">
@@ -1934,13 +1892,20 @@
     const $ = id => document.getElementById(id);
     const State = {
       gallery: null,
-      models: [],            // installed
-      currentId: null,       // Column A
+      models: [],            // installed, resident-slot candidates (compact.local_models.items)
+      // The two-slot model (sprints/2026-08-11-two-slot-chat-models):
+      // resident (tier0-local) + deep (tier1-aerollm), read straight from
+      // the registry via d.slots — the single source of truth the nav's
+      // model switcher also reads, so the two can no longer disagree.
+      residentSlot: null,
+      deepSlot: null,
+      // Column A = resident slot, always.
+      currentId: null,
       currentRuntime: null,
       currentEndpoint: null,
       currentSpec: null,
       currentModel: null,
-      // Column B (compare)
+      // Column B = deep slot, always, when Compare is on.
       compareOn: false,
       bId: null, bRuntime: null, bEndpoint: null, bModel: null,
       bStreaming: true,
@@ -1948,7 +1913,11 @@
       bSpec: null,
       sources: [],
       activeSource: 'my_machine',
-      history: [],
+      // Split per column (sprints/2026-08-11-two-slot-chat-models Phase 5)
+      // — previously one shared array, so column B's replies silently
+      // leaked into column A's context on the next turn and vice versa.
+      aHistory: [],
+      bHistory: [],
       // Server-side conversation (lab/pkb/conversations). localStorage
       // holds the POINTER only — content lives on the server.
       conversationId: localStorage.getItem('arail.chat.conversationId') || null,
@@ -1980,7 +1949,6 @@
         json_mode: false,
         // Local-runtime knobs.
         ctx: 8192,
-        prefetch_depth: 2,
         offload_strategy: 'auto',
         kv_cache_location: 'auto',
         quantization: 'off',
@@ -2062,11 +2030,10 @@
         impact: [ ['determinism', 'up'] ] },
 
       // ── Local runtime ──────────────────────────────────────────────
-      { key: 'prefetch_depth', group: 'runtime', label: 'prefetch depth', kind: 'slider',
-        desc: 'streaming load — how many layers to prefetch ahead.',
-        why: 'hides NVMe IO behind compute. larger = smoother, costs memory.',
-        reco: '2–4', min: 0, max: 8, step: 1, unit: 'layers',
-        impact: [ ['IO stalls', 'down'], ['memory','up'] ] },
+      // (ring/prefetch depth was a fake slider here — 2026-08-11 two-slot
+      // redesign: it's construction-time-only for the deep backend, not a
+      // per-message tunable, and is now shown read-only on the deep
+      // slot's picker instead, sourced from the real resolved value.)
       { key: 'offload_strategy', group: 'runtime', label: 'offload strategy', kind: 'select',
         desc: 'how to fit a model larger than VRAM.',
         why: 'auto picks based on fit; stream-hot pins active layers in GPU.',
@@ -2085,6 +2052,12 @@
     ];
 
     // ── Provider transform (spec §2) ────────────────────────────────
+    // Registry model_ids are bare (MODEL_NAME has no tag); Ollama-sourced
+    // gallery rows carry the tag it reports, e.g. "llama-ai-eng:latest"
+    // (_chat_slots_payload's own warm_candidates does the same
+    // both-forms comparison server-side, app.py's _chat_slots_payload).
+    function bareModelId(id) { return String(id || '').split(':')[0]; }
+
     function transformProvider(modelId, runtime) {
       if (!modelId) return { provider: '—', model: '—' };
       let provider = runtime || '';
@@ -2111,29 +2084,42 @@
       // and "not installed" is informational, not a fit warning.
       if (v.startsWith('resident')) return 'good';
       if (v.startsWith('not install')) return 'marginal';
+      if (v.startsWith('unknown')) return 'marginal';
       return 'streaming';
     }
-    function makeOpt(m, currentId, onPick) {
+    // `extra` (added Phase 5, sprints/2026-08-11-two-slot-chat-models):
+    // { ineligible, reason, attribution } — surfaces the ceiling's own
+    // refusal reason string INLINE on the row (reason-strings-first, the
+    // prior sprint's remedy order) instead of letting a click fail at
+    // send time, and the Llama license's "Built with Llama" disclosure
+    // (NOTICE §1.b.i.B) wherever a llama-family model is named.
+    function makeOpt(m, currentId, onPick, extra) {
+      extra = extra || {};
+      const ineligible = !!extra.ineligible;
       const opt = document.createElement('div');
-      opt.className = 'opt' + (m.id === currentId ? ' current' : '');
+      opt.className = 'opt' + (m.id === currentId ? ' current' : '') + (ineligible ? ' ineligible' : '');
       const isNew = m.badge === 'new';
       const isDeep = m.badge === 'deep';
       const isStreamed = !!m.streamed;
-      const sizeStr = m.size_gb ? `${m.size_gb.toFixed(1)} GB` : '';
-      const verdict = m.fit && m.fit.verdict ? m.fit.verdict : 'good';
+      const sizeStr = m.size_gb ? `${m.size_gb.toFixed(1)} GB`
+                    : (m.params_b ? `~${m.params_b}B params` : '');
+      const verdict = m.fit && m.fit.verdict ? m.fit.verdict : 'Unknown';
       opt.innerHTML = `
         <div class="name">
           <span>${escapeHtml(m.label || m.id)}</span>
           <span class="runtime">· ${escapeHtml(m.runtime || '')}</span>
           ${isNew ? '<span class="new-badge">new</span>' : ''}
           ${isDeep ? '<span class="deep-badge">deep</span>' : ''}
-          ${isStreamed ? '<span class="streamed-badge" title="Exceeds the local hardware floor — routes through a deep backend (AeroLLM resident · AirLLM layer-streamed)">streamed</span>' : ''}
+          ${isStreamed ? '<span class="streamed-badge" title="Exceeds the local hardware floor — routes through a deep backend (QueueLLM resident · AirLLM layer-streamed)">streamed</span>' : ''}
+          ${extra.attribution ? `<span class="attribution-badge">${escapeHtml(extra.attribution)}</span>` : ''}
         </div>
         <div class="meta">
           <span class="size">${sizeStr}</span>
           <span class="fit-chip ${fitClass(verdict)}">${escapeHtml(verdict)}</span>
-        </div>`;
-      opt.addEventListener('click', () => onPick(m));
+        </div>
+        ${ineligible && extra.reason ? `<div class="opt-reason">${escapeHtml(extra.reason)}</div>` : ''}`;
+      if (!ineligible) opt.addEventListener('click', () => onPick(m));
+      else opt.title = extra.reason || 'not eligible for this slot';
       return opt;
     }
 
@@ -2196,7 +2182,7 @@
         }
         if (e.target.closest('[data-mh-switch]')) {
           const m = State.models.find(x => x.id === h.id);
-          if (m) { selectModel(m); closePicker(); }
+          if (m) { selectResidentModel(m); closePicker(); }
           else { flashStatus(`${h.name || h.id}: not in installed list`); }
           return;
         }
@@ -2211,7 +2197,14 @@
       pop.appendChild(el);
     }
 
-    function renderPicker() {
+    // ── Resident picker (sprints/2026-08-11-two-slot-chat-models Phase 5)
+    // Replaces the old dead-popup renderPicker()/below-the-fold rail.
+    // Default view: rows the ceiling would accept AND that are <=3B
+    // (slot_default_visible, computed server-side in Phase 1). "show
+    // larger" reveals everything up to the <8B ceiling — the ceiling
+    // itself never widens; a row past it always shows the chokepoint's
+    // own refusal reason instead of silently failing at send time.
+    function renderResidentPicker() {
       const pop = $('picker-pop');
       pop.innerHTML = '';
 
@@ -2221,35 +2214,55 @@
                     ? `${State.gallery.compact.hardware.label} · ${State.gallery.compact.hardware.free_gb||'?'} GB free`
                     : '';
 
-      // Section: gallery (on-disk) local-GPU models — real fit chip decides
-      // whether any given row is Good/Marginal/Requires streaming; the
-      // header itself makes no size claim (F-HEADER).
-      const localModels = State.models.filter(m => m.badge !== 'deep');
-      if (localModels.length) {
-        const sec = document.createElement('div');
-        sec.className = 'section';
-        sec.innerHTML = `<div class="head"><span>Local · GPU</span><span class="hw">${hwLabel}</span></div>`;
-        pop.appendChild(sec);
-        localModels.forEach(m =>
-          pop.appendChild(makeOpt(m, State.currentId, x => { selectModel(x); closePicker(); }))
-        );
+      const sec = document.createElement('div');
+      sec.className = 'section';
+      sec.innerHTML = `<div class="head"><span>Resident model</span><span class="hw">${hwLabel}</span></div>`;
+      pop.appendChild(sec);
+
+      // State.models is compact.local_models.items — resident-slot
+      // candidates only; deep-badged virtual rows never land here.
+      const candidates = State.models.filter(m => m.badge !== 'deep');
+      const small = candidates.filter(m => m.slot_default_visible !== false);
+      const larger = candidates.filter(m => m.slot_default_visible === false);
+      const showAll = !!State._showLargerResident;
+      const visible = showAll ? candidates : small;
+
+      if (!visible.length) {
+        const empty = document.createElement('div');
+        empty.className = 'opt-reason';
+        empty.style.padding = '0.5rem var(--s-4)';
+        empty.textContent = 'no eligible models installed yet';
+        pop.appendChild(empty);
+      }
+      visible.forEach(m => {
+        const ineligible = !!(m.ceiling && m.ceiling.eligible === false);
+        pop.appendChild(makeOpt(m, State.currentId, x => selectResidentModel(x), {
+          ineligible, reason: m.ceiling && m.ceiling.reason, attribution: m.attribution,
+        }));
+      });
+
+      if (!showAll && larger.length) {
+        const btn = document.createElement('button');
+        btn.className = 'show-larger';
+        btn.type = 'button';
+        btn.textContent = `show larger (${larger.length}) — up to <8B`;
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          State._showLargerResident = true;
+          renderResidentPicker();
+        });
+        pop.appendChild(btn);
       }
 
-      // Section: deep backends (AeroLLM resident, AirLLM opt-in layer-
-      // streamed). F-HEADER twin fix: aeroLLM keeps its model resident
-      // once loaded, unlike the disk-per-token claim the old header made.
-      const deep = State.models.filter(m => m.badge === 'deep');
-      if (deep.length) {
-        const sec = document.createElement('div');
-        sec.className = 'section';
-        sec.innerHTML = `<div class="head"><span>Local · aeroLLM</span><span class="hw">30B+ deep backends</span></div>`;
-        pop.appendChild(sec);
-        deep.forEach(m =>
-          pop.appendChild(makeOpt(m, State.currentId, x => { selectModel(x); closePicker(); }))
-        );
-      }
+      renderPickerSourceRow(pop, renderResidentPicker);
+    }
 
-      // Compute source row
+    // Shared by both pickers — the compute-source pivot. Honest-disable
+    // (sprints/2026-08-11-two-slot-chat-models): a non-wired source used
+    // to error only at send time (cloud_backend_not_wired); now it's
+    // visibly disabled with the reason at click time instead. Wiring
+    // cloud send itself stays a separate follow-up.
+    function renderPickerSourceRow(pop, rerender) {
       const srcSec = document.createElement('div');
       srcSec.className = 'section';
       srcSec.innerHTML = '<div class="head"><span>Provider · run on</span><span class="hw">where this runs</span></div>';
@@ -2260,21 +2273,31 @@
         const pill = document.createElement('button');
         const cls = ['source-pill'];
         if (s.id === State.activeSource) cls.push('active');
-        if (!s.available) cls.push('unavailable');
+        const wired = s.wired !== false;
+        if (!s.available || !wired) cls.push('unavailable');
         pill.className = cls.join(' ');
         pill.textContent = s.label;
-        pill.title = s.available ? 'Switch source' : 'Add a token under Connections to enable.';
+        pill.title = !wired
+          ? `${s.label} isn't wired to chat send yet — coming in a follow-up.`
+          : (s.available ? 'Switch source' : 'Add a token under Connections to enable.');
         pill.addEventListener('click', () => {
+          if (!wired) { flashStatus(`${s.label}: not wired to chat send yet`); return; }
           if (!s.available && s.requires_token) { openConn(); return; }
           State.activeSource = s.id;
-          renderPicker();
+          rerender();
         });
         srcRow.appendChild(pill);
       });
       pop.appendChild(srcRow);
     }
 
-    function selectModel(m) {
+    // Sets resident-slot DISPLAY state only — chip label, State.current*,
+    // info card, warm dot — with no loadModel() round-trip. Shared by
+    // init() (a page load is not a user pick; triggering a real load
+    // there would fire a background inference call on every visit) and
+    // selectResidentModel() (after ITS loadModel() succeeds), so the two
+    // paths can't drift apart.
+    function applyResidentDisplay(m) {
       State.currentId = m.id;
       State.currentRuntime = m.runtime;
       State.currentEndpoint = m.endpoint || null;
@@ -2282,24 +2305,29 @@
       State.currentModel = m;
       const { provider, model } = transformProvider(m.id, m.runtime);
       $('picker-label').textContent = `${provider} · ${model}`;
-      // Telemetry refresh
+      if (typeof updateChipWarmState === 'function') updateChipWarmState();
       if (m.fit) {
         const tf = $('tele-fit'); if (tf) tf.textContent = m.fit.verdict || '—';
       }
       renderModelInfo(m);
-      // Refresh rail visuals (current highlight + active card)
-      if (typeof renderModelRail === 'function') renderModelRail();
-      if (typeof renderActiveCard === 'function') renderActiveCard();
-      // Auto-default: a frontier (70B+) pick belongs on the 2nd inference.
-      // Open the comparison so the user sees it run there + why. Skip when the
-      // tier doesn't ship the 2nd inference (the strip then shows the nudge).
-      if (isFrontier(m.id) && !State.compareOn
-          && (!State.deep || State.deep.available_in_tier !== false)) {
-        setCompare(true);
-        flashStatus('frontier 70B+ model → routed to the 2nd inference (aeroLLM)');
-      } else if (State.compareOn) {
-        renderComparisonStrip();  // keep the strip in sync with A's pick
-      }
+      if (State.compareOn) renderComparisonStrip();
+    }
+
+    async function selectResidentModel(m) {
+      closePicker();
+      const ok = await loadModel(m);
+      if (!ok) return;   // loadModel() already flashed the failure reason
+      applyResidentDisplay(m);
+
+      // Persist through the registry (Part 2/4 of the redesign) — the
+      // nav's model switcher and this picker agree by construction on
+      // the next load/restart instead of two systems that can disagree.
+      try {
+        await fetch('/api/chat/default', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ slot: 'resident', provider: 'my_machine', model: m.id, runtime: m.runtime }),
+        });
+      } catch (e) { console.warn('[resident picker] persist failed:', e); }
     }
 
     /* Render the rich model info card in the drawer. Pulls from gallery
@@ -2362,9 +2390,23 @@
         </div>`;
     }
 
-    function openPicker() { $('model-picker').classList.add('open'); }
+    // Phase 5 fix: the chip is now the real trigger (it wasn't wired to
+    // any click handler at all before — only ⌘K reached this popup, and
+    // even that added .open with no CSS rule to make it visible and no
+    // render call, so the advertised shortcut opened an empty, invisible
+    // shell). Both open paths now render fresh content every time.
+    function openPicker() { $('model-picker').classList.add('open'); renderResidentPicker(); }
     function closePicker() { $('model-picker').classList.remove('open'); }
-    function togglePicker() { $('model-picker').classList.toggle('open'); }
+    function togglePicker() {
+      const el = $('model-picker');
+      const open = !el.classList.contains('open');
+      el.classList.toggle('open', open);
+      if (open) renderResidentPicker();
+    }
+    $('model-picker').addEventListener('click', (e) => {
+      if (e.target.closest('.picker-pop') || e.target.closest('.chip-eject')) return;
+      togglePicker();
+    });
 
     document.addEventListener('click', (e) => {
       const p = $('model-picker');
@@ -2673,35 +2715,28 @@
       });
     }
 
-    // Frontier = 70B+ total params (the headline "2nd inference" threshold).
-    // Mirrors model_specs.is_frontier()'s fallback regex on the client so the
-    // chat can auto-default a frontier pick to aeroLLM without a round-trip.
-    function isFrontier(id) {
-      if (!id) return false;
-      const m = String(id).match(/(\d+(?:\.\d+)?)\s*([bBmM])\b/);
-      if (!m) return false;
-      let v = parseFloat(m[1]);
-      if (m[2].toLowerCase() === 'm') v /= 1000;
-      return v >= 70;
-    }
+    // (isFrontier() removed — sprints/2026-08-11-two-slot-chat-models:
+    // the resident slot is capped <8B by the ceiling, so "is A a
+    // frontier model" can never be true any more; the auto-route-to-
+    // deep behavior it drove is superseded by the two-slot split itself.)
 
-    // Curated comparison table (no LLM call): A = 1st inference (on-GPU),
-    // B = 2nd inference (aeroLLM). Sourced from static model metadata.
+    // Curated comparison table (no LLM call): A = resident slot,
+    // B = deep slot. Sourced from static model metadata + State.deepSlot.
     function renderComparisonStrip() {
       const el = $('compare-strip');
       if (!el) return;
       if (!State.compareOn) { el.hidden = true; el.classList.remove('nudge'); return; }
-      const deep = State.deep || {};
-      // No 2nd inference on this tier → upgrade nudge instead of specs.
+      const deep = State.deepSlot || {};
+      // No deep slot on this tier → upgrade nudge instead of specs.
       if (deep.available_in_tier === false) {
         el.classList.add('nudge'); el.hidden = false;
         const cmd = deep.upgrade_command || './arailctl upgrade maximus';
         el.innerHTML =
-          '<div class="cs-col a"><div class="cs-h">1st inference · on-GPU</div>'
+          '<div class="cs-col a"><div class="cs-h">Resident · on-GPU</div>'
           + '<div class="cs-row"><span>fast, always-on</span></div></div>'
-          + '<div class="cs-col b"><div class="cs-h">2nd inference · aeroLLM</div>'
+          + '<div class="cs-col b"><div class="cs-h">Deep · QueueLLM</div>'
           + '<div class="cs-row"><span>not on this tier</span></div></div>'
-          + '<div class="cs-why">The 2nd inference (aeroLLM, for 70B+ frontier models) ships '
+          + '<div class="cs-why">The deep model (QueueLLM) ships '
           + 'with the <b>maximus</b> tier. Upgrade: <code>' + escapeHtml(cmd) + '</code></div>';
         return;
       }
@@ -2715,34 +2750,35 @@
         + '<div class="cs-row"><span>model</span><span>' + escapeHtml(String(model)) + '</span></div>'
         + '<div class="cs-row"><span>params</span><span>' + escapeHtml(String(params)) + '</span></div>'
         + '<div class="cs-row"><span>runs</span><span>' + escapeHtml(runs) + '</span></div></div>';
-      let html = cell('a', '1st inference · on-GPU', aModel, aSpec.params || '≤ floor', 'resident in GPU');
+      let html = cell('a', 'Resident · on-GPU', aModel,
+                       aSpec.params || (a.params_b ? `~${a.params_b}B` : '<8B'), 'pinned in GPU');
       // Honest empty state: State.bId is the ONLY signal that a model is
-      // genuinely selected. `deep.model` used to be a silent fallback
+      // genuinely selected. deep.model_id used to be a silent fallback
       // here — it names the CONFIGURED default even when that default
       // was never downloaded, making the strip claim a selection that
-      // doesn't exist (the exact bug that made Compare look like it
-      // defaulted to a broken model after the auto-pick fix already
-      // correctly refused to select it).
+      // doesn't exist. Unlike main's older "use as B" design, Column B
+      // here can ONLY ever be the deep/aerollm slot (selectDeepModel is
+      // the sole setter of State.bId/State.bModel and always hardcodes
+      // runtime: 'aerollm') — so there's no heterogeneous-runtime case
+      // to defend against, and the header stays "Deep" for terminology
+      // consistency with the rest of this UI.
       html += State.bId
-        ? cell('b', '2nd inference · aeroLLM', State.bId,
-               bSpec.params || deep.param_hint || '70B+', 'resident via aeroLLM')
-        : '<div class="cs-col b"><div class="cs-h">2nd inference · aeroLLM</div>'
+        ? cell('b', 'Deep · QueueLLM', State.bId,
+               bSpec.params || (deep.params_b ? `~${deep.params_b}B` : '?'), 'resident via QueueLLM')
+        : '<div class="cs-col b"><div class="cs-h">Deep · QueueLLM</div>'
           + '<div class="cs-row"><span>not selected yet</span></div></div>';
-      if (isFrontier(a.id)) {
-        html += '<div class="cs-why">“' + escapeHtml(aModel) + '” is a frontier 70B+ model — '
-              + 'routed to the 2nd inference (aeroLLM), which keeps it resident '
-              + 'alongside your on-GPU model.</div>';
-      }
       el.innerHTML = html;
     }
 
     // ── Compare toggle ─────────────────────────────────────────────
-    // Column B is intentionally restricted to *deep backends* (AeroLLM,
-    // or AirLLM when the operator has opted in via ARAIL_DEV_AIRLLM=1
-    // on non-arm64). Loading two competing local models would over-
-    // subscribe VRAM; the deep backends (AeroLLM resident, AirLLM
-    // layer-streamed) coexist with the on-GPU primary at the cost of
-    // slower inference.
+    // Column A ≡ resident slot, column B ≡ deep slot, always (sprints/
+    // 2026-08-11-two-slot-chat-models Phase 5) — Compare runs both
+    // slots side by side rather than picking two arbitrary models. This
+    // is a deliberate reversal of the earlier "any model in column B"
+    // fix (a past user report: hard-restricting B to deep-only left
+    // "zero real choice for B"). The real choice now lives INSIDE the
+    // deep picker (any installed MLX model within the hardware cap), so
+    // the complaint is answered without reopening B to arbitrary models.
     function setCompare(on) {
       State.compareOn = on;
       // Persist the user's choice so closing Box B sticks across reloads
@@ -2752,31 +2788,24 @@
       document.querySelector('.col[data-col="B"]').hidden = !on;
       $('btn-compare').textContent = on ? '✓ Comparing' : '+ Compare';
       if (!on) { renderComparisonStrip(); flashStatus('compare mode off'); return; }
-      const tierHasDeep = !State.deep || State.deep.available_in_tier !== false;
-      if (!tierHasDeep) {
-        const cmd = (State.deep && State.deep.upgrade_command) || './arailctl upgrade maximus';
-        flashStatus('2nd inference (aeroLLM) needs the maximus tier — ' + cmd);
+
+      const deep = State.deepSlot;
+      if (!deep || deep.available_in_tier === false) {
+        const cmd = (deep && deep.upgrade_command) || './arailctl upgrade maximus';
+        flashStatus('deep model (QueueLLM) needs the maximus tier — ' + cmd);
       } else if (!State.bId) {
-        // Auto-pick AeroLLM if present AND its configured model's weights
-        // actually exist — not just "the package imports" (installed),
-        // which used to be treated as "ready to use" and defaulted
-        // Compare to a model that was guaranteed to fail with "model dir
-        // not found." Never auto-pick a regular local model (deliberate —
-        // Box B is for a genuinely different, deeper comparison, not a
-        // duplicate of Box A) — so when nothing deep is truly ready, say
-        // so honestly instead of picking anything.
-        const deeps = State.models.filter(m => m.badge === 'deep' && m.installed && m.model_ready);
-        if (deeps.length) {
-          selectModelB(deeps.find(m => m.runtime === 'aerollm') || deeps[0]);
-          flashStatus('compare on · column B = 2nd inference (aeroLLM)');
+        // Auto-bind to whatever's actually configured — honest about
+        // readiness instead of picking anything that isn't truly usable.
+        if (deep.model_ready) {
+          selectDeepModel({ id: deep.model_id, label: deep.display_name || deep.model_id, runtime: 'aerollm' });
+          flashStatus('compare on · column B = deep model (QueueLLM)');
+        } else if (!deep.installed) {
+          flashStatus('compare on, but QueueLLM isn’t built — run ./arailctl deep rebuild');
         } else {
-          const notInstalled = !State.models.some(m => m.badge === 'deep' && m.installed);
-          flashStatus(notInstalled
-            ? 'compare on, but the 2nd inference (aeroLLM) isn’t built — run ./arailctl deep rebuild'
-            : 'compare on, but no deep model is downloaded yet — set AEROLLM_MODEL in .env to a model you have locally, or pick one from Models');
+          flashStatus('compare on, but the deep model isn’t downloaded yet — set AEROLLM_MODEL in .env, or pick one from the deep picker');
         }
       } else {
-        flashStatus('compare on · column B = 2nd inference (aeroLLM)');
+        flashStatus('compare on · column B = deep model (QueueLLM)');
       }
       renderComparisonStrip();
     }
@@ -2797,42 +2826,131 @@
     });
 
     // ── Secondary model picker (column B) ──────────────────────────
-    function renderPickerB() {
+    // ── Deep picker (sprints/2026-08-11-two-slot-chat-models Phase 5) ──
+    // Replaces renderPickerB/selectModelB's freeform "any model in
+    // column B" — Column B IS the deep slot now (a deliberate reversal
+    // of the earlier "any model in B" fix; see the sprint ledger for
+    // why: the deep picker now offers real choice within its own
+    // candidate set, which was the actual complaint before). aeroLLM
+    // keeps its model fully resident once loaded — never claim
+    // streaming (F-OVERSELL).
+    function renderDeepPicker() {
       const pop = $('picker-pop-B');
       pop.innerHTML = '';
-      const closeB = () => $('model-picker-B').classList.remove('open');
-      const onPick = m => { selectModelB(m); closeB(); };
+      const deep = State.deepSlot;
 
-      const localModels = State.models.filter(m => m.badge !== 'deep');
-      if (localModels.length) {
-        const sec = document.createElement('div');
-        sec.className = 'section';
-        sec.innerHTML = `<div class="head"><span>Local models</span><span class="hw">column B</span></div>`;
-        pop.appendChild(sec);
-        localModels.forEach(m => pop.appendChild(makeOpt(m, State.bId, onPick)));
+      const sec = document.createElement('div');
+      sec.className = 'section';
+      const capText = deep && deep.cap_b ? `~${deep.cap_b}B cap on this hardware` : '';
+      sec.innerHTML = `<div class="head"><span>Deep model · QueueLLM</span><span class="hw">${escapeHtml(capText)}</span></div>`;
+      pop.appendChild(sec);
+
+      if (!deep) {
+        const empty = document.createElement('div');
+        empty.className = 'opt-reason';
+        empty.style.padding = '0.5rem var(--s-4)';
+        empty.textContent = 'QueueLLM isn’t available on this box.';
+        pop.appendChild(empty);
+        renderPickerSourceRow(pop, renderDeepPicker);
+        return;
       }
-      const deep = State.models.filter(m => m.badge === 'deep');
-      if (deep.length) {
-        const sec = document.createElement('div');
-        sec.className = 'section';
-        sec.innerHTML = `<div class="head"><span>Deep backends</span><span class="hw">30B+ deep backends</span></div>`;
-        pop.appendChild(sec);
-        deep.forEach(m => pop.appendChild(makeOpt(m, State.bId, onPick)));
+
+      // Tier lock: visible, not hidden behind a dedicated tab — explains
+      // why instead of pretending the slot doesn't exist.
+      if (deep.available_in_tier === false) {
+        const lock = document.createElement('div');
+        lock.className = 'lock-notice';
+        lock.innerHTML = `QueueLLM ships on the maximus tier.` +
+          `<code class="upgrade-cmd">${escapeHtml(deep.upgrade_command || './arailctl upgrade maximus')}</code>`;
+        pop.appendChild(lock);
+        return;
       }
+
+      // The currently-configured deep model — shown first even if it's
+      // the only option, so "what's resident right now" is never a
+      // question the operator has to guess at.
+      const currentRow = {
+        id: deep.model_id, label: deep.display_name || deep.model_id,
+        runtime: 'aerollm', params_b: deep.params_b, badge: 'deep',
+        fit: { verdict: deep.resident ? 'Resident' : (deep.model_ready ? 'Ready to load' : 'Not installed') },
+      };
+      pop.appendChild(makeOpt(currentRow, deep.model_id, () => {}, {
+        ineligible: !deep.eligible, reason: deep.reason,
+      }));
+
+      // Other installed MLX-runtime models could ALSO serve as the deep
+      // slot. Size check here is a CLIENT-SIDE estimate for display only
+      // (compact.local_models.items[].params_b, resolved server-side in
+      // Phase 1 for the PRIMARY ceiling — reused here just as a raw size
+      // figure) — POST /api/chat/default{slot:"deep"} runs the real
+      // secondary-role ceiling check server-side before anything
+      // persists or loads, so an estimate being wrong here can never
+      // silently oversell what will actually happen.
+      const alts = State.models.filter(m =>
+        m.id !== deep.model_id && (m.runtime === 'mlx' || m.runtime === 'mlx-openai'));
+      if (alts.length) {
+        const altSec = document.createElement('div');
+        altSec.className = 'section';
+        altSec.innerHTML = '<div class="head"><span>Other installed models</span><span class="hw">estimate — server confirms on pick</span></div>';
+        pop.appendChild(altSec);
+        alts.forEach(m => {
+          const overCap = !!(deep.cap_b && m.params_b != null && m.params_b > deep.cap_b);
+          pop.appendChild(makeOpt(m, deep.model_id, x => selectDeepModel(x), {
+            ineligible: overCap,
+            reason: overCap
+              ? `~${m.params_b}B is over the ~${deep.cap_b}B this machine can hold as a resident deep model.`
+              : null,
+            attribution: m.attribution,
+          }));
+        });
+      }
+
+      const regime = document.createElement('div');
+      regime.className = 'regime-note';
+      regime.textContent = deep.ring_depth
+        ? `Resident once loaded (ring depth ${deep.ring_depth}${deep.ring_depth_source ? ' · ' + deep.ring_depth_source : ''}). ${deep.restart_note || ''}`
+        : (deep.restart_note || 'Resident once loaded — QueueLLM keeps its model fully in memory; it does not stream.');
+      pop.appendChild(regime);
+
+      renderPickerSourceRow(pop, renderDeepPicker);
     }
-    function selectModelB(m) {
-      State.bId = m.id; State.bRuntime = m.runtime;
-      State.bEndpoint = m.endpoint || null; State.bModel = m;
-      const { provider, model } = transformProvider(m.id, m.runtime);
+
+    async function selectDeepModel(m) {
+      $('model-picker-B').classList.remove('open');
+      // The swap path (sprints/2026-08-11-two-slot-chat-models Part 4) —
+      // provider:'aerollm' routes _prepare_chat_model_load's _do_load
+      // into _swap_optional_chat_backend on a mismatch instead of the
+      // old "requires a portal restart" refusal.
+      const ok = await loadModel({ id: m.id, label: m.label || m.id, runtime: 'aerollm' });
+      if (!ok) return;
+
+      State.bId = m.id; State.bRuntime = 'aerollm';
+      State.bEndpoint = null; State.bModel = m;
+      const { provider, model } = transformProvider(m.id, 'aerollm');
       $('picker-label-B').textContent = `${provider} · ${model}`;
-      if ($('model-picker-B').classList.contains('open')) renderPickerB();
+      if (typeof updateChipWarmState === 'function') updateChipWarmState();
       if (typeof renderComparisonStrip === 'function') renderComparisonStrip();
+
+      try {
+        await fetch('/api/chat/default', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ slot: 'deep', model: m.id }),
+        });
+      } catch (e) { console.warn('[deep picker] persist failed:', e); }
+
+      // The swap changed which model is actually resident — re-fetch so
+      // cap_b/regime/ring_depth/etc reflect the NEW deep model, not the
+      // one that was configured when the page loaded.
+      await refreshSlots();
     }
+
+    function openPickerB() { $('model-picker-B').classList.add('open'); renderDeepPicker(); }
+    function closePickerB() { $('model-picker-B').classList.remove('open'); }
     $('model-picker-B').addEventListener('click', (e) => {
-      if (e.target.closest('.picker-pop')) return;
+      if (e.target.closest('.picker-pop') || e.target.closest('.chip-eject')) return;
       const open = !$('model-picker-B').classList.contains('open');
       $('model-picker-B').classList.toggle('open', open);
-      if (open) renderPickerB();
+      if (open) renderDeepPicker();
     });
     document.addEventListener('click', (e) => {
       const pB = $('model-picker-B');
@@ -2860,7 +2978,7 @@
         message: text,
         conversation_id: State.conversationId || undefined,
         branch: side,
-        history: State.history.slice(-20),
+        history: (side === 'B' ? State.bHistory : State.aHistory).slice(-20),
         backend: isDeepRuntime ? runtime : pickBackend(),
         runtime,
         model:   side === 'B' ? State.bId      : State.currentId,
@@ -2888,11 +3006,14 @@
       hideEmpty('A'); appendUser('A', text);
       const asstA = appendAssistant('A');
       let asstB = null;
+      State.aHistory.push({ role: 'user', content: text });
       if (State.compareOn && State.bId) {
         hideEmpty('B'); appendUser('B', text);
         asstB = appendAssistant('B');
+        // Each column keeps its OWN history (Phase 5) — the same prompt
+        // text starts both, but replies never cross over.
+        State.bHistory.push({ role: 'user', content: text });
       }
-      State.history.push({ role: 'user', content: text });
       $('send').disabled = true;
       flashStatus(State.compareOn ? 'sending to both…' : 'sending…');
 
@@ -3047,7 +3168,11 @@
       };
       slot.statsEl.innerHTML = renderStats(prov);
       attachStatsHandlers(slot.statsEl, prov);
-      State.history.push({ role: 'assistant', content: reply });
+      // Per-column history (Phase 5) — body.branch is the same 'A'/'B'
+      // buildBody() set; reading it back here (rather than threading a
+      // new parameter through) keeps this in sync with whatever side
+      // actually sent the request.
+      (body.branch === 'B' ? State.bHistory : State.aHistory).push({ role: 'assistant', content: reply });
       State.lastProv = prov;
       noteTelemetry(prov);
     }
@@ -3061,6 +3186,16 @@
       });
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const d = await r.json();
+      // Phase 1 review finding: a server-side error (d.error set) used to
+      // render d.reply as an ordinary assistant message and get pushed
+      // into History — indistinguishable from a real answer. Surface it
+      // as an error instead, same as the streaming path already does.
+      if (d.error) {
+        slot.bodyEl.innerHTML = renderMarkdown('⚠ ' + (d.reply || d.error));
+        slot.bodyEl.classList.add('chat-error');
+        renderSources(slot.srcEl, d.sources);
+        return;
+      }
       const reply = d.reply || '';
       slot.bodyEl.innerHTML = renderMarkdown(reply);
       renderSources(slot.srcEl, d.sources);
@@ -3076,7 +3211,11 @@
       };
       slot.statsEl.innerHTML = renderStats(prov);
       attachStatsHandlers(slot.statsEl, prov);
-      State.history.push({ role: 'assistant', content: reply });
+      // Per-column history (Phase 5) — body.branch is the same 'A'/'B'
+      // buildBody() set; reading it back here (rather than threading a
+      // new parameter through) keeps this in sync with whatever side
+      // actually sent the request.
+      (body.branch === 'B' ? State.bHistory : State.aHistory).push({ role: 'assistant', content: reply });
       State.lastProv = prov;
       noteTelemetry(prov);
     }
@@ -3213,56 +3352,84 @@
     }
 
     // ── Connections modal ──────────────────────────────────────────
+    // Backed by the real /api/providers/* endpoints (save/test/status) —
+    // NOT /api/tokens/*, which doesn't exist server-side and silently
+    // 404'd every save. This is the only place a Claude/HF/NVIDIA/
+    // OpenRouter key gets saved; the World forge's "Frontier API" option
+    // reads its availability from the same /api/providers/status call.
     const PROVIDERS = [
       { id: 'huggingface', label: 'HF',         hint: 'hf_xxx' },
       { id: 'claude',      label: 'Claude',     hint: 'sk-ant-…' },
       { id: 'nvidia',      label: 'NVIDIA',     hint: 'nvapi-…' },
       { id: 'openrouter',  label: 'OpenRouter', hint: 'sk-or-…' },
     ];
-    function renderConn() {
+    async function renderConn() {
       const wrap = $('conn-rows');
       wrap.innerHTML = '';
+      let status = null;
+      try {
+        const r = await fetch('/api/providers/status');
+        if (r.ok) status = await r.json();
+      } catch (e) { /* fall through — rows still render, just unstatused */ }
+      if (status && !status.cloud_enabled) {
+        const notice = document.createElement('p');
+        notice.className = 'blurb';
+        notice.style.color = 'var(--warn)';
+        notice.textContent = status.airgapped_notice ||
+          'Lab is airgapped — saved keys are stored but cloud providers stay locked out until LAB_MODE=hybrid.';
+        wrap.appendChild(notice);
+      }
       PROVIDERS.forEach(p => {
         const row = document.createElement('div');
         row.className = 'row';
         row.innerHTML = `
           <div class="name">${p.label}</div>
           <input type="password" placeholder="${p.hint}" data-prov="${p.id}">
-          <span><button data-verify="${p.id}">verify</button> <span class="badge"></span></span>`;
+          <span>
+            <button data-save="${p.id}">save</button>
+            <button data-verify="${p.id}">test</button>
+            <span class="badge"></span>
+          </span>`;
         wrap.appendChild(row);
-        // Status check
-        fetch(`/api/tokens/${p.id}/status`).then(r => r.ok ? r.json() : null).then(d => {
-          if (d && d.present) row.classList.add('ok');
-        }).catch(() => {});
-        row.querySelector('button').addEventListener('click', async () => {
+        if (status && status.available && status.available[p.id]) row.classList.add('ok');
+        row.querySelector('[data-save]').addEventListener('click', async () => {
           const tok = row.querySelector('input').value.trim();
-          if (!tok) return flashStatus(`${p.label}: paste token first`);
+          if (!tok) return flashStatus(`${p.label}: paste a key first`);
           try {
-            const r = await fetch(`/api/tokens/${p.id}`, {
+            const r = await fetch('/api/providers/save', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ token: tok }),
+              body: JSON.stringify({ provider: p.id, token: tok }),
             });
-            if (r.ok) { row.classList.add('ok'); flashStatus(`${p.label}: saved`); }
-            else flashStatus(`${p.label}: ${r.status}`);
+            const d = await r.json().catch(() => ({}));
+            if (r.ok && d.ok) {
+              row.classList.add('ok');
+              row.querySelector('input').value = '';
+              flashStatus(`${p.label}: key saved`);
+            } else {
+              flashStatus(`${p.label}: ${d.error || r.status}`);
+            }
+          } catch (e) { flashStatus(`${p.label}: ${e.message}`); }
+        });
+        row.querySelector('[data-verify]').addEventListener('click', async () => {
+          try {
+            const r = await fetch('/api/providers/test', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ provider: p.id }),
+            });
+            const d = await r.json().catch(() => ({}));
+            flashStatus(`${p.label}: ${d.ok ? 'authenticated' : (d.error || d.message || 'failed')}`);
           } catch (e) { flashStatus(`${p.label}: ${e.message}`); }
         });
       });
     }
-    function openConn() { $('conn-back').classList.add('open'); }
+    function openConn() { $('conn-back').classList.add('open'); renderConn(); }
     $('btn-conn').addEventListener('click', openConn);
     $('conn-close').addEventListener('click', () => $('conn-back').classList.remove('open'));
     $('conn-back').addEventListener('click', (e) => {
       if (e.target === $('conn-back')) $('conn-back').classList.remove('open');
     });
-
-    // ── Picker click handlers (delegated) ──────────────────────────
-    $('model-picker').addEventListener('click', (e) => {
-      // Don't toggle when clicking inside the popup options
-      if (e.target.closest('.picker-pop')) return;
-      togglePicker();
-    });
-    /* (source picker merged into model picker — no separate handler needed) */
 
     // ── Init ──────────────────────────────────────────────────────
     function escapeHtml(s) {
@@ -3390,183 +3557,53 @@
     }
 
     /* ── Render the model browser into the LEFT RAIL (cards). ── */
-    function renderModelRail() {
-      const local = State.models.filter(m => m.badge !== 'deep');
-      const deep  = State.models.filter(m => m.badge === 'deep');
-      const localWrap = $('rail-models-local');
-      const deepWrap  = $('rail-models-deep');
-      $('count-local').textContent = local.length;
-      $('count-deep').textContent  = deep.length;
-      const draw = (wrap, list) => {
-        wrap.innerHTML = '';
-        if (!list.length) {
-          wrap.innerHTML = '<div class="rail-empty">none</div>';
-          return;
-        }
-        list.forEach(m => {
-          const isCurrent = m.id === State.currentId;
-          const isDeep    = m.badge === 'deep';
-          const isWarm    = State.warmModels.has(m.id);
-          // F-FAKEFIT: a missing verdict must never render as a fake "good" —
-          // 'Unknown' matches the real backend's own out-of-band value
-          // (_fit_verdict_label returns "Unknown" when required/available
-          // memory can't be determined).
-          const verdict = m.fit && m.fit.verdict ? m.fit.verdict : 'Unknown';
-          const sizeStr = m.size_gb ? `${m.size_gb.toFixed(1)} GB` : (m.estimated_vram_gb ? `~${Number(m.estimated_vram_gb).toFixed(1)} GB vram` : '');
-          // C4: deep rows get warmth-driven, backend-accurate copy instead
-          // of the generic WARM/cold label — "resident (aeroLLM)" / cold →
-          // "installed (aeroLLM) · load to warm" — and never "streaming"
-          // for aeroLLM (finding 3, F-OVERSELL). AirLLM is AirLLM, not
-          // aeroLLM (finding 5).
-          const deepBackendLabel = m.runtime === 'aerollm' ? 'aeroLLM'
-                                  : m.runtime === 'airllm'  ? 'AirLLM'
-                                  : (m.runtime || 'deep backend');
-          const warmLabelText = isDeep
-            ? (isWarm ? `resident (${deepBackendLabel})` : `installed (${deepBackendLabel}) · load to warm`)
-            : (isWarm ? 'WARM' : 'cold');
-          const card = document.createElement('div');
-          card.className = 'model-card' + (isCurrent ? ' current' : '') + (isWarm ? ' warm' : '');
-          card.innerHTML = `
-            <div class="mc-row">
-              <span class="warm-dot" title="${isWarm ? 'Warm — loaded in memory' : 'Cold — on disk only'}"></span>
-              <div class="mc-name">${escapeHtml(m.label || m.id)}</div>
-              ${m.badge === 'deep' ? '<span class="deep-badge">deep</span>' : ''}
-              ${m.badge === 'new'  ? '<span class="new-badge">new</span>'  : ''}
-              ${m.streamed ? '<span class="streamed-badge" title="Exceeds the local hardware floor — routes through a deep backend (AeroLLM resident · AirLLM layer-streamed)">streamed</span>' : ''}
-            </div>
-            <div class="mc-meta">
-              <span class="runtime">${escapeHtml(m.runtime || '')}</span>
-              ${sizeStr ? `<span class="dot">·</span><span>${sizeStr}</span>` : ''}
-              <span class="dot">·</span>
-              <span class="fit-chip ${fitClass(verdict)}">${escapeHtml(verdict)}</span>
-              <span class="dot">·</span>
-              <span class="${isWarm ? 'warm-label' : 'cold-label'}">${escapeHtml(warmLabelText)}</span>
-            </div>
-            <div class="mc-actions">
-              <button class="mc-act primary"   data-act="A">use as A</button>
-              <!-- Column B used to hard-block every non-deep model — with
-                   only one deep backend ever installed (today: aeroLLM),
-                   that left operators with zero
-                   real choice for B, reported directly as "I can't change
-                   the models." Any model can go in B now; the real fit
-                   chip (already computed from live free memory) is the
-                   informed-choice signal instead of a hard block. -->
-              <button class="mc-act secondary" data-act="B" title="${m.badge === 'deep' ? 'Coexists with model A — layer-streamed/resident, not competing for the same VRAM.' : 'Loads alongside model A — check the fit chip above for whether both fit in free memory.'}">use as B</button>${m.badge !== 'deep' && verdict === 'Requires streaming' ? '<span class="dot">·</span><span class="fit-chip streaming" title="Both models resident at once may exceed free memory — the load itself will still tell you honestly if it fails.">tight fit</span>' : ''}
-              ${(() => {
-                // QA-1: /api/chat/eject can only ever really free a warm
-                // Ollama-runtime model (see its docstring) — mlx/mlx-
-                // openai/cpu/cuda always come back ok:false,
-                // requires_restart:true. Offering an "eject" button that
-                // titles itself "Free this model from VRAM/RAM" on those
-                // runtimes over-promises on exactly the honesty axis this
-                // sprint owns, even though the endpoint itself stays
-                // truthful. Only render it where it can actually work.
-                const canFree = m.runtime === 'ollama';
-                // Deep rows (aeroLLM/AirLLM) never render a working eject —
-                // the resident singleton can't be hot-freed this sprint
-                // (A3) — but a WARM deep row showing only "load" with no
-                // unload signal at all is worse than the mlx/cpu/cuda case
-                // below: at least those explain themselves. Match that
-                // honesty here instead of going silent.
-                if (isDeep && isWarm) return `<button class="mc-act eject disabled" data-act="eject-unavailable" disabled title="${escapeHtml(deepBackendLabel)} keeps its model resident once loaded — it can't be hot-freed in-process. Restart the portal to release it.">can't hot-free</button>`;
-                if (isDeep) return '<button class="mc-act load" data-act="load" title="Warm this deep backend with a 1-token call">load</button>';
-                if (isWarm && canFree) return '<button class="mc-act eject" data-act="eject" title="Free this model from VRAM/RAM">eject</button>';
-                if (isWarm) return `<button class="mc-act eject disabled" data-act="eject-unavailable" disabled title="${escapeHtml(m.runtime || 'this runtime')} cannot hot-free in-process — restart the portal to release it.">can't hot-free</button>`;
-                return '<button class="mc-act load"  data-act="load"  title="Warm this model with a 1-token call so it loads quickly next time">load</button>';
-              })()}
-            </div>`;
-          card.querySelector('[data-act="A"]').addEventListener('click', e => {
-            e.stopPropagation(); selectModel(m); renderModelRail();
-          });
-          const bBtn = card.querySelector('[data-act="B"]');
-          if (bBtn && !bBtn.disabled) {
-            bBtn.addEventListener('click', e => {
-              e.stopPropagation();
-              if (!State.compareOn) setCompare(true);
-              selectModelB(m); renderModelRail();
-            });
-          }
-          const loadBtn = card.querySelector('[data-act="load"]');
-          if (loadBtn) loadBtn.addEventListener('click', e => { e.stopPropagation(); loadModel(m); });
-          // C5/finding 6: deep rows (aeroLLM/AirLLM) never render an eject
-          // button — the singleton cannot be hot-freed this sprint (A3).
-          const ejectBtn = isDeep ? null : card.querySelector('[data-act="eject"]');
-          if (ejectBtn) ejectBtn.addEventListener('click', async e => {
-            e.stopPropagation();
-            // Use the existing eject endpoint with this card's runtime/model
-            const wasA = State.currentId === m.id;
-            const wasB = State.bId === m.id;
-            try {
-              const r = await fetch('/api/chat/eject', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ runtime: m.runtime, model: m.id }),
-              });
-              if (r.status === 404) { flashStatus('eject endpoint not registered — restart ./arail'); return; }
-              const d = await r.json();
-              // HON-1: only clear the warm dot once the endpoint confirms
-              // it actually freed something — otherwise a failed eject
-              // (or a runtime that can't hot-free) flips the dot to cold
-              // while the model is still resident. Matches the active-
-              // card eject path below, which already gated on d.ok.
-              if (d.ok) State.warmModels.delete(m.id);
-              flashStatus(d.ok ? `ejected ${m.id}` : `eject failed: ${(d.notes && d.notes[0]) || d.error || 'not freed'}`);
-              if (d.ok && wasA) { State.currentModel = null; State.currentId = null; renderActiveCard(); }
-              if (d.ok && wasB) { State.bModel = null; State.bId = null; renderActiveCard(); }
-              renderModelRail();
-              const wm = $('tele-warm');
-              if (wm) {
-                const ws = Array.from(State.warmModels);
-                wm.innerHTML = ws.length ? ws.map(x => `<span class="warm-pill">${escapeHtml(transformProvider(x,'').model)}</span>`).join(' ') : 'none';
-              }
-            } catch (err) { flashStatus('eject failed: ' + err.message); }
-          });
-          card.addEventListener('click', () => { selectModel(m); renderModelRail(); });
-          wrap.appendChild(card);
-        });
-      };
-      draw(localWrap, local);
-      draw(deepWrap,  deep);
+    // ── Chip state (sprints/2026-08-11-two-slot-chat-models Phase 5) ──
+    // Replaces renderModelRail()/renderActiveCard() — the below-the-fold
+    // rail and the separate "active model" strip both duplicated what
+    // the two header chips now show directly: name, warm dot, an eject
+    // action when something can actually be freed. No second surface to
+    // keep in sync, no scrolling required to see or change either slot.
+    // (main independently patched renderModelRail's whole-card-click
+    // footgun and eject-honesty gating after this sprint deleted it —
+    // moot here; there's no rail left to have those bugs.)
+    function updateChipWarmState() {
+      const chipA = $('model-picker');
+      if (chipA) {
+        const warmA = !!(State.currentId && (State.warmModels.has(State.currentId)
+                       || (State.residentSlot && State.residentSlot.warm)));
+        chipA.classList.toggle('warm', warmA);
+        const ejectA = $('resident-eject-btn');
+        // QA-1: /api/chat/eject can only ever really free a warm Ollama-
+        // runtime model — offering the button anywhere else over-
+        // promises on the exact honesty axis this surface owns.
+        if (ejectA) ejectA.hidden = !(warmA && State.currentRuntime === 'ollama');
+      }
+      const chipB = $('model-picker-B');
+      if (chipB) {
+        const warmB = !!(State.deepSlot && State.deepSlot.resident);
+        chipB.classList.toggle('warm', warmB);
+        const ejectB = $('deep-eject-btn');
+        // Part 4: aerollm CAN now be really freed (unlike the old A3
+        // restriction) — show the button whenever it's actually resident.
+        if (ejectB) ejectB.hidden = !warmB;
+      }
     }
-    function renderActiveCard() {
-      const m = State.currentModel;
-      const wrap = $('active-card');
-      if (!m) { wrap.innerHTML = '<div class="rc-loading">no model</div>'; return; }
-      const { provider, model } = transformProvider(m.id, m.runtime);
-      // F-FAKEFIT (active-mini-fit twin of the rail default above).
-      const verdict = m.fit && m.fit.verdict ? m.fit.verdict : 'Unknown';
-      $('active-mini-fit').innerHTML = `<span class="fit-chip ${fitClass(verdict)}">${escapeHtml(verdict)}</span>`;
-      // C5/finding 6: no Unload/Eject on deep rows (aeroLLM/AirLLM) here
-      // either — the mini "active card" mirrors the rail card's rule.
-      const isDeepActive = m.badge === 'deep';
-      const bIsDeep = State.bModel && State.bModel.badge === 'deep';
-      const bModel = State.compareOn && State.bModel
-        ? `<div class="mc-meta mt-2">B · ${escapeHtml(State.bRuntime||'')} · ${escapeHtml(State.bId||'')}
-             ${bIsDeep ? '' : '<button class="mc-act eject" data-eject="B" title="Free model B from VRAM/RAM">eject B</button>'}
-           </div>`
-        : '';
-      wrap.innerHTML = `
-        <div class="mc-name live">${escapeHtml(model)}</div>
-        <div class="mc-meta">${escapeHtml(provider)} · <span class="runtime">${escapeHtml(m.runtime||'')}</span></div>
-        <div class="active-actions">
-          ${isDeepActive ? '' : '<button class="mc-act eject" data-eject="A" title="Free this model from VRAM/RAM">eject from VRAM</button>'}
-          <button class="mc-act swap"  data-swap title="Swap to another model — opens the rail picker">swap →</button>
-        </div>
-        ${bModel}`;
-      // Wire eject + swap
-      wrap.querySelectorAll('[data-eject]').forEach(b => {
-        b.addEventListener('click', () => ejectModel(b.dataset.eject));
-      });
-      const sw = wrap.querySelector('[data-swap]');
-      if (sw) sw.addEventListener('click', () => {
-        // Scroll the local-models card into view + flash it.
-        const target = $('rail-models-local');
-        if (target) {
-          target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          target.style.transition = 'box-shadow 0.4s ease';
-          target.style.boxShadow = '0 0 0 2px var(--accent)';
-          setTimeout(() => { target.style.boxShadow = ''; }, 1100);
-        }
-      });
+
+    // Re-fetch just the two-slot state after an action that changes it
+    // (a deep swap, an eject) — cheaper than a full init() and keeps
+    // cap_b/regime/ring_depth/warm state honest without re-running
+    // conversation restore, tunable defaults, etc.
+    async function refreshSlots() {
+      try {
+        const r = await fetch('/api/chat/models');
+        const d = await r.json();
+        State.gallery = d;
+        State.residentSlot = (d.slots && d.slots.resident) || null;
+        State.deepSlot = (d.slots && d.slots.deep) || null;
+        State.models = (d.compact && d.compact.local_models && d.compact.local_models.items) || [];
+        State.sources = (d.compact && d.compact.compute_sources) || [];
+        updateChipWarmState();
+      } catch (e) { console.warn('[refreshSlots]', e); }
     }
 
     /* ── Session telemetry: refresh the right-rail Telemetry card after
@@ -3588,7 +3625,7 @@
             ? list.map(m => `<span class="warm-pill">${escapeHtml(transformProvider(m,'').model)}</span>`).join(' ')
             : 'none';
         }
-        renderModelRail();   // refresh warm dots on the cards
+        updateChipWarmState();   // refresh the chip warm dots
       } catch (e) { console.warn('[telemetry update]', e); }
     }
 
@@ -3643,8 +3680,12 @@
       } catch { /* a missed poll tick isn't worth surfacing */ }
     }
 
+    // Returns true on a confirmed-ready load, false on any failure — Phase
+    // 5 callers (selectResidentModel/selectDeepModel) need this to decide
+    // whether to update the chip/persist the pick, so a failed load can
+    // never look like a successful one.
     async function loadModel(m) {
-      if (!m) return;
+      if (!m) return false;
       const label = m.label || m.id;
       flashStatus(`loading ${label}…`);
       _showLoaderStrip(label);
@@ -3665,15 +3706,17 @@
         const d = await r.json();
         if (d.state === 'error') throw new Error(d.message || 'load failed');
         State.warmModels.add(m.id);
-        renderModelRail();
+        if (typeof updateChipWarmState === 'function') updateChipWarmState();
         const wm = $('tele-warm');
         if (wm) {
           const list = Array.from(State.warmModels);
           wm.innerHTML = list.map(x => `<span class="warm-pill">${escapeHtml(transformProvider(x,'').model)}</span>`).join(' ');
         }
         flashStatus(d.message || `loaded ${label}`);
+        return true;
       } catch (e) {
         flashStatus(`load failed: ${e.message}`);
+        return false;
       } finally {
         _stopLoadPoll();
         _hideLoaderStrip();
@@ -3702,10 +3745,11 @@
           const notes = (d.notes || []).join(' · ');
           flashStatus(`ejected: ${freed}${notes ? ' · ' + notes : ''}`);
           if (model) State.warmModels.delete(model);
-          if (side === 'A') { State.currentModel = null; State.currentId = null; renderActiveCard(); }
-          else              { State.bModel = null; State.bId = null; renderActiveCard(); }
-          renderModelRail();
-          // refresh the warm pill row in telemetry
+          // The slot's IDENTITY doesn't change on eject — only its warm
+          // state does (the registry still has a configured resident/deep
+          // model, just cold now). Re-fetch so the chip reflects the
+          // real state instead of nulling the slot out.
+          await refreshSlots();
           const wm = $('tele-warm');
           if (wm) {
             const list = Array.from(State.warmModels);
@@ -3720,6 +3764,12 @@
         flashStatus(`eject failed: ${e.message}`);
       }
     }
+    // Chip eject buttons — the eject affordance lives on the chip itself
+    // now (Phase 5), not a separate active-model strip. updateChipWarmState()
+    // shows/hides these based on real, server-confirmed residency.
+    $('resident-eject-btn')?.addEventListener('click', (e) => { e.stopPropagation(); ejectModel('A'); });
+    $('deep-eject-btn')?.addEventListener('click', (e) => { e.stopPropagation(); ejectModel('B'); });
+
     function renderSourcesRail() {
       const wrap = $('rail-sources');
       if (!wrap) return;
@@ -3728,11 +3778,15 @@
         const pill = document.createElement('button');
         const cls = ['source-pill'];
         if (s.id === State.activeSource) cls.push('active');
-        if (!s.available) cls.push('unavailable');
+        const wired = s.wired !== false;
+        if (!s.available || !wired) cls.push('unavailable');
         pill.className = cls.join(' ');
         pill.textContent = s.label;
-        pill.title = s.available ? 'Switch source' : 'Add a token under Connections to enable.';
+        pill.title = !wired
+          ? `${s.label} isn't wired to chat send yet — coming in a follow-up.`
+          : (s.available ? 'Switch source' : 'Add a token under Connections to enable.');
         pill.addEventListener('click', () => {
+          if (!wired) { flashStatus(`${s.label}: not wired to chat send yet`); return; }
           if (!s.available && s.requires_token) { openConn(); return; }
           State.activeSource = s.id;
           renderSourcesRail();
@@ -3762,15 +3816,23 @@
       const r = await fetch('/api/chat/conversations/' + encodeURIComponent(cid));
       if (!r.ok) return false;
       const data = await r.json();
-      const t = trEl('A');
-      if (t) t.innerHTML = '';
-      State.history = [];
+      const tA = trEl('A'); if (tA) tA.innerHTML = '';
+      const tB = trEl('B'); if (tB) tB.innerHTML = '';
+      State.aHistory = [];
+      State.bHistory = [];
+      // Route by the persisted branch (Phase 5 fix — this used to dump
+      // every turn into column A regardless of which column actually
+      // produced it, even though the server has recorded `branch` per
+      // message all along). Legacy rows saved before branch tracking
+      // existed have no `branch` field — default those to 'A'.
       for (const msg of (data.messages || [])) {
-        if (msg.role === 'user') { hideEmpty('A'); appendUser('A', msg.content); }
-        else { hideEmpty('A'); appendAssistantStatic('A', msg); }
-        State.history.push({ role: msg.role, content: msg.content });
+        const side = msg.branch === 'B' ? 'B' : 'A';
+        if (msg.role === 'user') { hideEmpty(side); appendUser(side, msg.content); }
+        else { hideEmpty(side); appendAssistantStatic(side, msg); }
+        (side === 'B' ? State.bHistory : State.aHistory).push({ role: msg.role, content: msg.content });
       }
       scrollToBottom('A');
+      if (State.bHistory.length) scrollToBottom('B');
       return true;
     }
 
@@ -3816,7 +3878,9 @@
           State.conversationId = meta.conversation_id;
           localStorage.setItem('arail.chat.conversationId', meta.conversation_id);
           const t = trEl('A'); if (t) t.innerHTML = '';
-          State.history = [];
+          const tb = trEl('B'); if (tb) tb.innerHTML = '';
+          State.aHistory = [];
+          State.bHistory = [];
           await refreshConversationPicker();
         });
         $('conv-rename')?.addEventListener('click', async () => {
@@ -3835,7 +3899,9 @@
           localStorage.removeItem('arail.chat.conversationId');
           State.conversationId = null;
           const t = trEl('A'); if (t) t.innerHTML = '';
-          State.history = [];
+          const tb = trEl('B'); if (tb) tb.innerHTML = '';
+          State.aHistory = [];
+          State.bHistory = [];
           await initConversations();
         });
       } catch (e) { console.warn('[chat] conversations unavailable:', e); }
@@ -3873,10 +3939,7 @@
           card.classList.add('flash');
         }
       }
-      $('btn-toggle-left').addEventListener('click', () => {
-        // Models live in the left rail, below the chat.
-        scrollAndFlash(document.getElementById('rail-models-local')?.closest('.rail-card') || $('rail-left'));
-      });
+      $('btn-toggle-left').addEventListener('click', () => { openPicker(); });
       $('btn-toggle-right').addEventListener('click', () => {
         // Tunables: the core strip is right under the chat.
         scrollAndFlash($('core-tunables'));
@@ -3885,99 +3948,56 @@
         const r = await fetch('/api/chat/models');
         const d = await r.json();
         State.gallery = d;
-        State.deep = d.deep || null;   // deep_info: 2nd-inference model + tier/frontier flags
+        // The two-slot model (sprints/2026-08-11-two-slot-chat-models):
+        // d.slots is the registry's own resident/deep identity — the
+        // single source of truth the nav's model switcher also reads.
+        // Replaces the old d.deep (deep_info) + client-synthesized
+        // "virtual" deep rows folded into one shared model list.
+        State.residentSlot = (d.slots && d.slots.resident) || null;
+        State.deepSlot = (d.slots && d.slots.deep) || null;
         // §2.2 fix: d.gallery.installed carries no `fit` verdict (every card
         // silently defaulted to a fake "good"). d.compact.local_models.items
         // is the SAME set of local models enriched by _build_local_model_entry
-        // with the real fit.verdict computed from free_gb (F-FAKEFIT).
+        // with the real fit.verdict computed from free_gb (F-FAKEFIT), plus
+        // (Phase 1) params_b/ceiling/attribution for the resident picker.
         State.models = (d.compact && d.compact.local_models && d.compact.local_models.items) || [];
 
-        // Fold optional deep backends (AirLLM, AeroLLM) into the picker
-        // as virtual entries — they're full-fledged backends but live
-        // outside the gallery's `installed` list because they wrap a
-        // remote/heavy local runtime, not an on-disk weight folder.
-        const optBackends = d.optional_backends || [];
-        const deepEntries = optBackends
-          .filter(o => o && (o.installed || o.id === 'aerollm'))
-          .map(o => ({
-            id: o.model || o.id,
-            label: `${o.label} · ${o.model || o.id}`,
-            runtime: o.id,                 // 'airllm' or 'aerollm'
-            size_gb: null,
-            estimated_vram_gb: null,
-            // C4/F-OVERSELL: never 'streaming' for aeroLLM — it keeps its
-            // model resident once loaded (AERO_MOE_SELECT, the real
-            // expert-streaming feature, is off and absent from src/).
-            // `o.resident` is the real warmth probe — `_tier1_resident()`
-            // for aeroLLM (inspects AeroLLMBackend._shared without
-            // constructing anything), wrapper-cache presence for AirLLM.
-            fit: {
-              verdict: !o.installed
-                ? 'Not installed'
-                : (o.id === 'aerollm'
-                    ? (o.resident ? 'Resident' : 'Ready to load')
-                    : 'Streaming'),
-              summary: o.description || '',
-            },
-            endpoint: null,
-            badge: 'deep',
-            installed: !!o.installed,
-            // installed means "the package imports"; this means "the
-            // specific configured model's weights are actually on disk."
-            // setCompare()'s auto-pick must not default to a selection
-            // that's installed-but-not-ready — that's exactly the state
-            // that made Compare silently pick a model guaranteed to fail.
-            model_ready: !!o.model_ready,
-            // F-WARMDOT: carried through so State.warmModels can be seeded
-            // from real residency, not client-side in-memory guesswork.
-            resident: !!o.resident,
-            install_command: o.install_command,
-            spec: {
-              params: o.param_hint || '70B+',
-              license: 'mixed (per upstream model)',
-              context: 'depends on base model',
-              strengths: [
-                o.id === 'airllm'
-                  ? 'Layer-streaming for 70B+ local models on modest VRAM'
-                  : 'Rust-native inference; future fast path for ARAIL',
-                'Wraps any HF-style base — set ' + (o.id === 'airllm' ? 'AIRLLM_MODEL' : 'AEROLLM_MODEL'),
-                o.installed ? 'Installed' : 'Not installed — see install command',
-              ],
-              notes: o.description || '',
-              source: o.id === 'airllm'
-                ? 'https://github.com/lyogavin/airllm'
-                : 'https://github.com/cdarnell/aerollm',
-            },
-          }));
-        State.deepEntries = deepEntries;
-        // Append to gallery so they show up in BOTH columns' pickers.
-        State.models = State.models.concat(deepEntries);
-
         // F-WARMDOT: seed the client's warm-tracking Set from real,
-        // server-probed residency (Ollama rows: live `ollama ps`; aeroLLM:
-        // `_tier1_resident()`; AirLLM: wrapper-cache presence) instead of
-        // starting cold every page load regardless of what's actually
-        // resident. Subsequent load/eject actions keep mutating this Set
-        // exactly as before — this only fixes the *initial* reading.
-        State.models.forEach(m => {
-          if (m.warm || m.resident) State.warmModels.add(m.id);
-        });
+        // server-probed residency instead of starting cold every page
+        // load regardless of what's actually resident. (Resident-slot
+        // warmth itself doesn't need seeding here — updateChipWarmState()
+        // checks State.residentSlot.warm directly.)
+        State.models.forEach(m => { if (m.warm) State.warmModels.add(m.id); });
 
         State.sources = (d.compact && d.compact.compute_sources) || [];
         State.activeSource = (State.sources.find(s => s.active) || {}).id || 'my_machine';
-        // Pick current
+        // Display the resident slot — a page load is not a user pick, so
+        // this sets display state only (no load-and-run round trip; that
+        // only happens when the operator actually clicks a picker row).
+        // Tag-tolerant: registry model_id is bare, Ollama rows are tagged.
         let cur = null;
-        if (d.current) cur = State.models.find(m => m.id === d.current);
+        if (State.residentSlot) {
+          cur = State.models.find(m => m.id === State.residentSlot.model_id)
+             || State.models.find(m => bareModelId(m.id) === bareModelId(State.residentSlot.model_id));
+        }
+        if (!cur && d.current) cur = State.models.find(m => m.id === d.current);
         if (!cur && State.models.length) cur = State.models[0];
         if (cur) {
           restoreTunables(cur.id);
           renderTunables();
-          selectModel(cur);
+          applyResidentDisplay(cur);
         } else {
           $('picker-label').textContent = 'no models found';
         }
-        renderModelRail();
-        renderActiveCard();
+        // Deep chip: show what's configured even before Compare is ever
+        // turned on, so "what will column B be if I open Compare" is
+        // never a mystery — but don't touch State.bId/bModel (Compare's
+        // OWN state), since Compare itself stays user-initiated only.
+        if (State.deepSlot) {
+          const { provider, model } = transformProvider(State.deepSlot.model_id, 'aerollm');
+          $('picker-label-B').textContent = `${provider} · ${model}`;
+        }
+        updateChipWarmState();
         renderSourcesRail();
         // Telemetry
         const hw = d.compact && d.compact.hardware;

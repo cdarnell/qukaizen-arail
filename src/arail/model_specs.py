@@ -35,6 +35,7 @@ Schema per model:
 
 from __future__ import annotations
 
+import json as _json
 import re as _re
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
@@ -302,6 +303,31 @@ def known_models() -> List[str]:
 # total_params_b is in BILLIONS (400.0 = 400B).
 # DO NOT add a generic "Llama-4" pattern — it would shadow specific variants.
 MODEL_METADATA_OVERRIDES: List[tuple] = [
+    # Persona-named Ollama tags carry no digit in their name, so the
+    # name-regex fallback can't see their size — without an explicit entry
+    # here they'd hit "unknown" and get refused by the answering-model
+    # ceiling (arail.registry.ceiling), including the shipped default.
+    # Keep these in sync with models/ai-eng/Modelfile.* `FROM` lines and
+    # pyproject.toml [tool.arail.models].
+    (_re.compile(r"^llama-ai-eng(?::|$)", _re.IGNORECASE), {
+        "total_params_b": 1.0,
+        "notes": "Persona wrap over Llama-3.2-1B-Instruct (models/ai-eng/Modelfile.default).",
+    }),
+    # "ai-eng" and "ai-engineer" are two DIFFERENT models that happen to
+    # share a name prefix — not a rename of each other. ai-engineer was
+    # ARAIL's original (pre-two-tier) default, based on qwen3:8b then
+    # qwen2.5:7b; it was repositioned as the maximus deep persona when the
+    # 1B llama-ai-eng/ai-eng lineage launched. Do not merge these entries or
+    # treat one as a fallback alias for the other — see the corrected
+    # history of _resilient_chat_default() in src/arail/portal/app.py.
+    (_re.compile(r"^ai-eng(?::|$)", _re.IGNORECASE), {
+        "total_params_b": 1.0,
+        "notes": "v1.0.0 name for llama-ai-eng.",
+    }),
+    (_re.compile(r"^ai-engineer(?::|$)", _re.IGNORECASE), {
+        "total_params_b": 7.0,
+        "notes": "Maximus deep persona wrap over Qwen2.5-7B-Instruct (models/ai-eng/Modelfile.deep). NOT a rename of ai-eng/llama-ai-eng.",
+    }),
     (_re.compile(r"Llama-4.*Maverick.*17B.*128E", _re.IGNORECASE), {
         "total_params_b": 400.0,
         "active_params_b": 17.0,
@@ -357,6 +383,143 @@ def get_total_params(model_name: str) -> Optional[float]:
             if isinstance(value, (int, float)) and value > 0:
                 return float(value)
     return None
+
+
+# ── Param resolution from an on-disk model file ────────────────────────────
+# Used by the answering-model ceiling (arail.registry.ceiling) so an opaquely
+# named file can't dodge the gate the way it can dodge the name-regex parser.
+# Best-effort: safetensors headers are always honest (they list every tensor's
+# shape); GGUF only sometimes carries an explicit parameter_count metadata key
+# — when it doesn't, this returns None and the caller falls through to the
+# next source in the resolution order, never inventing a number.
+
+def params_b_from_safetensors(path: str) -> Optional[float]:
+    """Sum every tensor's element count from a .safetensors header.
+
+    The header is a length-prefixed JSON blob at the start of the file — no
+    need to read the (potentially huge) tensor data itself.
+    """
+    try:
+        with open(path, "rb") as f:
+            header_len = int.from_bytes(f.read(8), "little")
+            if header_len <= 0 or header_len > 100_000_000:
+                return None
+            header = _json.loads(f.read(header_len))
+    except Exception:  # noqa: BLE001
+        return None
+    total = 0
+    for key, meta in header.items():
+        if key == "__metadata__" or not isinstance(meta, dict):
+            continue
+        shape = meta.get("shape")
+        if not shape:
+            continue
+        count = 1
+        for dim in shape:
+            count *= int(dim)
+        total += count
+    if total <= 0:
+        return None
+    return total / 1e9
+
+
+def params_b_from_gguf(path: str) -> Optional[float]:
+    """Read the explicit ``general.parameter_count`` key from a GGUF header.
+
+    Not every GGUF file carries this key. When it's absent this returns
+    None rather than estimating from tensor shapes (GGUF's quantized tensor
+    layout makes a cheap, reliable shape-based count impractical here) — the
+    caller falls through to the catalog / name-regex sources.
+    """
+    try:
+        with open(path, "rb") as f:
+            magic = f.read(4)
+            if magic != b"GGUF":
+                return None
+            version = int.from_bytes(f.read(4), "little")
+            if version < 2:
+                return None
+            _tensor_count = int.from_bytes(f.read(8), "little")
+            kv_count = int.from_bytes(f.read(8), "little")
+
+            def _read_str() -> str:
+                n = int.from_bytes(f.read(8), "little")
+                return f.read(n).decode("utf-8", "replace")
+
+            _GGUF_TYPE_SIZES = {0: 1, 1: 1, 2: 2, 3: 2, 4: 4, 5: 4, 6: 4, 7: 1, 10: 8, 11: 8, 12: 8}
+
+            def _skip_value(vtype: int) -> Optional[int]:
+                if vtype == 8:  # string
+                    return None if _read_str() is not None else None
+                if vtype == 9:  # array
+                    item_type = int.from_bytes(f.read(4), "little")
+                    n = int.from_bytes(f.read(8), "little")
+                    for _ in range(n):
+                        _skip_value(item_type)
+                    return None
+                size = _GGUF_TYPE_SIZES.get(vtype)
+                if size is None:
+                    return None
+                f.read(size)
+                return None
+
+            for _ in range(min(kv_count, 10_000)):
+                key = _read_str()
+                vtype = int.from_bytes(f.read(4), "little")
+                if key == "general.parameter_count" and vtype in (10, 11, 12):
+                    size = _GGUF_TYPE_SIZES[vtype]
+                    raw = f.read(size)
+                    value = int.from_bytes(raw, "little")
+                    return value / 1e9
+                _skip_value(vtype)
+    except Exception:  # noqa: BLE001
+        return None
+    return None
+
+
+def params_b_from_path(path: str) -> Optional[float]:
+    """Dispatch to the right on-disk metadata reader by extension."""
+    lower = path.lower()
+    if lower.endswith(".safetensors"):
+        return params_b_from_safetensors(path)
+    if lower.endswith(".gguf"):
+        return params_b_from_gguf(path)
+    return None
+
+
+def resolve_params_b(
+    model_name: str, model_path: Optional[str] = None
+) -> Tuple[Optional[float], str]:
+    """Resolve total params (billions) for the answering-model ceiling.
+
+    Resolution order — the one the review flagged as missing:
+      1. on-disk metadata (safetensors tensor shapes / GGUF parameter_count)
+      2. MODEL_METADATA_OVERRIDES / catalog-style override table
+      3. name-regex heuristic (last resort, not a default-to-small guess)
+
+    Returns (value_or_None, source). ``source`` is one of
+    "metadata" | "override" | "name-regex" | "unknown" — callers (the
+    ceiling gate) must treat "unknown" as *unknown*, never as "small".
+    """
+    if model_path:
+        from_metadata = params_b_from_path(model_path)
+        if from_metadata is not None:
+            return from_metadata, "metadata"
+    from_override = get_total_params(model_name) if model_name else None
+    if from_override is not None:
+        return from_override, "override"
+    if model_name:
+        m = _re.search(r"(\d+(?:\.\d+)?)([BMK])\b", model_name, _re.IGNORECASE)
+        if m:
+            val = float(m.group(1))
+            unit = m.group(2).upper()
+            if unit == "B":
+                return val, "name-regex"
+            if unit == "M":
+                return val / 1000.0, "name-regex"
+            if unit == "K":
+                return val / 1_000_000.0, "name-regex"
+    return None, "unknown"
 
 
 @lru_cache(maxsize=512)

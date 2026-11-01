@@ -1,0 +1,30 @@
+{
+  "name": "hold-all-ok-airgapped",
+  "method": "hold_all",
+  "setup": {
+    "lab_mode": "airgapped"
+  },
+  "request": {
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer $CREDENTIAL",
+      "X-Buddy-Contract": "sha256:$CONTRACT_SHA256"
+    },
+    "body": {
+      "v": 1,
+      "trace_id": "0123456789abcdef",
+      "reason": "telegram_stop",
+      "by": {
+        "pseudonym": "p_0123456789",
+        "role": "talker"
+      }
+    }
+  },
+  "expect": {
+    "status": 200,
+    "error_code": null,
+    "body_subset": {
+      "held": true
+    }
+  }
+}

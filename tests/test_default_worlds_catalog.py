@@ -9,6 +9,7 @@ offered as defaults, but still sealed and importable by path.
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 from arail import world_mount as wm
@@ -27,15 +28,38 @@ def _bundle_dirs(root: Path) -> set[str]:
             if d.is_dir() and (d / "manifest.json").exists()}
 
 
-def test_catalog_holds_exactly_the_shipped_defaults():
-    assert _bundle_dirs(CATALOG) == DEFAULTS
+def test_catalog_ships_the_default_worlds():
+    """The three defaults are present and sealed.
+
+    Deliberately a SUBSET check, not equality. ``lab/worlds/`` is also where
+    every World a user forges or mounts lands at runtime — a school-work
+    World, a demo they pulled down — so asserting the directory contains
+    *exactly* the shipped three made the suite fail on any lab that had
+    actually been used, which is every real one. The shipped catalog being
+    correct is what this guards; what else the operator keeps beside it is
+    their business (and is git-ignored — see .gitignore's lab/worlds/ rule).
+    """
+    present = _bundle_dirs(CATALOG)
+    missing = DEFAULTS - present
+    assert not missing, f"shipped default World(s) missing from the catalog: {sorted(missing)}"
 
 
 def test_demoted_worlds_moved_to_examples():
     present = _bundle_dirs(EXAMPLES)
     assert DEMOTED <= present
-    # and they are NOT in the shipped catalog anymore
-    assert not (DEMOTED & _bundle_dirs(CATALOG))
+
+    # ...and they are no longer SHIPPED from the catalog. Asked of git, not of
+    # the filesystem, because "demoted" is a claim about what the repo
+    # distributes — an operator is free to mount `physics` at runtime, and
+    # that lands in lab/worlds/ without making it a shipped default again.
+    tracked = subprocess.run(
+        ["git", "ls-files", "lab/worlds/"],
+        cwd=REPO, capture_output=True, text=True, check=True,
+    ).stdout.split("\n")
+    shipped = {line.split("/")[2] for line in tracked
+               if line.startswith("lab/worlds/") and line.count("/") >= 2}
+    assert not (DEMOTED & shipped), (
+        f"demoted demo World(s) still tracked in the catalog: {sorted(DEMOTED & shipped)}")
 
 
 def test_qukaizen_world_seals_and_is_sourced():

@@ -1,0 +1,10 @@
+Fixture prompt 1: summarize fixture commit A.
+Fixture prompt 2: which subsystem owns netdev/file_0.c?
+Fixture prompt 3: is this fixture commit a security fix?
+Fixture prompt 4: write a one-line changelog entry for fixture commit B.
+Fixture prompt 5: does this patch apply cleanly to the fixture tree?
+Fixture prompt 6: name a subsystem maintainer entry pattern from MAINTAINERS.
+Fixture prompt 7: what does CONFIG_KASAN do (fixture-generic answer)?
+Fixture prompt 8: explain the fixture repo's commit-date/cutoff split.
+Fixture prompt 9: classify fixture commit C as CVE or non-CVE.
+Fixture prompt 10: what is checkpatch.pl used for (fixture-generic answer)?

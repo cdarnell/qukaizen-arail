@@ -72,9 +72,18 @@ def _chat_html_text() -> str:
         return f.read()
 
 
-def test_warm_label_text_is_escaped_in_the_rail_card():
+def test_warmth_is_shown_without_an_unescaped_text_label():
+    """F-XSS successor (sprints/2026-08-11-two-slot-chat-models Phase 5):
+    the rail card's separate `warmLabelText` string is gone along with the
+    rail itself. Warmth is now a CSS-only signal (.col-chip.warm::before,
+    toggled by updateChipWarmState() via classList) — there is no
+    server-derived warm-status text interpolated into innerHTML at all,
+    so there is nothing left needing escapeHtml() for this specific
+    concern (identity-field escaping generally is covered by
+    test_sec_chat_html_escapes_every_model_identity_field_insertion)."""
     text = _chat_html_text()
-    assert "escapeHtml(warmLabelText)" in text
+    assert "warmLabelText" not in text
+    assert "classList.toggle('warm', warmA)" in text
 
 
 def test_eject_and_flash_status_never_use_inner_html_for_server_text():

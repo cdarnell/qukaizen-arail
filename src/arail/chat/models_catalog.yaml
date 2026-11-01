@@ -16,6 +16,11 @@
 #   description   one-line pitch
 #   install       install command (shown to user; one-click in phase 2)
 #   tier          recommended | optional | flagship
+#   hf_repo       (source: hf|mlx only) the HuggingFace repo id, e.g.
+#                 "mlx-community/Qwen2.5-7B-Instruct-4bit" — structured,
+#                 not parsed out of `install`, so the boot model-selection
+#                 banner can link straight to huggingface.co/<hf_repo>.
+#                 Omit for ollama-sourced rows (no HF link to show).
 #
 # Ordering controls UI display order. Recommended models first.
 
@@ -103,7 +108,7 @@
   released: ""
   source: hf
   good_at: [deep-reasoning, long-context, research]
-  description: "AirLLM/AeroLLM frontier lane: set your preferred 20–30B model in .env
+  description: "AirLLM/QueueLLM frontier lane: set your preferred 20–30B model in .env
                (AIRLLM_MODEL or AEROLLM_MODEL). Download on demand — not a
                setup auto-install. See docs for model selection guidance."
   install: ""
@@ -120,17 +125,18 @@
 # AEROLLM_MODEL value. Weights can be pre-downloaded; do not set
 # AEROLLM_MODEL to this id until the port lands and this comment is updated.
 - id: OLMoE-1B-7B-0125-Instruct-4bit
-  name: OLMoE 1B-7B (MoE, pending AeroLLM port)
+  name: OLMoE 1B-7B (MoE, pending QueueLLM port)
   family: olmoe
   size_gb: 4.0
   released: 2025-01
   source: mlx
   good_at: [chat, moe, efficient]
   description: "AllenAI OLMoE — 7B total / 1B active MoE, Apache-2.0.
-               Candidate minimalist-tier MoE for AeroLLM; blocked until
-               aerollm's olmoe.rs architecture module ships (see
-               aerollm CLAUDE.md / MILESTONES.md for status)."
+               Candidate minimalist-tier MoE for QueueLLM; blocked until
+               QueueLLM's olmoe.rs architecture module ships (see
+               QueueLLM CLAUDE.md / MILESTONES.md for status)."
   install: "hf download mlx-community/OLMoE-1B-7B-0125-Instruct-4bit --local-dir $ARAIL_MODELS_DIR/OLMoE-1B-7B-0125-Instruct-4bit"
+  hf_repo: mlx-community/OLMoE-1B-7B-0125-Instruct-4bit
   tier: optional
 
 # ── Dormant self-hosted lane preview base ─────────────────────────────
@@ -209,6 +215,7 @@
                reasoning at fast-model speed. Requires ollama >=0.32.1."
   install: "hf download google/gemma-4-26B-A4B-it-qat-q4_0-gguf gemma-4-26B_q4_0-it.gguf --local-dir $ARAIL_MODELS_DIR/gemma-4-26B-A4B-it-qat-q4_0-gguf
            # then: printf 'FROM %s/gemma-4-26B-A4B-it-qat-q4_0-gguf/gemma-4-26B_q4_0-it.gguf\\n' \"$ARAIL_MODELS_DIR\" > /tmp/Modelfile.gemma4-26b && ollama create gemma-4-26b-a4b -f /tmp/Modelfile.gemma4-26b"
+  hf_repo: google/gemma-4-26B-A4B-it-qat-q4_0-gguf
   tier: optional
 
 # ── Qwen 3 + Qwen 2.5 Coder — Alibaba family, very strong ──────────
@@ -308,10 +315,11 @@
   released: 2024-09
   source: hf
   good_at: [chat, reasoning, multilingual, agent]
-  description: Local bf16 weights routed through AeroLLM (in-process
-               mlx-rs). The proving-ground model for AeroLLM speed
+  description: Local bf16 weights routed through QueueLLM (in-process
+               mlx-rs). The proving-ground model for QueueLLM speed
                measurement and the AirLLM comparison baseline.
   install: "huggingface-cli download Qwen/Qwen2.5-7B-Instruct --local-dir $ARAIL_MODELS_DIR/Qwen2.5-7B-Instruct"
+  hf_repo: Qwen/Qwen2.5-7B-Instruct
   tier: flagship
 
 # ── Mistral 7B — solid baseline ────────────────────────────────────

@@ -289,3 +289,64 @@ def test_provenance_line():
     cannot = {"provenance": "cannot_run", "archetype": "x",
               "cannot_run_reason": "no local model available"}
     assert "NOT RUN" in mx.provenance_line(cannot)
+
+
+# ── The lab refuses what it cannot vary ─────────────────────────────
+#
+# select_archetype was a keyword mapper, so "increasing prefetch
+# lookahead from 2 to 4 will raise tokens/sec" matched on "tokens" and
+# became a plain model_throughput run: the engine measured the local
+# model as-is, varied nothing, and recorded outcome "supported". Five
+# such hypotheses produced five identical measurements reported as five
+# different optimizations.
+
+_NO_LEVER_HYPOTHESES = [
+    "Increasing prefetch lookahead from 2 to 4 will increase tokens/sec by 10%",
+    "Implementing a persistent KV cache will improve throughput by 15%",
+    "Integrating speculative decoding with a draft model will boost tok/s by 20%",
+    "Switching to mixed-precision per-layer will improve tokens per second by 30%",
+    "Increasing the concurrent-prompt batching depth from 8 to 16 will help latency",
+    "Applying LoRA fine-tuning will make the model faster at this task",
+]
+
+
+@pytest.mark.parametrize("hyp", _NO_LEVER_HYPOTHESES)
+def test_engine_refuses_hypotheses_it_has_no_lever_for(hyp):
+    archetype, reason = mx.classify_hypothesis(hyp)
+    assert archetype is None, (
+        f"still mapped to {archetype!r} — it would measure something else "
+        "and call it supported")
+    assert reason and "no lever" in reason
+
+
+@pytest.mark.parametrize("hyp", _NO_LEVER_HYPOTHESES)
+def test_select_archetype_agrees_with_the_classifier(hyp):
+    assert mx.select_archetype(hyp) is None
+
+
+def test_measurable_hypotheses_are_still_measurable():
+    """The refusal must not swallow what the lab genuinely can test."""
+    cases = {
+        "improve tokens per second throughput": "model_throughput",
+        "does prompt phrasing change the format": "prompt_variant",
+        "how well does retrieval from the KB work": "retrieval_quality",
+    }
+    for hyp, expected in cases.items():
+        archetype, reason = mx.classify_hypothesis(hyp)
+        assert archetype == expected, f"{hyp!r} -> {archetype!r}"
+        assert reason is None
+
+
+def test_mentioning_a_mechanism_without_proposing_a_change_is_measurable():
+    """Naming KV cache in passing is not proposing to vary it."""
+    archetype, reason = mx.classify_hypothesis(
+        "The local model's kv cache behaviour is documented; measure its "
+        "tokens per second on short prompts")
+    assert archetype == "model_throughput"
+    assert reason is None
+
+
+def test_unmatched_hypothesis_reports_why():
+    archetype, reason = mx.classify_hypothesis("will it rain tomorrow in Paris")
+    assert archetype is None
+    assert reason and "no on-device archetype" in reason

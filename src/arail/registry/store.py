@@ -52,7 +52,9 @@ def _entry_from_dict(d: Dict[str, Any]) -> Optional[ModelEntry]:
             provider_type=str(d.get("provider_type") or "local"),
             backend=str(d.get("backend") or "openai_compat"),
             endpoint=d.get("endpoint"),
-            model_id=str(d.get("model_id") or "default"),
+            # "" is valid: tier-1 with no deep model
+            model_id=("default" if d.get("model_id") is None
+                      else str(d["model_id"])),
             context_window=d.get("context_window"),
             params_b=d.get("params_b"),
             architecture=str(d.get("architecture") or "dense"),
@@ -86,6 +88,7 @@ def save(reg: ModelRegistry) -> None:
         "entries": [_entry_to_dict(e) for e in reg.entries.values()],
         "bindings": dict(reg.bindings),
         "tab_overrides": {t: dict(o) for t, o in reg.tab_overrides.items()},
+        "seed_state": dict(reg.seed_state),
     }
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -125,6 +128,10 @@ def load_or_seed(reg: ModelRegistry) -> None:
             reg.tab_overrides[tab_name] = {
                 k: v for k, v in overrides.items() if isinstance(v, str)}
     reg.config_version = int(data.get("config_version") or 0)
+    reg.seed_state = {
+        k: v for k, v in (data.get("seed_state") or {}).items()
+        if isinstance(v, str)
+    }
 
     changed = _seed_from_env(reg)
     if changed or not path.exists():
@@ -132,11 +139,115 @@ def load_or_seed(reg: ModelRegistry) -> None:
         save(reg)
 
 
+def reconcile_from_env(reg: ModelRegistry) -> bool:
+    """Force tier0/tier1 to match current env RIGHT NOW.
+
+    ``load_or_seed`` only reconciles once, on first ``_ensure_loaded()`` per
+    process. The boot model-selection settle endpoint calls
+    ``model_defaults.apply()`` to re-stamp ``MODEL_NAME``/``AEROLLM_MODEL``
+    live, and needs the registry (and the ``to_state()`` it returns in the
+    same response) to reflect that immediately — not one request later.
+    Returns True iff anything changed (and was persisted).
+    """
+    reg._ensure_loaded()
+    with reg._lock:
+        changed = _seed_from_env(reg)
+        if changed:
+            reg.config_version += 1
+            save(reg)
+    return changed
+
+
+def _aero_capable() -> bool:
+    """Tier + wheel: whether the deep slot can exist on this machine at
+    all. find_spec (not import) keeps this as cheap as the existing
+    health-probe convention (see arail.registry.health's R5 contract)."""
+    import importlib.util as _importlib_util
+    from arail import tier as _tier
+    return (_tier.is_maximus()
+            and _importlib_util.find_spec("aerollm_api") is not None)
+
+
+def reconcile_from_resolution(reg: ModelRegistry, resolution: Dict[str, Any]) -> bool:
+    """Make tier0/tier1 follow the boot resolution (resolution -> registry).
+
+    *resolution* is ``BootResolution.to_dict()``. Tier 0 takes slot A's
+    model (only when tier 0 fronts an Ollama/OpenAI-compat runtime). Tier 1
+    takes slot B's model; when B is none the entry is disabled with an
+    EMPTY model_id so no stale default (the old hardcoded Qwen) can be
+    preloaded (FM12). seed_state fingerprints are kept in step so
+    ``_seed_from_env`` stays inert afterwards. Returns True iff anything
+    changed (and was persisted).
+    """
+    from dataclasses import replace
+    reg._ensure_loaded()
+    a = resolution.get("a") or {}
+    b = resolution.get("b") or {}
+    changed = False
+    with reg._lock:
+        t0 = reg.entries.get(_TIER0_ID)
+        a_model = a.get("model")
+        if (a_model and t0 is not None
+                and t0.backend in ("ollama_native", "openai_compat")):
+            a_source = "user" if a.get("source") == "pin" else "seed_env"
+            if t0.model_id != a_model or t0.source != a_source:
+                ctx, params = _specs_for(a_model)
+                reg.entries[_TIER0_ID] = replace(
+                    t0, model_id=a_model, display_name=_short_name(a_model),
+                    context_window=ctx, params_b=params, source=a_source)
+                changed = True
+            t0 = reg.entries[_TIER0_ID]
+            fp = f"{t0.model_id}::{t0.backend}::{t0.endpoint or ''}"
+            if reg.seed_state.get("tier0") != fp:
+                reg.seed_state["tier0"] = fp
+                changed = True
+
+        t1 = reg.entries.get(_TIER1_ID)
+        if t1 is not None:
+            b_model = b.get("model") or ""
+            enabled = _aero_capable() and bool(b_model)
+            if b_model:
+                b_source = "user" if b.get("source") == "pin" else "seed_env"
+                if (t1.model_id != b_model or t1.enabled != enabled
+                        or t1.source != b_source):
+                    ctx1, params1 = _specs_for(b_model)
+                    reg.entries[_TIER1_ID] = replace(
+                        t1, model_id=b_model, display_name=_short_name(b_model),
+                        context_window=ctx1, params_b=params1,
+                        architecture="moe" if "moe" in b_model.lower() else "dense",
+                        enabled=enabled, source=b_source)
+                    changed = True
+            elif t1.model_id or t1.enabled:
+                reg.entries[_TIER1_ID] = replace(
+                    t1, model_id="", display_name="(none)", context_window=None,
+                    params_b=None, enabled=False)
+                changed = True
+            if reg.seed_state.get("tier1") != b_model:
+                reg.seed_state["tier1"] = b_model
+                changed = True
+        if changed:
+            reg.config_version += 1
+            save(reg)
+    return changed
+
+
 # ── env seeding ────────────────────────────────────────────────────
 
 TIER0_ID = _TIER0_ID = "tier0-local"
 TIER1_ID = _TIER1_ID = "tier1-aerollm"
 QKZ_2B_ID = "qkz-project-aware-2b"
+
+
+_TIER1_NOTE = (
+    "Tier 1 deep reasoning via QueueLLM (in-process, MoE-preferred). "
+    "Kept resident by deep_policy once first warmed."
+)
+# The built-in note as written before the QueueLLM display rename. Matched
+# exactly so a user-edited note is never overwritten.
+_LEGACY_TIER1_NOTE = (
+    "Tier 1 deep reasoning via aeroLLM (in-process, MoE-preferred). "
+    "Kept resident by deep_policy once first warmed."
+)
 
 
 def _specs_for(model_id: str) -> tuple[Optional[int], Optional[float]]:
@@ -159,6 +270,18 @@ def _short_name(model_id: str) -> str:
 
 
 def _seed_from_env(reg: ModelRegistry) -> bool:
+    """Reconcile the tier0/tier1 entries against env on every load.
+
+    "Env wins only when env moved" (sprints/2026-08-11-two-slot-chat-models
+    Part 4): each tier's env-derived identity is fingerprinted, and
+    ``reg.seed_state`` remembers the fingerprint last seen. A tier is only
+    RE-seeded (its model identity overwritten) when that fingerprint has
+    changed since — i.e. the operator actually edited .env/the shell env.
+    A stationary env value never overwrites a UI-driven pick (source=
+    "user") on the next boot; env genuinely changing always wins, exactly
+    as the previous unconditional-overwrite behavior did. First-ever load
+    (no prior seed_state) always seeds — there is nothing to preserve yet.
+    """
     changed = False
 
     # ── Tier 0 — the resident fast model ───────────────────────────
@@ -174,11 +297,14 @@ def _seed_from_env(reg: ModelRegistry) -> bool:
         # runtime; endpoint None means "in-process/managed by MODEL_BACKEND".
         endpoint = None
         t0_backend = backend
-    ctx, params = _specs_for(model_name)
     existing = reg.entries.get(_TIER0_ID)
-    if (existing is None or existing.model_id != model_name
-            or existing.backend != t0_backend
-            or existing.endpoint != endpoint):
+    tier0_fp = f"{model_name}::{t0_backend}::{endpoint or ''}"
+    tier0_env_moved = (
+        reg.seed_state.get("tier0") is not None
+        and reg.seed_state.get("tier0") != tier0_fp
+    )
+    if existing is None or tier0_env_moved:
+        ctx, params = _specs_for(model_name)
         reg.entries[_TIER0_ID] = ModelEntry(
             id=_TIER0_ID,
             display_name=_short_name(model_name),
@@ -195,19 +321,40 @@ def _seed_from_env(reg: ModelRegistry) -> bool:
                  "instant UI responses.",
         )
         changed = True
+    if reg.seed_state.get("tier0") != tier0_fp:
+        reg.seed_state["tier0"] = tier0_fp
+        changed = True
 
     # ── Tier 1 — aeroLLM deep reasoning ────────────────────────────
-    aero_model = os.getenv("AEROLLM_MODEL", "Qwen2.5-7B-Instruct-4bit")
-    aero_enabled = os.getenv("AEROLLM_RESEARCH", "true").lower() not in (
-        "0", "false", "no")
-    is_moe = "moe" in aero_model.lower()
-    ctx1, params1 = _specs_for(aero_model)
+    # No hardcoded fallback model: an unset AEROLLM_MODEL means "no deep
+    # model" (the boot resolver decides; sprints/2026-10-20-boot-model-
+    # autoresolve). A silent Qwen default here once re-enabled a model the
+    # operator had turned off because it crashes the process.
+    aero_model = os.getenv("AEROLLM_MODEL", "")
+    # Decoupled from AEROLLM_RESEARCH (sprints/2026-08-11-two-slot-chat-
+    # models Part 2) — that var now gates only the autoresearch loop
+    # (arail.agents.researcher), which never read it for anything else.
+    # Availability is a capability fact (tier + wheel importability), not
+    # an opt-in research flag; .env.example previously shipped
+    # AEROLLM_RESEARCH=false, which silently hid the whole Tier-1 row —
+    # including its visibility in the Chat tab's deep slot — even on a
+    # maximus box with the wheel built. find_spec (not import) keeps this
+    # as cheap as the existing health-probe convention (see
+    # arail.registry.health's R5 contract: never construct to check).
+    aero_capable = _aero_capable()
+    aero_enabled = aero_capable and bool(aero_model)
     existing = reg.entries.get(_TIER1_ID)
-    if (existing is None or existing.model_id != aero_model
-            or existing.enabled != aero_enabled):
+    tier1_fp = aero_model
+    tier1_env_moved = (
+        reg.seed_state.get("tier1") is not None
+        and reg.seed_state.get("tier1") != tier1_fp
+    )
+    if existing is None or tier1_env_moved:
+        ctx1, params1 = _specs_for(aero_model) if aero_model else (None, None)
+        is_moe = "moe" in aero_model.lower()
         reg.entries[_TIER1_ID] = ModelEntry(
             id=_TIER1_ID,
-            display_name=_short_name(aero_model),
+            display_name=_short_name(aero_model) if aero_model else "(none)",
             provider_type="aerollm",
             backend="aerollm",
             endpoint=None,   # in-process PyO3 runtime (no HTTP server)
@@ -220,9 +367,25 @@ def _seed_from_env(reg: ModelRegistry) -> bool:
             tags=["reasoning", "build", "long_context"],
             enabled=aero_enabled,
             source="seed_env",
-            note="Tier 1 deep reasoning via aeroLLM (in-process, MoE-preferred). "
-                 "Kept resident by deep_policy once first warmed.",
+            note=_TIER1_NOTE,
         )
+        changed = True
+    else:
+        want = aero_capable and bool(existing.model_id)
+        if existing.enabled != want:
+            # Capability changed (tier flip, wheel installed/removed) — always
+            # safe to apply in place; doesn't touch a user's model_id pick.
+            # An entry with no model can never be enabled.
+            existing.enabled = want
+            changed = True
+        if existing.note == _LEGACY_TIER1_NOTE:
+            # Display-only: a registry persisted before the QueueLLM rename
+            # still carries the old engine name. Only the exact built-in
+            # text is replaced, so a hand-edited note survives.
+            existing.note = _TIER1_NOTE
+            changed = True
+    if reg.seed_state.get("tier1") != tier1_fp:
+        reg.seed_state["tier1"] = tier1_fp
         changed = True
 
     # ── Builtins (only added when absent — user edits survive) ─────

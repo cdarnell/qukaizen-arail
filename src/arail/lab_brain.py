@@ -73,8 +73,10 @@ user is engaged:
   lab stays responsive.
 - **Heavy window** (default 22:00–08:00) — deep-backend experiments
   (AirLLM today) and full-send GPU burns happen here.
-- **Halt jobs** button in the dashboard nav cancels all running
-  agent work without taking the portal down. Resume with one click.
+- **Hold all agents** button in the dashboard nav stops agents from
+  calling models or posting findings/suggestions/announcements, without
+  taking the portal down. Operational/error lines and SRE crash alerts
+  continue. Resume with one click.
 - **5-minute courtesy delay** on boot before the researcher's
   first tick so the UI loads clean.
 
@@ -124,7 +126,7 @@ A self-curating wiki at `/wiki` that:
 
 ## Portal (arail.portal)
 
-FastAPI app at http://127.0.0.1:8080 with routes:
+FastAPI app at http://127.0.0.1:{portal_port} with routes:
 
 - `/` dashboard — goal prompt, activity feed, cost meter, halt switch
 - `/dac` — PKB file browser
@@ -299,6 +301,9 @@ _HOW_TO_ANSWER = (
     "on the dashboard (which triggers the researcher agent).\n"
     "- If the deep tier is needed but the current window is active, "
     "say so — the lab won't run heavy work until the heavy window.\n"
+    "- If the user asks whether the lab is working/healthy, point them "
+    "at `./arailctl status` or `./arailctl doctor` first — those give a "
+    "real pass/fail read. Don't just tell them to eyeball the dashboard.\n"
     "- Keep answers short unless asked for depth. This lab runs "
     "locally; every token costs energy."
 )
@@ -347,7 +352,9 @@ def build_system_prompt(
         )
     ]
     if include_capabilities:
-        parts.append(_CAPABILITIES)
+        parts.append(_CAPABILITIES.replace(
+            "{portal_port}", os.getenv("PORTAL_PORT", "8080")
+        ))
     if include_state:
         parts.append(_state_block(
             active_backend_name=active_backend_name,
@@ -408,7 +415,9 @@ def build_system_prompt_parts(
         )
     ]
     if include_capabilities:
-        frozen_parts.append(_CAPABILITIES)
+        frozen_parts.append(_CAPABILITIES.replace(
+            "{portal_port}", os.getenv("PORTAL_PORT", "8080")
+        ))
     frozen_parts.append(_HOW_TO_ANSWER)
     frozen = "\n\n".join(frozen_parts)
 

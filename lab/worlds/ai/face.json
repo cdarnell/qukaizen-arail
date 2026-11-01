@@ -6,11 +6,11 @@
   "palette_hint": "blue-cyan-lab",
   "domain_framing": "This lab studies how modern AI systems are built, trained, tuned, quantized, served, and debugged. Every factual claim is grounded in the World's cited sources; the glossary spans fundamentals, architecture, training, fine-tuning, RL & alignment, quantization, inference, performance, formats & runtime, and the training-run clinic (symptoms, conditions, pathologies, remedies).",
   "vocabulary_register": "Use the World's own terms; cite a source for every factual claim.",
-  "provenance_tier": "sourced",
+  "provenance_tier": "mixed",
   "provenance_counts": {
-    "model": 0,
+    "model": 8,
     "sourced": 331,
-    "total": 331
+    "total": 339
   },
   "theme": {
     "schema": "dac.world-theme/v1",

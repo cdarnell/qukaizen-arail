@@ -833,13 +833,14 @@ function dismissFirstWinCard() {
     <table>
       <tr><th>ID</th><th>Hypothesis</th><th>Status</th></tr>
       {% for e in experiments %}
+      {% set hyp_text = e.hypothesis or e.methodology or '' %}
       <tr class="exp-row" onclick="toggleExpDetail('exp-{{ e.id }}')">
         <td><code class="exp-id-link">{{ e.id }}</code></td>
-        <td>{{ e.hypothesis[:140] }}{% if e.hypothesis|length > 140 %}&hellip;{% endif %}</td>
+        <td>{{ hyp_text[:140] }}{% if hyp_text|length > 140 %}&hellip;{% endif %}</td>
         <td><span class="status {{ e.status }}">{{ e.status }}</span></td>
       </tr>
       <tr id="exp-{{ e.id }}" class="exp-detail" style="display:none;">
-        <td colspan="3" class="exp-detail-cell">{{ e.hypothesis }}</td>
+        <td colspan="3" class="exp-detail-cell">{{ hyp_text }}</td>
       </tr>
       {% endfor %}
     </table>

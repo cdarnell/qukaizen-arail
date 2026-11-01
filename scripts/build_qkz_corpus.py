@@ -43,7 +43,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 DEFAULT_REPOS = [
-    "qukaizen-aerollm",
+    "qukaizen-queuellm",
     "qukaizen-arail",
     "qukaizen-dac",
     "qukaizen-nucleus",

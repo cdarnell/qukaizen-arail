@@ -196,6 +196,64 @@ def test_reset_models_and_data_honor_their_overrides(tmp_path):
     assert not data.exists(), f"reset data ignored ARAIL_DATA_DIR\n{r2.stdout}"
 
 
+def test_reset_pkb_purges_pkb_derived_rows_from_arail_db(tmp_path):
+    """ADR-0005: <data_dir>/arail.db lives OUTSIDE $PKB_DIR, but
+    content_refs (pkb_pages/wiki_nodes) and "document" entities are derived
+    straight from PKB content. `reset pkb` must purge them too, or a wipe
+    is a false success for exactly the rows PKB content produced — the gap
+    ADR-0005 flagged and required a drift test for.
+
+    Rows for a lance_table NOT wiped by reset_pkb (agent_workflows lives
+    under $DATA_DIR, untouched here) and a non-document entity kind (goal)
+    must survive — this purge is scoped, not a blanket wipe of arail.db.
+    """
+    if shutil.which("sqlite3") is None:
+        pytest.skip("sqlite3 CLI required")
+    import sqlite3
+
+    fake = _make_sandbox(tmp_path)
+    pkb = fake / "lab" / "pkb"
+    pkb.mkdir(parents=True)
+    (pkb / "note.md").write_text("x", encoding="utf-8")
+
+    data_dir = fake / "lab" / "data"
+    data_dir.mkdir(parents=True)
+    db_file = data_dir / "arail.db"
+    conn = sqlite3.connect(db_file)
+    conn.executescript(
+        """
+        CREATE TABLE content_refs (id TEXT PRIMARY KEY, lance_table TEXT NOT NULL, row_key TEXT);
+        CREATE TABLE entities (id TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT);
+        INSERT INTO content_refs VALUES ('c1', 'pkb_pages', 'note.md');
+        INSERT INTO content_refs VALUES ('c2', 'wiki_nodes', 'note');
+        INSERT INTO content_refs VALUES ('c3', 'agent_workflows', 'agent-1');
+        INSERT INTO entities VALUES ('e1', 'document', 'note.md');
+        INSERT INTO entities VALUES ('e2', 'goal', 'ship it');
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    res = _run_reset(fake, "pkb", {})
+    assert res.returncode == 0, res.stdout + res.stderr
+
+    conn = sqlite3.connect(db_file)
+    remaining_refs = {row[0] for row in conn.execute(
+        "SELECT lance_table FROM content_refs")}
+    remaining_kinds = {row[0] for row in conn.execute(
+        "SELECT kind FROM entities")}
+    conn.close()
+
+    assert remaining_refs == {"agent_workflows"}, (
+        f"reset pkb should purge pkb_pages/wiki_nodes content_refs and leave "
+        f"others alone; got {remaining_refs}\n{res.stdout}"
+    )
+    assert remaining_kinds == {"goal"}, (
+        f"reset pkb should purge 'document' entities and leave others alone; "
+        f"got {remaining_kinds}\n{res.stdout}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Equivalence: the shell resolver must agree with arail.config
 # ---------------------------------------------------------------------------

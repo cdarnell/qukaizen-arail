@@ -93,7 +93,7 @@ hit and fix bugs in upstream projects, we contribute the patch back:
   the natural `tokenizer(text, return_tensors="pt").input_ids` input.
   Patch coerces input to `mlx.array` at the `generate()` boundary;
   6 regression tests included. Discovered while measuring
-  the AeroLLM-vs-AirLLM headline comparison for v0.1-alpha.
+  the QueueLLM-vs-AirLLM headline comparison for v0.1-alpha.
 
   Until the patch lands upstream, install from our fork to use the
   AirLLM toggle on Apple Silicon:

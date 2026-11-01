@@ -105,29 +105,63 @@
 
   // The frontier option is only offered when the lab can actually reach a
   // cloud gateway: hybrid mode + a saved Claude key. Otherwise it stays
-  // visible-but-disabled so the capability is discoverable.
+  // visible-but-disabled so the capability is discoverable. When the only
+  // thing missing is the key (lab is already hybrid), the inline
+  // frontier-key-row lets the operator paste one right here instead of
+  // hunting for Chat → ⚙ Connections.
   function loadBrainAvailability() {
     api('GET', '/api/providers/status').then(function (res) {
       if (!res.ok) return;
       var d = res.data || {};
       var frontier = $('brain-frontier');
+      var keyRow = $('frontier-key-row');
       if (!frontier) return;
       var hasKey = !!(d.available && d.available.claude);
       if (!d.cloud_enabled) {
         frontier.disabled = true;
         frontier.title = d.airgapped_notice ||
           'Airgapped — set LAB_MODE=hybrid to enable the frontier API.';
+        if (keyRow) keyRow.hidden = true;
         if (selectedBrain !== 'local') applyBrain('local');
       } else if (!hasKey) {
         frontier.disabled = true;
-        frontier.title = 'No Claude key saved — add one under Chat → Compute Source.';
+        frontier.title = 'No Claude key saved — paste one below, or add it under Chat → ⚙ Connections.';
+        if (keyRow) keyRow.hidden = false;
         if (selectedBrain !== 'local') applyBrain('local');
       } else {
         frontier.disabled = false;
         frontier.title = '';
+        if (keyRow) keyRow.hidden = true;
       }
     }).catch(function () {});
   }
+
+  (function initFrontierKeyRow() {
+    var saveBtn = $('frontier-key-save');
+    var input = $('frontier-key-input');
+    var errEl2 = $('frontier-key-err');
+    if (!saveBtn || !input) return;
+    function submit() {
+      var token = input.value.trim();
+      errEl2.textContent = '';
+      if (!token) { errEl2.textContent = 'Paste a key first.'; return; }
+      saveBtn.disabled = true;
+      api('POST', '/api/providers/save', { provider: 'claude', token: token }).then(function (res) {
+        saveBtn.disabled = false;
+        if (res.ok && res.data && res.data.ok) {
+          input.value = '';
+          loadBrainAvailability();
+        } else {
+          errEl2.textContent = (res.data && res.data.error) || 'Save failed (' + res.status + ').';
+        }
+      }).catch(function (e) {
+        saveBtn.disabled = false;
+        errEl2.textContent = 'Save failed: ' + e.message;
+      });
+    }
+    saveBtn.addEventListener('click', submit);
+    input.addEventListener('keydown', function (e) { if (e.key === 'Enter') submit(); });
+  })();
 
   document.querySelectorAll('#forge-chips .chip-ghost').forEach(function (btn) {
     btn.addEventListener('click', function () {

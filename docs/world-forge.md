@@ -1,11 +1,11 @@
 ---
 title: "World Forge — dream a world, then let research curate it"
-description: "Draft a knowledge World fast with the local model; let AeroLLM + the autoresearch loop forever curate it into sourced truth. Speculative authoring."
+description: "Draft a knowledge World fast with the local model; let QueueLLM + the autoresearch loop forever curate it into sourced truth. Speculative authoring."
 category: "Concepts"
 order: 6
 tags:
   - worlds
-  - aerollm
+  - queuellm
   - speculative-decoding
   - autoresearch
   - maximus
@@ -16,12 +16,12 @@ related:
   - the-lab
   - agents-explained
   - tier-selection
-buddy_prompt: "Explain World Forge like I'm excited but skeptical — how can a 1B model build a 'real' world, and what does AeroLLM actually add?"
+buddy_prompt: "Explain World Forge like I'm excited but skeptical — how can a 1B model build a 'real' world, and what does QueueLLM actually add?"
 ---
 
 # World Forge
 
-> **Quickly get a base — forever curated by the power of AeroLLM.**
+> **Quickly get a base — forever curated by the power of QueueLLM.**
 
 > **Status: shipped (v1).** The Forge lives on the **Worlds page** (`/worlds`,
 > also "✦ Forge a World…" in the world switcher): name any subject, pick a
@@ -56,7 +56,7 @@ decoding** — but one altitude up:
         │  honest, mountable, gated — but unverified                   │
         └─────────────────────────────────────────────────────────────┘
                               │
-                  ② RECONCILE  (AeroLLM, deep model, overnight · batch)
+                  ② RECONCILE  (QueueLLM, deep model, overnight · batch)
                               │   "did the small model get it right?"
                               │   accept · correct · reject · ground-vs-source
                               ▼
@@ -82,7 +82,7 @@ from the sealed corpus, not asserted).
 of speculative decoding: you pay the deep model only to *verify*, which is cheap,
 parallel, and batchable. Verification that survives a *retrieved source* gets
 **promoted** from `model-asserted` toward `sourced`. The draft was the
-speculation; AeroLLM is the accept/reject.
+speculation; QueueLLM is the accept/reject.
 
 **③ is ARAIL's whole reason to exist.** The autoresearch loop never stops
 gathering sources — so the World keeps getting *truer* over time. You dreamed a
@@ -105,7 +105,7 @@ model) but not the **algorithm**:
 The consequence: in real spec-decoding the small model can't hurt you. Here it
 **bounds coverage** — a term the drafter never dreamed, the curator won't add
 unless asked. So the loop needs an explicit *expand* step, not just *verify*.
-AeroLLM does the real thing at the token level internally; World Forge rhymes
+QueueLLM does the real thing at the token level internally; World Forge rhymes
 with it at the world level.
 
 ## What the deep model actually buys you
@@ -136,10 +136,10 @@ admin extras).
 | Tier | Same loop, different muscle |
 |---|---|
 | **minimalist** | Draft + curate with the ~1B starting model, fast, fully airgapped. Honest `model-asserted` worlds you can mount, study, and review today. |
-| **maximus** | The same loop on a **3–7B starting model** (finer drafts, sharper Curator verdicts), plus AeroLLM's deep-mode backend for frontier-scale overnight reconcile passes (the scheduler's heavy window, 22:00–08:00). |
+| **maximus** | The same loop on a **3–7B starting model** (finer drafts, sharper Curator verdicts), plus QueueLLM's deep-mode backend for frontier-scale overnight reconcile passes (the scheduler's heavy window, 22:00–08:00). |
 
 The upgrade story is quality, not capability: **every tier dreams and curates
-worlds; a bigger model just makes them truer, faster** — culminating in AeroLLM
+worlds; a bigger model just makes them truer, faster** — culminating in QueueLLM
 running deep models from disk on hardware that has no right to run them.
 
 ## See also

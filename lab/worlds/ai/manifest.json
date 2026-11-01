@@ -4,20 +4,20 @@
   "world": "ai",
   "display_name": "AI & Machine Learning",
   "created_at": "1970-01-01T00:00:00.000Z",
-  "world_sha256": "df6b682da2dec3694cc5df543a6085016a41940ec20a2c6bae7a52b0e24e175f",
+  "world_sha256": "c1914ba993a75f2f9cfa0dc3b08f91f50a2d27f1e5ae7b1487930f2665f29d4b",
   "files": {
-    "terms.json": "df6b682da2dec3694cc5df543a6085016a41940ec20a2c6bae7a52b0e24e175f",
+    "terms.json": "c1914ba993a75f2f9cfa0dc3b08f91f50a2d27f1e5ae7b1487930f2665f29d4b",
     "spec.json": "91d31534d56d6c67ce3e0f0b2b26a27bdcba1d4f625b495625751a543f3c1008",
     "roster.json": "14a44ecc39b15f8a1845391cc83b8ffdfeabe2703b9f5e8ad6bba6cecb962ee8",
-    "face.json": "9d4b13d9176f2d2c0d8c5a7cd50484800d9eb8db695dc217b769e099df704cc3",
+    "face.json": "db6ae8ac7c2c2fde6431e4a3369443be7c48adafcc0dc59f21321e4768daa482",
     "agenda.json": "8ee7953e238c3bc9c4802082cc319b3d1c6d4d4634009fb83589c2cc4f53fa71",
-    "drift-report.json": "eaa14e22e3a414533b1341139f698e8424677db56942a8a82823f1c90a9ca8ab"
+    "drift-report.json": "8a835062907ebb867e72498a03c152a3b5ce9197ad50068e5d244dcc5601a3d5"
   },
-  "provenance_tier": "sourced",
+  "provenance_tier": "mixed",
   "provenance_counts": {
-    "model": 0,
+    "model": 8,
     "sourced": 331,
-    "total": 331
+    "total": 339
   },
   "refresh_cadence": "see agenda.json",
   "compat": {

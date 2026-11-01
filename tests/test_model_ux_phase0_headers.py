@@ -50,21 +50,20 @@ def test_no_ssd_streamed_claim_on_the_deep_column_anywhere_in_chat_html():
     assert "SSD (streamed)" not in text
 
 
-def test_rail_card_headers_are_honest():
-    text = _chat_html_text()
-    assert '<div class="rc-head"><span>Local · GPU</span>' in text
-    assert '<div class="rc-head"><span>Local · aeroLLM</span>' in text
-
-
-def test_picker_popup_section_headers_are_honest():
+def test_resident_picker_header_is_honest():
+    """sprints/2026-08-11-two-slot-chat-models Phase 5: the below-the-fold
+    rail (rc-head twin) is gone — replaced by the resident-slot picker,
+    whose header carries hardware context instead of a static size claim
+    (per-row ceiling eligibility is computed server-side, C-CEILROW)."""
     text = _chat_html_text()
     assert (
-        '<div class="head"><span>Local · GPU</span><span class="hw">${hwLabel}</span></div>'
+        '<div class="head"><span>Resident model</span><span class="hw">${hwLabel}</span></div>'
     ) in text
-    assert (
-        '<div class="head"><span>Local · aeroLLM</span>'
-        '<span class="hw">30B+ deep backends</span></div>'
-    ) in text
+
+
+def test_deep_picker_header_is_honest():
+    text = _chat_html_text()
+    assert "sec.innerHTML = `<div class=\"head\"><span>Deep model · QueueLLM</span>" in text
 
 
 def test_deep_rail_subtitle_does_not_claim_streamed_from_disk():
@@ -73,3 +72,4 @@ def test_deep_rail_subtitle_does_not_claim_streamed_from_disk():
     header claim fixed alongside the header itself."""
     text = _chat_html_text()
     assert "streamed from disk via AeroLLM" not in text
+    assert "streamed from disk via QueueLLM" not in text

@@ -53,11 +53,70 @@ _GAME_CONFIG_KW = ("fps", "frame rate", "framerate", "frame time", "1% low",
                    "in-game setting", "game settings")
 
 
-def select_archetype(hypothesis: str) -> Optional[str]:
-    """Map a hypothesis to a measurable archetype, or None if unmeasurable.
+# Interventions this lab has no lever for. Each names something inside
+# an inference engine or a training pipeline; nothing here can be varied
+# by any v1 runner, which can only measure the local model AS IT IS,
+# swap prompts, probe the approved KB, or change a game config.
+#
+# Matching one of these does not make a hypothesis wrong — it makes it
+# untestable HERE, which is a different and honest answer.
+_NO_LEVER_KW = (
+    "prefetch", "lookahead", "kv cache", "key-value cache", "kv-cache",
+    "speculative decoding", "draft token", "mixed-precision",
+    "mixed precision", "per-layer", "per layer", "layer streaming",
+    "expert cache", "batching depth", "batch depth", "concurrent-prompt",
+    "kernel", "cuda", "metal shader", "flash attention", "paged attention",
+    "fine-tune", "finetune", "fine tune", "lora", "distill",
+    "quantize the", "requantize",
+)
 
-    Deterministic keyword mapper — no model, no randomness.
+# Verbs that turn a statement into a proposed change. "The local model
+# sustains 60 tok/s" is measurable as-is; "increasing X will raise
+# throughput" proposes an intervention.
+_INTERVENTION_VERB_KW = (
+    "increas", "decreas", "reduc", "rais", "lower", "switch", "swap",
+    "enabl", "disabl", "implement", "integrat", "appli", "apply",
+    "doubl", "halv", "tune", "adjust", "chang", "replac", "add ",
+    "introduc", "optimiz",
+)
+
+
+def _no_lever_reason(hypothesis: str) -> Optional[str]:
+    """Why this lab cannot test the hypothesis, or None if it can.
+
+    The engine has exactly four levers. A hypothesis that proposes
+    changing something else — engine internals, a training regime, a
+    model this lab is not running — cannot be tested by measuring the
+    local model harder. Saying so is the honest result; silently
+    measuring something else and calling it "supported" is not.
     """
+    h = (hypothesis or "").lower()
+    hit = next((kw for kw in _NO_LEVER_KW if kw in h), None)
+    if not hit:
+        return None
+    if not any(v in h for v in _INTERVENTION_VERB_KW):
+        # Mentions the concept without proposing to change it — e.g.
+        # "the model's KV cache behaviour is documented" — so it may
+        # still be a plain measurement.
+        return None
+    return (
+        f"this lab has no lever for '{hit.strip()}' — the on-device engine "
+        "can measure the local model as-is, vary prompts, probe the "
+        "approved knowledge base, or change a game config, and nothing "
+        "else. Testing it needs a harness that can actually vary that "
+        "setting."
+    )
+
+
+def classify_hypothesis(hypothesis: str) -> tuple[Optional[str], Optional[str]]:
+    """(archetype, unmeasurable_reason). Exactly one is non-None.
+
+    Deterministic — no model, no randomness.
+    """
+    reason = _no_lever_reason(hypothesis)
+    if reason:
+        return None, reason
+
     h = (hypothesis or "").lower()
 
     def _score(words: tuple[str, ...]) -> int:
@@ -70,7 +129,20 @@ def select_archetype(hypothesis: str) -> Optional[str]:
         "game_config_optimization": _score(_GAME_CONFIG_KW),
     }
     best = max(scores, key=lambda k: scores[k])
-    return best if scores[best] > 0 else None
+    if scores[best] > 0:
+        return best, None
+    return None, ("no on-device archetype matches this hypothesis — the "
+                  "engine can measure throughput, prompt variants, "
+                  "retrieval quality, or a game config.")
+
+
+def select_archetype(hypothesis: str) -> Optional[str]:
+    """Map a hypothesis to a measurable archetype, or None if unmeasurable.
+
+    Thin wrapper over ``classify_hypothesis`` kept for callers that only
+    need the archetype.
+    """
+    return classify_hypothesis(hypothesis)[0]
 
 
 # Real metric names per archetype (for tracker.create's metrics list + the UI).
@@ -601,11 +673,16 @@ async def run_experiment(exp: Dict[str, Any], ctx: ExperimentContext) -> MiniRes
     runner = _RUNNERS.get(archetype)
     if runner is None:
         # Unmeasurable hypothesis — recorded honestly, zero metrics, not success.
+        # Carry the designer's specific reason when it had one; "no lever
+        # for prefetch depth" is actionable, "isn't measurable" is not.
+        reason = str((exp.get("variables") or {}).get("unmeasurable_reason") or "")
         return MiniResult(
             archetype="unmeasured", provenance="unmeasured", outcome="inconclusive",
             success=False, started_at=started, duration_sec=time.monotonic() - t0,
-            conclusion="This hypothesis isn't measurable on-device with the "
-                       "current engine — recorded for the record, no metrics produced.")
+            cannot_run_reason=reason or None,
+            conclusion=(f"Not tested: {reason}" if reason else
+                        "This hypothesis isn't measurable on-device with the "
+                        "current engine — recorded for the record, no metrics produced."))
     try:
         return await runner(exp, ctx, started, t0)
     except Exception as e:  # defensive — a runner bug is a cannot_run, not fake data

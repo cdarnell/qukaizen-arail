@@ -1,4 +1,4 @@
-"""The Curator judge + organic-growth loop -- port of DaC's
+"""The Curator judge + organic-growth loop -- port of DDaC's
 ``scripts/reconcile-world.mts``.
 
 Moved from qukaizen-arail's ``src/arail/world_forge.py`` as part of the

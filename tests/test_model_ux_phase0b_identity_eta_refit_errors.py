@@ -68,8 +68,14 @@ def test_get_optional_chat_backend_allows_the_same_model():
 
 
 def test_prepare_chat_model_load_reports_honest_refusal_not_false_ready(monkeypatch):
-    """T-SWITCH: with aeroLLM resident on model A, requesting model B must
-    end in state=error naming a restart, never `ready` reporting A."""
+    """T-SWITCH, updated for Part 4 (sprints/2026-08-11-two-slot-chat-
+    models): with aeroLLM resident on model A, requesting model B now
+    ATTEMPTS an in-process swap (instead of refusing outright) — but
+    _FakeAeroBackend here has no _close(), so the swap fails at the
+    quiesce step. Either way the outcome required by T-SWITCH still
+    holds: state=error, never a false `ready` for model A. See
+    test_deep_swap.py for the swap-succeeds path with a fake that
+    actually supports teardown."""
     import arail.portal.app as app_mod
     from arail.portal import scheduler
 
@@ -83,10 +89,72 @@ def test_prepare_chat_model_load_reports_honest_refusal_not_false_ready(monkeypa
             model="gemma-4-26b-a4b", runtime=None, provider="aerollm"
         )
         assert result["state"] == "error"
-        assert "requires a portal restart" in result["message"]
-        assert "Qwen2.5-7B-Instruct-4bit" in result["message"]
+        assert "couldn't switch the deep model" in result["message"].lower()
+        # Never falsely reports ready for the still-resident model A.
+        assert result["state"] != "ready"
 
     asyncio.run(asyncio.wait_for(_scenario(), timeout=5.0))
+
+
+def test_chat_send_refuses_stale_resident_model_instead_of_relabeling(monkeypatch):
+    """F-SWITCH, chat-send path: unlike /model-load (covered above),
+    _prepare_chat_context used to call _get_optional_chat_backend()
+    with no expected_model= at all — so a resident aeroLLM singleton
+    left over from an earlier AEROLLM_MODEL value was returned as-is,
+    and the override_model block a few lines later just relabeled
+    active_backend.model_name to whatever the client asked for. That
+    cosmetic relabel changed the system prompt / API response's claimed
+    model without reloading a single byte of the actually-resident
+    weights — the model answers as whatever is really loaded while the
+    UI and system prompt both claim the newly-requested one. Confirmed
+    live: a resident gemma-4-26b-a4b singleton answered "Are you a MOE
+    model?" honestly (as gemma), while the UI's column-B header and the
+    persisted turn metadata both said Qwen2.5-7B-Instruct-4bit.
+    Wiring expected_model= into this call site must make that a loud,
+    honest refusal instead."""
+    import arail.portal.app as app_mod
+
+    app_mod._OPTIONAL_CHAT_BACKEND_CACHE["aerollm"] = _FakeAeroBackend("gemma-4-26b-a4b")
+    try:
+        ctx = app_mod._prepare_chat_context(
+            message="Are you a MOE model?",
+            history=[],
+            backend_override="aerollm",
+            model_override="Qwen2.5-7B-Instruct-4bit",
+        )
+        error_result = ctx.get("error_result")
+        assert error_result is not None, (
+            "must refuse — silently answering with the resident gemma "
+            "weights under a Qwen2.5 label is the exact bug this guards"
+        )
+        assert "gemma-4-26b-a4b" in error_result["reply"]
+        assert "Qwen2.5-7B-Instruct-4bit" in error_result["reply"]
+        assert error_result["model"] == "gemma-4-26b-a4b", (
+            "on refusal, the reported model must be the one actually "
+            "resident, never the mismatched request — no relabeling"
+        )
+    finally:
+        app_mod._OPTIONAL_CHAT_BACKEND_CACHE.clear()
+
+
+def test_chat_send_allows_matching_model_no_mismatch(monkeypatch):
+    """Sanity companion: when the request's model matches what's already
+    resident, _prepare_chat_context must proceed normally (no spurious
+    refusal for the common, correct case)."""
+    import arail.portal.app as app_mod
+
+    app_mod._OPTIONAL_CHAT_BACKEND_CACHE["aerollm"] = _FakeAeroBackend("Qwen2.5-7B-Instruct-4bit")
+    try:
+        ctx = app_mod._prepare_chat_context(
+            message="hello",
+            history=[],
+            backend_override="aerollm",
+            model_override="Qwen2.5-7B-Instruct-4bit",
+        )
+        assert ctx.get("error_result") is None
+        assert ctx["deep_backend"].model_name == "Qwen2.5-7B-Instruct-4bit"
+    finally:
+        app_mod._OPTIONAL_CHAT_BACKEND_CACHE.clear()
 
 
 # ---------------------------------------------------------------------------

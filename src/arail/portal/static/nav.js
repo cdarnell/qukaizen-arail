@@ -670,7 +670,10 @@ window.revealSlot = async function revealSlot(slot, subpath) {
         : 'cursor:pointer;') +
       (active ? 'font-weight:700;' : '');
     var mark = active ? '\u2713 ' : '  ';
-    var tail = disabled
+    // "disabled" covers two different reasons: genuinely unavailable
+    // (not launched yet) vs. inert because it's already the active
+    // selection (checkmarked). Only the former should say "unavailable".
+    var tail = (disabled && !active)
       ? ' <span style="opacity:.7;font-size:.68rem;">(unavailable)</span>'
       : '';
     // Concurrent Worlds (ARCHITECTURE.md \u00a75.4): a liveness dot + :port

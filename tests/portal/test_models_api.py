@@ -91,6 +91,26 @@ def test_register_artifact_creates_entry(client):
     assert any(e["id"] == "qkz-super-3b" for e in state["entries"])
 
 
+def test_register_artifact_requires_gguf_path(client):
+    # T-REG-4: gguf_path is required now that the /build NucleusClient
+    # graduation-lookup fallback is retired (sprints/2026-09-23-nucleus-sprint-1).
+    r = client.post("/api/models/register-artifact", json={"run_id": "qkz-test-2"})
+    assert r.status_code == 422
+
+
+def test_register_artifact_no_longer_imports_arail_build():
+    import ast
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parents[2] / "src" / "arail" / "portal" / "models_api.py"
+    tree = ast.parse(src.read_text())
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            names.add(node.module)
+    assert not any(n.startswith("arail.build") for n in names)
+
+
 def test_health_refresh_probes_without_constructing_aerollm(client, monkeypatch):
     from arail.router.backends import AeroLLMBackend
     constructed = []

@@ -93,6 +93,7 @@ class GoalStore:
             "findings": [],          # research findings
             "report": None,          # final researcher report
             "progress": 0.0,
+            "world": _mounted_world(),  # None when no World is mounted
         }
         self._save_current(goal_record)
         _notify_listeners("goal_set", {
@@ -213,6 +214,54 @@ class GoalStore:
             current["updated_at"] = _now()
             self._save_current(current)
 
+    def archive_if_world_mismatch(self, new_world: Optional[str]) -> bool:
+        """Called by world_mount on mount/swap/unmount: if the CURRENT goal
+        belongs to a different World than the one now mounted, archive it
+        (the ordinary, already-battle-tested path — same as clear_current)
+        rather than leave it silently "running" under the wrong World.
+
+        This is what closes the gap _sweep_other_worlds() deliberately
+        doesn't: switching the World a lab reflects must also switch which
+        goal that lab is actively researching, on the same "the lab
+        reflects the mounted World" rule the Compiled-KB gate already
+        follows. Observed live before this existed: a goal set while
+        World A was mounted kept running (and its experiments kept
+        rendering as "yours") after switching to World B.
+
+        A goal predating this field (``world`` key absent — legacy record)
+        is treated as belonging to no World (None), same as a goal set
+        with nothing mounted — so it archives on switching TO a World, and
+        is left alone on unmount (None == None). Fail-safe direction:
+        losing an already-superseded reference to a wrong-World goal is
+        far cheaper than silently continuing to research under one.
+
+        Does NOT restore a prior goal for the newly-mounted World from
+        history — switching back to a World starts fresh, deliberately
+        (see docs/concurrent-worlds.md's per-World-instance precedent:
+        state either lives with the instance or it doesn't; this avoids a
+        second, subtler kind of surprise — "why is an old goal suddenly
+        running again" — in exchange for the simpler, always-legible one:
+        a World switch archives, never resurrects).
+
+        Returns True iff a goal was archived.
+        """
+        current = self.get_current()
+        if not current:
+            return False
+        if current.get("world") == new_world:
+            return False
+        self._archive(current)
+        _notify_listeners("goal_cleared", {
+            "goal_id": current.get("id"),
+            "reason": "world_switched",
+            "from_world": current.get("world"),
+            "to_world": new_world,
+        })
+        if CURRENT_FILE.exists():
+            CURRENT_FILE.unlink()
+        clear_run_state()
+        return True
+
     def clear_current(self) -> None:
         """Archive and remove the current goal."""
         current = self.get_current()
@@ -249,6 +298,20 @@ class GoalStore:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _mounted_world() -> Optional[str]:
+    """The slug of the currently mounted World, or None. Lazy-imported to
+    avoid a module-load-order coupling with world_mount (neither module
+    currently imports the other at top level; keep it that way). Never
+    raises — a goal must always be settable even if the mount sidecar is
+    unreadable."""
+    try:
+        from arail import world_mount
+        record = world_mount.current_mount()
+        return record.world if record is not None else None
+    except Exception:
+        return None
 
 
 # Lightweight goal-event bus. Listeners are registered by other modules

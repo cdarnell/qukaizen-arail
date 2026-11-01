@@ -142,3 +142,66 @@ def test_load_catalog_all_entries_have_provider_key():
         d = entry.as_dict()
         assert "provider" in d, f"Entry {entry.id!r} missing 'provider' in as_dict()"
         assert "ctx" in d, f"Entry {entry.id!r} missing 'ctx' in as_dict()"
+
+
+# ---------------------------------------------------------------------------
+# hf_repo — structured HuggingFace repo id for source: hf|mlx rows, added
+# so the boot model-selection banner can link straight to huggingface.co
+# instead of parsing a repo id out of a free-text `install` shell command.
+# ---------------------------------------------------------------------------
+
+def test_catalog_entry_hf_repo_defaults_to_empty_string():
+    """Legacy/ollama rows (no hf_repo in YAML) must default to "" — never
+    a missing key, and never None (as_dict() distinguishes hf_repo="" from
+    hf_url=None deliberately: hf_repo is always a string)."""
+    e = CatalogEntry(
+        id="qwen2.5:7b", name="Qwen 2.5 7B", family="qwen", size_gb=4.7,
+        released="2024-09", source="ollama", good_at=["chat"],
+        description="test", install="ollama pull qwen2.5:7b", tier="recommended",
+    )
+    d = e.as_dict()
+    assert d["hf_repo"] == ""
+    assert d["hf_url"] is None
+
+
+def test_catalog_entry_hf_repo_derives_hf_url():
+    e = CatalogEntry(
+        id="olmoe-test", name="OLMoE test", family="olmoe", size_gb=4.0,
+        released="2025-01", source="mlx", good_at=["chat"], description="test",
+        install="hf download mlx-community/OLMoE-1B-7B-0125-Instruct-4bit",
+        tier="optional", hf_repo="mlx-community/OLMoE-1B-7B-0125-Instruct-4bit",
+    )
+    d = e.as_dict()
+    assert d["hf_repo"] == "mlx-community/OLMoE-1B-7B-0125-Instruct-4bit"
+    assert d["hf_url"] == "https://huggingface.co/mlx-community/OLMoE-1B-7B-0125-Instruct-4bit"
+
+
+def test_every_hf_or_mlx_catalog_row_carries_a_matching_hf_repo():
+    """hf_repo isn't optional decoration for source: hf|mlx rows with a
+    real install command — it's how the boot banner derives an HF link
+    instead of parsing one out of a shell command. The one exception is
+    the __TODO_DEEP_MODEL__ operator-configured placeholder, which has no
+    real repo and an empty install command."""
+    for entry in load_catalog():
+        if entry.source not in ("hf", "mlx"):
+            continue
+        if entry.id.startswith("__"):
+            continue
+        assert entry.hf_repo, (
+            f"catalog entry {entry.id!r} (source={entry.source!r}) has no "
+            "hf_repo — the boot banner can't derive an HF link for it")
+        assert entry.hf_repo in entry.install, (
+            f"catalog entry {entry.id!r}: hf_repo {entry.hf_repo!r} does not "
+            f"appear in its own install command {entry.install!r} — they've "
+            "drifted apart")
+
+
+def test_ollama_sourced_rows_never_carry_hf_repo():
+    """An ollama-sourced row has no HF download path — hf_repo must stay
+    unset so the banner never shows a nonsensical HF link next to an
+    `ollama pull` command."""
+    for entry in load_catalog():
+        if entry.source == "ollama":
+            assert entry.hf_repo == "", (
+                f"ollama-sourced entry {entry.id!r} unexpectedly carries "
+                f"hf_repo={entry.hf_repo!r}")

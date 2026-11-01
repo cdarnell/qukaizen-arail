@@ -1,4 +1,4 @@
-"""The draft pipeline -- port of DaC's ``scripts/forge-world.mts`` (7-stage
+"""The draft pipeline -- port of DDaC's ``scripts/forge-world.mts`` (7-stage
 pipeline: SPEC -> SEED -> DISCOVER BFS -> LINK -> DEFINE -> CLOSE -> GATE).
 
 Moved from qukaizen-arail's ``src/arail/world_forge.py`` as part of the
@@ -37,7 +37,7 @@ from .skill import estimate_skill_chars
 
 _log = logging.getLogger(__name__)
 
-# ── Caps (DaC forge-world.mts DEFINE stage) ─────────────────────────────
+# ── Caps (DDaC forge-world.mts DEFINE stage) ─────────────────────────────
 MAX_SHORT = 200
 MAX_DEFINITION = 600
 MAX_EXAMPLE = 300

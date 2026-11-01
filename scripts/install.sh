@@ -431,7 +431,12 @@ try:
     data = yaml.safe_load(open(sys.argv[1]).read()) or {}
 except Exception:
     sys.exit(0)
-v = data.get("default_a") if isinstance(data, dict) else None
+v = None
+if isinstance(data, dict):
+    # v2: the last-resolved fast model, else the pin; v1: default_a.
+    resolved_a = ((data.get("resolved") or {}).get("a") or {}).get("model")
+    pins = data.get("pins") if isinstance(data.get("pins"), dict) else {}
+    v = resolved_a or pins.get("a") or data.get("default_a")
 if v:
     print(v)
 ' "$REPO_ROOT/model_defaults.yaml" 2>/dev/null)"
@@ -501,9 +506,51 @@ _install_models_phase() {
     fi
 }
 
+# ── Compiled-KB bootstrap (QA-6) ────────────────────────────────────────
+# One non-fatal backfill call so a freshly-installed/updated lab's Compiled
+# KB manifest exists (state moves from "unbootstrapped" to "empty"/
+# "populated") without the operator needing to know the verb exists.
+# Never on `start` — only here and via the explicit `./arailctl pkb
+# bootstrap` verb. A failure here degrades, never hard-fails, install.
+_install_kb_bootstrap() {
+    [[ -d "$REPO_ROOT/.venv" ]] || return 0
+    local out rc=0
+    out="$(cd "$REPO_ROOT" && source .venv/bin/activate && python -m arail.compiled_kb bootstrap 2>&1)" || rc=$?
+    if [[ "$rc" == "0" ]]; then
+        _install_line "  [kb]              $(echo "$out" | tr '\n' ' ')"
+    else
+        _install_line "  [kb]              ⚠ Compiled KB bootstrap skipped (exit $rc)"
+    fi
+}
+
+# ── Relational store: ensure every resolved root's arail.db is created
+# and forward-migrated (sprints/2026-08-10-arail2-persistence-instantiated
+# §4.6 — "the seamless promise's real home"). SAFE-FORWARD only, applied
+# per root; LOSSY/AHEAD/DIVERGED are reported, never applied, per root.
+# One line per root; a healthy already-ok root prints nothing (quiet
+# boot). Never fatal — a DB problem degrades install, it doesn't hard-fail
+# it (nothing reads arail.db at runtime yet, per that sprint's §0).
+_install_db_ensure() {
+    [[ -d "$REPO_ROOT/.venv" ]] || return 0
+    local slug data_dir origin line rc
+    while IFS=$'\t' read -r slug data_dir origin; do
+        [[ -n "$data_dir" ]] || continue
+        line="$(cd "$REPO_ROOT" && source .venv/bin/activate && \
+            python -m arail.dbspec.ensure "$data_dir" --apply --quiet-ok 2>&1)"
+        rc=$?
+        if [[ -n "$line" ]]; then
+            _install_line "  [db]              ${line}"
+        fi
+        [[ "$rc" != "0" ]] && PHASE_DEGRADED=1
+    done < <(inst_resolve_data_dirs)
+    return 0
+}
+
 # ── [5/5] verify ─────────────────────────────────────────────────────────
 _install_verify_phase() {
     local rc=0
+    _install_db_ensure
+    _install_kb_bootstrap
     if [[ "$JSON_MODE" == "1" ]]; then
         bash "$REPO_ROOT/arailctl" doctor 1>&2 || rc=$?
     else

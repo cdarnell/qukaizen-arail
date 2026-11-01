@@ -113,7 +113,7 @@
     var t1 = (state.entries||[]).find(function(e){return e.tier===1&&e.enabled;});
     var html = [];
     if(t0) html.push(dot(t0.health.status)+esc(t0.display_name)+' <span class="msw-muted">(resident)</span>');
-    if(t1) html.push(dot(t1.health.status)+esc(t1.display_name)+' <span class="msw-muted">@ aeroLLM</span>');
+    if(t1) html.push(dot(t1.health.status)+esc(t1.display_name)+' <span class="msw-muted">@ QueueLLM</span>');
     el.innerHTML = html.join(' <span class="msw-muted">·</span> ') || '—';
   }
 
@@ -211,7 +211,11 @@
   function renderChip(tab, el){
     if(!state||!el) return;
     var byId={}; (state.entries||[]).forEach(function(e){byId[e.id]=e;});
-    var profile = (tab==='research'||tab==='build') ? 'reasoning' : 'fast';
+    // research maps to 'fast': the experiment engine runs on the fast
+    // binding unconditionally; the deep (reasoning) model is policy-gated
+    // and shown separately on /research's truth strip. Advertising
+    // 'reasoning' here named a model most runs never touch.
+    var profile = (tab==='build') ? 'reasoning' : 'fast';
     var ov=(state.tab_overrides||{})[tab]||{};
     var id = ov[profile]||ov['*']||(state.bindings||{})[profile];
     var e = id && byId[id];

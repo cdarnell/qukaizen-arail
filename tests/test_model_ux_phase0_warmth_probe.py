@@ -186,56 +186,59 @@ def test_optional_backends_aerollm_resident_false_when_cold(monkeypatch, tmp_pat
 
 
 # ---------------------------------------------------------------------------
-# Frontend: deep rows never render an eject/unload affordance; badge
-# copy is warmth-driven and backend-accurate
+# sprints/2026-08-11-two-slot-chat-models Phase 5 superseded this whole
+# cluster. The below-the-fold rail (renderModelRail) and the separate
+# "active model" strip (renderActiveCard) — the two surfaces the tests
+# above pinned as twins — are gone; both collapsed onto the two header
+# chips (#model-picker / #model-picker-B) and their shared ejectModel(side)
+# handler. That consolidation also REVERSED the A3 restriction the old
+# tests protected ("the aeroLLM singleton cannot be hot-freed this
+# sprint"): Phase 4 wired a real in-process teardown
+# (AeroLLMBackend._close(), _swap_optional_chat_backend), so a warm deep
+# chip now gets a working eject, not a disabled "can't hot-free" notice.
+# See docs/chat-studio.spec.md §3 and the Phase 4/5 sprint ledger entries.
 # ---------------------------------------------------------------------------
 
-def test_chat_html_rail_card_never_renders_eject_for_deep_rows():
+def test_chip_eject_gating_matches_what_can_actually_be_freed():
+    """F-WARMDOT/A3 successor: the resident chip's eject is gated on the
+    ollama runtime specifically (the only one /api/chat/eject can free
+    in-process); the deep chip's eject is gated on residency alone — no
+    runtime carve-out — because Phase 4 made aeroLLM genuinely freeable.
+    Both live in updateChipWarmState(), replacing the old rail/active-card
+    per-row `canFree`/`isDeep` branches."""
     text = _chat_html_text()
-    assert "const isDeep = m.badge === 'deep';" in text
-    assert "isDeep ? null : card.querySelector('[data-act=\"eject\"]')" in text
-
-
-def test_chat_html_active_card_never_renders_eject_for_deep_active_model():
-    text = _chat_html_text()
-    assert "const isDeepActive = m.badge === 'deep';" in text
-    assert "isDeepActive ? '' : '<button class=\"mc-act eject\" data-eject=\"A\"" in text
-
-
-def test_chat_html_deep_row_badge_text_is_warmth_driven_and_backend_accurate():
-    text = _chat_html_text()
-    assert "resident (${deepBackendLabel})" in text
-    assert "installed (${deepBackendLabel}) · load to warm" in text
-    assert (
-        "const deepBackendLabel = m.runtime === 'aerollm' ? 'aeroLLM'"
-    ) in text
+    assert "if (ejectA) ejectA.hidden = !(warmA && State.currentRuntime === 'ollama');" in text
+    assert "if (ejectB) ejectB.hidden = !warmB;" in text
 
 
 def test_chat_html_seeds_warm_models_from_server_truth_not_only_client_actions():
     text = _chat_html_text()
-    assert "if (m.warm || m.resident) State.warmModels.add(m.id);" in text
+    assert "State.models.forEach(m => { if (m.warm) State.warmModels.add(m.id); });" in text
+    # Resident-slot warmth doesn't need a parallel client-side seed — it's
+    # read directly off the server-probed State.residentSlot.warm.
+    assert "State.residentSlot && State.residentSlot.warm" in text
 
 
-def test_chat_html_warm_deep_row_explains_why_it_cant_be_unloaded():
-    """A WARM deep row (aeroLLM/AirLLM) must never render a bare "load"
-    button with zero unload signal — that's silent, not honest, and a
-    real operator flagged it as indistinguishable from a missing/broken
-    eject button. It should get the same disabled "can't hot-free"
-    affordance a warm mlx/cpu/cuda row gets, not go quiet instead."""
+def test_ejectmodel_only_clears_warm_dot_on_confirmed_success():
+    """HON-1 successor: the single, shared ejectModel(side) handler (which
+    replaced the separate rail-card/active-card copies) still gates
+    State.warmModels.delete on the endpoint's own d.ok — never optimistic."""
     text = _chat_html_text()
-    assert "if (isDeep && isWarm) return" in text
-    assert "keeps its model resident once loaded" in text
-    assert "can't be hot-freed in-process" in text
+    assert "if (d.ok) {" in text
+    assert "if (model) State.warmModels.delete(model);" in text
 
 
-def test_chat_html_use_as_b_is_never_hard_disabled():
-    """Column B used to hard-block every non-deep model card — with only
-    one deep backend ever installed in practice, that left operators with
-    zero real alternative for B. Reported directly: "I can't change the
-    models." The button must now always be enabled; the fit chip (real,
-    computed from live free memory) is the informed-choice signal instead
-    of a hard block."""
+def test_column_b_has_real_choice_not_a_hard_lock():
+    """Successor to 'use as B is never hard disabled': the old rail-card
+    fix gave column B a real alternative by un-disabling a generic 'use as
+    B' button on every card. Phase 5 goes further — column B now has a
+    DEDICATED Deep picker (renderDeepPicker) listing the configured
+    aeroLLM model plus every other installed MLX-runtime model as a real,
+    clickable alternative (over-cap rows shown but marked ineligible with
+    a reason, never silently hidden)."""
     text = _chat_html_text()
-    assert 'B · deep only' not in text
-    assert 'data-act="B" disabled' not in text
-    assert '<button class="mc-act secondary" data-act="B"' in text
+    assert (
+        "const alts = State.models.filter(m =>\n"
+        "        m.id !== deep.model_id && (m.runtime === 'mlx' || m.runtime === 'mlx-openai'));"
+    ) in text
+    assert "pop.appendChild(makeOpt(m, deep.model_id, x => selectDeepModel(x), {" in text
