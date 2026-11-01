@@ -556,7 +556,8 @@ symbolic link above it, such as a lab kept on another disk, is fine.
 space, and a control character in it (an escape sequence, a bell, a stray
 carriage return) becomes `?`, in the text, in the stored record and in `--json`
 alike. A runtime's error message, or a hand-edited `verdict.json`, cannot move
-the cursor or erase the `FAILING` line. The sentences the verdict hands to other surfaces (the research strip, an agent's trace, the Curator's reports, the activity log) are cleaned the same way where they are made, so the lines this feature writes show `?` in `./arailctl logs` and not an escape sequence. The other strings in `--json` (paths,
+the cursor or erase the `FAILING` line. The sentences the verdict hands to other surfaces (the research strip, an agent's trace, the Curator's reports, the activity log) are cleaned the same way where they are made, so the lines this feature writes show `?` in `./arailctl logs` and not an escape sequence. Two older lines are not cleaned yet: the `Model '…' failed:` line the model registry writes when any call fails, and `./arailctl logs` itself, which prints every activity message as it was written.
+The other strings in `--json` (paths,
 names) are kept exactly; the characters a terminal could act on in them are
 written as `\u00XX` escapes, which a program reads back as the same characters.
 
