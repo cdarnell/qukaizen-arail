@@ -289,6 +289,9 @@ def test_qa17_deep_probe_with_a_python_that_cannot_run_it_exits_5_not_run(tmp_pa
 # 9,000 recorded failures. Nothing is ever written into the link's target (the QA-4 promise holds); what is
 # lost is the record itself. The adversary needs write access to lab/data.
 
+@pytest.mark.xfail(strict=True, reason="TD43 (QA-19): _locked_update decides by a path-based read of verdict.json and "
+                                       "writes through the folder's descriptor, so a folder swapped at that moment costs "
+                                       "the stored record. Fix with TD42: read through the same dir_fd.")
 @pytest.mark.skipif(sys.platform != "darwin", reason="uses macOS renamex_np(RENAME_SWAP) to swap atomically")
 def test_qa19_a_folder_swapped_at_the_writers_read_does_not_cost_the_stored_record(fake_deep, tmp_path, monkeypatch):
     import ctypes
