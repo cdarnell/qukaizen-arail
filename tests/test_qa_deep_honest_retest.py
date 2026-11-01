@@ -119,7 +119,7 @@ def test_qa18_a_new_unsaved_failure_after_a_pass_starts_a_fresh_record(fake_deep
 # lab/data/deep; TD42 already lets a folder another user owns be read, and this read does not return.
 
 HANG = (
-    "import os, sys, time, types\n"
+    "import os, stat, sys, time, types\n"
     "root = sys.argv[1]; op = sys.argv[2]\n"
     "so = os.path.join(root, 'pkg', '_native.abi3.so'); os.makedirs(os.path.dirname(so), exist_ok=True)\n"
     "open(so, 'wb').write(b'NATIVE' * 100)\n"
@@ -134,7 +134,8 @@ HANG = (
     "if op == 'write':\n"
     "    dv.note_call(False, error='boom')\n"
     "v = dv.current()\n"
-    "print(round(time.monotonic() - t, 2), v.state, v.source)\n"
+    "mode = os.lstat(os.path.join(d, 'verdict.json')).st_mode\n"
+    "print(round(time.monotonic() - t, 2), v.state, v.source, 'REG' if stat.S_ISREG(mode) else 'NOT-REG')\n"
 )
 
 
@@ -147,8 +148,13 @@ def test_qa14_a_fifo_named_verdict_json_does_not_hang_readers_or_writers(tmp_pat
                            timeout=15)
     except subprocess.TimeoutExpired:
         pytest.fail(f"{op}: deep_verdict did not return in 15 s with a FIFO at verdict.json (it blocks in open())")
-    secs, state, source = r.stdout.split()
-    assert float(secs) < 5 and state == "failing" and source == "store_unreadable", r.stdout + r.stderr
+    secs, state, source, kind = r.stdout.split()
+    # A reader only fails closed, and leaves the FIFO where it is. A writer is the repair: the FIFO is renamed away
+    # and the failure it was asked to record is what the verdict then says (docs/cli.md: "moved aside by the next
+    # writer"; QA-14's own smallest fix says the same). The first version of this test expected `store_unreadable`
+    # after the write too; amended after fix pass 4 (SPRINT.md decisions log), and now it also pins both halves.
+    want = ("store_unreadable", "NOT-REG") if op == "read" else ("call", "REG")
+    assert float(secs) < 5 and state == "failing" and (source, kind) == want, r.stdout + r.stderr
 
 
 # ── QA-15: when flock itself fails, the probe says another probe is running ─────────────────────────
