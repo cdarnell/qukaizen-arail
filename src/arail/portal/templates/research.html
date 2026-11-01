@@ -889,9 +889,12 @@ function renderTruthStrip() {
     ? '<strong>' + esc(fast.display_name || '') + '</strong>' +
       ' <span class="rx-truth-dim">via ' + esc(fast.backend || fast.provider_type || 'local') + '</span>'
     : '<span class="rx-truth-dim">no model bound</span>';
+  // deep_failing is not "dim": generation is broken on this build, and the
+  // reason (already escaped by esc) names the probe that clears it.
   const state = deep.reason_code === 'ok'
     ? '<span class="rx-truth-ok">ready — runs planning &amp; interpretation</span>'
-    : '<span class="rx-truth-dim">' + esc(deep.reason || 'off') + '</span>';
+    : '<span class="' + (deep.reason_code === 'deep_failing' ? 'rx-truth-danger' : 'rx-truth-dim') + '">' +
+      esc(deep.reason || 'off') + '</span>';
   text.innerHTML =
     'Research runs on ' + fastHtml +
     ' <span class="rx-truth-sep">·</span> Deep passes: <strong>' +

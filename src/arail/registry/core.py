@@ -119,6 +119,68 @@ class Resolution:
             return None
 
 
+def _deep_overlay(entry: ModelEntry) -> Optional[HealthState]:
+    """Read-time health for an in-process QueueLLM entry while deep generation fails.
+
+    ``arail.deep_verdict`` stores one failure per binary, cleared only by a
+    ``./arailctl deep probe`` that passes 5/5. While it says failing, the entry
+    reads ``unhealthy`` with the verdict's own detail, whatever a residency
+    probe, a warm, a Check or ``report_success`` stored. Applied on read, so no
+    stored write can show healthy over it. Static identity only: a registry
+    read never imports the runtime. ``None`` means "no overlay": the stored
+    health stands, exactly as before (a minimalist or wheel-less lab sees no
+    change).
+    """
+    if entry.provider_type != "aerollm" or not entry.enabled:
+        return None
+    try:
+        from arail import deep_verdict
+        v = deep_verdict.current(import_if_needed=False)
+        if v.state != "failing" or v.binary is None:
+            return None
+        last = (v.failure or {}).get("last_ts")
+        return HealthState(status="unhealthy", latency_ms=None,
+                           checked_at=float(last) if last else time.time(),
+                           endpoint=entry.endpoint, detail=deep_verdict.health_detail(v))
+    except Exception:  # noqa: BLE001 - a verdict problem must not break the registry
+        return None
+
+
+def _refresh_cleared_overlay(entry: ModelEntry) -> None:
+    """Re-probe a stored ``unhealthy`` that a passing deep probe has superseded, so the dot turns green
+    without a Check. Called on a read, and only when the overlay is not in force (the verdict does not fail).
+
+    Two kinds of stored ``unhealthy`` go stale when the verdict clears:
+
+    - the overlay's own text (``HEALTH_PREFIX``), stored while the verdict failed (a Check, a warm, the
+      opt-in loop); and
+    - what a failed deep call stored raw through ``report_failure`` (``RuntimeError: ...``, from
+      ``complete_preferring_deep``, ``Resolution.router`` and the binding's two wrappers). That carries no
+      prefix, so it stayed until someone pressed Check while explain() and the probe already said deep was
+      cleared (QA-7). It is recognised by its age: recorded before the stored passing probe *started*, the
+      rule the verdict applies to a failure itself (``deep_verdict.passed_after``). An entry that went
+      unhealthy for another reason after the pass, or one that is ``not_installed`` (a missing model dir),
+      is not touched.
+
+    The re-probe stores a fresh health, stamped now, which is later than that probe's start, so it runs once
+    per clear and not once per read. It is a residency check and never generates (R5).
+    """
+    if entry.provider_type != "aerollm" or not entry.enabled:
+        return
+    try:
+        if entry.health.status != "unhealthy":
+            return
+        from arail import deep_verdict
+        stale = (entry.health.detail.startswith(deep_verdict.HEALTH_PREFIX)
+                 or deep_verdict.passed_after(deep_verdict.current(import_if_needed=False),
+                                              entry.health.checked_at))
+        if stale:
+            from arail.registry.health import probe_entry
+            entry.health = probe_entry(entry)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _gate_reason(entry: ModelEntry) -> Optional[tuple[str, str]]:
     """Return (reason, detail) when *entry* is unusable, else None."""
     if not entry.enabled:
@@ -134,6 +196,10 @@ def _gate_reason(entry: ModelEntry) -> Optional[tuple[str, str]]:
             if not os.getenv(entry.key_env, "").strip():
                 return ("no_key",
                         f"{entry.display_name} needs {entry.key_env} (not set)")
+    overlay = _deep_overlay(entry)
+    if overlay is not None:
+        return ("unhealthy", overlay.detail)
+    _refresh_cleared_overlay(entry)
     if entry.health.status in ("unhealthy", "not_installed"):
         return ("unhealthy",
                 entry.health.detail or f"{entry.display_name} is "
@@ -298,7 +364,10 @@ class ModelRegistry:
             entry.health = HealthState(
                 status="healthy", latency_ms=latency_ms,
                 checked_at=time.time(), endpoint=entry.endpoint)
-        if was == "unhealthy":
+            # A call that answered does not clear a recorded deep failure (only a
+            # passing probe does), so it must not announce a recovery either.
+            still_failing = _deep_overlay(entry) is not None
+        if was == "unhealthy" and not still_failing:
             self._emit("info",
                        f"Model '{entry.display_name}' recovered.",
                        {"entry_id": entry_id, "kind": "recovery"})
@@ -480,12 +549,23 @@ class ModelRegistry:
             parts.append(f"{tier1.display_name} @ QueueLLM")
         return " · ".join(parts) if parts else "no models configured"
 
+    def _public_entry(self, e: ModelEntry) -> Dict[str, Any]:
+        """One entry as the portal sees it: the stored health, or the read-time
+        overlay while deep generation is failing (see ``_deep_overlay``)."""
+        overlay = _deep_overlay(e)
+        if overlay is None:
+            _refresh_cleared_overlay(e)
+            return e.to_public()
+        d = e.to_public()
+        d["health"] = asdict(overlay)
+        return d
+
     def to_state(self) -> Dict[str, Any]:
         self._ensure_loaded()
         with self._lock:
             return {
                 "config_version": self.config_version,
-                "entries": [e.to_public() for e in self.entries.values()],
+                "entries": [self._public_entry(e) for e in self.entries.values()],
                 "bindings": dict(self.bindings),
                 "tab_overrides": {t: dict(o)
                                   for t, o in self.tab_overrides.items()},

@@ -103,8 +103,8 @@ browse and pull on demand. AirLLM is opt-in via `ARAIL_INSTALL_AIRLLM=1`.
 > out-of-band with `./arailctl deep install` (a checksummed prebuilt binary
 > from ARAIL's own GitHub Releases — no source repo or credentials needed;
 > this is what `./arailctl setup` at tier `maximus` uses), or, if you're a
-> maintainer, `./arailctl deep rebuild` (source build from a local QueueLLM
-> checkout) or `./arailctl deep update` (release wheel from the private
+> maintainer, `./arailctl deep rebuild` (source build from a local pre-rename
+> QueueLLM checkout) or `./arailctl deep update` (release wheel from the private
 > index); all three fail soft, so the lab runs fine without the 2nd
 > inference until one succeeds. **`deep install`'s binary is unsigned,
 > prebuilt native code that executes on import** — it's integrity-checked

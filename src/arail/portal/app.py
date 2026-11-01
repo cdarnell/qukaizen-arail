@@ -2107,7 +2107,7 @@ async def providers_active(request: Request):
                 "error": "Airgapped mode — only local sources are active. Set LAB_MODE=hybrid to use cloud providers."}
     if provider == "aerollm" and not _is_aerollm_installed():
         return {"ok": False,
-                "error": "The QueueLLM engine isn't built on this machine. Run './arailctl deep rebuild' to enable it."}
+                "error": "The QueueLLM engine isn't installed on this machine. Run './arailctl deep install' to enable it."}
     os.environ["COMPUTE_SOURCE"] = provider
     activity_log.emit("chat", f"Compute source switched to '{provider}'.", "info")
     # Sprint 2: regenerate_config() THEN restart() — under a single lock.
@@ -4520,9 +4520,14 @@ def _research_models_block() -> dict | None:
     ``fast`` is the model the experiment engine and most planning calls
     use (a dry-run of the same resolve the researcher does); ``deep`` is
     the aeroLLM slot with a reason code the truth strip can render:
-    tier_locked | wheel_missing | disabled | deferred_now | ok.
+    tier_locked | wheel_missing | disabled | deep_failing | deferred_now | ok.
+    ``deep.generation`` (additive) says what is known about generation on the
+    binary this process loaded: state untested | passing | failing, and when
+    failing since when, from which consumer, and how many failure events.
     Availability (tier/wheel) outranks the operator's toggle so a
-    minimalist user sees a locked control, not a dead one. Never raises —
+    minimalist user sees a locked control, not a dead one, and so does a deep
+    that is failing: "flip the toggle" must never promise a deep that does not
+    generate. Never raises —
     returns None and the strip hides.
     """
     try:
@@ -4557,11 +4562,30 @@ def _research_models_block() -> dict | None:
 
         enabled_by_user = research_deep_enabled()
         eligible, code, detail = deep_policy.explain(foreground=False)
-        if not enabled_by_user and code not in ("tier_locked", "wheel_missing"):
+        if not enabled_by_user and code not in ("tier_locked", "wheel_missing", "deep_failing"):
             eligible = False
             code = "disabled"
             detail = ("deep passes are switched off — flip the toggle to use "
                       "the QueueLLM deep model for planning and interpretation")
+
+        generation = None
+        try:
+            from arail import deep_verdict
+            v = deep_verdict.current(import_if_needed=False)   # explain() has just imported the wheel
+            lp = v.last_probe or {}
+            generation = {
+                "state": v.state,
+                "since": v.since,
+                "source": v.source,
+                "consumer": (v.failure or {}).get("consumer"),
+                "lab": (v.failure or {}).get("lab"),
+                "failures": (v.failure or {}).get("count"),
+                "last_probe": ({"at": lp.get("at"), "passed": lp.get("passed"), "total": lp.get("total")}
+                               if lp else None),
+                "sha256_12": v.binary.sha256[:12] if v.binary is not None else None,
+            }
+        except Exception:  # noqa: BLE001 - the strip must render without it
+            generation = None
 
         return {
             "tier": get_current_tier(),
@@ -4574,6 +4598,7 @@ def _research_models_block() -> dict | None:
                 "eligible_now": eligible,
                 "reason_code": code,
                 "reason": detail,
+                "generation": generation,
             },
         }
     except Exception as e:  # noqa: BLE001 — status must never break on this
@@ -8792,10 +8817,13 @@ _OPTIONAL_CHAT_BACKEND_CONFIG: dict[str, dict[str, str]] = {
     "aerollm": {
         "label": "QueueLLM",
         "class_name": "AeroLLMBackend",
-        # Built from the local sibling repo ($ARAIL_AEROLLM_REPO) — not pip.
-        # `deep rebuild` re-runs the cargo build + dylib copy so active local
-        # aerollm changes flow into the lab.
-        "install_command": "./arailctl deep rebuild",
+        # `deep install` fetches a checksummed prebuilt binary from ARAIL's own
+        # Releases: no source repo or credentials. (`deep rebuild` is the dev
+        # build from the pre-rename checkout at $ARAIL_AEROLLM_REPO, for
+        # maintainers only: it re-runs the cargo build so local aerollm
+        # changes flow into the lab, and it refuses any checkout that has the
+        # renamed crate.)
+        "install_command": "./arailctl deep install",
         "model_env": "AEROLLM_MODEL",
         "default_model": "Qwen2.5-7B-Instruct-4bit",
     },
@@ -10108,7 +10136,7 @@ async def api_chat_models(provider: str = ""):
         "model_ready": _aerollm_model_ready(aero_model_name),
         "param_hint": _extract_param_hint(aero_model_name),
         "gated": aero_model_name.lower().startswith("meta-llama/"),
-        "install_command": "./arailctl deep rebuild",
+        "install_command": "./arailctl deep install",
         "description": "In-process Rust runtime — primary deep backend on Apple Silicon (Qwen2.5-7B-4bit default, ~4 GB resident; max tier ships Qwen2.5-72B-Instruct-4bit, ~40 GB resident, requires 48 GB+). Single Metal command buffer per generation; ~3× faster than mlx_lm baseline.",
         # C4/F-OVERSELL: aeroLLM keeps its model resident once loaded — it
         # does not stream (AERO_MOE_SELECT is off and absent from src/).

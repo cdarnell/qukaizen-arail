@@ -74,6 +74,29 @@ os.environ["ARAIL_MODEL_DEFAULTS_FILE"] = os.path.join(
 )
 
 
+@pytest.fixture(autouse=True)
+def _no_leaked_fake_native_runtime():
+    """No test starts with the deep tests' fake ``aerollm_api`` still imported.
+
+    ``tests/fakes/fake_deep_runtime.py`` cleans up after itself, but a test that also uses
+    ``monkeypatch.delitem(sys.modules, ...)`` gets the entries RESTORED when monkeypatch
+    undoes, which happens after the fake's own teardown. A leaked fake makes
+    ``import aerollm_api`` succeed in unrelated tests (it turned 7 setup errors in
+    tests/test_aerollm_defaults.py into other results). So the purge runs at the START of every
+    test, where the order of earlier teardowns cannot matter. Only the fake is touched: a real
+    ``aerollm_api`` must stay imported (a native extension cannot be initialised twice).
+    """
+    def _purge() -> None:
+        for name in [n for n in list(sys.modules) if n.split(".")[0] in ("aerollm_api", "queuellm_api")]:
+            mod = sys.modules.get(name)
+            path = str(getattr(mod, "__file__", "") or "")
+            if getattr(mod, "__version__", None) == "0.0.0-fake" or "/fakedeep/" in path:
+                sys.modules.pop(name, None)
+    _purge()
+    yield
+    _purge()
+
+
 @pytest.fixture
 def isolated_secrets(monkeypatch, tmp_path):
     """Redirect the portal's secrets file to a tmp path and restore env on teardown.
@@ -566,3 +589,47 @@ def _stub_embedding_provider(request, monkeypatch):
     monkeypatch.setattr(embed_mod, "embed_query", _fake_embed_query)
     monkeypatch.setattr(embed_mod, "embed", _fake_embed)
     yield
+
+
+# ---------------------------------------------------------------------------
+# Deep verdict isolation (sprint 2026-10-29-arail-deep-honest, F23).
+#
+# ``arail.deep_verdict`` keeps one checkout-wide file, <checkout>/lab/data/
+# deep/verdict.json, that every surface reads. A test must never write the
+# operator's real one, and must never read it either (a real "failing" would
+# turn unrelated tests red). Each test gets its own store dir and clean caches.
+# A session-level guard below fails the run if the real file changed.
+# ---------------------------------------------------------------------------
+_CHECKOUT_VERDICT = os.path.join(_REPO_ROOT, "lab", "data", "deep", "verdict.json")
+
+
+def _verdict_signature():
+    try:
+        st = os.stat(_CHECKOUT_VERDICT)
+    except OSError:
+        return None
+    return (st.st_mtime_ns, st.st_size)
+
+
+_VERDICT_SIGNATURE_AT_START = _verdict_signature()
+
+
+@pytest.fixture(autouse=True)
+def _isolated_deep_verdict(monkeypatch, tmp_path):
+    """Per-test deep verdict store and clean caches (see the block comment above)."""
+    from arail import deep_verdict
+
+    monkeypatch.setenv("ARAIL_DEEP_STATE_DIR", str(tmp_path / "deep"))
+    monkeypatch.delenv("ARAIL_DEEP_PROBE_CHILD", raising=False)
+    deep_verdict._reset_for_tests()
+    yield
+    deep_verdict._reset_for_tests()
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """F23: fail the session if any test changed the checkout's real verdict file."""
+    if _verdict_signature() != _VERDICT_SIGNATURE_AT_START:
+        sys.stderr.write(
+            f"\nFAIL: the test session changed {_CHECKOUT_VERDICT}. "
+            "A test wrote the real deep verdict; it must use ARAIL_DEEP_STATE_DIR.\n")
+        session.exitstatus = 1

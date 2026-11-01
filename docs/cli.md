@@ -35,7 +35,8 @@ renumbered or reused for a different meaning (`sprints/2026-07-29-elite-cli/ARCH
 | `2` | Usage error — bad flag, missing flag value, invalid slug, ambiguous non-interactive target, unknown `--json` value, `install daemon` (typo) | every verb with flags |
 | `3` | **Degraded** — partially up, a phase refused/failed but the lab is still usable, `--check` pending changes | `status`, `doctor`, `install`, `update` |
 | `4` | **Nothing running** | `status` only |
-| `130` / `143` | Killed by SIGINT / SIGTERM | `start --world <slug>` (foreground instance/root path) |
+| `5` | **Not run** — the operation could not start, and nothing was recorded (`deep probe`: `aerollm_api` is not importable by that interpreter, the model dir is missing, another probe is running, the probe lock cannot be taken at all (`flock` fails: the folder's filesystem has no lock support, or `probe.lock` is not a regular file), there is not enough available memory for a second copy and `--force` was not given, the lab has no `.venv` yet because `./arailctl setup` has not run (`arailctl` itself says so on stderr and prints no JSON; every other `deep` op exits `1` in that case), the interpreter cannot run the probe (a `PYTHON` without arail, or a path that is not an executable file: `arailctl` says so on stderr), the binary could not be identified, or the verdict folder is a symbolic link or belongs to another user; also a bug in the probe itself) | `deep probe` only |
+| `130` / `143` | Killed by SIGINT / SIGTERM | `start --world <slug>` (foreground instance/root path); `deep probe` exits `130` on SIGINT, stops its child and records nothing |
 
 `stop` deliberately always exits `0` when there was nothing to stop — a
 stop verb's contract is the post-condition ("it is down now"), and
@@ -393,22 +394,40 @@ active).
 ### `deep <op>`
 
 QueueLLM 2nd-inference control: `install` (bundled prebuilt binary) |
-`rebuild` (from source) | `update` (published wheel) | `status`.
+`rebuild` (from source) | `update` (published wheel) | `status` |
+`probe` (does it generate? see below).
 
-Three install channels, dispatched by `scripts/build-aerollm.sh auto`
-(what `setup.sh` and a bare `./arailctl deep install` with no forced
-channel both use):
+Three install channels. Each op runs one channel directly: `deep install`
+runs `scripts/build-aerollm.sh bundle`, `deep rebuild` runs `build`, and
+`deep update` runs `update`. `setup.sh` (at tier `maximus`, on Apple
+Silicon, when `aerollm_api` is not already importable) runs
+`scripts/build-aerollm.sh auto` instead, which chooses:
 
 | Channel | Op | Requires | Who it's for |
 |---|---|---|---|
 | BUNDLED | `deep install` | network to `github.com` (or a local tarball via `AEROLLM_BUNDLE_FILE`) | outside users — no source repo, no credentials |
-| DEV | `deep rebuild` | the QueueLLM sibling repo checked out at `$ARAIL_AEROLLM_REPO` | maintainers with local QueueLLM changes |
+| DEV | `deep rebuild` | a pre-rename QueueLLM checkout (it has `crates/aerollm-api`) at `$ARAIL_AEROLLM_REPO`, default `~/ProJects/qukaizen-queuellm` | maintainers with local QueueLLM changes |
 | RELEASE | `deep update` | `pypi.qukaizen.com` index credentials | maintainers on the private index |
 
-`auto` picks DEV if the sibling repo is present, RELEASE if
-`AEROLLM_CHANNEL=release` or index credentials are configured, and
-BUNDLED otherwise. Force any channel with `AEROLLM_CHANNEL=dev|release|bundle`
-regardless of what's on disk.
+With `AEROLLM_CHANNEL` unset, `auto` looks at `$ARAIL_AEROLLM_REPO` first:
+
+- **A pre-rename checkout** (it has `crates/aerollm-api`): DEV, a source
+  build.
+- **A checkout this ARAIL cannot build**: QueueLLM `main` has only the
+  renamed `crates/queuellm-api`, which this ARAIL refuses, and a folder with
+  neither crate is not a QueueLLM checkout. `auto` prints the reason, builds
+  and installs nothing, and exits `1`. It **never switches channel on its
+  own**: it names `./arailctl deep install` (or `AEROLLM_CHANNEL=bundle`) as
+  the prebuilt route.
+- **No checkout at that path**: RELEASE if release-index credentials are
+  configured (`PIP_INDEX_URL` or `PIP_EXTRA_INDEX_URL` is set,
+  `AEROLLM_INDEX_URL` differs from its default, or `~/.netrc` has an entry
+  for `pypi.qukaizen.com`), BUNDLED otherwise.
+
+`AEROLLM_CHANNEL=dev|release|bundle` makes `auto` run that channel and skip
+the choice. It does not make a channel possible: `dev` still refuses a
+checkout that has no `crates/aerollm-api`. Any other value exits `2`. The
+ops `deep install`, `deep rebuild` and `deep update` do not read it.
 
 **Bundled-channel env knobs** (all optional):
 
@@ -421,9 +440,20 @@ regardless of what's on disk.
 | `AEROLLM_BUNDLE_FILE` | unset | use a local tarball instead of downloading — the offline / airgapped install path |
 | `AEROLLM_BUNDLE_SHA256` | read from `pyproject.toml [tool.arail.package-sources] aerollm_bundle_sha256` — a genuine out-of-band pin, independent of the download — on both routes: `./arailctl setup` forwards it, and standalone `./arailctl deep install` reads pyproject itself when the env var is unset. An explicit env value always wins. Only if pyproject can't be read at all does it fall back to the same-origin `.sha256` sidecar | pin/override the expected **tarball** digest |
 
-`./arailctl deep status` reports a `channel:` line (`dev` \| `release` \|
-`bundled` \| `none`) and, when bundled, a `QueueLLM <version> (<short-sha>,
-built <date>)` provenance line read from `aerollm_api.bundle.json`.
+`./arailctl deep status` reports what is at `$ARAIL_AEROLLM_REPO` on a
+`crate:` line (the pre-rename crate, which `deep rebuild` can build; the
+renamed crate or neither crate, which it cannot; or no checkout), and, on its
+`channel:` line, how the binary that `import aerollm_api` loads got there.
+It says so only when it can prove it, by the sha256 of the loaded file; it
+never guesses from what is on disk:
+
+| `channel:` line | Proof |
+|---|---|
+| `bundled — QueueLLM <version> (<short commit>, built <date>)` | `aerollm_api.bundle.json` names the loaded file |
+| `source build — QueueLLM commit <short commit>, built <date>`, with `, dirty tree` or `, tree state unknown` after the commit | `aerollm_api.build.json`, which a source build writes, names the loaded file |
+| `pip (<package> <version>, regular install)` or `pip (<package> <version>, editable, <url>)` | pip's `RECORD` lists the loaded file with the same hash |
+| `none` | nothing is installed |
+| `unknown — <reason>` | no install record, a record that names a different binary, a pip package that does not list the file or whose file was replaced outside pip, or a binary that could not be identified |
 
 **What the sha256 check does and doesn't guarantee (v1):** when
 `AEROLLM_BUNDLE_SHA256` is unset, the expected digest is fetched from the
@@ -456,6 +486,100 @@ TLS + repo access control, one hop. Treat the bundled channel accordingly.
 See `sprints/2026-08-05-arail-bundled-aerollm/ARCHITECTURE.md` for the
 full design and `docs/releasing.md` for the maintainer-side bundle
 refresh checklist.
+
+#### `deep probe [--json] [--force]`
+
+Makes **5 sequential deep calls** through ARAIL's own deep backend
+(`AeroLLMBackend`), in a **fresh child process**, never inside the portal.
+Token-free and local: no network (the child runs with `HF_HUB_OFFLINE=1`).
+**Explicit only**: nothing runs it at boot or on a timer.
+
+Why it exists: an import, a policy check and "the weights are in memory" all
+pass on a runtime that answers the first call in a process and fails the
+second. Every QueueLLM build tested on the maintainer's Mac does exactly that
+(`sprints/2026-10-29-arail-deep-honest/DAY1.json`). The probe is the one test
+that generates, and its result is stored so every other surface can read it.
+
+In order: take `probe.lock` (a second probe exits `5`), check that
+`aerollm_api` is importable and the model dir exists, check available memory
+against the weights on disk plus headroom (a second copy of the model can
+push a 16 GB Mac into swap; `--force` skips this check only), list any copy
+of the module that is shadowed on the path and any process that already has
+the binary loaded, then run the 5 calls in a child process group with a
+per-call deadline and a load deadline. The 5 calls mix a short question with
+a prompt as long as a chat turn with lab context, because the known failures
+are in chunked prefill. The prompt set is pinned by hash.
+
+| Flag | Effect |
+|---|---|
+| `--json` | One JSON object on stdout and nothing else (schema `arail.deep-probe/v1`), with a `teaching` object that explains every number in it |
+| `--force` | Skips the memory refusal only. Never the lock |
+
+| Env | Default | Meaning |
+|---|---|---|
+| `ARAIL_DEEP_STATE_DIR` | `<checkout>/lab/data/deep` | Where `verdict.json` and the locks live. One folder per checkout, shared by every World instance (they share the venv, so they share the binary) |
+| `ARAIL_DEEP_PROBE_CALL_TIMEOUT_S` | `300` | Per-call deadline. A call cannot be cancelled in-process, so a timeout kills the child's process group |
+| `ARAIL_DEEP_PROBE_LOAD_TIMEOUT_S` | `300` | Deadline for loading the weights and starting the runtime |
+
+Exit codes (additive to the contract above):
+
+| Code | Meaning |
+|---|---|
+| `0` | 5 of 5 answered, and the record now says `passing` |
+| `1` | The probe ran and fewer than 5 answered (a load failure, a crash and a timeout all count). Recorded `failing`. Also `1` when 5 of 5 answered but a deep call failed in another lab while the probe ran (that failure survives, so deep is still failing), and when 5 of 5 answered but the result could not be saved (`recorded  NOT SAVED`): nothing was written, so a failure already on record is not cleared. Only `0` means deep is cleared |
+| `2` | Usage error |
+| `5` | Not run, nothing recorded: see the exit-code table above |
+| `130` | Interrupted (SIGINT). The child is stopped and nothing is recorded |
+
+**What it records.** One record per binary, keyed by the sha256 of the native
+file the process loaded (`<state dir>/verdict.json`, schema
+`arail.deep-verdict/v1`). A failure from the probe, from any deep call in any
+lab of this checkout, or from a load keeps deep marked **failing** until a
+probe of *the same binary* passes 5 of 5. A later successful call does not
+clear it: call 1 works on every build tested, so one answer proves nothing. A
+new build starts "never tested", not "passing". The probe clears a failure
+unless that failure could have landed while it ran, so a failure stamped in the
+future (the clock was stepped back after it) is cleared too, and so is one with
+no usable time. A failure a running lab could not save (it keeps that one in
+memory, and `deep status` says `NOT SAVED`) is cleared the same way: the lab
+reads the passing probe, and when that probe started after the failure the lab
+stops reporting it, with no restart. The next failure after that pass starts a record of its own, with its own time and count. The record is written under a lock with an atomic replace; a
+corrupt file (one that does not parse, is nested too deeply, has an entry the
+readers cannot use, or is not a regular file at all, such as a FIFO) reads as
+failing and is moved aside by the next writer.
+ARAIL checks the verdict folder before every write: if it is itself a symbolic
+link, or belongs to another user, nothing is written there (the failure is kept
+in memory and `deep status` says `NOT SAVED` and why; the probe exits `5`). A
+symbolic link above it, such as a lab kept on another disk, is fine.
+
+**What it prints.** Error text is one line: runs of whitespace become one
+space, and a control character in it (an escape sequence, a bell, a stray
+carriage return) becomes `?`, in the text, in the stored record and in `--json`
+alike. A runtime's error message, or a hand-edited `verdict.json`, cannot move
+the cursor or erase the `FAILING` line. The sentences the verdict hands to other surfaces (the research strip, an agent's trace, the Curator's reports, the activity log) are cleaned the same way where they are made, so the lines this feature writes show `?` in `./arailctl logs` and not an escape sequence. Two older lines are not cleaned yet: the `Model '…' failed:` line the model registry writes when any call fails, and `./arailctl logs` itself, which prints every activity message as it was written.
+The other strings in `--json` (paths,
+names) are kept exactly; the characters a terminal could act on in them are
+written as `\u00XX` escapes, which a program reads back as the same characters.
+
+**Who reads it.** The research truth strip (`reason_code: deep_failing`), the
+tier-1 health of the model registry (status bar dot, degradation banner,
+switcher), the background agents and the World Curator (they use the fast
+model while deep is failing, and say why), the "deep model loaded" lines at
+boot, and `deep status`. When a probe passes, a tier-1 `unhealthy` the registry
+stored *before that probe started* (a failed deep call's own record, or the
+text stored while deep was failing) is re-checked the next time the registry is
+read, so the status-bar dot turns green without pressing Check. The re-check
+asks whether the weights are resident and never generates. A tier-1 failure
+recorded during or after the probe, and a missing model folder, are left as
+they are.
+
+**What the Models "Check" button does.** It re-reads this record and whether
+the weights are resident. It never generates, and it never clears a failure.
+Only `./arailctl deep probe` can.
+
+**Numbers.** Every number the probe prints carries what it means, the bar and
+why, what out of range means and where the failure lives: in a legend at the end
+of the text, and in the `teaching` object of the JSON.
 
 ### `reset [mode]`
 

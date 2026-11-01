@@ -76,6 +76,37 @@ def _tier1_resident() -> bool:
         return False
 
 
+def _deep_loaded_line(lead: str) -> "tuple[str, str, str]":
+    """``(level, text, generation_state)`` for the "deep model is loaded" activity line.
+
+    Weights being resident says nothing about whether the runtime can answer a
+    second call, so the line never says "ready". It says what is known about
+    generation on this build: failing (and why), last probe result, or not
+    tested yet (sprint 2026-10-29-arail-deep-honest, C8).
+    """
+    try:
+        from arail import deep_verdict
+        v = deep_verdict.current(import_if_needed=False)
+    except Exception:  # noqa: BLE001
+        v = None
+    if v is not None and v.state == "failing":
+        what = deep_verdict._clip(deep_verdict.what_failed(v), 160)
+        return ("warn",
+                f"{lead} (weights resident), but generation is failing on this build: {what}. "
+                "Chat can still pick it; agents and the Curator will not use it. "
+                "5/5 on a ./arailctl deep probe is the bar to clear this.",
+                "failing")
+    if v is not None and v.state == "passing":
+        lp = v.last_probe or {}
+        return ("success",
+                f"{lead} (weights resident). Last probe {lp.get('passed')}/{lp.get('total')} at "
+                f"{deep_verdict._utc_minute(lp.get('at'))} (5/5 is the bar).",
+                "passing")
+    return ("success",
+            f"{lead} (weights resident). Generation not tested on this build yet: ./arailctl deep probe.",
+            "untested")
+
+
 async def _preload_once() -> str:
     """One preload attempt. Returns a status string (for tests/logging)."""
     from arail.agents import deep_policy
@@ -110,11 +141,10 @@ async def _preload_once() -> str:
         if entry is not None:
             entry.health = reg_health.probe_entry(entry)
         if router is not None:
+            level, text, gen = _deep_loaded_line("Deep model preloaded")
             activity_log.emit(
-                "registry",
-                "Deep model preloaded — Tier 1 is resident and ready.",
-                "success",
-                {"model_event": {"kind": "preload_ok", "entry_id": TIER1_ID}})
+                "registry", text, level,
+                {"model_event": {"kind": "preload_ok", "entry_id": TIER1_ID, "generation": gen}})
             return "loaded"
         activity_log.emit(
             "registry",
@@ -458,9 +488,10 @@ async def boot_warm_deep(model: Optional[str]) -> str:
                 "will fall back visibly.", "warn",
                 {"model_event": {"kind": "boot_warm_failed", "entry_id": TIER1_ID}})
             return "failed"
-        activity_log.emit("registry", "Deep model loaded at boot -- Tier 1 is "
-                          "resident and ready.", "success",
-                          {"model_event": {"kind": "boot_warm_ok", "entry_id": TIER1_ID}})
+        level, text, gen = _deep_loaded_line("Deep model loaded at boot")
+        activity_log.emit("registry", text, level,
+                          {"model_event": {"kind": "boot_warm_ok", "entry_id": TIER1_ID,
+                                           "generation": gen}})
         return "ok"
     except Exception as exc:  # noqa: BLE001
         clear_sentinel()

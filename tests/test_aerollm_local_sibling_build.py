@@ -43,8 +43,11 @@ def test_build_fails_clearly_when_sibling_missing(tmp_path):
         env={**os.environ, "ARAIL_AEROLLM_REPO": str(tmp_path / "missing"), "NO_COLOR": "1"},
     )
     assert r.returncode == 1
-    out = (r.stdout + r.stderr).lower()
-    assert "clone" in out and "aerollm" in out
+    out = r.stdout + r.stderr
+    assert "No QueueLLM checkout at" in out and "crates/aerollm-api" in out
+    # Review B2: a clone of QueueLLM main has only the renamed crate, which this ARAIL refuses, so the
+    # message must not send anyone to clone it. It names the route that works without a checkout.
+    assert "./arailctl deep install" in out and "git clone" not in out
 
 
 def test_setup_delegates_to_local_sibling_helper():

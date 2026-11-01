@@ -17,8 +17,10 @@
     data: null,          // /api/worlds/terms payload
     flags: {},           // slug -> flag object from /api/worlds/review
     reviewState: 'idle',
+    reviewNote: '',      // the API's message when a review is partial or failed
     reviewTimer: null,
-    growState: 'idle',   // world growth engine
+    growState: 'idle',   // world growth engine; 'not_applied' is terminal (a failed call)
+    growNote: '',        // the API's message when a growth pass was not applied
     growTimer: null,
     growPasses: [],
     query: '',
@@ -79,6 +81,8 @@
     const r = await api('/api/worlds/review');
     if (r.ok && r.body) {
       S.reviewState = r.body.state || 'idle';
+      // A review that judged fewer terms than it planned says so; its silence is not "All clear".
+      S.reviewNote = (r.body.outcome === 'partial' || r.body.outcome === 'failed') ? (r.body.message || '') : '';
       S.flags = {};
       for (const f of (r.body.flags || [])) S.flags[f.slug] = f;
     }
@@ -106,6 +110,8 @@
     if (r.ok) {
       S.growState = r.body.state || 'idle';
       S.growPasses = r.body.passes || [];
+      // 'not_applied' is terminal: a model call failed, so nothing was resealed or swapped.
+      S.growNote = S.growState === 'not_applied' ? (r.body.message || '') : '';
       if (S.growState === 'running') {
         S.growTimer = setTimeout(pollGrow, 3000);
       } else {
@@ -205,6 +211,14 @@
     head.appendChild(headActions);
 
     view.appendChild(head);
+
+    // The Curator's honest notices: the API's own sentence, inserted as text (never HTML).
+    [S.reviewNote, S.growNote].forEach((note) => {
+      if (!note) return;
+      const n = el('div', 'wt-notice wt-notice--warn', note);
+      n.setAttribute('role', 'status');
+      view.appendChild(n);
+    });
 
     // Evolution summary — the World's growth history (transparency).
     if (S.growState === 'running' || (S.growPasses && S.growPasses.length)) {
