@@ -851,7 +851,7 @@ def _render_opencode_config(
                 "agent": "build",
                 "template": (
                     "Search the LanceDB-backed KB for: $ARGUMENTS. "
-                    "Curl `http://127.0.0.1:8080/api/wiki/search?q=...` "
+                    f"Curl `http://127.0.0.1:{portal_port}/api/wiki/search?q=...` "
                     "and summarize the top 5 hits with file paths."
                 ),
             },
