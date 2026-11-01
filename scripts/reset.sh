@@ -458,6 +458,48 @@ reset_data() {
     if [[ -n "$ollama_pid" ]]; then
         kill "$ollama_pid" 2>/dev/null || true
     fi
+    # Mastra Studio (opt-in) keeps its LibSQL file under $DATA_DIR/mastra; stop it first. A process
+    # group id cannot be reused while any member lives, so: group alive + leader dead = orphaned
+    # Studio members (stop them); leader alive = it must look like `npm|node ... mastra dev` run
+    # from integrations/mastra-studio (a recycled pid, e.g. an editor, is never signalled).
+    local studio_pidfile="$DATA_DIR/mastra/studio.pid" studio_pid="" studio_pgid=""
+    if [[ -f "$studio_pidfile" ]]; then
+        read -r studio_pid studio_pgid < "$studio_pidfile" || true
+        if [[ "$studio_pid" =~ ^[0-9]+$ && "$studio_pid" == "$studio_pgid" && "$studio_pgid" -gt 1 ]] \
+            && kill -0 -- "-$studio_pgid" 2>/dev/null; then
+            local studio_ok="false" studio_cmd studio_cwd studio_root
+            if ! kill -0 "$studio_pid" 2>/dev/null; then
+                studio_ok="true"
+            else
+                studio_cmd="$(ps -p "$studio_pid" -o command= 2>/dev/null || true)"
+                # lsof may be absent (set -e/pipefail would abort the whole reset): an unknown cwd is
+                # "unknown", never a mismatch and never a reason to abort silently.
+                studio_cwd=""
+                if command -v lsof >/dev/null 2>&1; then
+                    studio_cwd="$(lsof -a -p "$studio_pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1 || true)"
+                fi
+                studio_root="$(cd -P "$REPO_ROOT/integrations/mastra-studio" 2>/dev/null && pwd -P || true)"
+                if [[ -z "$studio_cmd" ]]; then
+                    # The recorded leader looks live but cannot be identified: never signal on a guess,
+                    # and never wipe the database under a Studio that may still be running.
+                    error "Studio (pid $studio_pid) could not be verified, so it was not stopped and nothing was wiped."
+                    error "Stop it first with ./arailctl mastra stop, then re-run reset."
+                    return 1
+                fi
+                # argv shape must match; the cwd must be under THIS repo's Studio dir (anchored prefix),
+                # or be unknown (no lsof) in which case shape + recorded pid==pgid is the proof.
+                if [[ "$studio_cmd" =~ ^([^[:space:]]*/)?(npm|npx|node)[[:space:]]([^[:space:]]+[[:space:]])*mastra[[:space:]]dev([[:space:]]|$) ]] \
+                    && { [[ -z "$studio_cwd" ]] || { [[ -n "$studio_root" ]] \
+                         && [[ "$studio_cwd" == "$studio_root" || "$studio_cwd" == "$studio_root"/* ]]; }; }; then
+                    studio_ok="true"
+                fi
+            fi
+            if [[ "$studio_ok" == "true" ]]; then
+                kill -TERM -- "-$studio_pgid" 2>/dev/null || true
+                sleep 1
+            fi
+        fi
+    fi
     if [[ -d "$DATA_DIR" ]]; then
         local sz
         sz=$(report_size "$DATA_DIR")

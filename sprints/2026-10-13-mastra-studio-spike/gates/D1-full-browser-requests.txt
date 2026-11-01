@@ -1,0 +1,92 @@
+[1D0DC8BB2FA6687F7E5A6B374FC41554] GET http://127.0.0.1:4111/ (Document) 200
+[63400.2] GET http://127.0.0.1:4111/assets/index-7baZuMyB.js (Script) 200
+[63400.3] GET http://127.0.0.1:4111/assets/preload-helper-PPVm8Dsz.js (Script) 200
+[63400.4] GET http://127.0.0.1:4111/assets/style-B9hVqMxD.css (Stylesheet) 200
+[63400.8] GET http://127.0.0.1:4111/refresh-events (EventSource) 200
+[63400.9] GET http://127.0.0.1:4111/assets/main-BuUo6qbj.js (Script) 200
+[63400.13] GET http://127.0.0.1:4111/mastra-dark-tile.svg (Other) 200
+[63400.14] GET http://127.0.0.1:4111/ (Fetch) 200
+[63400.15] GET http://127.0.0.1:4111/api/auth/capabilities (Fetch) 200
+[63400.10] GET http://127.0.0.1:4111/assets/MonaSans-VariableFont_wdth-wght-CX-7s9jm.ttf (Font) 200
+[63400.11] GET http://127.0.0.1:4111/assets/CommitMono-400-Regular-DzkyLZ26.woff2 (Font) 200
+[63400.16] GET http://127.0.0.1:4111/api/agents (Fetch) 200
+[63400.17] GET http://127.0.0.1:4111/api/workflows (Fetch) 200
+[63400.18] GET http://127.0.0.1:4111/api/tools (Fetch) 200
+[63400.19] GET http://127.0.0.1:4111/api/processors (Fetch) 200
+[63400.20] GET http://127.0.0.1:4111/api/mcp/v0/servers (Fetch) 200
+[63400.21] GET http://127.0.0.1:4111/api/scores/scorers (Fetch) 200
+[63400.22] GET http://127.0.0.1:4111/api/system/packages (Fetch) 200
+[63400.23] GET http://127.0.0.1:4111/api/editor/builder/settings (Fetch) 200
+[63400.24] GET http://127.0.0.1:4111/api/workspaces (Fetch) 200
+[63400.26] GET https://registry.npmjs.org/mastra (Fetch)
+[63400.27] GET https://registry.npmjs.org/%40mastra%2Fcore (Fetch)
+[63400.28] GET https://registry.npmjs.org/%40mastra%2Fmcp (Fetch)
+[63400.29] GET https://registry.npmjs.org/%40mastra%2Flibsql (Fetch)
+[63400.30] GET https://registry.npmjs.org/%40mastra%2Fobservability (Fetch)
+[63400.25] GET https://models.dev/logos/ollama.svg (Image)
+[EDCD4C93A0039BFFF0F2D954D9D9B5FE] GET http://127.0.0.1:4111/observability (Document) 200
+[63400.33] GET http://127.0.0.1:4111/assets/index-7baZuMyB.js (Script) 200
+[63400.34] GET http://127.0.0.1:4111/assets/preload-helper-PPVm8Dsz.js (Script) 200
+[63400.35] GET http://127.0.0.1:4111/assets/style-B9hVqMxD.css (Stylesheet) 200
+[63400.39] GET http://127.0.0.1:4111/refresh-events (EventSource) 200
+[63400.40] GET http://127.0.0.1:4111/assets/main-BuUo6qbj.js (Script) 200
+[63400.41] GET http://127.0.0.1:4111/assets/MonaSans-VariableFont_wdth-wght-CX-7s9jm.ttf (Font) 200
+[63400.42] GET http://127.0.0.1:4111/assets/CommitMono-400-Regular-DzkyLZ26.woff2 (Font) 200
+[63400.44] GET http://127.0.0.1:4111/ (Fetch) 200
+[63400.45] GET http://127.0.0.1:4111/api/auth/capabilities (Fetch) 200
+[63400.46] GET http://127.0.0.1:4111/api/agents (Fetch) 200
+[63400.47] GET http://127.0.0.1:4111/api/workflows (Fetch) 200
+[63400.48] GET http://127.0.0.1:4111/api/tools (Fetch) 200
+[63400.49] GET http://127.0.0.1:4111/api/processors (Fetch) 200
+[63400.50] GET http://127.0.0.1:4111/api/mcp/v0/servers (Fetch) 200
+[63400.51] GET http://127.0.0.1:4111/api/scores/scorers (Fetch) 200
+[63400.52] GET http://127.0.0.1:4111/api/system/packages (Fetch) 200
+[63400.53] GET http://127.0.0.1:4111/api/editor/builder/settings (Fetch) 200
+[63400.54] GET http://127.0.0.1:4111/api/workspaces (Fetch) 200
+[63400.55] GET http://127.0.0.1:4111/api/observability/capabilities (Fetch) 200
+[63400.56] GET http://127.0.0.1:4111/api/observability/discovery/entity-names?entityType=agent (Fetch) 200
+[63400.57] GET http://127.0.0.1:4111/api/observability/discovery/entity-names?entityType=workflow_run (Fetch) 200
+[63400.58] GET http://127.0.0.1:4111/api/observability/discovery/entity-names?entityType=scorer (Fetch) 200
+[63400.59] GET http://127.0.0.1:4111/api/observability/discovery/entity-names?entityType=rag_ingestion (Fetch) 200
+[63400.60] GET http://127.0.0.1:4111/api/observability/discovery/environments (Fetch) 200
+[63400.61] GET https://registry.npmjs.org/mastra (Fetch)
+[63400.62] GET https://registry.npmjs.org/%40mastra%2Fcore (Fetch)
+[63400.63] GET https://registry.npmjs.org/%40mastra%2Fmcp (Fetch)
+[63400.64] GET https://registry.npmjs.org/%40mastra%2Flibsql (Fetch)
+[63400.65] GET https://registry.npmjs.org/%40mastra%2Fobservability (Fetch)
+[63400.66] GET http://127.0.0.1:4111/api/scores/scorers (Fetch) 200
+[63400.67] GET http://127.0.0.1:4111/api/datasets (Fetch) 200
+[63400.68] GET http://127.0.0.1:4111/api/observability/traces/light?startedAt=%7B%22start%22%3A%222026-10-14T13%3A18%3A51.576Z%22%7D&page=0&perPage=25&field=startedAt&direction=DESC (Fetch) 200
+[2319FFA9480A3340FAAA51105716393D] GET http://127.0.0.1:4111/observability (Document) 200
+[63400.70] GET http://127.0.0.1:4111/assets/index-7baZuMyB.js (Script) 200
+[63400.71] GET http://127.0.0.1:4111/assets/preload-helper-PPVm8Dsz.js (Script) 200
+[63400.72] GET http://127.0.0.1:4111/assets/style-B9hVqMxD.css (Stylesheet) 200
+[63400.76] GET http://127.0.0.1:4111/assets/MonaSans-VariableFont_wdth-wght-CX-7s9jm.ttf (Font) 200
+[63400.77] GET http://127.0.0.1:4111/assets/CommitMono-400-Regular-DzkyLZ26.woff2 (Font) 200
+[63400.79] GET http://127.0.0.1:4111/refresh-events (EventSource) 200
+[63400.80] GET http://127.0.0.1:4111/assets/main-BuUo6qbj.js (Script) 200
+[63400.81] GET http://127.0.0.1:4111/ (Fetch) 200
+[63400.82] GET http://127.0.0.1:4111/api/auth/capabilities (Fetch) 200
+[63400.83] GET http://127.0.0.1:4111/api/agents (Fetch) 200
+[63400.84] GET http://127.0.0.1:4111/api/workflows (Fetch) 200
+[63400.85] GET http://127.0.0.1:4111/api/tools (Fetch) 200
+[63400.86] GET http://127.0.0.1:4111/api/processors (Fetch) 200
+[63400.87] GET http://127.0.0.1:4111/api/mcp/v0/servers (Fetch) 200
+[63400.88] GET http://127.0.0.1:4111/api/scores/scorers (Fetch) 200
+[63400.89] GET http://127.0.0.1:4111/api/system/packages (Fetch) 200
+[63400.90] GET http://127.0.0.1:4111/api/editor/builder/settings (Fetch) 200
+[63400.91] GET http://127.0.0.1:4111/api/workspaces (Fetch) 200
+[63400.92] GET http://127.0.0.1:4111/api/observability/capabilities (Fetch) 200
+[63400.93] GET http://127.0.0.1:4111/api/observability/discovery/entity-names?entityType=agent (Fetch) 200
+[63400.94] GET http://127.0.0.1:4111/api/observability/discovery/entity-names?entityType=workflow_run (Fetch) 200
+[63400.95] GET http://127.0.0.1:4111/api/observability/discovery/entity-names?entityType=scorer (Fetch) 200
+[63400.96] GET http://127.0.0.1:4111/api/observability/discovery/entity-names?entityType=rag_ingestion (Fetch) 200
+[63400.97] GET http://127.0.0.1:4111/api/observability/discovery/environments (Fetch) 200
+[63400.98] GET https://registry.npmjs.org/mastra (Fetch)
+[63400.99] GET https://registry.npmjs.org/%40mastra%2Fcore (Fetch)
+[63400.100] GET https://registry.npmjs.org/%40mastra%2Fmcp (Fetch)
+[63400.101] GET https://registry.npmjs.org/%40mastra%2Flibsql (Fetch)
+[63400.102] GET https://registry.npmjs.org/%40mastra%2Fobservability (Fetch)
+[63400.103] GET http://127.0.0.1:4111/api/scores/scorers (Fetch) 200
+[63400.104] GET http://127.0.0.1:4111/api/datasets (Fetch) 200
+[63400.105] GET http://127.0.0.1:4111/api/observability/traces/light?startedAt=%7B%22start%22%3A%222026-10-14T13%3A19%3A04.415Z%22%7D&page=0&perPage=25&field=startedAt&direction=DESC (Fetch) 200

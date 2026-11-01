@@ -1,0 +1,79 @@
+{
+ "gate": "D1",
+ "verdict": "PASS (server leg 2026-10-21, browser leg 2026-10-31)",
+ "also": "INCONCLUSIVE for packet capture (tcpdump NOT RUN, no root)",
+ "date": "2026-10-13",
+ "mastra": "1.34.0",
+ "core": "1.76.0",
+ "test_run": {
+  "env": "env -i, MASTRA_TELEMETRY_DISABLED=1, no platform token",
+  "subject": "mastra dev (server only, idle 45 s, no browser, no run-once)",
+  "non_loopback_remotes": [
+   "104.26.8.108:443 (Cloudflare; unidentified, likely mastra.ai or models.dev)",
+   "52.14.132.233:443 (AWS us-east-2; unidentified)"
+  ],
+  "listen": "*:4111 (all interfaces, not 127.0.0.1)"
+ },
+ "negative_control": {
+  "env": "telemetry NOT disabled",
+  "result": "harness saw 3.41.202.171:443 = us.i.posthog.com ELB (PostHog). Harness is not blind."
+ },
+ "not_run": [
+  "tcpdump packet capture",
+  "headless browser request log",
+  "run-once.mjs (no Python mcp pkg, Ollama not running, no model pulled)"
+ ],
+ "b03_framing": "no X-Frame-Options or CSP in response headers (gates/studio-headers-test.txt): iframe permitted; CORS allow-origin *",
+ "update_2026-10-15": {
+  "attribution": "models.dev (172.67.69.147 et al.) and api.netlify.com (52.14.132.233) via provider-registry auto-refresh; not telemetry",
+  "fix": "MASTRA_OFFLINE=1 + MASTRA_AUTO_REFRESH_PROVIDERS=false",
+  "lsof_after_fix": "0 non-loopback sockets (45 s)",
+  "listener_after_fix": "127.0.0.1:4111",
+  "verdict": "PENDING pcap re-run (lsof clean)"
+ },
+ "update_2026-10-21": {
+  "verdict": "PASS (with caveats)",
+  "evidence": [
+   "owner-run pcap (D1.pcap, gitignored) + lsof poll of the process tree",
+   "0 lookups for models.dev / api.netlify.com / posthog / mastra.ai / mastra.cloud across the whole capture",
+   "0 non-loopback sockets from the Mastra process tree (250 ms lsof poll, 60 s)",
+   "every DNS name seen in the server-alive window (08:52:01-08:53:01) belongs to other apps on the machine",
+   "registry.npmjs.org lookup at 08:53:16 is after the server was stopped (pkill 08:53:01); harness uses `npx --no-install`"
+  ],
+  "caveats": [
+   "whole-machine capture cannot tag packets by process; attribution is by timing + lsof",
+   "no idle-baseline capture was taken",
+   "server idle only; browser-on-Studio and run-once egress are re-checked at D2/B0.4 and in qa"
+  ]
+ },
+ "update_2026-10-21b": {
+  "verdict": "FAIL (browser leg)",
+  "run": "Studio on 127.0.0.1:4111 + headless browser (agent-browser) on / and /observability + run-once.mjs concurrently, 3 flags set",
+  "node_and_ollama_sockets": "all loopback (gates/D1-full-lsof-ours.txt)",
+  "browser_requests": "gates/D1-full-browser-requests.txt: 78 to 127.0.0.1:4111, 15 to https://registry.npmjs.org (mastra, @mastra/core, @mastra/mcp, @mastra/libsql, @mastra/observability version lookups from the Studio page), 1 to https://models.dev/logos/ollama.svg",
+  "rule": "ARCHITECTURE B0.2 step 3: every browser URL host must be loopback",
+  "note": "The owner pcap covered the server only; the browser leg was not in it. Python MCP child sockets not attributable by name (venv python == Homebrew Python); run-once Ollama traffic is 127.0.0.1:11434."
+ },
+ "update_2026-10-21c": {
+  "verdict": "INCONCLUSIVE (browser leg): mitigation works locally; owner pcap still required; request log is not literally zero",
+  "mitigation": "./arailctl mastra open = separate profile (lab/data/mastra/browser) with --host-resolver-rules='MAP * ~NOTFOUND , EXCLUDE 127.0.0.1 , EXCLUDE localhost', --proxy-server=http://127.0.0.1:9 (dead local proxy), --proxy-bypass-list=127.0.0.1;localhost;[::1], background networking/sync/component update disabled",
+  "run": "Studio started by `arailctl mastra start`; browser (agent-browser, same proxy flags; its arg parser cannot carry the host-resolver rule) on / and /observability; `arailctl mastra run-once` executing; whole run polled with lsof",
+  "lsof_node_ollama_browser_driver": "no non-loopback socket (D1-full-lsof-ours.txt)",
+  "chrome_netlog_proxy_flags_run": "scripts/mastra/netlog-summary.py on --log-net-log: resolver jobs [], TCP connects only 127.0.0.1:4111 and 127.0.0.1:9 (dead proxy), non-loopback TCP [] (D1-full-netlog-summary.json)",
+  "chrome_netlog_host_resolver_rule_run": "direct Chrome launch with the exact `arailctl mastra open` flags (headless): resolver jobs [], TCP only 127.0.0.1:4111 and :9, non-loopback TCP []",
+  "request_log": "Studio JS still ATTEMPTS ~16 non-loopback requests (registry.npmjs.org x15, models.dev x1; D1-full-browser-requests.txt). They are refused locally (connection to the dead proxy / NOTFOUND), but the attempts are visible in the browser request log, so the literal 'zero non-loopback URLs in the request log' condition cannot be met by any launch flag. Needs owner reading of the rule: 'no packets/DNS leave the machine' (supported by netlog) vs 'no attempts' (impossible without patching Studio).",
+  "owner_pcap_command": "sudo tcpdump -i any -n -w sprints/2026-10-13-mastra-studio-spike/gates/D1-browser.pcap 'not (host 127.0.0.1 or host ::1)'   # run for ~90 s while doing: ./arailctl mastra start; ./arailctl mastra open; ./arailctl mastra run-once \"Measure how responsive this lab is on local hardware\"; then: tcpdump -nr sprints/2026-10-13-mastra-studio-spike/gates/D1-browser.pcap 'udp port 53' | grep -iE 'npmjs|models\\.dev|netlify|posthog|mastra'   # expect no lines (diff vs a 60 s idle baseline for OS noise)"
+ },
+ "update_2026-10-31_browser_leg": {
+  "verdict": "PASS",
+  "build": "8b1c7838",
+  "evidence": "gates/D1-browser-attribution.md (owner pcap + per-process lsof re-run)",
+  "target_lookups": 0,
+  "udp_stun_quic": "none (LAN broadcast only)",
+  "caveats": [
+   "whole-machine pcap, process attribution by timing + runner logs + lsof",
+   "no idle baseline",
+   "enterprise-policy proxy override untested"
+  ]
+ }
+}

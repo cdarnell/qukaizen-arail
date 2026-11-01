@@ -1,0 +1,18 @@
+{
+ "url_hosts": {
+  "clients2.google.com": 4,
+  "accounts.google.com": 20,
+  "www.google.com": 29,
+  "127.0.0.1:4111": 268,
+  "registry.npmjs.org": 60,
+  "models.dev": 4,
+  "content-autofill.googleapis.com": 36,
+  "android.clients.google.com": 8
+ },
+ "resolver_jobs": [],
+ "tcp_addresses": [
+  "127.0.0.1:4111",
+  "127.0.0.1:9"
+ ],
+ "tcp_non_loopback": []
+}

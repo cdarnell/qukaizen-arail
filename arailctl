@@ -22,6 +22,7 @@
 #    wiki     ARAIL documentation-as-code: build | info | new <title>
 #    kb       QuKaiZen Karpathy LLM Wiki ops: status | compile | lint | query |
 #             search | ingest | index | where  (discoverable, no hardcoded paths)
+#    mastra   opt-in Mastra Studio (maximus): install | start | stop | open | run-once
 #    autoresearch  tuning-loop retention: prune branches | rotate bench logs
 #    help     show this message
 #
@@ -1565,6 +1566,14 @@ TASK: Regenerate wiki/_INDEX.md ONLY (no other files).
                 die "kb op must be one of: status | compile | lint | validate | query | search | ingest | index | where (run: qkz kb help)"
                 ;;
         esac
+        ;;
+    mastra)
+        # Opt-in Mastra Studio spike (maximus). Not part of setup; see
+        # sprints/2026-10-13-mastra-studio-spike/ARCHITECTURE.md C4.
+        [[ -d .venv ]] || die "missing .venv — run ./arailctl setup"
+        # shellcheck disable=SC1091
+        source .venv/bin/activate
+        exec python -m arail.mastra_cli "$@"
         ;;
     help|-h|--help|"") usage ;;
     *) usage; die "unknown command: $cmd" ;;
