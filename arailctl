@@ -819,7 +819,22 @@ case "$cmd" in
             rebuild) exec bash "$REPO_ROOT/scripts/build-aerollm.sh" build ;;
             update)  exec bash "$REPO_ROOT/scripts/build-aerollm.sh" update ;;
             status)  exec bash "$REPO_ROOT/scripts/build-aerollm.sh" status ;;
-            probe)   exec "$PYTHON" -m arail.deep_probe "$@" ;;
+            probe)
+                # Exit 5 is the probe's "not run, nothing recorded" (docs/cli.md); exit 1 means "the probe ran and
+                # deep generation is failing". A $PYTHON that cannot run the probe (a stray `export PYTHON=python3`
+                # without arail, a path that does not exist) would end in Python's or bash's own exit 1, so look
+                # first (QA-17). find_spec reads where arail.deep_probe is without running it: about 10 ms.
+                probe_why=""
+                if ! command -v "$PYTHON" >/dev/null 2>&1; then
+                    probe_why="it is not an executable file"
+                elif ! probe_out="$("$PYTHON" -c 'import importlib.util as u, sys; sys.exit(0 if u.find_spec("arail.deep_probe") else "arail.deep_probe is not in this Python")' 2>&1)"; then
+                    probe_why="${probe_out##*$'\n'}"
+                fi
+                if [[ -n "$probe_why" ]]; then
+                    echo -e "${RED}[${LAB_SHORT_NAME}]${RESET} not run: $PYTHON cannot run arail.deep_probe (${probe_why:0:200}). Nothing was recorded. Run ./arailctl setup, or unset PYTHON so the lab's own .venv/bin/python is used." >&2
+                    exit 5
+                fi
+                exec "$PYTHON" -m arail.deep_probe "$@" ;;
         esac
         ;;
     install)

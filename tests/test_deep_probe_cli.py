@@ -166,3 +166,83 @@ def test_qa15_the_docs_name_the_lock_that_cannot_be_taken_in_the_exit_5_row():
 def test_qa16_the_docs_say_the_other_surfaces_are_cleaned_where_the_text_is_made():
     section = CLI_DOC.split("**What it prints.**", 1)[1].split("**Who reads it.**", 1)[0]
     assert "activity log" in section and "Curator's reports" in section and "where they are made" in section, section
+
+
+# ── QA-17 (fix pass 4): `deep probe` with a $PYTHON that cannot run it is "not run" (5), not 1 ───────────
+# QA-13 covered "no .venv and no PYTHON". An explicit PYTHON wins in arailctl, and one that cannot import arail (a
+# stray `export PYTHON=python3`) or that does not exist ended in Python's or bash's own exit 1: the documented
+# code for "the probe ran and deep generation is failing", on a machine where nothing ran.
+
+def _fake_python(tmp_path: Path, body: str) -> Path:
+    py = tmp_path / "fake-python"
+    py.write_text("#!/bin/sh\n" + body + "\n")
+    py.chmod(0o755)
+    return py
+
+
+@pytest.mark.parametrize("flags", [[], ["--json"]], ids=["plain", "--json"])
+def test_qa17_a_python_without_arail_is_not_run_and_says_what_why_and_what_next(tmp_path, flags):
+    py = _fake_python(tmp_path, 'echo "Traceback (most recent call last):" >&2\n'
+                                'echo "ModuleNotFoundError: No module named \'arail\'" >&2\nexit 1')
+    r = _run_fresh(_fresh_checkout(tmp_path), tmp_path, "deep", "probe", *flags, PYTHON=str(py))
+    assert r.returncode == 5, (r.returncode, r.stderr)
+    for needle in ("not run:", f"{py} cannot run arail.deep_probe", "ModuleNotFoundError: No module named 'arail'",
+                   "Nothing was recorded", "./arailctl setup", "unset PYTHON"):
+        assert needle in r.stderr, (needle, r.stderr)
+    assert "Traceback" not in r.stderr, "the reason is the last line, not the whole traceback"
+    assert r.stdout == "", "no JSON either: nothing ran"
+
+
+def test_qa17_a_python_that_does_not_exist_or_cannot_be_run_is_not_run(tmp_path):
+    co = _fresh_checkout(tmp_path)
+    (tmp_path / "a-folder").mkdir()
+    (tmp_path / "not-executable").write_text("#!/bin/sh\nexit 0\n")
+    for python in ("/nonexistent/python", str(tmp_path / "a-folder"), str(tmp_path / "not-executable")):
+        r = _run_fresh(co, tmp_path, "deep", "probe", PYTHON=python)
+        assert r.returncode == 5, (python, r.returncode, r.stderr)
+        assert f"not run: {python} cannot run arail.deep_probe (it is not an executable file)" in r.stderr, r.stderr
+        assert "Nothing was recorded" in r.stderr and r.stdout == ""
+
+
+def test_qa17_an_arail_without_the_probe_module_is_not_run(tmp_path):
+    pkg = tmp_path / "pkg" / "arail"
+    pkg.mkdir(parents=True)
+    (pkg / "__init__.py").write_text("")
+    r = _run_fresh(_fresh_checkout(tmp_path), tmp_path, "deep", "probe", PYTHON=sys.executable,
+                   PYTHONPATH=str(tmp_path / "pkg"))
+    assert r.returncode == 5 and "arail.deep_probe is not in this Python" in r.stderr, (r.returncode, r.stderr)
+
+
+def test_qa17_the_check_locates_the_probe_without_running_it_and_a_working_python_is_unchanged(tmp_path):
+    """find_spec reads where the module is; it does not execute it. A module that counts its own imports is run
+    once, by the exec, and its exit code reaches the caller untouched."""
+    pkg = tmp_path / "pkg" / "arail"
+    pkg.mkdir(parents=True)
+    (pkg / "__init__.py").write_text("")
+    count = tmp_path / "imports"
+    (pkg / "deep_probe.py").write_text(
+        "import os, sys\nopen(os.environ['QA17_COUNT'], 'a').write('x')\nsys.exit(int(os.environ.get('QA17_EXIT', '0')))\n")
+    r = _run_fresh(_fresh_checkout(tmp_path), tmp_path, "deep", "probe", PYTHON=sys.executable,
+                   PYTHONPATH=str(tmp_path / "pkg"), QA17_COUNT=str(count), QA17_EXIT="7")
+    assert r.returncode == 7, (r.returncode, r.stderr)
+    assert count.read_text() == "x", "the module ran once, for real, and not also for the check"
+
+
+def test_qa17_the_real_probe_still_answers_through_a_working_python(tmp_path):
+    co = _fresh_checkout(tmp_path)
+    r = _run_fresh(co, tmp_path, "deep", "probe", "--help", PYTHON=sys.executable, PYTHONPATH=str(REPO / "src"))
+    assert r.returncode == 0 and "usage: ./arailctl deep probe [--json] [--force]" in r.stdout, r.stderr
+    r = _run_fresh(co, tmp_path, "deep", "probe", "--nonsense", PYTHON=sys.executable, PYTHONPATH=str(REPO / "src"))
+    assert r.returncode == 2 and "unknown argument" in r.stderr, (r.returncode, r.stderr)
+
+
+@pytest.mark.skipif(not Path("/bin/bash").exists(), reason="no /bin/bash")
+def test_qa17_arailctl_parses_under_the_system_bash():
+    """macOS ships bash 3.2; the deep branch avoids anything newer."""
+    r = subprocess.run(["/bin/bash", "-n", str(ARAILCTL)], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr
+
+
+def test_qa17_the_docs_name_the_interpreter_case_in_the_exit_5_row():
+    row = next(ln for ln in CLI_DOC.splitlines() if ln.startswith("| `5` |"))
+    assert "cannot run the probe" in row and "PYTHON" in row, row
