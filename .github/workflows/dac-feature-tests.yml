@@ -67,6 +67,11 @@ jobs:
           echo "::error::dependency install failed after 3 attempts"
           exit 1
 
+      # test_conftest_portal_bearer.py is listed first on purpose: almost every
+      # test below reaches the portal with the credential the conftest's bearer
+      # wrapper adds, and when that stops reaching the request the symptom is 50+
+      # anonymous `401`s (red on main from 2026-10-26, sprints/BACKLOG.md TD48).
+      # The canary fails first and names the cause.
       - name: Run DaC feature tests (live hardware tests excluded)
         shell: bash
         env:
@@ -75,6 +80,7 @@ jobs:
         run: |
           set -euo pipefail
           python -m pytest \
+            tests/test_conftest_portal_bearer.py \
             tests/test_world_loader.py tests/test_world_mount.py tests/test_world_kb.py \
             tests/test_world_dictionary.py tests/test_world_face.py \
             tests/test_world_identity_flip.py tests/test_world_recolor.py \
