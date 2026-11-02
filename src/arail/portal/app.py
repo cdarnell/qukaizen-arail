@@ -11948,11 +11948,14 @@ async def get_airgap_status():
       definition: human-readable description of what the mode enforces
       recent_activity: last 5 egress.jsonl entries, each with a "kind" field
       host_can_reach_internet: null | true | false (only when BUDDY_EGRESS_PROBE=1)
-      known_gaps: list of unwrapped clients documented in PRIVACY.md
-      guard_installed: bool — True once install_guard() has run
+      known_gaps: the gaps documented in PRIVACY.md (arail.airgap.KNOWN_GAPS), plus one
+        entry for each httpx-family library the guard found installed and could not patch
+      guard_installed: bool — True once install_guard() has completed (False after an
+        incomplete install, which known_gaps then explains)
     """
+    from arail.airgap import KNOWN_GAPS as _AIRGAP_KNOWN_GAPS
     from arail.airgap import lab_mode as _airgap_lab_mode
-    from arail.egress import read_recent_blocks, probe_internet, _INSTALLED
+    from arail.egress import read_recent_blocks, probe_internet, uncovered, _INSTALLED
 
     mode = _airgap_lab_mode()
 
@@ -11972,10 +11975,9 @@ async def get_airgap_status():
     }
 
     _KNOWN_GAPS = [
-        "raw socket connections (BUDDY_EGRESS_PROBE is the only audited use)",
-        "subprocess-spawned tools (opencode CLI is config-gated to the local "
-        "provider when airgapped; curl/wget: none in tree today)",
-        "aiohttp (not in tree)",
+        *_AIRGAP_KNOWN_GAPS,
+        *(f"{name}: installed, but the guard could not patch it ({why}); "
+          "its requests are NOT checked" for name, why in uncovered().items()),
     ]
 
     raw_blocks = read_recent_blocks(5)

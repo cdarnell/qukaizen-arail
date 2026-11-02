@@ -4,13 +4,17 @@ Every other module that wants to ask "are we airgapped?" or
 "is this URL local?" goes through this module. Five duplicated
 helpers across the codebase collapse to delegations into here.
 
-Threat model: well-meaning agent code that uses ``requests`` and
-``urllib.request``. Not an adversary on the host — for that, run
-a host firewall (pf on macOS, iptables/ufw on Linux).
+Threat model: well-meaning agent code that uses ``requests``,
+``urllib.request`` or an httpx-family client (``httpx``, ``httpx2``). Not
+an adversary on the host — for that, run a host firewall (pf on macOS,
+iptables/ufw on Linux).
 
-Known gaps documented in PRIVACY.md:
-- ``httpx`` — not wrapped; localhost-only in tree.
+The guard itself lives in ``arail.egress``. Known gaps, documented in
+PRIVACY.md and listed by the Network Policy modal (``KNOWN_GAPS`` below):
 - ``aiohttp`` — not in tree.
+- ``urllib3`` or ``httpcore``/``httpcore2`` used directly — the guard sits
+  one layer up, in requests and the httpx family.
+- A configured proxy — the guard decides on the destination, not the proxy.
 - Raw sockets — wrapping would break loopback paths underneath wrapped libs.
 - Subprocess shells — ``subprocess.run(["curl", ...])``, ``os.system("curl")``.
 """
@@ -31,6 +35,20 @@ from urllib.parse import urlparse
 AIRGAPPED_NOTICE = (
     "Lab is in airgapped mode. Only My Machine is usable. "
     "To enable cloud providers, set LAB_MODE=hybrid in .env and restart."
+)
+
+# What the Network Policy modal lists under "Known gaps"; /api/airgap/status appends any
+# library the guard could not patch at runtime. Lives here (not in portal/app.py) so tests can
+# read it without booting the portal; keep docs/PRIVACY.md in step (tests/test_egress_docs.py).
+KNOWN_GAPS: tuple[str, ...] = (
+    "raw socket connections (BUDDY_EGRESS_PROBE is the only audited use)",
+    "subprocess-spawned tools (opencode CLI is config-gated to the local "
+    "provider when airgapped; curl/wget: none in tree today)",
+    "aiohttp (not in tree)",
+    "urllib3, httpcore or httpcore2 called directly (the guard sits one layer "
+    "up, in requests and httpx/httpx2; none in tree today)",
+    "the hop to a configured proxy (HTTP_PROXY/HTTPS_PROXY or a client's "
+    "proxy setting): the guard checks the destination, not the proxy",
 )
 
 

@@ -12,9 +12,9 @@ from arail.router.backends import (BACKEND_MAP, BaseBackend, ModelResponse,
 from arail.costs import cost_tracker, current_recap_depth
 
 # Backends whose inference calls leave this machine. Constructing one of
-# these while airgapped is refused up front — the httpx/requests egress
-# guard would block the eventual API call anyway, but failing here gives
-# an immediate, non-network, user-readable error.
+# these while airgapped is refused up front — the egress guard (requests,
+# urllib.request, httpx, httpx2) would block the eventual API call anyway,
+# but failing here gives an immediate, non-network, user-readable error.
 _CLOUD_BACKENDS = frozenset({"claude", "huggingface", "openrouter"})
 
 

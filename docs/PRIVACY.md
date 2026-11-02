@@ -40,8 +40,8 @@ yourself.
 
 ## What airgapped mode enforces
 
-`LAB_MODE=airgapped` (the default) blocks agent-originated calls
-through `requests` and `urllib.request` to anything that isn't:
+`LAB_MODE=airgapped` (the default) blocks calls made through
+`requests`, `urllib.request`, `httpx` or `httpx2` to anything that isn't:
 
 - Loopback: `127.0.0.0/8`, `::1`, `localhost`
 - RFC1918: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`
@@ -56,16 +56,42 @@ known DNS-trust limit). Denials raise `EgressBlocked` (a
 
 ### Known gaps — what the Python-level guard does NOT catch
 
-The guard wraps `requests`, `urllib.request`, and `httpx` (the httpx
-transport patch also covers SDKs that use it internally — anthropic,
-openai — and the open-notebook / knowledge-canvas clients). It does
-NOT wrap:
+The guard wraps four client libraries: `requests` (the adapter every new
+`Session` gets), `urllib.request` (the default opener), and the httpx
+family — `httpx` and its successor `httpx2`, a separate package with its
+own import name that huggingface-hub 2.x, anthropic 2.x and openai 3.x use
+in place of `httpx`. The httpx-family check sits on the transport classes,
+so it also covers clients built before the guard was installed and the
+clients SDKs build for themselves: Hugging Face downloads
+(`hf_hub_download`, `HfApi`), the default anthropic and openai clients, and
+the Open Notebook seeding. `./arailctl doctor` prints which of the four
+this lab's guard covered. If one of them is installed but the guard cannot
+patch it (a future release renamed its transport classes, say), requests
+made through that library are not checked, and the lab says so instead of
+staying silent: the portal's activity log records "Egress guard install
+failed", `./arailctl doctor` fails its egress check, and the Network Policy
+modal lists the library under known gaps.
 
-- `aiohttp` — not used in tree today.
+It does NOT wrap:
+
+- `aiohttp` — not used in tree today. The anthropic and openai SDKs offer
+  an opt-in aiohttp client (`DefaultAioHttpClient`); it is not covered.
+- `urllib3`, `httpcore` or `httpcore2` called directly — the guard sits one
+  layer up, in `requests` and the httpx family. Nothing in `src/arail/`
+  calls them directly today.
+- The hop to a proxy you configure (`HTTP_PROXY`/`HTTPS_PROXY`, or a
+  client's `proxy=`/`proxies=` setting) — the guard decides on the
+  destination, so a request for a local address can still be sent through
+  a public proxy.
 - Raw sockets (`socket.socket()`) — wrapping these would break
   loopback connection paths underneath the wrapped libraries.
 - Subprocess shells — `subprocess.run(["curl", ...])` and
   `os.system("curl ...")` go straight to the OS network stack.
+- Other processes — the guard lives inside the Python processes that
+  install it: the portal, any process that loads agents through the agent
+  loader, Model Forge's worker, and `./arailctl doctor`. Setup's and
+  upgrade's model downloads, Docker containers such as Open Notebook's,
+  and opencode run outside it.
 
 These are documented gaps for the v1 guard. The threat model is
 well-meaning agent code that uses standard libraries; it is not
@@ -297,8 +323,9 @@ auditable.
 Everything above is verifiable with `grep` — no need to trust this doc:
 
 ```bash
-# Find every network call in the Python code
-grep -rn "httpx\|requests\.\|urllib\.request\|aiohttp" src/arail/
+# Find where the Python code uses the HTTP clients and raw sockets this doc
+# names (httpx also matches httpx2, httpcore also matches httpcore2)
+grep -rnE "httpx|httpcore|urllib3|requests\.|urllib\.request|aiohttp|socket\.socket\(" src/arail/
 
 # Confirm no analytics SDKs
 grep -rn "sentry\|posthog\|amplitude\|mixpanel\|google-analytics" .

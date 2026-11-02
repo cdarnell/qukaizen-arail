@@ -45,8 +45,10 @@ class TestWinConditionArtifacts:
 
     def test_privacy_md_has_known_gaps_section(self):
         privacy = (REPO_ROOT / "docs" / "PRIVACY.md").read_text(encoding="utf-8")
-        # All four gaps must be named.
-        for gap in ("httpx", "aiohttp", "subprocess", "socket"):
+        # Every gap the guard does not cover must be named.  httpx and httpx2 are
+        # wrapped now (they were listed here as gaps until TD50);
+        # tests/test_egress_docs.py pins that.
+        for gap in ("aiohttp", "subprocess", "socket", "urllib3", "httpcore"):
             assert gap in privacy.lower(), (
                 f"docs/PRIVACY.md must name documented gap: {gap}"
             )
@@ -61,8 +63,10 @@ class TestWinConditionArtifacts:
         modal = (
             REPO_ROOT / "src" / "arail" / "portal" / "templates" / "_airgap_modal.html"
         ).read_text(encoding="utf-8")
-        # All four gaps must be named in the modal copy.
-        for gap in ("httpx", "aiohttp"):
+        # The gaps must be named in the modal copy.  httpx and httpx2 are wrapped
+        # now (they were listed here as gaps until TD50); tests/test_egress_docs.py
+        # pins that.
+        for gap in ("aiohttp", "urllib3", "httpcore"):
             assert gap in modal.lower(), f"Modal must name gap: {gap}"
 
 
