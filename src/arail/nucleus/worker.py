@@ -8,6 +8,13 @@ implementation in ``build.py``. Models are loaded only from resolved
 local dirs inside the phase implementations — never a repo id — which,
 together with the offline env vars phases.py sets before spawning this
 process, is how zero egress lines is actually achieved.
+
+If the guard is incomplete (an HTTP library is installed that it could not
+patch) the worker does NOT run the phase: it writes one ``worker: ...`` line
+to stderr and exits 1. It is the one caller of ``install_guard()`` that stops
+(the portal and the agent loader report and keep serving; see
+docs/PRIVACY.md). The parent inherits this stderr, so the line is what a
+Model Forge user reads; it must not be a traceback.
 """
 
 from __future__ import annotations
@@ -36,7 +43,13 @@ def main(argv: Sequence[str] = None) -> int:
 
     from arail import egress
 
-    egress.install_guard()
+    try:
+        egress.install_guard()
+    except egress.EgressGuardIncomplete as exc:
+        # Still fail closed, but readable: the message names the library, says its requests are
+        # not checked, and gives the fix.
+        sys.stderr.write(f"worker: {exc}\n")
+        return 1
 
     try:
         context = _load_context(build_id)

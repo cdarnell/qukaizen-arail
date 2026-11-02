@@ -337,6 +337,47 @@ def test_the_portal_is_silent_when_the_guard_is_whole(status_env, activity_lines
     assert egress._INSTALLED is True
 
 
+@lib_param
+@pytest.mark.parametrize("mode", ["airgapped", "hybrid"])
+def test_the_model_forge_worker_stops_with_one_readable_line_when_the_guard_is_incomplete(
+        lib, mode, monkeypatch, status_env, capsys):
+    """DOC-5, the worker (REVIEW.md N2).  Of the callers of ``install_guard()`` only Model Forge's worker
+    stops when the guard is incomplete (fail closed: a phase must never run with a library open, in
+    hybrid too, because the toggle flips the mode in-process).  It used to let ``EgressGuardIncomplete``
+    escape, and the parent process inherits the worker's stderr, so a Model Forge user got a raw
+    traceback.  Now: exit status 1 and one ``worker: <message>`` line; the phase never starts."""
+    from arail.nucleus import worker
+
+    monkeypatch.setenv("LAB_MODE", mode)
+    monkeypatch.delattr(importlib.import_module(lib), "AsyncHTTPTransport")
+    started = []
+    monkeypatch.setattr(worker, "_load_context", lambda build_id: started.append(build_id) or {})
+
+    assert worker.main(["PA", "build-1"]) == 1
+    captured = capsys.readouterr()
+    assert started == [], "the phase started with an incomplete guard"
+    assert captured.out == ""
+    assert captured.err.startswith("worker: egress guard incomplete"), captured.err
+    assert captured.err.count("\n") == 1 and "Traceback" not in captured.err, captured.err
+    assert lib in captured.err and "NOT checked" in captured.err and f"uninstall {lib}" in captured.err
+
+
+def test_the_model_forge_worker_still_starts_the_phase_when_the_guard_is_whole(monkeypatch, status_env, capsys):
+    """DOC-5, the worker: the guard is installed first, and a whole guard changes nothing."""
+    from arail.nucleus import worker
+
+    started = []
+
+    def _load_context(build_id):
+        started.append(egress._INSTALLED)  # the guard must already be in when the phase begins
+        raise RuntimeError("stop here: the phase body is not under test")
+
+    monkeypatch.setattr(worker, "_load_context", _load_context)
+    assert worker.main(["PA", "build-1"]) == 1  # the existing phase-boundary handler reports the stop
+    assert started == [True]
+    assert capsys.readouterr().err.startswith("worker: phase PA failed: stop here")
+
+
 def test_the_portal_installs_the_guard_before_it_does_anything_else():
     """DOC-5, wiring.  The guard goes in "FIRST - before any agent loads, before any cloud-provider
     endpoint fires, before the security scan".  Moving the install into a function must not lose the call
