@@ -6,7 +6,7 @@
 **Pass 1:** commits 1 to 4 of the "Atomic commit plan" (the guard and its proof): `052a6217` (skeleton), `da2057b6`, `96d87fb2`, `e7f868a7`, `a02ba141`.
 **This pass (pass 2):** commits 5 to 7 (the consumers, the docs, the CI workflow), starting from head `5ea83b9f` (pass 1 plus the orchestrator's checkpoint 1). Commit 8 is the orchestrator's, after #211 merges. Pass 1's log is kept below, unedited except for back-filled SHAs.
 **Status:** pass 2 done: steps 5, 6 and 7 are committed (`d626a1cf`, `ac1bb82b`, `95c70aea`). Step 8 is the orchestrator's, after #211 merges.
-**Pass 3 (review fixes):** the fix pass after the architect's BLOCK (REVIEW.md). Its own section is at the end of this file, "Pass 3 (review fixes)". The step 7 SHA above was back-filled by pass 3 (a commit cannot contain its own SHA).
+**Pass 3 (review fixes):** the fix pass after the architect's BLOCK (REVIEW.md). Done: commits `81548cd0` to `55107aeb` (W4, B1, N2, W3, W1, W2, B1 docs, N1, W5 and its follow-up), plus this file. Its own section is at the end of this file, "Pass 3 (review fixes)". The step 7 SHA above was back-filled by pass 3 (a commit cannot contain its own SHA).
 
 ## Hard rules (both passes)
 
@@ -678,7 +678,7 @@ The fix pass after the architect's review ([REVIEW.md](./REVIEW.md), verdict BLO
 - **Not mine:** `SPRINT.md` and `sprints/BACKLOG.md`. The B1 decision text is written below and in `docs/PRIVACY.md`; the orchestrator copies it into the ledger and the PR description.
 - **W3's installer change is message text only** (tell the user to restart the lab); nothing else in that code path changes.
 - **The workflow edit is limited to W5.** New tests go into files already listed in `EGRESS_TESTS`, so `tests/egress_ci_check.py`, CI-5 and CI-6 need no change.
-- **Frozen, untouched:** `src/arail/deep_*.py`, `src/dac_world/`, `src/arail/buddy_host/contract/`, `tests/conftest.py`, `pyproject.toml`, `uv.lock`, `CHANGELOG.md`, any `aerollm` / `AERO_*` name. The airgapped default is not relaxed by anything here. "token-free", never "free".
+- **Frozen, untouched:** `src/arail/deep_*.py`, `src/dac_world/`, `src/arail/buddy_host/contract/`, `tests/conftest.py`, `pyproject.toml`, `uv.lock`, `CHANGELOG.md`, any `aerollm` / `AERO_*` name. The airgapped default is not relaxed by anything here. The wording rule of pass 2 (the "Wording" bullet) holds.
 
 ### The decision B1 asks to record (verbatim; for the ledger and the PR description)
 
@@ -688,22 +688,297 @@ Why this stands for this PR (REVIEW.md "Rulings"): no supported library version 
 
 ### Plan
 
-A commit cannot contain its own SHA, so each row's "Commit ref" is filled in by the next commit's edit of this file; the last row's by the orchestrator. Tests come first wherever the failure mode is new (rows 1, 2, 3, 4, 5), and are run against the unmodified source before the fix; docs come after the behaviour they describe (rows 6 to 8).
+A commit cannot contain its own SHA, so each row's "Commit ref" was filled in by the final BUILD_LOG commit (row 10), whose own SHA is the orchestrator's to record. Tests come first wherever the failure mode is new (rows 1, 2, 3, 4, 5), and are run against the unmodified source before the fix; docs come after the behaviour they describe (rows 6 to 8).
 
 | # | Files | Change | Test | Commit ref |
 |---|---|---|---|---|
-| 0 | `sprints/2026-11-01-arail-egress-httpx2/BUILD_LOG.md` | This plan; step 7's SHA back-filled. | none (docs) | this commit |
-| 1 | `tests/test_egress_httpx.py`; `tests/test_egress_httpx_fresh.py` | **W4.** EG-A3 (in process) and FR-4 (fresh interpreter) simulate the broken import with `RuntimeError` and with a real `ModuleNotFoundError` (the dependency of the library is missing, which is the `neither` venv's huggingface_hub state). | Mutant R5 (an `ImportError` counts as absent) must go red. | pending |
-| 2 | `src/arail/portal/app.py` (`_install_egress_guard`, the status definition); `src/arail/portal/static/nav.js`; `src/arail/portal/templates/_airgap_modal.html`; `tests/test_egress_docs.py` | **B1, code.** The portal's guard-install block moves into a function. With an unguarded library the airgapped definition names it and says its requests are NOT blocked; `nav.js` paints the pill `warn` and opens the known-gaps list when `guard_installed` is false (still `textContent`); the modal's static paragraph no longer says httpx2 is caught without qualification. | DOC-5 extended (definition) plus new behavioural tests of the function (incomplete: one warning naming the library and the fix; whole: none), of `_startup` calling it first, and of `nav.js`; the source-string match of the portal's warning becomes behavioural. Mutant R6 must go red. | pending |
-| 3 | `src/arail/nucleus/worker.py`; `tests/test_egress_docs.py` | **N2.** The worker catches `EgressGuardIncomplete` in `main`, writes `worker: <message>` to stderr, returns 1 (still fail closed; no traceback). | A test that the worker exits 1 with one line and never reaches the phase. | pending |
-| 4 | `src/arail/egress.py` (two docstrings); `src/arail/plugins/manager.py` (message text); `docs/PRIVACY.md` (the doctor sentence); `tests/test_egress_docs.py`; `tests/test_qa_airgap_bypass_attempts.py` | **W3.** "Absent" means absent when the guard ran: a library installed while the lab runs is not guarded until the lab restarts. The plugin installer's success line says to restart. | A documented-gap tripwire for the late install (BY-6) and a test that the installer's line says restart. | pending |
-| 5 | `README.md`; `docs/PRIVACY.md`; `tests/test_qa_airgap_bypass_attempts.py`; `tests/test_egress_docs.py` | **W1.** README scopes `requests` (new sessions) and `urllib.request` (the default opener); PRIVACY gets the gap bullet for a session or adapter created before the guard and for `build_opener()`. | BY-5, a documented-gap tripwire for the three shapes (a pre-install session; a pre-install adapter class mounted after install; `build_opener()`), in the style of BY-2. | pending |
-| 6 | `docs/PRIVACY.md`; `README.md`; `src/arail/router/core.py` (comment); `tests/test_egress_docs.py` | **W2.** "Other processes" names the lab's own Python subprocesses (the goal parser's, the AirLLM worker) and the `./arailctl` commands that do not run a guarded process; README's parenthetical adds other processes; the router comment says the guard blocks the call only in a process that installed it. | DOC-9 extended: both subprocess modules exist, neither installs the guard, the bullet names both. | pending |
-| 7 | `docs/PRIVACY.md`; `tests/test_egress_docs.py` | **B1, docs.** PRIVACY says plainly that with an incomplete guard the portal and the agents keep running with that library unguarded and only Model Forge's worker stops; and what the modal shows. | The decision is pinned per caller: portal and loader continue and warn, the worker exits 1, the doctor degrades (DR-3); a test that PRIVACY states it. | pending |
-| 8 | `docs/PRIVACY.md`; `tests/test_egress_docs.py` | **N1.** One sentence: the local-address check is Python's `ipaddress` private set (documentation, benchmarking and reserved ranges, IPv6 unique-local). | `is_local_ip` on one address of each range named; `100.64.0.1` and `8.8.8.8` refused. | pending |
-| 9 | `.github/workflows/egress-guard.yml` | **W5.** `-rsP` on both pytest lines (the evidence tables reach the log of a green run); the SDK step prints the `anthropic`, `openai` and `httpx2` versions it installed. | CI-5 and CI-6 stay green; actionlint; all five legs through `emulate.py`. | pending |
+| 0 | `sprints/2026-11-01-arail-egress-httpx2/BUILD_LOG.md` | This plan; step 7's SHA back-filled. | none (docs) | `7ce4d2ff` |
+| 1 | `tests/test_egress_httpx.py`; `tests/test_egress_httpx_fresh.py` | **W4.** EG-A3 (in process) and FR-4 (fresh interpreter) simulate the broken import with `RuntimeError` and with a real `ModuleNotFoundError` (the dependency of the library is missing, which is the `neither` venv's huggingface_hub state). | Mutant R5 (an `ImportError` counts as absent) must go red. | `81548cd0` |
+| 2 | `src/arail/portal/app.py` (`_install_egress_guard`, the status definition); `src/arail/portal/static/nav.js`; `src/arail/portal/templates/_airgap_modal.html`; `tests/test_egress_docs.py` | **B1, code.** The portal's guard-install block moves into a function. With an unguarded library the airgapped definition names it and says its requests are NOT blocked; `nav.js` paints the pill `warn` and opens the known-gaps list when `guard_installed` is false (still `textContent`); the modal's static paragraph no longer says httpx2 is caught without qualification. | DOC-5 extended (definition) plus new behavioural tests of the function (incomplete: one warning naming the library and the fix; whole: none), of `_startup` calling it first, and of `nav.js`; the source-string match of the portal's warning becomes behavioural. Mutant R6 must go red. | `c14b2dd4` |
+| 3 | `src/arail/nucleus/worker.py`; `tests/test_egress_docs.py` | **N2.** The worker catches `EgressGuardIncomplete` in `main`, writes `worker: <message>` to stderr, returns 1 (still fail closed; no traceback). | A test that the worker exits 1 with one line and never reaches the phase. | `dc6a246f` |
+| 4 | `src/arail/egress.py` (two docstrings); `src/arail/plugins/manager.py` (message text); `docs/PRIVACY.md` (the doctor sentence); `tests/test_egress_docs.py`; `tests/test_qa_airgap_bypass_attempts.py` | **W3.** "Absent" means absent when the guard ran: a library installed while the lab runs is not guarded until the lab restarts. The plugin installer's success line says to restart. | A documented-gap tripwire for the late install (BY-6) and a test that the installer's line says restart. | `a71bc309` |
+| 5 | `README.md`; `docs/PRIVACY.md`; `tests/test_qa_airgap_bypass_attempts.py`; `tests/test_egress_docs.py` | **W1.** README scopes `requests` (new sessions) and `urllib.request` (the default opener); PRIVACY gets the gap bullet for a session or adapter created before the guard and for `build_opener()`. | BY-5, a documented-gap tripwire for the three shapes (a pre-install session; a pre-install adapter class mounted after install; `build_opener()`), in the style of BY-2. | `d1383674` |
+| 6 | `docs/PRIVACY.md`; `README.md`; `src/arail/router/core.py` (comment); `tests/test_egress_docs.py` | **W2.** "Other processes" names the lab's own Python subprocesses (the goal parser's, the AirLLM worker) and the `./arailctl` commands that do not run a guarded process; README's parenthetical adds other processes; the router comment says the guard blocks the call only in a process that installed it. | DOC-9 extended: both subprocess modules exist, neither installs the guard, the bullet names both. | `d6271948` |
+| 7 | `docs/PRIVACY.md`; `tests/test_egress_docs.py` | **B1, docs.** PRIVACY says plainly that with an incomplete guard the portal and the agents keep running with that library unguarded and only Model Forge's worker stops; and what the modal shows. | The decision is pinned per caller: portal and loader continue and warn, the worker exits 1, the doctor degrades (DR-3); a test that PRIVACY states it. | `b2fdb908` |
+| 8 | `docs/PRIVACY.md`; `tests/test_egress_docs.py` | **N1.** One sentence: the local-address check is Python's `ipaddress` private set (documentation, benchmarking and reserved ranges, IPv6 unique-local). | `is_local_ip` on one address of each range named; `100.64.0.1` and `8.8.8.8` refused. | `192e616e` |
+| 9 | `.github/workflows/egress-guard.yml` | **W5.** `-rsP` on both pytest lines (the evidence tables reach the log of a green run); the SDK step prints the `anthropic`, `openai` and `httpx2` versions it installed. | CI-5 and CI-6 stay green; actionlint; all five legs through `emulate.py`. | `bf80d184` |
 | 10 | `sprints/2026-11-01-arail-egress-httpx2/BUILD_LOG.md` | Pass 3 results and final state. | none (docs) | the orchestrator |
 
-### Verification (REVIEW.md item 7)
+### Verification protocol (REVIEW.md item 7)
 
 Per venv, with `ARAIL_TEST_EXPECT_HTTPX_FAMILY` set: the 13 `EGRESS_TESTS` files in ci, lock, both and py310 (one pytest process per file, one at a time); leg 5's negative control in neither; `tests/test_egress_sdk_clients.py` in `ci-sdk`; `tests/test_queuellm_rename_frozen_surface.py` against the failure text on `origin/main` (it fails 2 cases there; the criterion is that its text does not change); mutants R5 and R6 in a scratch export of the final head (never in the worktree); all five legs through `emulate.py` once the workflow edit is in; `actionlint` on the workflow. Every number recorded gets what it means, the bar and why, what out of range means, and where a failure lives. `git status` is clean between commits.
+
+### Execution
+
+Each step: the test first where the failure mode is new, run against the unmodified source (the reds are listed per step); then the change; then the files the commit touches and the whole 13-file list in ci, lock, both and py310, the neither venv, the neighbours of the change against the orchestrator's untouched-main baseline (`results/full-before2-{ci,lock}`, post-#211, 511 files, failing ids compared file by file), and the frozen-surface text against `origin/main`. `git status` was clean after every commit. Counts below are cases in the ci venv unless a venv is named; the 13-file total in ci went 322 (after step 1), 330, 333, 338, 343, 347, 349, 361, 362 (after step 9), against 320 in the review (333 is derived: step 3 ran only the docs file, 28 to 31 cases; the others are measured).
+
+#### Step 1: W4, a broken install that raises ModuleNotFoundError. Commit `81548cd0`
+
+Tests only, no source change. EG-A3 (in process) now fails the import three ways: lookup, `RuntimeError`, and a real `ModuleNotFoundError` (the simulated library runs `import <a module that does not exist>`, so the exception is Python's own, not a hand-built one); FR-4 (fresh interpreter) does `RuntimeError` and `ModuleNotFoundError`. EG-A3 also asserts the operator is told what is missing.
+
+- **Can it fail?** Mutant R5 (`except ImportError: ... "absent"`) went from 0 new failing ids to **2**: EG-A3 `[ModuleNotFoundError]` and FR-4 `[ModuleNotFoundError]`.
+- Pass-before: the new cases pass on the real source (it was right; the tests were missing), so the proof is the mutant, not a red run.
+
+#### Step 2: B1, code. Commit `c14b2dd4`
+
+`portal/app.py`: the install block is `_install_egress_guard()`, called first in `_startup()` (the `try` and the two lines R6 mutates are unchanged, so the reviewer's anchor applies as written). `/api/airgap/status` builds the airgapped description from one `uncovered()` snapshot: with an unguarded library it says `Cloud-provider APIs are blocked, EXCEPT requests made through <libs>: the guard could not patch it|them, so those requests are NOT blocked.` in the place of the old sentence; the rest of the text, and the hybrid text, are unchanged. `nav.js`: the pill is `warn` unless the mode is airgapped and the guard is whole; the known-gaps `<details>` (given an id) is opened; entries still go in with `textContent`. The modal's static paragraph now reads "(...built on them), unless the list above names one of them as a library the guard could not patch."
+
+- **Red first** (ci, old source, 28 tests in `tests/test_egress_docs.py`): 20 passed, **8 failed**: the description (2), the new function (3: the start-up warning, the silent whole guard, the PRIVACY quote), the wiring (the first call in `_startup` was `_egress.install_guard()`), `nav.js` (does not read `guard_installed`), the modal paragraph.
+- **Can it fail?** R6 (the reviewer's own text, applied unchanged to the refactored function): 0 new failing ids before, **2** now (the behavioural test and the PRIVACY quote). X3 (description left unqualified) 2; X4 (pill from the mode alone) 1; X5 (list not opened) 1; X6 (a call before the guard install) 1.
+- **nav.js under node** (scratch harness with a DOM stub, `pass3/nav_harness.js`, not committed; CI has no node test infrastructure): the old file fails **5 of 14** checks (pill stays `ok`, no tooltip, list closed; and after a flip hybrid to airgapped the pill turns green again, on success and on a failed flip); the new file passes **14 of 14**. The commit message of `c14b2dd4` says "4 of 14"; that is a counting slip in the message, the run says 5.
+- Beyond the plan row: reading `nav.js` showed four more places that paint the pill from the mode alone (the optimistic flip, the confirmed flip, and two reverts). Left alone, a flip to airgapped would have turned the pill green again with an incomplete guard. All five paints now go through one helper, `pillClass(mode)`, which remembers `guard_installed` from the last status fetch. Also: a pill tooltip, and the `get_airgap_status` docstring.
+- Neighbours: 44 files (everything that reads the endpoint, the modal, `nav.js`, `_startup`, or `install_guard`) fail the same ids as main in ci and in lock. The token-compliance ratchet fails on main with the same text (`static/nav.js: color_literals 1 > baseline 0` is already there).
+
+#### Step 3: N2, the Model Forge worker. Commit `dc6a246f`
+
+`nucleus/worker.py`: `main()` catches `EgressGuardIncomplete`, writes `worker: <message>` to stderr, returns 1; the module docstring says the worker is the one caller that stops. Anything else still propagates.
+
+- **Red first**: the old worker let the exception escape (2 failures, airgapped and hybrid); the whole-guard test passes before and after (it pins that the guard is already in when the phase begins).
+- **Run as a process** (`python -m arail.nucleus.worker PA build-1`, `httpx2.AsyncHTTPTransport` deleted first, ci venv): exit status **1** in airgapped and in hybrid, no traceback. A real process prints two lines, not one: the guard's own `_log.error` line reaches stderr through logging's last-resort handler (the worker configures no logging), then the worker's `worker: ...` line. The test, which runs in pytest's captured logging, sees the worker's one line.
+- **Can it fail?** X7 (exception escapes) 2; X8 (swallowed, the phase would run) 2.
+- Neighbours: the 37 `tests/nucleus/` files (including the real end-to-end worker test in `test_phases.py`) fail the same ids as main in ci and in lock.
+
+#### Step 4: W3, a library installed after the guard. Commit `a71bc309`
+
+`egress.py`: the `coverage()` and `_install_httpx_family_guard()` docstrings no longer say "absent: nothing in this process can use it" (true only when the guard ran); `install_guard()`'s docstring says it looks once. `docs/PRIVACY.md`: the doctor sentence is as of when that process started, and a library installed while the lab runs is not guarded until the lab restarts. `plugins/manager.py`: the success line is `Plugin '<name>' installed successfully. Restart the lab so the egress guard covers any HTTP library it added.` (message text only; nothing else in that path changed).
+
+- **BY-6** (new, `TestDocumentedGaps`): a documented-gap tripwire. The library is hidden (`sys.modules[lib] = None`) while the guard installs (`coverage()[lib] == "absent"`), then made visible; a second `install_guard()` is a no-op; the library's transport is not guarded and a request ends in the library's own `ConnectError`, not `EgressBlocked`, with no audit line. It passes before and after (it pins today's behaviour); the proof it can fail is mutant X10 (`install_guard` looks again on every call): **1** new failing id, BY-6.
+- **Red first**: the installer's line, the PRIVACY sentence, and the two docstrings (4 failed); X9 (the installer's line loses "restart") 1.
+
+#### Step 5: W1, README and PRIVACY scope. Commit `d1383674`
+
+README: `wraps `requests` (new sessions), `urllib.request` (the default opener) and every client of `httpx` and its successor `httpx2`, such as ...` (the reviewer's wording). PRIVACY: a gap bullet for a session or adapter created before the guard and for `build_opener()`; the httpx family has no such gap.
+
+- **BY-5** (new): three shapes, each past the guard on purpose: a `Session()` built before `install_guard()`; a session built after it that mounts the `HTTPAdapter` class held from before it; `urllib.request.build_opener().open(...)`. Each ends in the library's own connection error (`.invalid`, made unresolvable at `getaddrinfo`), never `EgressBlocked`, with no audit line.
+- **Can it fail?** X1 (the stock adapter's `send` is patched too) turns the two `requests` shapes red; X2 (the stock `HTTPHandler.http_open` is patched too) turns the opener shape red; X14 (README claims "everything built on them" again) 1. The two doc pins were red against the old text first.
+- Neighbours (10 doc-reading files) identical to main in ci and lock.
+
+#### Step 6: W2, the processes the guard does not reach. Commit `d6271948`
+
+PRIVACY "Other processes": "Everything else runs outside it: setup's and upgrade's model downloads, Docker containers such as Open Notebook's, opencode, the lab's own Python subprocesses (the goal parser's model subprocess and the AirLLM worker), and the Python behind every other `./arailctl` command (apart from `start`, which runs the portal)." README's parenthetical adds "other processes such as setup's and upgrade's model downloads". `router/core.py` (comment only): the guard blocks the eventual call "only in a process that installed it (the portal does; the goal parser's model subprocess does not, so there this refusal is the only line)".
+
+- Delta from the review's text: the review said "every other `./arailctl` command". `./arailctl start` runs the portal, which is guarded, so the sentence needed the exception; `nucleus` verbs spawn the guarded worker, but the `nucleus` CLI process itself is not guarded, which "Model Forge's worker" in the guarded list already says.
+- **Tests** (red against the old text first): for each of the two subprocesses, the spawn site still names the module, the module exists, contains no `install_guard`, is not one of DOC-9's four sites, importing it in a fresh interpreter leaves the guard uninstalled (the AirLLM worker takes over `sys.stdout` on import, so the child prints through the saved stream), and the bullet names it; the "every other `./arailctl` command" sentence; README's clause; the router comment. **X15** (the goal parser's subprocess calls `install_guard()`) turns **2** red.
+
+#### Step 7: B1, docs. Commit `b2fdb908`
+
+PRIVACY, in the paragraph on a library the guard cannot patch: where the lab says so (the activity log, the doctor, and the modal: its pill is a warning, its known-gaps list opens with the library in it, its description says requests made through that library are NOT blocked), then the decision verbatim ("With an incomplete guard the portal and the agent loader keep serving with that library unguarded; only Model Forge's worker exits (with a message that names the library)"), then the remedy (a supported version, `httpx2<3` or `httpx<1`, or uninstall, and restart the lab; until then airgapped mode does not hold for it).
+
+- Tests: a pin that PRIVACY states each sentence (red first; X13, "the portal stops too", 1), and the loader's half of the decision (`load_all` logs `Egress guard install failed in load_all: ...` and returns; seeding and discovery faked). The loader test passes before and after (it pins today's behaviour); X11 (the loader stops logging) 1 and X12 (the loader re-raises) 1 turn it red. With the portal (step 2), the worker (step 3) and the doctor (DR-3) every caller's behaviour is now pinned, so TD56 (fail closed) would change tests, not silently the docs.
+
+#### Step 8: N1, the private ranges. Commit `192e616e`
+
+One bullet: "Or another range Python's `ipaddress` treats as private (documentation, benchmarking and reserved ranges, IPv6 unique-local): the guard uses its `is_private` test as it is." Checked first with `airgap.is_local_ip` on Python 3.10.22 and 3.11.17: `192.0.2.7`, `198.51.100.7`, `203.0.113.7`, `198.18.0.1`, `240.0.0.1`, `0.0.0.0`, `192.0.0.8`, `fc00::1` and `2001:db8::1` are local; `100.64.0.1` and `8.8.8.8` are refused.
+
+- Tests: one address per range named is local (7 cases), a carrier-grade-NAT address and three public ones are refused (4), and the sentence is there (red first). **X18** (the documentation ranges are refused) turns the range cases red (5 of its 11 failing ids; the other 6 are collateral, because the mutant is crude and also refuses `192.168.x`).
+
+#### Step 9: W5, a green run shows its evidence. Commits `bf80d184` and `55107aeb`
+
+`bf80d184`: both pytest lines: `-rs` became `-rsP` (not an extra `-rP`: pytest keeps only the last `-r`, so `-rs -rP` would have dropped the skip names). The SDK step prints the `anthropic`, `openai` and `httpx2` versions between the install and the tests. Nothing else in the workflow changed. A new CI-6 test pins both (red against the old workflow first); X16 (`-rs` back) 1, X17 (no version print) 1. `actionlint` 1.7.12 with shellcheck 0.11.0 exits 0 on the workflow and on every workflow in the repo; removing the existing `SC2086` directive from a scratch copy makes it report two issues, so the check is live. In the emulated leg 1: the SDK step's log now starts with `anthropic 2.3.0`, `openai 3.42.1`, `httpx2 2.16.0`; the egress step's log has the two EVIDENCE tables (FR-1 for httpx2 2.16.0, FR-5 for huggingface_hub 2.4.0), 148 lines in all.
+
+`55107aeb` (the follow-up, found by reading that first emulated green log): `-rP` shows more than the evidence tables. It also shows the captured **log and stderr** of passing tests. The first green leg-1 log carried: 19 `ERROR` and 2 `WARNING` log lines (the guard logs at ERROR when incomplete, and the tests simulate that on purpose); 3 `[arail.egress] record failed` stderr lines (the tests of an unwritable audit log) and 1 lance `WARN` from an unrelated test; and, the one that matters, the checker's own failure verdict, `NO TESTS from ...` and `egress ci check (no-skips): 4 finding(s); this leg is red.`, because a unit test called the checker three times and read the output of only the first. A line saying "this leg is red" in a green log is what the "runs must teach" rule exists to prevent.
+
+- Fixed at the source: that test reads and asserts every call's output (it now also asserts what the missing-file and the empty-run messages say), and an autouse fixture in `tests/test_egress_ci_check.py` fails any test in that file that leaves checker output unread. **X20** (the fix reverted) is caught by that fixture. After the fix, the PASSES section of leg 1's egress log holds no verdict-like line (`this leg is red`, `NO TESTS`, `SKIPPED`, `FAILED`, `UNPROVEN`, `Traceback`: none); what remains is the 21 ERROR/WARNING log lines, the 3 `record failed` lines and the lance warning, which the log now explains.
+- The explanation sits where the reader meets the output: one `echo` before the pytest line says that `-rP` also shows the captured log and stderr of passing tests and what tests of failure paths put there on purpose. The CI-6 pin requires it (**X19**, the note removed, is caught). `--show-capture=stdout` would remove the noise but also hide the log of FAILING tests, which is what a red run needs, so it was not used. The review's expectation that `-rP` prints only the evidence tables was slightly off; if the noise is unwanted, the cleaner fix is to have the evidence written to a file and printed after the run, which is new work.
+
+### Deltas from the plan
+
+1. **`nav.js` helper (step 2).** The plan says "the pill is `warn` when `guard_installed` is false". The file paints the pill in five places, not one; all five now go through `pillClass()`. Without that, flipping the mode in the modal turned the pill green with an incomplete guard.
+2. **Three docstrings, not two (step 4).** The review names `egress.py:488-489` and `:574`; `install_guard()`'s own docstring is where the short-circuit lives, so it gets one sentence.
+3. **W2's "every other `./arailctl` command"** got an exception for `start` (see step 6).
+4. **W5 is `-rsP`**, not an added `-rP` (pytest keeps only the last `-r`).
+5. **More tests than the review asked for**, each pinning a sentence that a docs or UI change now makes: step 2 (hybrid left alone, every library named, the wiring of `_startup`, the modal paragraph), step 3 (the whole guard still starts the phase), step 4 (BY-6, the installer's line, the docstrings), step 5 (two doc pins), step 6 (the subprocess tie, the `./arailctl` sentence, the router comment), step 7 (the PRIVACY pin and the loader), step 8 (the range cases), step 9 (the CI-6 pin).
+6. **No new test file, no change to `tests/egress_ci_check.py`.** Every test is in a file already in `EGRESS_TESTS`; the only edit to `tests/test_egress_ci_check.py` is one added CI-6 test. CI-5 and the other CI-6 tests are unchanged and green. The workflow differs only by W5.
+7. **Not written:** no technical-debt numbers in README or PRIVACY (user-facing); the "no supported release is in that state today" sentence that the review's rulings support was left out of PRIVACY, because it would age; the extra N1 clauses (carrier-grade NAT, "none of them is routed") were written and then cut back to the reviewer's one sentence.
+8. **W5 has a follow-up commit (`55107aeb`)** for what `-rP` really prints (step 9). It stays inside W5's scope: the same two pytest lines' output, one `echo`, and one existing test file.
+9. **The commit message of `c14b2dd4`** says the old `nav.js` fails 4 of 14 node checks; it is 5 of 14 (see step 2). History was not rewritten for a counting slip in a message.
+
+### Findings and where each is fixed
+
+| REVIEW.md | Fix | Commit | Shown by |
+|---|---|---|---|
+| B1 (code) | `_install_egress_guard()`; the airgapped description names the unguarded library; the pill is `warn` and the list opens; the paragraph is qualified | `c14b2dd4` | R6 red (2); X3 to X6 red; node harness 5 red to 14 of 14 green |
+| B1 (docs, decision) | PRIVACY states what the lab does and does not do | `b2fdb908` | PRIVACY pin (X13); the four callers' behaviours pinned (X11, X12, X7, X8, R6) |
+| W1 | README scope; PRIVACY gap bullet; BY-5 | `d1383674` | X1, X2, X14 |
+| W2 | PRIVACY "Other processes"; README parenthetical; router comment | `d6271948` | X15; the fresh-interpreter ties |
+| W3 | three docstrings; PRIVACY; the installer's line; BY-6 | `a71bc309` | X10, X9 |
+| W4 | EG-A3 and FR-4 over `RuntimeError` and `ModuleNotFoundError` | `81548cd0` | R5 red (2) |
+| W5 | `-rsP` on both pytest lines; SDK versions printed; a note in the log; no test prints a verdict into a green log | `bf80d184`, `55107aeb` | X16, X17, X19, X20; CI-6 pin; all five legs emulated |
+| N1 | one PRIVACY bullet | `192e616e` | the range cases; X18 |
+| N2 | the worker catches `EgressGuardIncomplete` | `dc6a246f` | X7, X8; run as a process |
+| N3, N5, N7 | skipped by decision | | |
+| N4 | no action (the RLock stays); R4 still survives, by design | | |
+| N6, B1 item 5, W2 and W3 "file TD..." | TD56 to TD59 and AF-3's sites: the orchestrator's commit 8 | | |
+
+### Verification (REVIEW.md item 7), tree clean
+
+V1 to V6 were measured on `bf80d184` (every code, test and doc change of the pass). The two commits after it change only `.github/workflows/egress-guard.yml` and `tests/test_egress_ci_check.py` (still 44 cases); R5, R6 and the W5 mutants were re-run on the final head, and the emulation (V7) re-ran all 13 files in all five legs on it.
+
+Every table says what the number means, the bar and why, what out of range means, and where a failure lives. Environment: scratch venvs (editable installs of this worktree), scratch HOME and TMPDIR, scrubbed environment, `CI=true`, one pytest process per file and one at a time, each venv declaring its leg through `ARAIL_TEST_EXPECT_HTTPX_FAMILY`. Nothing bound `127.0.0.1:8089`, no full suite, no `docker`.
+
+#### V1. The 13 `EGRESS_TESTS` files in ci, lock, both and py310 (passed; failed and skipped are 0 in every cell)
+
+| File | review, ci | ci (httpx2 2.16.0) | lock (httpx 0.28.1) | both | py310 (httpx2 2.14.0) |
+|---|---|---|---|---|---|
+| `test_airgap_helpers.py` | 46 | 46 | 46 | 46 | 46 |
+| `test_airgap_modal_dom.py` | 6 | 6 | 6 | 6 | 6 |
+| `test_egress_bootstrap.py` | 22 | 22 | 22 | 22 | 22 |
+| `test_egress_ci_check.py` | 43 | 44 | 44 | 44 | 44 |
+| `test_egress_docs.py` | 20 | 55 | 55 | 63 | 55 |
+| `test_egress_guard.py` | 18 | 18 | 18 | 18 | 18 |
+| `test_egress_httpx.py` | 63 | 64 | 64 | 90 | 64 |
+| `test_egress_httpx_fresh.py` | 6 | 7 | 7 | 10 | 7 |
+| `test_httpx_family.py` | 17 | 17 | 17 | 20 | 17 |
+| `test_qa_airgap_bypass_attempts.py` | 20 | 24 | 24 | 28 | 24 |
+| `test_qa_airgap_happy_setup.py` | 17 | 17 | 17 | 17 | 17 |
+| `test_qa_airgap_ipv6_edge_cases.py` | 14 | 14 | 14 | 14 | 14 |
+| `test_qa_tier1_egress_guard.py` | 28 | 28 | 28 | 28 | 28 |
+| **Total** | **320** | **362** | **362** | **406** | **362** |
+
+- *Means:* the cases each leg's job runs, in that leg's library state. The review measured 320 / 320 / 320 / 356 at `98e9e98a`; the difference is this pass's new cases (+42 in ci: W4 +2, B1 +8, N2 +3, W3 +5, W1 +5, W2 +4, B1 docs +2, N1 +12, W5 +1).
+- *Bar and why:* 0 failed and 0 skipped in every cell, every file at least 1 case. A skip is how TD50 stayed hidden, and the workflow's checker fails the leg on any of these.
+- *Out of range:* a failure names a test; a skip means a test became conditional; a file with 0 cases means a path typo or a collection change.
+- *Where:* the file named in the row; `.github/workflows/egress-guard.yml` and `tests/egress_ci_check.py` for how the leg judges it.
+
+#### V2. The neither venv (leg 5's state): the negative control
+
+The whole list in the neither venv, declared `none`: 314 passed, **2 failed**, 45 skipped. The two failures are the ones this venv is for: EG-0, the sentinel (`UNPROVEN`), which must fail, and FR-5, huggingface_hub without its HTTP library, which leg 5 never runs. The 45 skips are the `[lib]` tests having an empty parameter set. Leg 5's own command is in V6.
+
+- *Means:* with no httpx-family library installed the proof must refuse to pass. *Bar and why:* EG-0 red with its message, EG-0b green; the vacuous pass on `main` (79 passed, 2 skipped, exit 0) is gone. *Out of range:* EG-0 green means the sentinel shares the guard's lookup; any other red means this pass's tests assumed a library. *Where:* `tests/test_egress_httpx.py`.
+
+#### V3. `tests/test_egress_sdk_clients.py` in an SDK venv (`ci-sdk`: httpx2 only, plus anthropic and openai, both declared)
+
+3 passed, 0 failed, 0 skipped, 4.4 s.
+
+- *Means:* the SDKs' default clients are refused in airgapped mode. *Bar and why:* `EgressBlocked` in the chain, no network-error type, one audit line at `max_retries=0`; skipped is red when the SDK is declared. *Out of range:* `ConnectError` or `gaierror` in a chain means an SDK's default client left the guarded transports (an architect decision, not a test edit). *Where:* SDK-1.
+
+#### V4. The frozen-surface failure text against `origin/main` (`de1ce285`)
+
+`tests/test_queuellm_rename_frozen_surface.py` fails 2 and passes 3 on `origin/main` and here. The 13 `E ` lines are **identical** in ci, lock, both, py310 and neither (the same four drift lines: `pyproject.toml | 5 +++++`, `scripts/build-aerollm.sh` losing `aerollm_version` x2, and `src/arail/portal/app.py` losing `AEROLLM_MODEL` x3 and `AeroLLMBackend` x1; the counts for `app.py` did not grow).
+
+- *Means:* the two pre-existing failures are not hiding a new one. *Bar and why:* identical text, because the test is red on main and a changed line would be a frozen token lost or a frozen path touched by this pass. *Out of range:* a new or changed line names the file and token. *Where:* the test's `E ` lines.
+
+#### V5. Order independence (E13): the 13 files in one process, forward and reversed
+
+ci 362 / 362, lock 362 / 362, both 406 / 406, py310 362 / 362; 0 failed, 0 skipped.
+
+- *Means:* patch state does not leak between files. *Bar and why:* the same counts both ways, because the suite shares one process. *Out of range:* a difference names a file whose autouse reset is incomplete. *Where:* the file whose count moved.
+
+#### V6. Mutants (scratch export of `bf80d184`; R5, R6 and the W5 rows re-run on the final head; 13 files, ci venv, control 362 cases and 0 failing ids; a mutant is caught when it adds at least one failing id)
+
+| Mutant | New failing ids | Named tests |
+|---|---|---|
+| **R5** an `ImportError` counts as absent | **2** (was 0) | EG-A3 `[ModuleNotFoundError]`, FR-4 `[ModuleNotFoundError]` |
+| **R6** the portal's start-up swallows an incomplete guard | **2** (was 0) | the start-up warning test, the PRIVACY quote test |
+| R1 in-process transports patched too | 6 | EG-13, EG-18, EG-19, FR-3, and two structural |
+| R2 audit line records the whole URL | 9 | EG-1, EG-2, EG-9, EG-10, FR-5, `TestAuditLog` |
+| R3 refusal message carries the whole URL | 1 | EG-1 |
+| R4 no lock in `install_guard` | 0 (survives, by design) | N4: nothing observable breaks without it |
+| R7 raise only when airgapped | 3 (was 1) | EG-20 `[hybrid]`, the hybrid description, the worker `[hybrid]` |
+| R8 check after the library's own I/O | 19 | EG-1, EG-11, EG-14, FR-2, and others |
+| X1 stock `requests` adapter's `send` patched too (BY-5) | 2 | BY-5 session shapes |
+| X2 stock urllib `HTTPHandler` patched too (BY-5) | 1 | BY-5 opener shape |
+| X3 description left unqualified (B1) | 2 | DOC-5 description tests |
+| X4 pill from the mode alone (B1) | 1 | DOC-6 `nav.js` |
+| X5 known-gaps list not opened (B1) | 1 | DOC-6 `nav.js` |
+| X6 a call before the guard in `_startup` (B1) | 1 | DOC-5 wiring |
+| X7 worker lets the exception escape (N2) | 2 | worker test, airgapped and hybrid |
+| X8 worker swallows it and runs the phase (N2) | 2 | worker test, airgapped and hybrid |
+| X9 installer's line loses "restart" (W3) | 1 | the installer test |
+| X10 `install_guard` looks again on every call (W3) | 1 | BY-6 |
+| X11 loader stops logging (B1 decision) | 1 | the loader test |
+| X12 loader re-raises (B1 decision) | 1 | the loader test |
+| X13 PRIVACY says the portal stops too (B1 docs) | 1 | the PRIVACY pin |
+| X14 README claims "everything built on them" (W1) | 1 | the README pin |
+| X15 goal parser's subprocess installs the guard (W2) | 2 | the subprocess tie, DOC-9 |
+| X16 workflow loses `-rP` (W5) | 1 | the CI-6 pin |
+| X17 SDK step stops printing versions (W5) | 1 | the CI-6 pin |
+| X18 documentation ranges refused (N1) | 11 | the range cases (5) and RFC1918 tests (collateral) |
+| X19 the egress step stops saying what the ERROR lines are (W5) | 1 | the CI-6 pin |
+| X20 a checker test leaves the checker's verdict unread (W5) | 1 | the autouse fixture, on that test |
+
+- *Means:* whether a mitigation has a test that fails without it. *Bar and why:* at least 1 new failing id per mutant, except R4, which the review accepts. R5 and R6 are the two the review required to go red. *Out of range:* a survivor is a mitigation nothing pins. *Where:* the test named in the row.
+
+#### V7. All five legs through `emulate.py`, on the final head `55107aeb` (the workflow's own `run:` text; tree status `''` before and after each leg)
+
+| Leg | Library state (venv, Python) | Egress step | Checker | SDK step | Leg |
+|---|---|---|---|---|---|
+| 1 httpx2 only (pip, floating) | httpx2 2.16.0, hf 2.4.0, starlette 1.10.0 (ci, 3.11.17) | 362 passed, exit 0 | `ok - 13 files, 362 cases, none skipped, failed or missing` | `ci-sdk`: 3 passed; the step printed `anthropic 2.3.0`, `openai 3.42.1`, `httpx2 2.16.0`; checker `ok - 1 files, 3 cases` | green |
+| 2 httpx2 only, Python 3.10 | httpx2 2.14.0, hf 2.4.0, starlette 1.7.0 (py310, 3.10.22; the checker also runs under 3.10) | 362 passed, exit 0 | ok, 13 files, 362 cases | not in this leg | green |
+| 3 httpx only (uv.lock) | httpx 0.28.1, hf 1.25.1, starlette 1.3.1 (lock, 3.11.17) | 362 passed, exit 0 | ok, 13 files, 362 cases | not in this leg | green |
+| 4 both | httpx 0.28.1 and httpx2 2.16.0 (both, 3.11.17) | 406 passed, exit 0 | ok, 13 files, 406 cases | not in this leg | green |
+| 5 neither (negative control) | no httpx, httpx2, httpcore, httpcore2 (neither, 3.11.17) | not run (the leg's `if:`) | `ok - the sentinel failed with UNPROVEN, as it must with neither library, and the declaration passed` | not in this leg | green *because* the sentinel failed: pytest `1 failed, 1 passed` |
+
+- *Means:* each leg's job, run as GitHub would run its test steps (the install steps are skipped: the venvs are prebuilt, see "Not verified here"). *Bar and why:* legs 1 to 4 pass every case with none skipped and every file counted; leg 5 is green only because its sentinel failed with `UNPROVEN` and its declaration passed, so the proof can fail. *Out of range:* a skip or a file with 0 cases fails the checker; a passing sentinel in leg 5 fails the control. *Where:* `.github/workflows/egress-guard.yml`; `tests/egress_ci_check.py`.
+- What the green logs now show (leg 1): the SDK step's versions; two EVIDENCE tables (the probe, huggingface_hub); the note; 21 ERROR/WARNING log lines and 4 `record failed` mentions (3 stderr lines and the note itself); no line that reads like a verdict (`this leg is red`, `NO TESTS`, `SKIPPED`, `UNPROVEN` outside leg 5, `Traceback`).
+- Order of events worth knowing: my first emulation of these legs passed a relative `--out`, so the junit files were written into the worktree (`results/`, untracked). It was removed and the legs were re-run with absolute paths (the `''`/`''` above). The emulation was then re-run after each of the two W5 commits; the table is the last run.
+
+#### V8. `actionlint` on the workflow
+
+`actionlint` 1.7.12 with shellcheck 0.11.0 on `PATH`: exit 0 on `.github/workflows/egress-guard.yml` and on every workflow in the repo. Negative control: with the `SC2086` directives deleted from a scratch copy, it reports two `SC2086` issues, so shellcheck is active. *Means:* the workflow's expressions, matrix, `if:` conditions and every `run:` script are well-formed. *Bar and why:* exit 0, because a malformed workflow fails on GitHub with no test having run. *Out of range:* a finding names the line. *Where:* the workflow.
+
+#### V9. Neighbours of every change, against the untouched-main baseline
+
+The standing 44 files (everything that reads the status endpoint, the modal, `nav.js`, `_startup`, `install_guard`, README or PRIVACY), the 37 `tests/nucleus/` files and the loader test, in ci and in lock, compared file by file with `results/full-before2-{ci,lock}` (the orchestrator's post-#211 full-suite baseline on `origin/main`):
+
+| Venv | Files | Cases | Failing ids (all also failing on main) | Files whose failing ids differ from main |
+|---|---|---|---|---|
+| ci | 82 | 1229 | 21 (in 6 files) | 0  |
+| lock | 82 | 1229 | 20 (in 5 files) | 0  |
+
+- *Means:* no test that this pass did not write changed its verdict. *Bar and why:* the same failing ids as main, because this pass changes the guard's callers (the portal's start-up, the worker, the installer) and a regression elsewhere would show here. *Out of range:* an id that fails only here is a regression until a serial re-run on both trees says otherwise. *Where:* the file named. The token-compliance ratchet fails on main and here with the same text (`static/nav.js: color_literals 1 > baseline 0` is already in it).
+
+### Doc claims checked (pass 3)
+
+Every factual sentence added to README, PRIVACY, the modal, a docstring, a comment or a user-visible string in this pass, with how it was checked. "Run" means run in this session (probes are scratch scripts under `pass3/`, not committed); "test" names the committed test that now ties the sentence to the code.
+
+| # | Where | Claim | Verdict | Evidence |
+|---|---|---|---|---|
+| 1 | README | The guard wraps `requests` (new sessions) and `urllib.request` (the default opener) | true | BY-5 (3 shapes); `TestPreGuardSession`; `egress.install_guard` swaps `requests.adapters.HTTPAdapter` and installs an opener; README pin |
+| 2 | README | ...and every client of `httpx` and `httpx2` | true | EG-3 and FR-1 (clients built before install), FR-2, SDK-1, FR-5 |
+| 3 | PRIVACY | A session or adapter created before the guard, and a `build_opener()` opener, are not reached; the httpx family has no such gap | true | BY-5 (run, three cases, no audit line); the class-level patch (EG-3) |
+| 4 | PRIVACY, docstrings, installer line | The guard looks once at start; a library installed while the lab runs is not guarded until it restarts | true | BY-6 (run); `portal/app.py:5093` calls `plugin_mgr.install`, which runs `pip install -r` with `sys.executable` (`plugins/manager.py:78-81`) into the running interpreter |
+| 5 | PRIVACY | `./arailctl doctor` prints which of the four the guard covered when that process started | true | `doctor._guard_summary` (DR-2); the doctor is its own process |
+| 6 | PRIVACY | The portal's activity log records "Egress guard install failed" | true | run: DOC-5 calls the start-up and reads the emitted line |
+| 7 | PRIVACY | `./arailctl doctor` fails its egress check | true | DR-3 (pass 2) |
+| 8 | PRIVACY | The modal shows the pill as a warning, opens the known-gaps list with the library in it, and its description says requests made through it are NOT blocked | true | run: `nav.js` under node with a DOM stub, 14 of 14 checks (the old file fails 5); DOC-5 for the description; not run: a browser |
+| 9 | PRIVACY | With an incomplete guard the portal and the agent loader keep serving with that library unguarded; only Model Forge's worker exits (with a message that names the library) | true | tests: portal (DOC-5), loader (new), worker (new); the worker run as a process exits 1 in airgapped and hybrid |
+| 10 | PRIVACY | Until a supported version (`httpx2<3`, `httpx<1`) is installed, or the library is uninstalled, and the lab is restarted, airgapped mode does not hold for it | true | the `EgressGuardIncomplete` message (EG-A2) says the same fix; the review's probe: an async httpx2 request reached the network layer in that state |
+| 11 | PRIVACY | The goal parser's model subprocess and the AirLLM worker run outside the guard | true for "do not install it"; the worker's hub fallback is read, not run | run: importing either module in a fresh interpreter leaves `_INSTALLED` False and `coverage()` empty; AST: no `install_guard()` in either; `skills/goal_parser/__init__.py:237` and `router/backends.py:1091` spawn them; `router/airllm_worker.py:74` falls back to the repo id when the local model directory is missing (read) |
+| 12 | PRIVACY | The Python behind every other `./arailctl` command (apart from `start`) runs outside the guard | true | the four `install_guard()` sites (DOC-9) and one caller of `load_all()` (`portal/app.py`, grep); `arailctl:1058` and following run `python -m arail.*` entry points that are not among them |
+| 13 | README | Other processes, such as setup's and upgrade's model downloads, are not covered | true | `scripts/setup.sh:1939` and `scripts/upgrade.sh:177` run `python3 -c "from huggingface_hub import snapshot_download..."` in separate interpreters |
+| 14 | `router/core.py` comment | The guard blocks the call only in a process that installed it; the goal parser's subprocess does not, so there the router's refusal is the only line | true | row 11; the router refuses cloud backends while airgapped before any call (pre-existing, unchanged) |
+| 15 | PRIVACY | The local-address check also passes documentation, benchmarking and reserved ranges and IPv6 unique-local, because it uses `is_private` | true | run on 3.10.22 and 3.11.17: nine addresses local, `100.64.0.1` and `8.8.8.8` refused; `airgap.is_local_ip` is `is_loopback or is_private or is_link_local`; the range tests |
+| 16 | `worker.py` docstring | The parent inherits the worker's stderr | true | `nucleus/phases.py:166` `subprocess.Popen(args, cwd=..., env=env)` with no redirection |
+| 17 | `portal/app.py` docstring | `./arailctl doctor` fails its egress check; the modal names the library | true | rows 7 and 8 |
+| 18 | `nav.js` tooltip | "The egress guard could not patch every HTTP library -- see below." | true | the string is set only when `guard_installed` is false (node harness) |
+| 19 | modal paragraph | The guard catches the four, "unless the list above names one of them as a library the guard could not patch" | true | DOC-5 and the harness: the list gets that entry |
+
+### Architect feedback required
+
+None blocking. Three places where the review's text needed a refinement, applied and logged above rather than escalated: W2's "every other `./arailctl` command" (an exception for `start`, step 6); W5's "`-rP`" (written `-rsP`, step 9); and W5's expectation that `-rP` "prints captured output only for tests that print, which are the evidence tables": it also prints the captured log and stderr of passing tests, and one checker unit test printed a failure verdict into a green log (fixed at the source, pinned, and the log now carries a note; step 9). Whether that remaining noise is acceptable, or the evidence should instead be written to a file and printed after the run, is the architect's or the operator's call. One item for the architect's judgement, not a defect: B1's fix list asks to "show the unguarded entries outside the collapsed `<details>` (or open it)". The description (outside the `<details>`) names each unguarded library and the list opens by itself; I did not add a second element that repeats the entries, because that needs either a new field in the status payload or inline styles (the token-compliance ratchet counts both).
+
+### Observations for the review (not defects)
+
+1. The nav bar's own **Airgapped** badge (`#mode-badge`) still shows the mode only: it reads `/api/system/mode`, which carries no guard state, so it stays "Airgapped" with an incomplete guard. The modal it opens is where the state is. Changing the badge needs a field on that endpoint or a second fetch at load; not in B1's list.
+2. After a mode flip in the modal, the description paragraph is not refreshed until the modal is reopened (pre-existing, for every mode). With an incomplete guard the pill stays amber across the flip (step 2), and the next open shows the right description.
+3. If `install_guard()` fails for a reason other than an unpatchable family member, `uncovered()` is empty: the pill is `warn` and the list opens, but the description keeps the unqualified sentence. B1 asks for the qualification when `uncovered()` is non-empty; widening it to "the guard is not installed" is a small follow-up the architect may want.
+4. A real worker process prints two lines on stderr (the guard's own log line and the worker's), see step 3.
+5. Carrier-grade NAT addresses (`100.64.0.0/10`, which some VPNs assign) are refused in airgapped mode, because `ipaddress` does not call them private. PRIVACY now says what is allowed; it does not list this. Pre-existing.
+6. In the neither venv the docs file skips 9 cases for an empty parameter set (the `[lib]` tests); leg 5 never runs that file.
+7. `-rP` is noisier than the review expected (step 9): a green log carries the 21 ERROR/WARNING log lines and 3 `record failed` lines of tests that provoke them on purpose, now explained by a note and without any verdict-like line. If the operator wants a quieter log, the options are in step 9.
+8. The B1 decision text, for the ledger and the PR: **"With an incomplete guard the portal and the agent loader keep serving with that library unguarded; only Model Forge's worker exits."** It is written in `docs/PRIVACY.md` and pinned per caller by tests; TD56 (fail closed) is the operator's call.
+
+### Not verified here
+
+The real GitHub run: the install steps on `ubuntu-latest` with PyPI as of the day (including whether leg 2's `pip` resolves httpx2 2.14.0 on Python 3.10), `uv sync --frozen` there, `setup-python`'s pip cache, the daily schedule, and the first run's wall time. A browser rendering of the modal (the `nav.js` behaviour was run under node with a DOM stub instead). The AirLLM worker's hub fallback (read, not run: `airllm` is not installed). Anything under TD56 to TD59.
+
+## Final state (pass 3)
+
+- **Commits:** `7ce4d2ff` (this pass's plan), `81548cd0` (W4), `c14b2dd4` (B1 code), `dc6a246f` (N2), `a71bc309` (W3), `d1383674` (W1), `d6271948` (W2), `b2fdb908` (B1 docs), `192e616e` (N1), `bf80d184` (W5), `55107aeb` (W5 follow-up), and the commit of this file (the orchestrator records its SHA). Branch `qukaizen/arail-egress-httpx2`, not pushed. `55107aeb` was amended twice before anything referenced it (the leak guard, then its message); no other commit was rewritten.
+- **Diff of the code commits** (`98e9e98a..55107aeb`, `sprints/` excluded): 15 files, +769 / -70. Source, docs and workflow: 10 files, +160 / -45 (`portal/app.py` +40/-8, `docs/PRIVACY.md` +32/-9, `nav.js` +22/-5, `egress.py` +16/-9, the workflow +16/-2, `worker.py` +14/-1, `plugins/manager.py` +6/-1, README +6/-5, `router/core.py` +5/-3, the modal +3/-2). Tests: 5 files, +609 / -25 (`test_egress_docs.py` alone +408/-11).
+- **Tests now** (13 files, `CI=true`, declared per venv): ci 362, lock 362, both 406, py310 362, all with 0 failed and 0 skipped, against 320 / 320 / 320 / 356 at `98e9e98a`. neither: 314 passed, 2 failed on purpose (EG-0 and FR-5), 45 skipped for empty parameter sets. `ci-sdk`: 3 passed. The frozen-surface text is identical to `origin/main`'s in five venvs. Order independence holds in four.
+- **Mutants:** R5 and R6 are red (2 new failing ids each; both were 0). R1, R2, R3, R7 and R8 are caught (R7 by 3, up from 1); R4 survives by the review's own ruling (N4). The 20 mutants written for this pass are all caught.
+- **Not touched:** `src/arail/deep_*.py`, `src/dac_world/`, `src/arail/buddy_host/contract/`, `tests/conftest.py`, `pyproject.toml`, `uv.lock`, `CHANGELOG.md`, `NOTICE`, the licences, `SPRINT.md`, `sprints/BACKLOG.md`; no `aerollm` / `AERO_*` name removed or added; the pass-2 wording rule holds (`grep -iw` for the forbidden cost word over the diff, this file included, finds nothing new). The airgapped default and the `allow_egress` ratchet are not relaxed.
+- **Not built, by decision:** TD56 (fail closed), TD57 (post-import hook), TD58 (subprocess guarding), TD59 (socket timeout); filing them, and AF-3's three sites, is the orchestrator's commit 8.
+- **Environment:** scratch only. New this pass: `pass3/` (harnesses, the mutant runner with the reviewer's R1 to R8 copied verbatim and 20 of mine, the node harness, the drivers), a pristine `origin/main` checkout in `base-wt` (already at `de1ce285`) for the frozen-surface and baseline comparisons. Nothing is created in the worktree except committed files; `git status` is clean.
