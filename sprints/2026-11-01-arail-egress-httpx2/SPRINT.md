@@ -28,7 +28,8 @@ Constraints: never relax the airgapped default; no `aerollm` / `AERO_*` rename; 
 | think | none | none | skipped, on purpose | The win condition is stated by the operator's brief. |
 | baseline | none (the orchestrating session) | this file | done | Reproduced in three venvs before any change: see Baseline. |
 | plan | architect (design) | ARCHITECTURE.md | done | The design is the build contract. 13 of its claims were run against the real libraries (V1 to V13). The six open questions are answered in the Decisions log. |
-| build | builder | BUILD_LOG.md | pending | |
+| build, pass 1 (commits 1 to 4) | builder | BUILD_LOG.md | done, checked by the orchestrator | The guard, its proof and the tripwires. Re-run independently, see Checkpoint 1. |
+| build, pass 2 (commits 5 to 7) | builder | BUILD_LOG.md | pending | |
 | review | architect (review) | REVIEW.md | pending | |
 | test | qa | TEST_REPORT.md | pending | |
 | ship | none | PR | pending | |
@@ -110,6 +111,22 @@ Three venvs, all editable installs of this worktree, built in the session's scra
 | 2026-11-01 | Cut from `origin/main` as told, not from #211's branch. | The brief says so; it keeps this PR's diff to this PR's work. Consequence: until #211 merges, this PR's DB-Ensure, DaC and Blueprint Smoke checks are red for TD48's reason and are compared with main's, not read as green. |
 | 2026-11-01 | The BACKLOG closure of TD50 and TD51 is the last commit, made after #211 merges. | TD49 to TD51 exist only on #211's branch. Rewriting rows that main does not have yet would conflict with #211 in either merge order. |
 | 2026-11-01 | Verification venvs live in the session scratch directory and are editable installs of this worktree (and, for the baseline, of a detached worktree of `origin/main`). | The home clone `~/ProJects/qukaizen-arail` (its branch, working tree and `.venv`) stays untouched. |
+
+## Checkpoint 1: the orchestrator's re-run after builder pass 1 (head `a02ba141`)
+
+Nothing below is taken from the builder's report; each item was run again by the orchestrator in the same venvs as Baseline.
+
+- **The brief's probe, fresh interpreter, after:** `EgressBlocked` in every cell. CI-style (`httpx2` 2.16.0), both-installed and Python 3.10 (`httpx2` 2.14.0): all four `httpx2` variants (sync and async, client built after and before `install_guard`); lock (`httpx` 0.28.1) and the `httpx` rows of both-installed: unchanged, still `EgressBlocked`. Before, every `httpx2` cell was `ConnectError` (Baseline B1).
+- **`huggingface_hub`, after:** `model_info`, `hf_hub_download` and `snapshot_download` each end in `EgressBlocked` with exactly 1 refusal written, in at most 0.02 s, on 2.4.0 (CI-style, Python 3.10) and 1.25.1 (lock). Before (2.4.0, untouched code): 0 refusals, a `ConnectError` chain, and `hf_hub_download` spent 23.06 s in retries before `LocalEntryNotFoundError`.
+- **The targeted egress and airgap list (13 files), per venv, passed / failed / skipped:** CI-style 260/1/3, lock 261/0/3, both 293/0/3, Python 3.10 260/1/3. The 1 failure is `tests/test_qa_deep_honest_egress_happy.py` (`assert 401 == 202`), the TD48 fault that #211 repairs and that was red before this work (Baseline B5). Of the 3 skips, 2 are `tests/test_egress_sdk_clients.py`'s SDK cases where the SDK is not installed and not declared (that file runs with both SDKs declared in its own CI step, where a skip fails the step; the `sdk` venv gives 3 passed, 0 skipped), and 1 is a pre-existing `xfail` in `tests/test_qa_deep_honest_egress_happy.py` (a credential echo in `deep status`, marked expected; junit counts an `xfail` as skipped; that file is not in the CI list).
+- **The negative control, venv with neither library:** the sentinel fails with the `UNPROVEN` message and the declaration test passes under `none` (and fails under a wrong declaration). Before this work the same venv ran the egress files green.
+- **Mutants, final tests against a deliberately broken guard (restored afterwards, worktree clean):** M1, `origin/main`'s original `egress.py` put back: 37 tests red in CI-style (31 + 5 + 1 across the three files) and 46 in both-installed, including the brief's probe (`httpx2: sync-after -> ConnectError`, all four variants) and the `huggingface_hub` test. M2, `FAMILY = ("httpx",)` and nothing else changed: 37 red in CI-style (27 + 5 + 4 + 1). The fresh-interpreter tests exercised the mutated file, so the pinned `PYTHONPATH` works.
+  - *Means:* the proof fails when the bug is present, for the reason it is meant to catch.
+  - *Bar and why:* at least the brief's probe red under both mutants. A proof that cannot fail proves nothing.
+  - *Out of range:* a mutant with nothing red means a vacuous test.
+  - *Where:* `tests/test_egress_httpx.py`, `tests/test_egress_httpx_fresh.py`, `tests/test_qa_airgap_bypass_attempts.py`.
+- **`tests/test_queuellm_rename_frozen_surface.py`: 2 failures, identical on pristine `origin/main` and on this branch** (failure text diffed): token drift in `scripts/build-aerollm.sh` and `src/arail/portal/app.py` and changed frozen paths, both from earlier sprints. Not caused by this work; it cannot be used as a green gate, so the criterion is "the failure text does not change".
+- **Erratum to `ARCHITECTURE.md` (builder's AF-1, verified):** the test strategy says to point `socket.gethostbyname` at the TEST-NET-3 address `203.0.113.7` so a `.invalid` name has a deterministic, non-local address. Python's `ipaddress` calls that whole documentation range private (`203.0.113.7`, `198.51.100.7` and `192.0.2.7` are all `is_private`), and the guard treats a private address as local, so the guard would let the request through and no `EgressBlocked` could ever be seen. The builder used the globally routable `151.101.64.81`, which existing tests already use; only `gethostbyname` is patched, so a regression is still a fast `ConnectError`. To be corrected in `ARCHITECTURE.md` by the architect in the review pass.
 
 ## Skipped phases
 
