@@ -194,7 +194,8 @@ def _no_audit_lines(tmp_path):
 class TestDocumentedGaps:
     """The README, PRIVACY.md, and modal copy list the remaining gaps:
     ``aiohttp``, ``urllib3`` / ``httpcore`` / ``httpcore2`` used directly,
-    the hop to a configured proxy, raw socket, subprocess shells. These
+    the hop to a configured proxy, a library installed after the guard
+    ran, raw socket, subprocess shells. These
     tests pin the gaps so a future PR that tries to close them
     (excellent!) triggers a tripwire saying "update the docs and modal
     too."
@@ -379,6 +380,51 @@ class TestDocumentedGaps:
         else:
             pytest.fail("a request to a .invalid name succeeded; the premise of this test (it never resolves) is false")
         assert _no_audit_lines(tmp_path), f"a direct {core} call should leave no audit line"
+
+    @pytest.mark.parametrize("lib", installed_independently())
+    def test_a_library_installed_after_the_guard_is_not_guarded_until_restart(self, lib, monkeypatch, tmp_path):
+        """BY-6.  A family member that becomes importable AFTER ``install_guard()`` ran is NOT guarded.
+
+        Pin: the guard looks at what is installed once. ``coverage()`` recorded the member as
+        ``"absent"`` (true then), and a second ``install_guard()`` is a no-op because a complete
+        install short-circuits, so a library installed while the lab runs stays open until the
+        process restarts. Reachable: ``/api/plugins/install`` runs ``pip install -r requirements.txt``
+        into the portal's own interpreter, and subprocess pip is itself a documented gap. The docs say
+        so (PRIVACY.md, the ``coverage()`` and ``_install_httpx_family_guard`` docstrings) and the
+        plugin installer's message says to restart the lab (REVIEW.md W3).
+
+        Simulated without installing anything: the library is hidden (``sys.modules[lib] = None``)
+        while the guard is installed, then made visible again.
+        """
+        mod = importlib.import_module(lib)
+        monkeypatch.setenv("LAB_MODE", "airgapped")
+        monkeypatch.setenv("ARAIL_DATA_DIR", str(tmp_path))
+        _make_invalid_names_unresolvable(monkeypatch)
+        arail.egress._reset_for_tests()
+
+        monkeypatch.setitem(sys.modules, lib, None)  # "not installed yet"
+        arail.egress.install_guard()
+        assert arail.egress.coverage()[lib] == "absent", arail.egress.coverage()
+        monkeypatch.setitem(sys.modules, lib, mod)  # ...and now a plugin's pip install has put it there
+        arail.egress.install_guard()  # a second install: still a no-op
+
+        closed = (
+            "DOCUMENTED-GAP TRIPWIRE: a library that became importable after install_guard() ran is now "
+            "guarded. That is good news (TD57). Update docs/PRIVACY.md, the docstrings of "
+            "egress.coverage() and egress._install_httpx_family_guard(), and the plugin installer's "
+            "'restart the lab' message, then turn this pin into a closed-path test."
+        )
+        assert arail.egress.coverage()[lib] == "absent", closed
+        assert not getattr(vars(mod.HTTPTransport)["handle_request"], "_arail_guarded", False), closed
+        try:
+            mod.Client(timeout=3).get(PROBE_URL)
+        except arail.airgap.EgressBlocked:
+            pytest.fail(closed)
+        except Exception:
+            pass  # ConnectError: it reached the library's own network layer, as documented
+        else:
+            pytest.fail("a request to a .invalid name succeeded; the premise of this test (it never resolves) is false")
+        assert _no_audit_lines(tmp_path), "a library the guard never saw should leave no audit line"
 
     @pytest.mark.parametrize("client", ["requests", *installed_independently()])
     def test_a_configured_proxy_is_not_checked(self, client, monkeypatch, tmp_path):

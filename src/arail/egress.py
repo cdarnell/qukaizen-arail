@@ -485,12 +485,15 @@ def _install_httpx_family_guard() -> dict[str, str]:
     """Patch every installed member of ``httpx_family.FAMILY``; return ``{name: coverage value}``.
 
     The patch is on the classes, so it covers clients built before this ran and the clients SDKs
-    build for themselves (huggingface_hub, anthropic, openai).  A member that is NOT installed is
-    ``"absent"``: nothing in this process can use it.  A member that IS installed but cannot be
-    patched (its lookup or import raises, a class or method is missing) is ``"unguarded: <why>"``,
-    and install_guard() raises after everything else is patched.  The guard used to treat a
-    library it could not import as nothing to do, so it could not tell those two apart, which is
-    how TD50 stayed hidden.
+    build for themselves (huggingface_hub, anthropic, openai).  A member that is NOT installed when
+    this runs is ``"absent"``: nothing could use it then.  That is a fact about this moment, not
+    about the process: a library installed later in the same process (a plugin's ``pip install``
+    into the running portal) is NOT guarded until the process restarts, because a complete
+    ``install_guard()`` does not look again.  A member that IS installed but cannot be patched (its
+    lookup or import raises, a class or method is missing) is ``"unguarded: <why>"``, and
+    install_guard() raises after everything else is patched.  The guard used to treat a library it
+    could not import as nothing to do, so it could not tell those two apart, which is how TD50
+    stayed hidden.
 
     Libraries are imported here, eagerly: the check must exist before any code can use them.
     """
@@ -571,9 +574,10 @@ def coverage() -> dict:
     """What the last install attempt guarded, per client.
 
     Keys are ``"requests"``, ``"urllib.request"``, then ``httpx_family.FAMILY`` in order; values
-    are ``"guarded"``, ``"absent"`` (not installed: nothing here can use it) or
-    ``"unguarded: <why>"``.  ``{}`` before the first install and after ``_reset_for_tests()``.
-    Reflects the last attempt, including one that raised EgressGuardIncomplete.  A copy.
+    are ``"guarded"``, ``"absent"`` (not installed when the guard ran; a library installed later in
+    the process is not guarded until it restarts) or ``"unguarded: <why>"``.  ``{}`` before the
+    first install and after ``_reset_for_tests()``.  Reflects the last attempt, including one that
+    raised EgressGuardIncomplete.  A copy.
     """
     return dict(_COVERAGE)
 
@@ -622,6 +626,9 @@ def install_guard() -> None:
     every later call retries and raises again: the guard never reports itself installed while a
     library it knows about is open.  This holds in hybrid mode too, because the airgap toggle flips
     ``LAB_MODE`` in-process.
+
+    The installed libraries are looked at once: after a complete install, a family member that
+    becomes importable later in the same process stays unguarded until the process restarts.
 
     Tests that need a fresh install call ``_reset_for_tests()``.
     """

@@ -65,12 +65,15 @@ so it also covers clients built before the guard was installed and the
 clients SDKs build for themselves: Hugging Face downloads
 (`hf_hub_download`, `HfApi`), the default anthropic and openai clients, and
 the Open Notebook seeding. `./arailctl doctor` prints which of the four
-this lab's guard covered. If one of them is installed but the guard cannot
-patch it (a future release renamed its transport classes, say), requests
-made through that library are not checked, and the lab says so instead of
-staying silent: the portal's activity log records "Egress guard install
-failed", `./arailctl doctor` fails its egress check, and the Network Policy
-modal lists the library under known gaps.
+the guard covered when that process started. The guard looks at what is
+installed once, at start: a library installed while the lab is running (a
+plugin's `pip install`, say) is not guarded until the lab restarts. If one
+of them is installed but the guard cannot patch it (a future release
+renamed its transport classes, say), requests made through that library
+are not checked, and the lab says so instead of staying silent: the
+portal's activity log records "Egress guard install failed",
+`./arailctl doctor` fails its egress check, and the Network Policy modal
+lists the library under known gaps.
 
 It does NOT wrap:
 

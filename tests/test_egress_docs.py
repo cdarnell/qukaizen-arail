@@ -29,6 +29,7 @@ import importlib
 import json
 import re
 import socket
+import types
 from pathlib import Path
 
 import pytest
@@ -393,6 +394,57 @@ def test_the_portal_installs_the_guard_before_it_does_anything_else():
     assert calls[0][2] == "_install_egress_guard", (
         f"the first call in _startup() is {calls[0][2]}(), not _install_egress_guard()"
     )
+
+
+def test_the_plugin_installer_tells_the_user_to_restart_the_lab(monkeypatch, tmp_path):
+    """REVIEW.md W3.  ``/api/plugins/install`` pip-installs a plugin's requirements into the running
+    portal's interpreter.  A family member that arrives that way is not guarded until the process
+    restarts (BY-6), so the success line says to restart the lab.  Nothing is cloned or installed: git
+    is faked."""
+    from arail.plugins import manager
+
+    plugins = tmp_path / "plugins"
+    monkeypatch.setattr(manager, "PLUGINS_DIR", plugins)
+    monkeypatch.setattr(manager, "MANIFEST_FILE", plugins / "manifest.json")
+
+    def fake_run(args, **kwargs):  # the only subprocess call without a requirements.txt is `git clone`
+        assert args[:2] == ["git", "clone"], args
+        Path(args[-1]).mkdir(parents=True)
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(manager, "subprocess", types.SimpleNamespace(run=fake_run))
+    lines = []
+    monkeypatch.setattr(
+        manager.activity_log, "emit",
+        lambda source, message, level="info", data=None: lines.append((source, message, level)),
+    )
+
+    manager.PluginManager().install("https://github.com/example/plugin")
+
+    success = [message for _source, message, level in lines if level == "success"]
+    assert len(success) == 1, lines
+    assert "installed successfully" in success[0]
+    assert "Restart the lab" in success[0] and "egress guard" in success[0], success[0]
+
+
+def test_privacy_says_a_library_installed_later_is_not_guarded_until_restart():
+    """REVIEW.md W3, the words.  The doctor line and the guard's coverage are as of the moment the process
+    started; PRIVACY.md must not promise more (BY-6 pins the behaviour)."""
+    text = flat(privacy_known_gaps())
+    assert "not guarded until the lab restarts" in text, (
+        "PRIVACY.md does not say that a library installed while the lab runs is unguarded until a restart"
+    )
+    assert "this lab's guard covered" not in text, "PRIVACY.md still describes the doctor line as a standing fact"
+
+
+@pytest.mark.parametrize("doc", [egress.coverage, egress._install_httpx_family_guard], ids=["coverage", "family-guard"])
+def test_the_guards_docstrings_do_not_call_a_not_yet_installed_library_unusable(doc):
+    """REVIEW.md W3.  The docstrings said a member that is not installed is "absent: nothing in this
+    process can use it".  True when the guard ran; false once a plugin's pip install runs inside the
+    process.  They now say when 'absent' was decided."""
+    text = " ".join((doc.__doc__ or "").split())
+    assert "nothing in this process can use it" not in text and "nothing here can use it" not in text, text
+    assert "restart" in text, f"{doc.__name__}'s docstring does not say a later install is unguarded until a restart"
 
 
 def test_the_modal_lists_whatever_the_status_endpoint_calls_a_known_gap():
