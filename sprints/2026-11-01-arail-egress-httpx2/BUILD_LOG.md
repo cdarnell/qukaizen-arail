@@ -5,7 +5,7 @@
 **Started:** 2026-11-01
 **Pass 1:** commits 1 to 4 of the "Atomic commit plan" (the guard and its proof): `052a6217` (skeleton), `da2057b6`, `96d87fb2`, `e7f868a7`, `a02ba141`.
 **This pass (pass 2):** commits 5 to 7 (the consumers, the docs, the CI workflow), starting from head `5ea83b9f` (pass 1 plus the orchestrator's checkpoint 1). Commit 8 is the orchestrator's, after #211 merges. Pass 1's log is kept below, unedited except for back-filled SHAs.
-**Status:** pass 2 planned (this commit). Steps 5, 6 and 7 are filled in as each lands; step 7's SHA stays for the orchestrator.
+**Status:** pass 2 done: steps 5, 6 and 7 are committed (`d626a1cf`, `ac1bb82b`, and step 7's, which the orchestrator fills in below). Step 8 is the orchestrator's, after #211 merges.
 
 ## Hard rules (both passes)
 
@@ -25,7 +25,7 @@
 | 3 | `tests/test_egress_httpx_fresh.py` (new); `tests/test_egress_sdk_clients.py` (new); `tests/egress_family_support.py` (extend: `run_fresh`) | The brief's probe in a fresh interpreter, huggingface_hub, and the SDKs' default clients. No source change. | FR-1 to FR-5, SDK-1. Shown failing against the pre-fix `egress.py` (a scratch tree), not only passing against the fixed one. | `e7f868a7` |
 | 4 | `tests/test_egress_httpx.py` (+EG-23, EG-24); `tests/test_qa_airgap_bypass_attempts.py` (+BY-2, BY-3, BY-4) | Tripwires for an unknown httpx-family module or transport, and pins for the documented lower-layer and proxy gaps. | EG-23, EG-24, BY-2 to BY-4, plus the declaration-parser tests (EG-A7). Each shown to fail on a planted change. | `a02ba141` |
 | 5 | `src/arail/open_notebook_seed.py`; `src/arail/doctor.py`; `tests/test_httpx_family.py` | TD51 runtime consumers. The seeding takes its HTTP library from `httpx_family.preferred()` (a fresh install has no `httpx`, so the `import httpx` at line 19 raised right after `docker compose up`). The doctor lists every family member under Components and prints which clients the guard covered. | ON-1, ON-2, DR-1 to DR-3, written first and run against the unmodified source. DR-3 is expected to pass already (the doctor's existing `except` branch records the failure), so it is shown to fail on a planted change instead. | `d626a1cf` |
-| 6 | `README.md` (298-307); `docs/PRIVACY.md` (43-44, 57-73, 301); `src/arail/portal/templates/_airgap_modal.html` (137-146); `src/arail/airgap.py` (docstring, new `KNOWN_GAPS`); `src/arail/router/core.py` (comment, 14-17); `src/arail/portal/app.py` (the `/api/airgap/status` handler only); `tests/test_egress_docs.py` (new); `tests/test_qa_airgap_happy_setup.py` (the two gap lists, on purpose) | The docs say what is wrapped and list what is not. `KNOWN_GAPS` moves to `arail.airgap`; the status endpoint reads it and appends `egress.uncovered()`. Every factual sentence is checked against the tree before it is written ("Doc claims checked", step 6). | DOC-1 to DOC-5, written first and seen failing against the current docs. | pending (the next commit fills it in) |
+| 6 | `README.md` (298-307); `docs/PRIVACY.md` (43-44, 57-73, 301); `src/arail/portal/templates/_airgap_modal.html` (137-146); `src/arail/airgap.py` (docstring, new `KNOWN_GAPS`); `src/arail/router/core.py` (comment, 14-17); `src/arail/portal/app.py` (the `/api/airgap/status` handler only); `tests/test_egress_docs.py` (new); `tests/test_qa_airgap_happy_setup.py` (the two gap lists, on purpose) | The docs say what is wrapped and list what is not. `KNOWN_GAPS` moves to `arail.airgap`; the status endpoint reads it and appends `egress.uncovered()`. Every factual sentence is checked against the tree before it is written ("Doc claims checked", step 6). | DOC-1 to DOC-5, written first and seen failing against the current docs. | `ac1bb82b` |
 | 7 | `.github/workflows/egress-guard.yml` (new); `tests/egress_ci_check.py` (new); `tests/test_egress_ci_check.py` (new) | The five-leg workflow and the junit checker it calls. | CI-1 to CI-4, written first (the checker does not exist yet), plus a mutant that makes `no-skips` ignore skips: CI-2 must go red. The workflow is validated three ways (see below). | pending (the orchestrator fills it in) |
 | 8 | `sprints/BACKLOG.md` + ledger | Close TD50, re-scope TD51, file TD52 to TD55. | none | orchestrator, after #211 merges |
 
@@ -400,7 +400,7 @@ Commit: `d626a1cf`.
 **Self-check.** Scope: `open_notebook_seed.py`, `doctor.py`, `tests/test_httpx_family.py` and this file, all in the plan. Atomic: one change, "the two runtime consumers of the HTTP library resolve it through the one place that names it". The message names TD51 (runtime) and says what each consumer does now.
 
 ### Step 6: the docs say what the guard wraps and list the gaps it does not
-Commit: pending (a commit cannot contain its own SHA; the next commit fills it in).
+Commit: `ac1bb82b`.
 
 **Done as planned.** `README.md` (the "What local-first means" paragraph), `docs/PRIVACY.md` (the enforcement sentence, the whole "Known gaps" section, the audit grep), the modal paragraph in `_airgap_modal.html`, the `airgap.py` docstring and the new `airgap.KNOWN_GAPS` (five strings, the first three byte-identical to the ones `portal/app.py` carried), the `router/core.py` comment, `/api/airgap/status` (only the `known_gaps` expression and the handler's docstring: it reads `airgap.KNOWN_GAPS` and appends one entry per `egress.uncovered()`; `guard_installed` is untouched), the deliberate edit of the two gap lists in `tests/test_qa_airgap_happy_setup.py` (httpx is no longer a gap; urllib3 and httpcore are; each gets the design's comment; the test names are unchanged), and `tests/test_egress_docs.py`. The `egress.py` docstrings the design lists were done in step 2.
 
@@ -520,6 +520,81 @@ The Model Forge worker, the agent loader and the doctor were checked as asked (r
 
 **Self-check.** Scope: every file is in the plan, and the one deliberate test edit is logged here. `portal/app.py` changed only inside `get_airgap_status` (two import lines, the gap list, the docstring). Atomic: one idea, "the words match the code, and the endpoint reports what the guard could not do". The message names what the guard wraps and the gaps.
 
+### Step 7: the five-leg workflow and the checker that lets it fail
+Commit: pending (the orchestrator fills it in).
+
+**Done as planned.** `.github/workflows/egress-guard.yml` is the design's YAML. Diffed against the fenced block in ARCHITECTURE.md's "CI design", the committed file has **three extra lines and none removed**: a comment and two `# shellcheck disable=SC2086` directives before the two commands that expand `$EGRESS_TESTS` unquoted on purpose (actionlint reported SC2086 twice without them; with them it exits 0; a directive only takes effect immediately before the command, which I found by trying three placements). Action versions are the repo's own (`actions/checkout@v4`, `actions/setup-python@v5`). `tests/egress_ci_check.py` is the checker (stdlib only, runs as a script, runs under Python 3.10). `tests/test_egress_ci_check.py` has 43 tests.
+
+**Deltas from the plan**
+
+1. **More than CI-1 to CI-4**, because the checker is only half of what keeps leg 5 honest. CI-1 to CI-4 are as designed and go further than the design lists: an expected failure counts as a skip; a failed or errored case is named; one run lists every problem; a listed file whose name only *starts* like another's (`test_egress_httpx` against `test_egress_httpx_fresh`) does not count; a collection error is an error; a class or a subdirectory counts for its file; unreadable, missing and empty junit files fail; leg 5 fails on each of pytest exits 0, 2, 3, 4 and 5 even when the XML looks right, on a passed sentinel, on a sentinel that failed for another reason, on a missing, skipped or errored sentinel, and on a declaration that is missing, failed, skipped or errored; a misused command line is exit 2; and the script, run as the workflow runs it, exits with the checker's code. **CI-5 and CI-6 are new**: they read the workflow as YAML and require that the matrix keys it expands exist in every leg, that no step has `continue-on-error` or `|| true` (read from keys and commands, not comments), that every file in `EGRESS_TESTS` exists and that pytest and the checker are given the same `$EGRESS_TESTS`, and that leg 5's two node ids, the checker's two constants and the two functions in `tests/test_egress_httpx.py` are the same names (F24: a renamed sentinel would otherwise make leg 5 collect nothing or look for a test that is gone).
+2. **The sentinel's failure is matched on the failure's message, not its text.** pytest prints a failing test's whole source in the failure text, and the sentinel's source contains `UNPROVEN`, so matching the text would accept any failure inside it. A test plants exactly that.
+3. **The checker prints each file's counts** (`tests/test_x.py: 17 passed`) before its findings, so the CI log carries the per-file numbers E6 asks for.
+4. **Exit status 4, not 2 or 5, is what a module that cannot import gives in leg 5** (AF-2, item 7). Found by planting the fault (run F5 below); the checker's message for 4 says what it can mean.
+5. Not added: `-rP` on the pytest lines (pass 1's observation 4, to put the `EVIDENCE` tables in the CI log). The design's commands are kept as written; adding it is one flag if the reviewer wants those tables on every green run.
+
+**Red first.** Against an absent checker the new test file fails at collection (1 error). Against a checker whose `main` is `return 0` (a checker that always says fine, the failure this sprint exists to remove), **35 of its 43 tests are red** (the other 8 do not depend on a verdict: the six workflow-structure tests, the script run that expects exit 0, and the clean-run case in `test_classes_and_subdirectories_count_for_their_file`).
+
+**Can they fail? Thirteen more mutations**, each in a scratch copy of the tree, each turned named tests red:
+
+| Mutation | Red | Named tests |
+|---|---|---|
+| `no-skips` ignores skips (E10(e)) | 4 | CI-2: a skipped case, an expected failure, one run lists every problem, the script's exit status |
+| a listed file that ran nothing is accepted | 3 | CI-3 |
+| the module match is `startswith` again | 1 | CI-3 (the lookalike file) |
+| leg 5 accepts any pytest exit status | 6 | CI-4 (exits 0, 2, 3, 4, 5 and the all-problems case) |
+| leg 5 accepts a sentinel that passed | 1 | CI-4 |
+| leg 5 accepts any failure of the sentinel | 1 | CI-4 (another reason) |
+| leg 5 accepts a failed declaration | 4 | CI-4 (failed, skipped, errored, all-problems) |
+| one leg loses a matrix key | 1 | CI-6 |
+| `\|\| true` after the checker | 1 | CI-6 |
+| a typo in leg 5's node id | 1 | CI-5 |
+| the sentinel is renamed | 1 | CI-5 |
+| a typo in `EGRESS_TESTS` | 1 | CI-5 |
+| the checker is given fewer files than pytest runs | 1 | CI-5 |
+
+**Green** (passed / failed / skipped; each venv declares its leg): `test_egress_ci_check.py` 43 / 0 / 0 in ci, lock, both, py310 (Python 3.10.22) and neither.
+
+**The workflow, validated three ways**
+
+*(a) Structure.* `python -c "import yaml,sys; yaml.safe_load(open(sys.argv[1]))" .github/workflows/egress-guard.yml` loads. The matrix keys that `${{ matrix.* }}` expands are `expect`, `install`, `leg`, `python`, `sdks`, and all five legs have all five (checked in this session and, permanently, by CI-6). `python` is a string in every leg (`"3.10"` would be the float 3.1 otherwise). The only other expressions are `github.event_name`, `github.event.pull_request.number || github.ref`.
+
+*(b) actionlint.* Installed in a throwaway venv under the scratch directory (`pip install actionlint-py shellcheck-py`: actionlint 1.7.12, shellcheck 0.11.0). It first reported SC2086 (info) twice, for the unquoted `$EGRESS_TESTS`, which is intentional; with the three comment lines above it exits **0** on this workflow and on every workflow in `.github/workflows` (the repo's other workflows exited 0 before). It checks the `${{ }}` expressions, the matrix and `if:` contexts, the step names and every `run:` script with shellcheck.
+
+*(c) Every leg, emulated.* `emulate_workflow.py` (scratch directory, not committed) loads the YAML and runs each leg's test steps exactly as the workflow writes them: the `run:` text, matrix expressions substituted, `bash -eo pipefail`, `CI=true`, `GITHUB_ACTIONS=true`, the leg's declaration, `cwd` the worktree. The only substitutions: `.venv/bin/python` becomes the leg's scratch venv, the junit file names go under the scratch directory, and `.venv/bin/pip install` becomes `uv pip install --python` in the SDK step. Exit codes (the step is `set -euo pipefail`, so a step that exits 0 means pytest and the checker both did):
+
+| Leg | Venv | Python | `What this leg installed` | pytest | checker | Step |
+|---|---|---|---|---|---|---|
+| 1 httpx2 only (pip, floating) | ci | 3.11.17 | httpx2 2.16.0, httpcore2 2.16.0, hf 2.4.0, starlette 1.10.0 | 320 passed, exit 0 | `ok - 13 files, 320 cases, none skipped, failed or missing`, exit 0 | exit 0 |
+| 1, SDK step | a fresh venv: ci plus the step's own `pip install anthropic openai` (anthropic 2.3.0, openai 3.42.1, installed by the step) | 3.11.17 | | 3 passed, exit 0 | `ok - 1 files, 3 cases, ...`, exit 0 | exit 0 |
+| 2 httpx2 only, Python 3.10 | py310 | **3.10.22** (also runs the checker) | httpx2 2.14.0, httpcore2 2.14.0, hf 2.4.0, starlette 1.7.0 | 320 passed, exit 0 | ok, 13 files, 320 cases, exit 0 | exit 0 |
+| 3 httpx only (uv.lock) | the venv the literal `uv sync --frozen --extra dev --python "$(command -v python)"` produced in a scratch copy of the project (uv 0.13.5; 5 min of downloads) | 3.11.17 | httpx 0.28.1, httpcore 1.0.9, hf 1.25.1, starlette 1.3.1, no httpx2 | 320 passed, exit 0 | ok, 13 files, 320 cases, exit 0 | exit 0 |
+| 4 both | both | 3.11.17 | httpx 0.28.1 and httpx2 2.16.0 | 356 passed, exit 0 | ok, 13 files, 356 cases, exit 0 | exit 0 |
+| 5 neither (negative control) | neither (ci with httpx2 and httpcore2 removed, as the leg's `pip uninstall` does) | 3.11.17 | no httpx, httpx2, httpcore, httpcore2 | **exit 1** (`1 failed, 1 passed`: the sentinel failed, the declaration passed) | `ok - the sentinel failed with UNPROVEN, as it must with neither library, and the declaration passed`, exit 0 | exit 0 |
+
+*What the pipeline does when something is wrong* (the same step text, one planted fault in a scratch copy of the tree each time):
+
+| Fault | Leg | Result |
+|---|---|---|
+| **E10(f): the sentinel is made to always pass** | 5 | pytest exit 0 (`2 passed`); the checker: `pytest exited 0, but leg 5 must see exactly 1 ...` and `the sentinel ... passed in a venv with neither library: it can pass vacuously ...`; **step exit 1** |
+| a silent skip planted on a test in `test_airgap_helpers.py` (the TD50 shape: pytest exits 0) | 1 | the checker: `SKIPPED tests.test_airgap_helpers.TestLabMode::test_default_is_airgapped: ... a skip is how TD50 stayed hidden`; **step exit 1** |
+| every test in `test_airgap_modal_dom.py` renamed so the listed file collects nothing | 1 | pytest exit 0 for everything else; the checker: `NO TESTS from tests/test_airgap_modal_dom.py ...`; **step exit 1** |
+| the leg declares `httpx2,httpx` but the venv has only httpx2 | 2 | pytest `1 failed` (EG-0b: `this leg declared ['httpx', 'httpx2'] but the environment has ['httpx2']`); **step exit 1** |
+| a module-level `import httpx` in `test_egress_httpx.py` (a collection problem) | 5 | pytest **exit 4**; the checker: three findings (the exit status, the sentinel and the declaration are not in the junit file); **step exit 1** |
+
+*The install steps cannot be run here as written* (they need GitHub's runner, PyPI as of the run, `actions/checkout` and `actions/setup-python`), and I say so. What I did instead: (1) each leg's venv was built by an equivalent route in pass 1 (pip floating, `uv sync --frozen --extra dev`, plus httpx, minus httpx and httpx2), and for leg 3 I also ran the literal `uv sync` command above and ran the leg against its result; (2) the two install scripts were run with stubbed `python`, `pip`, `uv` and `sleep`, to check their shell logic and not PyPI: the commands and arguments per mode (floating: `pip install -e ".[dev]"` and nothing else; both: plus `pip install httpx`; neither: plus `pip uninstall -y httpx httpcore httpx2 httpcore2`; lock: `pip install --upgrade pip "uv>=0.8"` then `uv sync --frozen --extra dev --python <python>`), a retry after one and two failures with the `::warning::` lines and the 20 s and 40 s waits, and exit 1 with `::error::dependency install failed after 3 attempts` (and `uv sync failed after 3 attempts`) after three; (3) the SDK step's install loop ran for real, with `uv pip install` for `.venv/bin/pip install`.
+
+**Evidence the sprint asked for**
+
+- *E6, the targeted list per leg*: the table above (320 / 320 / 320 / 356 cases, 0 failed, 0 skipped, every one of the 13 files at least one case; the checker prints each file's count). Order independence (E13): the 13-file CI list in ONE process, forward and reverse: 320 passed in ci, lock and py310, 356 in both, 359 in sdk with the SDK file; 0 failed and 0 skipped in all, identical both ways.
+- *E7, negative control*: leg 5's exit 1 with `UNPROVEN`, and the five faults above. Before this work the same venv ran the egress files green.
+- *E10*: (e) and (f) are shown (mutant `no-skips` ignoring skips turns CI-2 red; the always-passing sentinel turns the negative control red). (a) to (d) were shown in steps 2 and 4.
+- *E11, the import cost `install_guard()` adds* (median of 5 fresh interpreters that had already imported `arail.egress`, libraries not yet imported; the process also installs the `requests` adapter and the urllib opener): ci (httpx2) 8.9 ms, lock (httpx) 10.5 ms, both 17.0 ms, py310 (httpx2 2.14.0) 7.7 ms. *Bar:* under 50 ms for each library. *Means:* what a portal, doctor or worker start pays. *Out of range:* a figure near 50 ms for one library would mean revisiting eager import for the CLI paths. *Where:* `egress._install_httpx_family_guard`.
+
+**Not verified here** (the PR's own CI run is the check for each): the install steps on GitHub's runner; whether leg 2's `pip` resolves httpx2 2.14.0 on Python 3.10 (uv did; if pip differs, the declaration test says so and the decision is for the reviewer); `actions/checkout` and `actions/setup-python` with `cache: pip` (the glob `**/requirements.txt` matches `core/knowledge-canvas/backend/requirements.txt`, as for the other workflows); the `schedule` trigger; the concurrency group; ubuntu-latest, since these 13 files have only run on this Mac (nothing in them names a platform: `grep` found a zone-id string and a `win32` skipif); the wall time (the four full test steps took 6 to 31 s here and leg 5's 0.1 s; the budget is 15 minutes per leg); that the real runner has no stray `*_proxy` variable or DNS wildcard (the tests clear proxy variables; a wildcard answering `.invalid` would show as `NO EXCEPTION` in FR-1).
+
+**Self-check.** Scope: the three new files, in the plan, plus this file; the workflow differs from the design only by the three comment lines. Atomic: one idea, "run the guard's tests in every httpx-family state, daily, and prove the proof can fail". The message names the five legs, the checker and the daily schedule.
+
 ## Architect feedback required
 
 **AF-1 (non-blocking; worked around with the same intent; please correct ARCHITECTURE.md).** "Test strategy" says the in-process tests monkeypatch `socket.gethostbyname` to return a TEST-NET-3 address (`203.0.113.7`) for names, so that the local check is deterministic. `ipaddress` calls the documentation ranges private: `ip_address("203.0.113.7").is_private` is `True` on CPython 3.10.22 and 3.11.17 (also 192.0.2.0/24 and 198.51.100.0/24). `arail.airgap.is_local_ip` returns `addr.is_private or ...`, so a name that resolves there is **local** and the guard lets it through. With the literal as written, EG-1 to EG-4 could never see `EgressBlocked`. Intent kept (a deterministic answer for names, no DNS query, no real host): the in-process tests patch only `socket.gethostbyname`, and return a globally routable address, `151.101.64.81`, the one `tests/test_egress_guard.py` and `tests/test_qa_airgap_bypass_attempts.py` already use. `getaddrinfo` stays real, so a guard regression is still a fast `ConnectError` on a `.invalid` name and never a connection to the patched address. The constant is `PUBLIC_TEST_IP` in `tests/egress_family_support.py`, with this reason in a comment (landed in step 2). No design decision, contract or failure mode changes.
@@ -532,6 +607,7 @@ The Model Forge worker, the agent loader and the doctor were checked as asked (r
 4. PRIVACY, audit grep: "# Find **every network call** in the Python code". False for this pattern and for the old one: `socket.create_connection` (`portal/services/opencode.py:268`) and `asyncio.open_connection` (`portal/app.py:2512`) are network calls it does not match, and SDK calls name no httpx-family library at the call site. Written: "Find where the Python code uses the HTTP clients and raw sockets this doc names".
 5. Evidence E10(a) expects `FAMILY = ("httpx",)` to turn DOC-1 red. It cannot (the docs still name everything `GUARDED_CLIENTS` then lists); the guard's own tests go red for it, and DOC-1 goes red when a member is added without docs (shown).
 6. Not changed, for you to decide: the README's parenthetical of gaps does not include "other processes" (setup's and upgrade's model downloads run outside the guard, per PRIVACY), so "everything built on them, such as the Hugging Face downloader" is true for the processes that install the guard and the README sends the reader to PRIVACY for the full list. Adding "other processes" to the parenthetical is a one-clause edit if you want it.
+7. E7 says that exit 2 or 5 in the neither venv means a collection problem. With explicit node ids (what leg 5 runs) a test module that fails to import makes pytest exit **4** ("found no collectors"), not 2 (shown in step 7, run F5). The checker rejects any exit status but 1, and its message for 4 says what it can mean.
 
 **AF-3 (non-blocking; found in step 6; a debt candidate, not fixed here).** The design drops PRIVACY's old "knowledge-canvas clients" claim because "the Knowledge Canvas backend is a separate container outside any in-process guard". That is only half true. The portal also mounts the backend in-process (`portal/app.py:757-771`), `app.main` imports in a stock ci and lock venv (run), and its Ollama fallback is refused by the guard there (run, lock and both: `EgressBlocked`). The claim stays dropped, because the compose copy (`core/knowledge-canvas/docker-compose.yml`, started by nothing in the lab) and `core/knowledge-canvas/client.py` are not provably guarded and no single sentence covers all three.
 
@@ -552,3 +628,39 @@ The same probe found a TD51-class fault outside TD52's inventory (B8 set `core/k
 2. The strategy text calls the TEST-NET-3 address "public" (AF-1). Anything else in the design that relies on how `ipaddress` classifies an address is worth the same check.
 3. `starlette` 1.3.1 (the lock venv) prints a deprecation warning when `starlette.testclient` is imported ("Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead"). EG-13 imports it; the warning is harmless and not an error.
 4. For step 6 and 7: the gap tripwires' failure text already names `airgap.KNOWN_GAPS`; step 6 should make that name true. Step 7's workflow may want `-rP` on the pytest line so the `EVIDENCE` tables reach the CI log.
+
+## Final state (pass 2, steps 5 to 7)
+
+- **Commits:** `24ea80a0` (the pass-2 plan), `d626a1cf` (step 5), `ac1bb82b` (step 6), and step 7's, which the orchestrator fills in (a commit cannot contain its own SHA). Branch `qukaizen/arail-egress-httpx2`, not pushed. Step 8 is the orchestrator's.
+- **Diff of pass 2, `src/`, `tests/`, README, `docs/` and `.github/` only, against `5ea83b9f`:** 14 files, +1,526 / -44. Source: 6 files, +67 / -22 (`airgap.py` +23 / -5, `doctor.py` +19 / -2, `portal/app.py` +9 / -7 inside `get_airgap_status`, `open_notebook_seed.py` +7 / -1, the modal paragraph +6 / -4, `router/core.py` +3 / -3). Docs: README +10 / -6 and `PRIVACY.md` +37 / -10. Tests: `test_httpx_family.py` +283 / -2, `test_egress_docs.py` new (322), `egress_ci_check.py` new (249), `test_egress_ci_check.py` new (403), `test_qa_airgap_happy_setup.py` +8 / -4 (the two gap lists). Workflow: `.github/workflows/egress-guard.yml` new (147 lines).
+- **Tests now (passed / failed / skipped), per venv, for the egress and airgap list** (the 13 files of the workflow's list plus `test_egress_sdk_clients.py`):
+
+| File | ci | lock | both | py310 | neither | sdk |
+|---|---|---|---|---|---|---|
+| `test_airgap_helpers.py` | 46 / 0 / 0 | 46 / 0 / 0 | 46 / 0 / 0 | 46 / 0 / 0 | 46 / 0 / 0 | 46 / 0 / 0 |
+| `test_airgap_modal_dom.py` | 6 / 0 / 0 | 6 / 0 / 0 | 6 / 0 / 0 | 6 / 0 / 0 | 6 / 0 / 0 | 6 / 0 / 0 |
+| `test_egress_bootstrap.py` | 22 / 0 / 0 | 22 / 0 / 0 | 22 / 0 / 0 | 22 / 0 / 0 | 22 / 0 / 0 | 22 / 0 / 0 |
+| `test_egress_ci_check.py` | 43 / 0 / 0 | 43 / 0 / 0 | 43 / 0 / 0 | 43 / 0 / 0 | 43 / 0 / 0 | 43 / 0 / 0 |
+| `test_egress_docs.py` | 20 / 0 / 0 | 20 / 0 / 0 | 21 / 0 / 0 | 20 / 0 / 0 | 19 / 0 / 1 | 21 / 0 / 0 |
+| `test_egress_guard.py` | 18 / 0 / 0 | 18 / 0 / 0 | 18 / 0 / 0 | 18 / 0 / 0 | 18 / 0 / 0 | 18 / 0 / 0 |
+| `test_egress_httpx.py` | 63 / 0 / 0 | 63 / 0 / 0 | 89 / 0 / 0 | 63 / 0 / 0 | 36 / **1** / 26 | 89 / 0 / 0 |
+| `test_egress_httpx_fresh.py` | 6 / 0 / 0 | 6 / 0 / 0 | 9 / 0 / 0 | 6 / 0 / 0 | 2 / **1** / 3 | 9 / 0 / 0 |
+| `test_egress_sdk_clients.py` | 1 / 0 / **2** | 1 / 0 / **2** | 1 / 0 / **2** | 1 / 0 / **2** | 1 / 0 / **2** | 3 / 0 / 0 |
+| `test_httpx_family.py` | 17 / 0 / 0 | 17 / 0 / 0 | 20 / 0 / 0 | 17 / 0 / 0 | 13 / 0 / 4 | 20 / 0 / 0 |
+| `test_qa_airgap_bypass_attempts.py` | 20 / 0 / 0 | 20 / 0 / 0 | 23 / 0 / 0 | 20 / 0 / 0 | 17 / 0 / 2 | 23 / 0 / 0 |
+| `test_qa_airgap_happy_setup.py` | 17 / 0 / 0 | 17 / 0 / 0 | 17 / 0 / 0 | 17 / 0 / 0 | 17 / 0 / 0 | 17 / 0 / 0 |
+| `test_qa_airgap_ipv6_edge_cases.py` | 14 / 0 / 0 | 14 / 0 / 0 | 14 / 0 / 0 | 14 / 0 / 0 | 14 / 0 / 0 | 14 / 0 / 0 |
+| `test_qa_tier1_egress_guard.py` | 28 / 0 / 0 | 28 / 0 / 0 | 28 / 0 / 0 | 28 / 0 / 0 | 28 / 0 / 0 | 28 / 0 / 0 |
+
+  The only failures anywhere are the two pre-existing `test_queuellm_rename_frozen_surface.py` failures (identical to untouched main after every commit of this pass) and, in neither, EG-0 on purpose and FR-5 (huggingface_hub installed without its HTTP library; leg 5 never runs it). The one TD48 failure in `tests/test_qa_deep_honest_egress_happy.py` is unchanged (ci and py310 fail the same id as the baseline; lock and both pass; the file is not touched and not in the workflow's list).
+- **Neighbours:** the 33 files that read what step 6 edits have the same failing ids as untouched main in both ci and lock. `test_ensure_ready_build_isolation.py::test_cross_world_contamination_probe` (`No module named 'pandas'`) fails in every scratch venv and on untouched main.
+- **Mutations shown to turn a named test red in this pass:** 9 (step 5), 14 (step 6), 15 (step 7); 5 more faults planted in the real pipeline's steps.
+- **Not touched:** every path the brief lists as frozen; no `aerollm` / `AERO_*` token; `src/arail/egress.py` and `src/arail/httpx_family.py` unchanged in pass 2 (no test exposed a defect in either). Nothing was created in the worktree by this pass except committed files and the runtime files the existing suite writes to its own gitignored `lab/data` and `logs/scheduler` (they date from the baseline run; `lab/data/egress.jsonl` grows from `tests/test_egress_bootstrap.py`, which does not redirect its data dir).
+- **Environment:** scratch only. New this pass: `ci-sdk` (ci's freeze, httpx2 only; the SDK step installed the SDKs into it), `oa2` (openai 2.49.0 on httpx 0.28.1, for the doc-claim probe), `actionlint` (actionlint-py, shellcheck-py), a scratch copy of the project in which `uv sync` ran, and `lock-uvsync` (a link to it).
+
+**Observations for the review (not defects)**
+
+1. `tests/test_egress_bootstrap.py` writes its audit lines into the repository's own `lab/data/egress.jsonl` (gitignored) because it does not set `ARAIL_DATA_DIR`. Harmless in CI, untidy locally; not touched (it is not this work's file).
+2. With an incomplete guard the status endpoint reports `guard_installed: False` while the portal keeps serving: that is the honest reading of "not completely installed", and the modal's list says which library is open. A UI that wants a stronger signal (a banner) would be new work.
+3. The status entry carries a library's own exception text (the reason), and the endpoint is authenticated; `nav.js` writes it with `textContent` (pinned by DOC-6).
+4. Three more TD51-class `import httpx` sites exist outside TD52's inventory: AF-3.
