@@ -277,18 +277,26 @@ _send_patched = {"done": False}
 def _patch_testclient_send_once():
     """Wrap ``TestClient.send`` once per process; the wrapper is a no-op unless a test has the
     bearer switched on. Patching ``send`` (not ``__init__``) also covers module- and
-    session-scoped clients, which are built before any function-scoped fixture runs."""
+    session-scoped clients, which are built before any function-scoped fixture runs.
+
+    Never ``import httpx`` here. Which HTTP library sits under ``TestClient`` is starlette's choice:
+    it builds it on ``httpx2`` when that is installed and falls back to a deprecated ``httpx``
+    (checked on 1.3.1 and 1.10.0). An unpinned ``pip install -e ".[dev]"`` resolves only ``httpx2``
+    (huggingface-hub 2.x depends on it; nothing depends on ``httpx``), so ``import httpx`` raised
+    there, and swallowing the error (#206) left every portal test sending no credential: 401 across
+    CI. ``TestClient.send`` resolves through the MRO to the ``send`` of whichever library it is built
+    on, so wrap that one. ``tests/test_conftest_portal_bearer.py`` fails if the bearer stops reaching
+    the request."""
     if _send_patched["done"]:
         return
     try:
-        import httpx
         from starlette.testclient import TestClient
-    except ImportError:
-        # A minimal CI job (no httpx/starlette) builds no TestClient, so there is
-        # nothing to wrap and no portal test can run there.
+    except (ImportError, RuntimeError):
+        # No starlette, or no HTTP library for it to stand on (it raises RuntimeError for that):
+        # no TestClient can be built, so no portal test can run and there is nothing to wrap.
         return
 
-    orig_send = httpx.Client.send
+    orig_send = TestClient.send
 
     def send(self, request, **kw):
         # /api/host/v1/* has its own bhc1_ credential; a portal bearer there would turn
