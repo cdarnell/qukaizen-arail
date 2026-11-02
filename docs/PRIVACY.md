@@ -82,6 +82,12 @@ It does NOT wrap:
 - `urllib3`, `httpcore` or `httpcore2` called directly — the guard sits one
   layer up, in `requests` and the httpx family. Nothing in `src/arail/`
   calls them directly today.
+- A `requests` session or adapter created before the guard was installed,
+  and a `urllib` opener built with `build_opener()` — the guard swaps the
+  defaults (the adapter class new sessions get, the opener `urlopen`
+  uses); it does not reach objects that already exist, or an opener you
+  build yourself. The httpx family is patched on its classes and has no
+  such gap.
 - The hop to a proxy you configure (`HTTP_PROXY`/`HTTPS_PROXY`, or a
   client's `proxy=`/`proxies=` setting) — the guard decides on the
   destination, so a request for a local address can still be sent through

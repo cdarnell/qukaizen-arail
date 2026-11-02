@@ -299,10 +299,10 @@ By default `LAB_MODE=airgapped` — agents in the lab cannot collect
 information from the public internet. Calls to loopback and your private
 network still work, so a LAN GPU box (Ollama, vLLM, a QueueLLM node)
 keeps inferring without changes. Cloud-provider APIs are blocked at the
-HTTP layer: the lab's Python-level guard wraps `requests`,
-`urllib.request`, `httpx` and its successor `httpx2`, and so everything
-built on them, such as the Hugging Face downloader and the Anthropic and
-OpenAI SDKs. The dashboard's **Airgapped** badge is clickable — it shows
+HTTP layer: the lab's Python-level guard wraps `requests` (new sessions),
+`urllib.request` (the default opener) and every client of `httpx` and its
+successor `httpx2`, such as the Hugging Face downloader and the Anthropic
+and OpenAI SDKs. The dashboard's **Airgapped** badge is clickable — it shows
 what is and isn't enforced, the recent blocks, and the known gaps the
 guard doesn't cover (`aiohttp`, `urllib3` or `httpcore` used directly, a
 proxy you configure, raw sockets, subprocess `curl`; the full list is in

@@ -171,6 +171,14 @@ _GAP_CLOSED = (
 )
 
 
+_EXISTING_OBJECTS_REACHED = (
+    "DOCUMENTED-GAP TRIPWIRE: {what} raised EgressBlocked, so the guard now reaches objects that were created "
+    "before it was installed, or an opener built around it. That is good news. Update docs/PRIVACY.md (the "
+    "bullet about a session or adapter created before the guard) and README ('requests (new sessions)', "
+    "'urllib.request (the default opener)'), then turn this pin into a closed-path test."
+)
+
+
 def _make_invalid_names_unresolvable(monkeypatch):
     """The gap tests send requests PAST the guard on purpose.  Make ``getaddrinfo`` (what urllib3 and
     httpcore call) fail for any ``.invalid`` name, so that even on a network whose resolver answers
@@ -195,7 +203,8 @@ class TestDocumentedGaps:
     """The README, PRIVACY.md, and modal copy list the remaining gaps:
     ``aiohttp``, ``urllib3`` / ``httpcore`` / ``httpcore2`` used directly,
     the hop to a configured proxy, a library installed after the guard
-    ran, raw socket, subprocess shells. These
+    ran, a requests session or adapter created before it and a urllib
+    opener built around it, raw socket, subprocess shells. These
     tests pin the gaps so a future PR that tries to close them
     (excellent!) triggers a tripwire saying "update the docs and modal
     too."
@@ -380,6 +389,58 @@ class TestDocumentedGaps:
         else:
             pytest.fail("a request to a .invalid name succeeded; the premise of this test (it never resolves) is false")
         assert _no_audit_lines(tmp_path), f"a direct {core} call should leave no audit line"
+
+    @pytest.mark.parametrize("shape", [
+        "session-built-before-the-guard",
+        "adapter-class-imported-before-the-guard",
+        "opener-from-build_opener",
+    ])
+    def test_objects_that_exist_before_the_guard_and_custom_openers_are_not_checked(self, shape, monkeypatch, tmp_path):
+        """BY-5.  The guard SWAPS DEFAULTS; it does not reach what already exists (REVIEW.md W1).
+
+        Pin, three shapes, each past the guard on purpose:
+
+        - a ``requests.Session()`` built before ``install_guard()`` holds the stock adapter;
+        - a session built after it that mounts the ``HTTPAdapter`` class a library imported before it
+          (``from requests.adapters import HTTPAdapter`` at module top);
+        - ``urllib.request.build_opener().open(...)``: the guard installs a global opener for
+          ``urlopen``; an opener you build has the stock handlers.
+
+        Each ends in the library's own connection error (the name is reserved and never resolves), not
+        EgressBlocked, and writes no audit line. The httpx family has no such gap (it is patched on
+        its classes: FR-1 "built before" and EG-3). In tree today nothing is in these shapes at
+        runtime (measured when the gap was found: importing the portal creates no Session and no
+        opener before its start-up installs the guard), but a third-party agent could be.
+        """
+        monkeypatch.setenv("LAB_MODE", "airgapped")
+        monkeypatch.setenv("ARAIL_DATA_DIR", str(tmp_path))
+        _make_invalid_names_unresolvable(monkeypatch)
+        arail.egress._reset_for_tests()
+
+        stock_adapter = requests.adapters.HTTPAdapter  # what a library imported at module top holds
+        assert stock_adapter is not arail.egress.GuardedHTTPAdapter, "this test starts from a polluted process"
+        pre_guard_session = requests.Session()
+        arail.egress.install_guard()
+        assert requests.adapters.HTTPAdapter is arail.egress.GuardedHTTPAdapter  # the guard IS in
+
+        def attempt():
+            if shape == "session-built-before-the-guard":
+                return pre_guard_session.get(PROBE_URL, timeout=3)
+            if shape == "adapter-class-imported-before-the-guard":
+                session = requests.Session()  # built after the guard...
+                session.mount("http://", stock_adapter(max_retries=0))  # ...with a class from before it
+                return session.get(PROBE_URL, timeout=3)
+            return urllib.request.build_opener().open(PROBE_URL, timeout=3)
+
+        try:
+            attempt()
+        except arail.airgap.EgressBlocked:
+            pytest.fail(_EXISTING_OBJECTS_REACHED.format(what=shape))
+        except Exception:
+            pass  # requests.ConnectionError / urllib.error.URLError: it reached the network layer, as documented
+        else:
+            pytest.fail("a request to a .invalid name succeeded; the premise of this test (it never resolves) is false")
+        assert _no_audit_lines(tmp_path), f"{shape} should leave no audit line"
 
     @pytest.mark.parametrize("lib", installed_independently())
     def test_a_library_installed_after_the_guard_is_not_guarded_until_restart(self, lib, monkeypatch, tmp_path):

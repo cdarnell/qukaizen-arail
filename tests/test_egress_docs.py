@@ -447,6 +447,29 @@ def test_the_guards_docstrings_do_not_call_a_not_yet_installed_library_unusable(
     assert "restart" in text, f"{doc.__name__}'s docstring does not say a later install is unguarded until a restart"
 
 
+def test_readme_scopes_what_requests_and_urllib_are_wrapped_for():
+    """REVIEW.md W1.  "...and so everything built on them" over-claimed: the guard swaps the DEFAULT
+    requests adapter (new sessions) and the DEFAULT urllib opener, and only the httpx family is patched on
+    its classes. BY-5 pins the gap; the README must not claim more than the behaviour."""
+    text = flat(readme_section())
+    assert "`requests` (new sessions)" in text, "README does not say the requests guard is for new sessions"
+    assert "`urllib.request` (the default opener)" in text, "README does not say the urllib guard is the default opener"
+    assert "everything built on them" not in text, "README still claims everything built on requests and urllib is wrapped"
+
+
+def test_privacy_lists_objects_created_before_the_guard_as_a_gap():
+    """REVIEW.md W1.  PRIVACY scoped the claim ("the adapter every new Session gets", "the default opener")
+    but its list of what is NOT wrapped never named what falls outside that scope."""
+    # The whole bullet, first line included: start at a zero-width match, end at the first line break
+    # that is followed by the next bullet or by unindented text.
+    bullet = flat(_between(privacy_known_gaps(), r"^(?=- A `requests` session or adapter created before\b)", r"\n(?=- |\S)",
+                           "PRIVACY.md's bullet about objects that exist before the guard"))
+    assert bullet.startswith("- A `requests` session or adapter created before the guard was installed"), bullet
+    assert "`build_opener()`" in bullet, bullet
+    assert "already exist" in bullet, bullet
+    assert "httpx family" in bullet, "the bullet should say the httpx family has no such gap"
+
+
 def test_the_modal_lists_whatever_the_status_endpoint_calls_a_known_gap():
     """DOC-6.  The path is /api/airgap/status -> nav.js -> the modal's list.  The entry for an
     unpatchable library carries a library's own error text, so nav.js must write it as text, never as
