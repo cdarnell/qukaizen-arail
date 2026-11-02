@@ -5,7 +5,16 @@
 **Product:** arail (`qukaizen-arail`)
 **Branch:** `qukaizen/arail-egress-httpx2` (cut from `origin/main` `5997363e`, which is #210)
 **Worktree:** `<session>/qukaizen-arail-egress-wt`
-**Debt:** TD50 (the egress guard patches `httpx` only) and its sibling TD51 (code and tests that import `httpx` by name). Both were filed by PR [#211](https://github.com/cdarnell/qukaizen-arail/pull/211) (TD48's repair), so until #211 merges they exist in `sprints/BACKLOG.md` only on that branch.
+**Debt:** TD50 (the egress guard patches `httpx` only) and its sibling TD51 (code and tests that import `httpx` by name). Both were filed by PR [#211](https://github.com/cdarnell/qukaizen-arail/pull/211) (TD48's repair), which merged 2026-11-02 00:59 UTC as `de1ce285`; until then they existed in `sprints/BACKLOG.md` only on that branch, and the BACKLOG commit waited for it.
+
+## Resume here (rewritten at every checkpoint)
+
+- **State:** Checkpoint 2, head `f2218b1c` (builder pass 2, plus the merge of `origin/main`). Done: design, build passes 1 and 2, the orchestrator's two re-runs. Next, in order: architect review (`REVIEW.md`) and its fix loop; qa (`TEST_REPORT.md`); the full-suite "after" runs against baseline 2; commit 8 (BACKLOG); push and open the PR (this session does not merge it).
+- **Checked by re-running, not by reading a report:** the brief's probe in every venv; the five CI legs from the workflow's own `run:` text; ten mutants of the pass-2 pieces; the frozen-surface failure text; six of the builder's 33 documentation claims.
+- **Taken on the builder's word so far:** the other 27 documentation claims; the `actionlint` and `shellcheck` runs; the dry-run of the install steps.
+- **Cannot be checked on this machine:** anything on a GitHub-hosted Linux runner (the install steps, `setup-python`'s cache, pip's resolution on the day, the 15-minute timeout). The first real run of the five legs is the proof. Watch two things in it: leg 2 declares `httpx2` (Python 3.10 resolves 2.14.0), and leg 5 is green because its sentinel failed.
+- **Goes stale if `origin/main` moves:** baseline 2 (taken on `de1ce285`). Merge main again and re-run it, before commit 8.
+- **Open for the architect (builder's feedback AF-2 and AF-3):** four rewritten documentation sentences; the Knowledge Canvas rationale (the design's reason for dropping that claim is wrong, but no single true sentence replaces it); three `import httpx` sites outside TD52's inventory (`core/knowledge-canvas/backend/app/services/llm_router.py:32`, `core/knowledge-canvas/client.py:25`, `scripts/deep_honest_win.py:717`).
 
 ## Task
 
@@ -29,7 +38,8 @@ Constraints: never relax the airgapped default; no `aerollm` / `AERO_*` rename; 
 | baseline | none (the orchestrating session) | this file | done | Reproduced in three venvs before any change: see Baseline. |
 | plan | architect (design) | ARCHITECTURE.md | done | The design is the build contract. 13 of its claims were run against the real libraries (V1 to V13). The six open questions are answered in the Decisions log. |
 | build, pass 1 (commits 1 to 4) | builder | BUILD_LOG.md | done, checked by the orchestrator | The guard, its proof and the tripwires. Re-run independently, see Checkpoint 1. |
-| build, pass 2 (commits 5 to 7) | builder | BUILD_LOG.md | pending | |
+| build, pass 2 (commits 5 to 7) | builder | BUILD_LOG.md | done, checked by the orchestrator | The TD51 consumers, the documentation and the CI workflow. Re-run independently, see Checkpoint 2. |
+| integrate #211 | none (the orchestrating session) | this file | done | #211 merged 2026-11-02 00:59 UTC; `origin/main` merged into the branch as `f2218b1c`, clean. |
 | review | architect (review) | REVIEW.md | pending | |
 | test | qa | TEST_REPORT.md | pending | |
 | ship | none | PR | pending | |
@@ -111,6 +121,10 @@ Three venvs, all editable installs of this worktree, built in the session's scra
 | 2026-11-01 | Cut from `origin/main` as told, not from #211's branch. | The brief says so; it keeps this PR's diff to this PR's work. Consequence: until #211 merges, this PR's DB-Ensure, DaC and Blueprint Smoke checks are red for TD48's reason and are compared with main's, not read as green. |
 | 2026-11-01 | The BACKLOG closure of TD50 and TD51 is the last commit, made after #211 merges. | TD49 to TD51 exist only on #211's branch. Rewriting rows that main does not have yet would conflict with #211 in either merge order. |
 | 2026-11-01 | Verification venvs live in the session scratch directory and are editable installs of this worktree (and, for the baseline, of a detached worktree of `origin/main`). | The home clone `~/ProJects/qukaizen-arail` (its branch, working tree and `.venv`) stays untouched. |
+| 2026-11-01 | #211 merged (2026-11-02 00:59:09 UTC, `de1ce285`). `origin/main` is merged into this branch with a merge commit, not rebased. | Rebasing would rewrite 13 commits and invalidate the SHAs that BUILD_LOG and this file quote. The merge was clean and shares no file with #211, so the PR's diff against main is unchanged. |
+| 2026-11-01 | Full-suite baseline 2: the "before" is re-run on `de1ce285`. The first baseline (`5997363e`, B9) stays as a record only. | #211 repaired the 401s that made up most of the CI-style failures, so the first baseline can no longer isolate this change. |
+| 2026-11-01 | Commit 8 (BACKLOG) stays last, after review, qa and the "after" runs. | #211 has merged, so it is unblocked; keeping it last keeps the review about the guard. |
+| 2026-11-01 | The session was resumed from a context summary at Checkpoint 2. This file, not the summary, is the source of truth, and it now opens with a "Resume here" block that is rewritten at every checkpoint. | The summary was stale on three facts within hours of being written: #211 had merged, `origin/main` had moved from `5997363e` to `de1ce285`, and builder pass 2 had finished. |
 
 ## Checkpoint 1: the orchestrator's re-run after builder pass 1 (head `a02ba141`)
 
@@ -127,6 +141,50 @@ Nothing below is taken from the builder's report; each item was run again by the
   - *Where:* `tests/test_egress_httpx.py`, `tests/test_egress_httpx_fresh.py`, `tests/test_qa_airgap_bypass_attempts.py`.
 - **`tests/test_queuellm_rename_frozen_surface.py`: 2 failures, identical on pristine `origin/main` and on this branch** (failure text diffed): token drift in `scripts/build-aerollm.sh` and `src/arail/portal/app.py` and changed frozen paths, both from earlier sprints. Not caused by this work; it cannot be used as a green gate, so the criterion is "the failure text does not change".
 - **Erratum to `ARCHITECTURE.md` (builder's AF-1, verified):** the test strategy says to point `socket.gethostbyname` at the TEST-NET-3 address `203.0.113.7` so a `.invalid` name has a deterministic, non-local address. Python's `ipaddress` calls that whole documentation range private (`203.0.113.7`, `198.51.100.7` and `192.0.2.7` are all `is_private`), and the guard treats a private address as local, so the guard would let the request through and no `EgressBlocked` could ever be seen. The builder used the globally routable `151.101.64.81`, which existing tests already use; only `gethostbyname` is patched, so a regression is still a fast `ConnectError`. To be corrected in `ARCHITECTURE.md` by the architect in the review pass.
+
+## Checkpoint 2: the orchestrator's re-run after builder pass 2 (head `f2218b1c`)
+
+Nothing below is taken from the builder's report; each item was run again by the orchestrator, on the tree that includes #211, in the same venvs as Baseline. The session resumed from a context summary between Checkpoint 1 and here, so the first action was to reconcile that summary with the live state (see the last Decisions row).
+
+- **Integration.** #211 merged 2026-11-02 00:59:09 UTC as `de1ce285` (`gh pr view`). `origin/main` is merged into the branch as `f2218b1c`: clean, no file in common (#211 changed seven files, this branch twenty-four), so the BACKLOG commit is unblocked. #211's change to `tests/conftest.py` (no `import httpx`; it wraps `TestClient.send`; it catches `RuntimeError` as well as `ImportError`) does not touch the guard, and the `neither` venv still reaches its sentinel (leg 5 below). Baseline 2 on `de1ce285` is running; its numbers are recorded at the next checkpoint.
+- **The brief's probe, merged tree, fresh interpreter:** `EgressBlocked` in every cell, as at Checkpoint 1. `httpx2` 2.16.0 (Python 3.11) and 2.14.0 (3.10), sync and async, client built after and before `install_guard`; `httpx` 0.28.1 (lock, and both-installed) likewise. `huggingface_hub` 2.4.0 (ci, 3.10) and 1.25.1 (lock): `model_info`, `hf_hub_download` and `snapshot_download` each ended in `EgressBlocked` with exactly 1 refusal written, in at most 0.02 s. Direct `urllib3` and `httpcore2` calls still end in `NameResolutionError` and `ConnectError`, the documented gap.
+- **The five CI legs, run from the workflow's own `run:` text** (each step whose `if:` holds for the leg, with `.venv/bin/python` pointed at a prebuilt venv, `CI=true`, the leg's declaration, a scratch `HOME`; the install steps are skipped because the venvs are prebuilt; the worktree was clean before and after):
+
+  | Leg | Venv | Declared | Result |
+  |---|---|---|---|
+  | 1 | `httpx2` 2.16.0 only, Python 3.11.17 | `httpx2` | 13 files, 320 cases, none skipped, failed or missing. The SDK step, in a venv with `httpx2` only plus anthropic 2.3.0 and openai 3.42.1: 3 cases, none skipped. |
+  | 2 | `httpx2` 2.14.0 only, Python 3.10.22 | `httpx2` | 320 cases. |
+  | 3 | `httpx` 0.28.1 only (lock) | `httpx` | 320 cases. |
+  | 4 | both | `httpx,httpx2` | 356 cases. |
+  | 5 | neither | `none` | pytest exit 1: the sentinel failed with its `UNPROVEN` message, the declaration test passed, and `egress_ci_check.py negative-control` accepted it; the step is green. |
+
+  - *Means:* the workflow's steps pass in each library state a lab can be in. 320 against 356 is the parametrization over a second library in leg 4, not a lost file: the checker counts per file.
+  - *Bar and why:* in legs 1 to 4, no failed, skipped or missing case, because a skip is how TD50 stayed hidden; in leg 5, the sentinel must fail, because a sentinel that passes with neither library installed can pass vacuously and would make every other leg's green mean less.
+  - *Out of range:* a skipped or missing case names the file (the checker prints it); a leg 5 whose sentinel passes means the venv is not the `neither` state or the sentinel is vacuous.
+  - *Where:* `.github/workflows/egress-guard.yml` (matrix and steps); `tests/egress_ci_check.py`; `tests/test_egress_httpx.py` (EG-0 and EG-0b).
+  - *Not covered:* GitHub-hosted runners. Everything here ran on macOS (arm64) in prebuilt venvs, so the install steps, `setup-python`'s pip cache (the other four workflows already use it with the same `checkout@v4` and `setup-python@v5`), pip's resolution on the day and the 15-minute timeout are untested until the PR's first run.
+- **Mutants of the pass-2 pieces.** Each was applied to a scratch export of `f2218b1c` (never the worktree) and run through 18 test files in the `ci` venv (the 13 egress files plus 5 that read `/api/airgap/status` or the doctor); the unmutated export gave 0 failing ids. The CI-shape mutants were also run through the leg-5 emulation.
+
+  | Mutant | Caught by (new failing ids) | Leg 5 emulation |
+  |---|---|---|
+  | README says only `httpx` is wrapped | `test_egress_docs.py` (1) | |
+  | PRIVACY known-gaps bullet loses `urllib3` | `test_egress_docs.py` (1) | |
+  | `airgap.KNOWN_GAPS` loses the proxy entry | `test_egress_docs.py` (2) | |
+  | `/api/airgap/status` stops listing a library the guard could not patch | `test_egress_docs.py` (1) | |
+  | the CI checker stops counting skipped cases | `test_egress_ci_check.py` (4) | |
+  | leg 5 declares `httpx2` instead of `none` | `test_egress_ci_check.py` (1) | red at the negative-control step |
+  | the egress-tests step may run in the `neither` leg | `test_egress_ci_check.py` (1) | red at the egress-tests step |
+  | the sentinel can no longer fail | `test_egress_ci_check.py` (1) | red at the negative-control step |
+  | `open_notebook_seed` goes back to `import httpx` | `test_httpx_family.py` (3) | |
+  | the doctor lists `httpx` only | `test_httpx_family.py` (1) | |
+
+  - *Means:* each piece pass 2 added fails a test when it is broken, for its own reason.
+  - *Bar and why:* at least one new failing id per mutant. A mutant nothing notices is a test that cannot fail for that reason.
+  - *Out of range:* a mutant that nothing catches is a piece with no guard; none was found.
+  - *Where:* the files named in the table. The 10 mutants do not exercise the guard itself again; Checkpoint 1's M1 and M2 did.
+- **Documentation claims.** Six of the builder's 33 rows were checked against the tree, not copied: the four processes that install the guard are exactly the four `docs/PRIVACY.md` names (portal `app.py:903`, the agent loader `loader.py:315`, Model Forge's worker `nucleus/worker.py:39`, `doctor.py:100`); "Egress guard install failed" is written to the portal's activity log (`app.py:906`); nothing in `src/arail/` imports `urllib3`, `httpcore` or `httpcore2`; `DefaultAioHttpClient` exists in anthropic 2.3.0 and openai 3.42.1; the doctor records a failed `install_guard()` as a failed required check; the `grep` PRIVACY tells the reader to run is valid and runs (exit 0, 168 hits). The other 27 are for the architect.
+- **`tests/test_queuellm_rename_frozen_surface.py`: the same 2 failures on `de1ce285` and on this branch, failure text identical** after normalising the tree path (diffed). Pass 2 edited `portal/app.py`, `airgap.py`, `doctor.py` and the modal, and the text still did not move. The criterion stays "the failure text does not change".
+- **Open for the architect:** the builder's AF-2 and AF-3 (see Resume here), and AF-1 still to be written into `ARCHITECTURE.md`.
 
 ## Skipped phases
 
