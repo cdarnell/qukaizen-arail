@@ -583,16 +583,30 @@ def test_an_unpatchable_member_is_loud_and_everything_else_stays_guarded(lib, mo
     assert requests.sessions.HTTPAdapter is _STOCK_ADAPTER
 
 
+# A module that is not installed, imported from inside a "library" below: the same failure as a real
+# install that has httpx2 but not the httpcore2 it imports.
+_MISSING_DEPENDENCY = "arail_test_dependency_that_is_not_installed"
+
+
 class _RaisingLoader(importlib.abc.Loader):
+    """Importing the library fails.  ``failure`` is the exception class's name: RuntimeError, or the
+    ModuleNotFoundError that a real broken install raises."""
+
+    def __init__(self, failure):
+        self.failure = failure
+
     def create_module(self, spec):
         return None
 
     def exec_module(self, module):
+        if self.failure == "ModuleNotFoundError":
+            importlib.import_module(_MISSING_DEPENDENCY)  # raises the real ModuleNotFoundError
         raise RuntimeError("simulated: this library is installed but its import raises")
 
 
 class _BrokenLibraryFinder(importlib.abc.MetaPathFinder):
-    """Makes one top-level name look installed but broken: finding it raises, or importing it does."""
+    """Makes one top-level name look installed but broken: finding it raises (``mode == "lookup"``), or
+    importing it raises ``mode``, the name of the exception class."""
 
     def __init__(self, name, mode):
         self.name, self.mode = name, mode
@@ -602,22 +616,35 @@ class _BrokenLibraryFinder(importlib.abc.MetaPathFinder):
             return None
         if self.mode == "lookup":
             raise RuntimeError("simulated: the import system fails while looking this library up")
-        return importlib.machinery.ModuleSpec(fullname, _RaisingLoader())
+        return importlib.machinery.ModuleSpec(fullname, _RaisingLoader(self.mode))
 
 
-@pytest.mark.parametrize("mode,expected", [("lookup", "unguarded: lookup raised RuntimeError"),
-                                           ("import", "unguarded: import raised RuntimeError")])
+@pytest.mark.parametrize("mode,expected", [
+    ("lookup", "unguarded: lookup raised RuntimeError"),
+    ("RuntimeError", "unguarded: import raised RuntimeError"),
+    ("ModuleNotFoundError", "unguarded: import raised ModuleNotFoundError"),
+])
 def test_a_library_that_cannot_even_be_imported_is_loud(mode, expected, monkeypatch):
-    """EG-A3 (simulated, so it runs in every leg; FR-4 repeats the import case in a fresh
+    """EG-A3 (simulated, so it runs in every leg; FR-4 repeats the import cases in a fresh
     interpreter).  The first family member is made to raise while it is looked up, or while it is
-    imported.  Everything else is still patched, and the install raises."""
+    imported.  Everything else is still patched, and the install raises.
+
+    The import is made to fail twice over: with a RuntimeError, and with the ModuleNotFoundError that
+    a real broken install raises (the library is there, a library it imports is not; this is exactly
+    what huggingface_hub reports in a venv with httpx2 but no httpcore2).  ModuleNotFoundError is an
+    ImportError, and "I could not import it" is also how a library that is not installed looks, so a
+    guard that read ImportError as "absent" would pass the RuntimeError case and leave a library that
+    IS installed open without a word (REVIEW.md W4, mutant R5)."""
     first = LITERAL_FAMILY[0]
     monkeypatch.delitem(sys.modules, first, raising=False)
     monkeypatch.setattr(sys, "meta_path", [_BrokenLibraryFinder(first, mode), *sys.meta_path])
-    with pytest.raises(egress.EgressGuardIncomplete):
+    with pytest.raises(egress.EgressGuardIncomplete) as excinfo:
         egress.install_guard()
     coverage = egress.coverage()
     assert coverage[first].startswith(expected), coverage
+    assert first in excinfo.value.uncovered and excinfo.value.uncovered == egress.uncovered()
+    if mode == "ModuleNotFoundError":  # the operator is told what is missing, not just that something is
+        assert _MISSING_DEPENDENCY in coverage[first] and _MISSING_DEPENDENCY in str(excinfo.value)
     assert coverage["requests"] == "guarded" and coverage["urllib.request"] == "guarded"
     assert egress._INSTALLED is False
     for other in INSTALLED:  # a working member after the broken one was still patched

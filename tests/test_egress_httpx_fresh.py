@@ -238,6 +238,7 @@ _BROKEN_IMPORT = _COMMON + r'''
 import importlib.abc, importlib.machinery
 
 first = sys.argv[1]
+failure = sys.argv[2]   # RuntimeError, or ModuleNotFoundError (what a real broken install raises)
 
 
 class RaisingLoader(importlib.abc.Loader):
@@ -245,6 +246,8 @@ class RaisingLoader(importlib.abc.Loader):
         return None
 
     def exec_module(self, module):
+        if failure == "ModuleNotFoundError":
+            importlib.import_module("arail_test_dependency_that_is_not_installed")  # the real exception
         raise RuntimeError("simulated: this library is installed but its import raises")
 
 
@@ -274,20 +277,26 @@ print(json.dumps({
 '''
 
 
-def test_an_installed_library_whose_import_raises_makes_the_install_fail_loudly(tmp_path):
+@pytest.mark.parametrize("failure", ["RuntimeError", "ModuleNotFoundError"])
+def test_an_installed_library_whose_import_raises_makes_the_install_fail_loudly(failure, tmp_path):
     """FR-4.  Simulated, so it runs in every leg: the first family member is made to look installed
     and to raise when imported.  Everything else is still guarded, the error says which library and
-    why, and the guard does not call itself installed."""
+    why, and the guard does not call itself installed.
+
+    Raised twice over: a RuntimeError, and the ModuleNotFoundError of a real broken install (the
+    library is there, a library it imports is not).  A ModuleNotFoundError is an ImportError, which is
+    also how a library that is NOT installed looks; reading it as "absent" would leave an installed
+    library open in silence (REVIEW.md W4)."""
     first = LITERAL_FAMILY[0]
-    result = run_fresh(_BROKEN_IMPORT, first, tmp_path=tmp_path)
+    result = run_fresh(_BROKEN_IMPORT, first, failure, tmp_path=tmp_path)
     assert result["raised"] is not None, (
-        f"install_guard() returned quietly although {first} is installed and cannot be imported: "
-        "that is the silent hole of TD50"
+        f"install_guard() returned quietly although {first} is installed and cannot be imported "
+        f"({failure}): that is the silent hole of TD50"
     )
     assert result["raised"]["type"] == "EgressGuardIncomplete", result["raised"]
     assert first in result["raised"]["uncovered"], result["raised"]
     assert result["coverage"] is not None, "arail.egress.coverage() does not exist"
-    assert result["coverage"][first].startswith("unguarded: import raised RuntimeError"), result["coverage"]
+    assert result["coverage"][first].startswith(f"unguarded: import raised {failure}"), result["coverage"]
     assert result["requests_guarded"] is True
     assert result["installed_flag"] is False
 
