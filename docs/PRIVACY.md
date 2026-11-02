@@ -98,9 +98,12 @@ It does NOT wrap:
   `os.system("curl ...")` go straight to the OS network stack.
 - Other processes — the guard lives inside the Python processes that
   install it: the portal, any process that loads agents through the agent
-  loader, Model Forge's worker, and `./arailctl doctor`. Setup's and
-  upgrade's model downloads, Docker containers such as Open Notebook's,
-  and opencode run outside it.
+  loader, Model Forge's worker, and `./arailctl doctor`. Everything else
+  runs outside it: setup's and upgrade's model downloads, Docker
+  containers such as Open Notebook's, opencode, the lab's own Python
+  subprocesses (the goal parser's model subprocess and the AirLLM worker),
+  and the Python behind every other `./arailctl` command (apart from
+  `start`, which runs the portal).
 
 These are documented gaps for the v1 guard. The threat model is
 well-meaning agent code that uses standard libraries; it is not

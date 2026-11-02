@@ -36,7 +36,7 @@ import pytest
 
 import arail.egress as egress
 from arail import airgap
-from tests.egress_family_support import LITERAL_FAMILY, PUBLIC_TEST_IP, installed_independently
+from tests.egress_family_support import LITERAL_FAMILY, PUBLIC_TEST_IP, installed_independently, run_fresh
 
 ROOT = Path(__file__).resolve().parent.parent
 README = ROOT / "README.md"
@@ -571,6 +571,71 @@ def test_the_guard_is_installed_exactly_where_privacy_says():
     bullet = flat(_between(privacy_known_gaps(), r"^- Other processes\b.*$", r"^\S|\Z", "PRIVACY.md's 'Other processes' bullet"))
     for needle in ("portal", "agent loader", "Model Forge", "doctor"):
         assert needle in bullet, f"PRIVACY.md's 'Other processes' bullet does not name {needle!r}"
+
+
+# Lab-spawned Python that PRIVACY.md says runs outside the guard: (what PRIVACY calls it, the file that
+# spawns it, the module it runs).  Read from the code, so a rename or a removal fails here.
+LAB_SPAWNED_PYTHON = {
+    "goal parser": ("src/arail/skills/goal_parser/__init__.py", "arail.skills.goal_parser._subprocess_runner"),
+    "AirLLM worker": ("src/arail/router/backends.py", "arail.router.airllm_worker"),
+}
+
+
+def other_processes_bullet() -> str:
+    return flat(_between(privacy_known_gaps(), r"^- Other processes\b.*$", r"^\S|\Z", "PRIVACY.md's 'Other processes' bullet"))
+
+
+@pytest.mark.parametrize("what", sorted(LAB_SPAWNED_PYTHON))
+def test_privacy_names_the_labs_own_python_subprocesses_and_they_run_without_the_guard(what, tmp_path):
+    """DOC-9, REVIEW.md W2.  The lab starts two Python processes that run models and neither installs
+    the guard: the goal parser's model subprocess and the AirLLM worker (read: the worker falls back to
+    a Hugging Face repo id when the local model directory is missing).  'Other processes' used to list
+    only what runs outside the guard in OTHER tools.  The bullet names them; this ties each name to a
+    spawn that exists, to a module that exists, to no install_guard() call, and to a fresh interpreter in
+    which importing the module leaves the guard uninstalled."""
+    spawner, module = LAB_SPAWNED_PYTHON[what]
+    assert f'"{module}"' in _read(ROOT / spawner), (
+        f"{spawner} no longer starts {module}: the 'Other processes' bullet in PRIVACY.md names it"
+    )
+    relative = Path("src", *module.split(".")).with_suffix(".py")
+    assert (ROOT / relative).is_file(), f"{module} does not exist"
+    assert str(relative) not in PROCESSES_THAT_INSTALL_THE_GUARD
+    assert "install_guard" not in _read(ROOT / relative), f"{relative} installs the guard: update PRIVACY.md"
+    code = (  # the AirLLM worker takes over sys.stdout when imported (it reserves it for its protocol)
+        "import importlib, json, sys\n"
+        "out = sys.stdout\n"
+        "importlib.import_module(sys.argv[1])\n"
+        "import arail.egress as egress\n"
+        "print(json.dumps({'egress_file': egress.__file__, 'installed': egress._INSTALLED, 'coverage': egress.coverage()}), file=out)\n"
+    )
+    result = run_fresh(code, module, tmp_path=tmp_path)
+    assert result["installed"] is False and result["coverage"] == {}, (
+        f"importing {module} installed the egress guard: update the 'Other processes' bullet in PRIVACY.md"
+    )
+    assert what in other_processes_bullet(), f"PRIVACY.md's 'Other processes' bullet does not name the {what}"
+
+
+def test_privacy_says_other_arailctl_commands_run_outside_the_guard_and_readme_points_at_other_processes():
+    """REVIEW.md W2.  The CLI commands other than the portal and the doctor run their own Python without
+    the guard (the install sites are exactly the four DOC-9 pins), and the README's list of what the guard
+    does not cover includes other processes, such as setup's and upgrade's model downloads."""
+    bullet = other_processes_bullet()
+    assert "every other `./arailctl` command" in bullet, bullet
+    assert "Everything else runs outside it" in bullet, bullet
+    readme = flat(readme_section())
+    assert "other processes such as setup's and upgrade's model downloads" in readme, (
+        "README's list of what the guard does not cover omits other processes"
+    )
+
+
+def test_the_router_comment_says_the_guard_blocks_only_in_a_process_that_installed_it():
+    """REVIEW.md W2.  The comment above _CLOUD_BACKENDS said the egress guard 'would block the eventual API
+    call anyway'.  In the goal parser's model subprocess, which does not install it, that is false: this
+    refusal is the only line there."""
+    source = _read(ROUTER_CORE)
+    comment = flat(_between(source, r"^# Backends whose inference calls leave this machine\.", r"^_CLOUD_BACKENDS", "the router comment"))
+    assert "only in a process that installed it" in comment, comment
+    assert "goal parser" in comment and "only line" in comment, comment
 
 
 @lib_param
