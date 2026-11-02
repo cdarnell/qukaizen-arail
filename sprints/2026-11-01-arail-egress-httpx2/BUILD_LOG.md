@@ -323,6 +323,82 @@ One canary reported "nothing went red" on its first try. It was the canary: it c
 
 **Self-check.** Scope: `test_egress_httpx.py`, `test_qa_airgap_bypass_attempts.py` and this file; no source change. Atomic: one idea, "the guard's list of libraries is fixed, so tell us when the world outgrows it, and pin what it does not cover". EG-A7 sits beside that because it is the same kind of guard on the test side. The message names the tripwires and the pins.
 
+### Step 5: the Open Notebook seeding and the doctor resolve the library through `arail.httpx_family` (TD51, runtime)
+Commit: pending (a commit cannot contain its own SHA; the next commit fills it in).
+
+**Done as planned.** `src/arail/open_notebook_seed.py`: `import httpx` (line 19) became `httpx = httpx_family.preferred()  # noqa-airgap: localhost-only (...)`, the original audit comment kept; nothing else in the module changed. `src/arail/doctor.py`: `check_components` lists `*httpx_family.FAMILY` (httpx2, httpx) in place of `httpx`; `check_environment` prints `installed — guards requests, urllib.request, httpx2 (not installed: httpx)`, built by a new small helper `_guard_summary(egress)` from `egress.coverage()`. On `EgressGuardIncomplete` the existing `except` branch is untouched: it prints the error and records `egress_guard` as a failed required check with the message as detail (the message names the library). Tests: ON-1, ON-2 and DR-1 to DR-3 in `tests/test_httpx_family.py`.
+
+**Deltas from the plan**
+
+1. **More than the plan's six tests, every one pinning a sentence of the contract.** ON-1 is two tests: the real environment (`seed.httpx.__name__` is the first installed member, or the import fails where none is) and a simulated neither that runs in every leg (both members blocked in `sys.modules`; the message must name both and say `pip install`, where the old code said only `import of httpx halted`). **ON-2 does more than `_wait_for_api`**: it runs `_wait_for_api`, `_already_seeded` and `_create_notebook` (a `post` with `json=`, `auth=`, `timeout=`; a 201, and a 500 with a text body for `r.text`) against a loopback stand-in bound to port 0, with the guard installed and airgapped; it asserts that the library the seeding bound carries the guard's marker, that the Basic credentials and the JSON body arrive, that no loopback call was audited as refused, and that the same library is refused for a public name. **ON-3** (new) reads the `httpx.get/post/put` calls and their keyword arguments out of the module's source and checks each against every installed library's signature, because `put` is only reached after the AI-provider setup, which needs a running Open Notebook and cannot be driven here. **DR-3 is two tests**: the failed required finding that names the library, and `doctor.main([])` returning 3 with a broken library and 0 with a whole guard (the other checks stubbed, so only the egress finding decides). They are parametrized over the independently computed installed set; in the neither environment that set is empty and they are skipped for an empty parameter set, as in pass 1.
+2. **A `guard_state` fixture** (not autouse: the resolver tests above do not install the guard) resets the guard before and after, points the audit log at `tmp_path`, removes `*_proxy` variables, sets `LAB_MODE=airgapped` and answers `socket.gethostbyname` with `PUBLIC_TEST_IP` (the AF-1 erratum, applied).
+3. **`_record` is unchanged**: `egress_guard` still carries no detail on success. The summary is printed, not recorded.
+4. **DR-3 passes before the change.** The doctor's existing `except` branch already records the failure now that pass 1's guard raises, so its red-first run is not red. It is shown to fail on planted changes instead (mutants e and f below).
+
+**Red first: the new tests against the unmodified `open_notebook_seed.py` and `doctor.py`** (passed / failed / skipped; `tests/test_httpx_family.py` had 9 tests before):
+
+| Venv | Result | Red, and why |
+|---|---|---|
+| ci | 12 / **5** / 0 | ON-1 and ON-2: `ModuleNotFoundError: No module named 'httpx'` (the real TD51 fault); ON-1 simulated: the message is `import of httpx halted; None in sys.modules`, no `httpx2`; DR-1: `httpx: not installed` and no httpx2 line; DR-2: `egress guard : installed` and nothing else |
+| lock | 14 / **3** / 0 | ON-1 simulated, DR-1, DR-2. ON-1 and ON-2 pass: httpx is the only library, so the old import was right |
+| both | 15 / **5** / 0 | as ci, and ON-1 / ON-2 because the seeding bound `httpx` where `httpx2` is preferred (`'httpx' == 'httpx2'`) |
+| py310 | 12 / **5** / 0 | as ci |
+| neither | 10 / **3** / 4 | ON-1 simulated, DR-1, DR-2; 4 skipped for an empty parameter set (ON-2, ON-3, DR-3 x2) |
+
+**Can the tests fail? Nine mutations**, each in a scratch copy of the tree (never in the worktree), each turned at least one named test red:
+
+| Mutation | Venv | Red | Named tests |
+|---|---|---|---|
+| the seeding binds the last installed member (httpx where httpx2 is preferred) | both | 3 | ON-1 (real and simulated), ON-2 |
+| the seeding passes a keyword the library does not accept | both | 3 | ON-2, ON-3 (httpx2 and httpx) |
+| the seeding posts a form instead of JSON | ci | 1 | ON-2 |
+| the seeding sends other credentials | ci | 1 | ON-2 |
+| the doctor records an incomplete guard as passed | ci | 2 | DR-3 (finding), DR-3 (exit code) |
+| the doctor records an incomplete guard as an info finding | both | 4 | DR-3 x2, per library |
+| the doctor prints a hard-coded coverage line | ci | 1 | DR-2 |
+| the doctor lists httpx alone again | ci | 1 | DR-1 |
+| `install_guard` patches no family member | ci | 4 | ON-2 (the library the seeding uses is open), DR-2, DR-3 x2 |
+
+**Green: after the change** (passed / failed / skipped; each venv declares its leg):
+
+| File | ci | lock | both | py310 | neither | sdk |
+|---|---|---|---|---|---|---|
+| `test_httpx_family.py` | 17 / 0 / 0 | 17 / 0 / 0 | 20 / 0 / 0 | 17 / 0 / 0 | 13 / 0 / 4 | 20 / 0 / 0 |
+| `test_egress_bootstrap.py` | 22 / 0 / 0 | 22 / 0 / 0 | 22 / 0 / 0 | 22 / 0 / 0 | 22 / 0 / 0 | 22 / 0 / 0 |
+| `test_egress_guard.py` | 18 / 0 / 0 | 18 / 0 / 0 | 18 / 0 / 0 | 18 / 0 / 0 | 18 / 0 / 0 | 18 / 0 / 0 |
+| `test_egress_httpx.py` | 63 / 0 / 0 | 63 / 0 / 0 | 89 / 0 / 0 | 63 / 0 / 0 | 36 / **1** / 26 | 89 / 0 / 0 |
+| `test_egress_httpx_fresh.py` | 6 / 0 / 0 | 6 / 0 / 0 | 9 / 0 / 0 | 6 / 0 / 0 | 2 / **1** / 3 | 9 / 0 / 0 |
+| `test_egress_sdk_clients.py` | 1 / 0 / **2** | 1 / 0 / **2** | 1 / 0 / **2** | 1 / 0 / **2** | 1 / 0 / **2** | 3 / 0 / 0 |
+| `test_qa_airgap_bypass_attempts.py` | 20 / 0 / 0 | 20 / 0 / 0 | 23 / 0 / 0 | 20 / 0 / 0 | 17 / 0 / 2 | 23 / 0 / 0 |
+| `test_qa_airgap_happy_setup.py` | 17 / 0 / 0 | 17 / 0 / 0 | 17 / 0 / 0 | 17 / 0 / 0 | 17 / 0 / 0 | 17 / 0 / 0 |
+| `test_airgap_modal_dom.py` | 6 / 0 / 0 | 6 / 0 / 0 | 6 / 0 / 0 | 6 / 0 / 0 | 6 / 0 / 0 | 6 / 0 / 0 |
+| `test_airgap_helpers.py` | 46 / 0 / 0 | 46 / 0 / 0 | 46 / 0 / 0 | 46 / 0 / 0 | 46 / 0 / 0 | 46 / 0 / 0 |
+
+- The skips are the same allowed ones as in pass 1: the SDK-not-installed-and-not-declared cases (venvs without an SDK), and, in neither, the `[lib]` tests having an empty parameter set. neither's two failures are EG-0 (required: it is the sentinel) and FR-5 (huggingface_hub installed without its HTTP library; leg 5 never runs it). **The CI leg-5 selection again: exit 1, EG-0 failing with `UNPROVEN`, EG-0b passing.**
+- **Neighbours of the doctor** (ci, lock, both, py310): `test_doctor_embedding_status.py` 6 / 0 / 0, `test_compiled_kb_sweep_prune.py` 10 / 0 / 0, `test_qa_tier1_egress_guard.py` 28 / 0 / 0, `test_qa_airgap_ipv6_edge_cases.py` 14 / 0 / 0, all four venvs. `test_ensure_ready_build_isolation.py` is 9 / 1 / 0 in all four: `test_cross_world_contamination_probe` fails with `No module named 'pandas'` (the scratch venvs have no pandas), on untouched main too (run in `base-wt`) and in the orchestrator's full-suite baseline for both ci and lock. Not this work.
+- **The frozen-surface text is identical to pristine main's** (the `E ` lines diffed): the same four drift lines, and none of `doctor.py`, `open_notebook_seed.py` or the tests appears in them.
+- **Order independence**: the twelve-file egress and airgap list in ONE process, forward and in reverse: 258 passed and the 2 allowed skips in ci, lock and py310, 293 passed and 2 skipped in both, 0 failed in all, identical both ways.
+
+**Evidence the sprint asked for**
+
+*E12, what an operator sees (a fresh interpreter per venv, `doctor.check_environment()` and `check_components()`, `LAB_MODE` unset so airgapped; no lab state is read or written)*
+
+| Venv | `egress guard` line | Components |
+|---|---|---|
+| ci | `installed — guards requests, urllib.request, httpx2 (not installed: httpx)` | `httpx2 : 2.16.0`, `httpx : not installed` |
+| lock | `installed — guards requests, urllib.request, httpx (not installed: httpx2)` | `httpx2 : not installed`, `httpx : 0.28.1` |
+| both | `installed — guards requests, urllib.request, httpx2, httpx` | `httpx2 : 2.16.0`, `httpx : 0.28.1` |
+| neither | `installed — guards requests, urllib.request (not installed: httpx2, httpx)` | both `not installed` |
+| ci, `httpx2.AsyncHTTPTransport` deleted | `? (EgressGuardIncomplete: egress guard incomplete — httpx2: AsyncHTTPTransport.handle_async_request is missing. Requests made through httpx2 are NOT checked against LAB_MODE. Still guarded: requests, urllib.request. Fix: install a supported version (httpx2<3, httpx<1) or uninstall httpx2.)`; the failing finding is `egress_guard`, level required, so the exit is 3 | |
+| lock, `httpx.AsyncHTTPTransport` deleted | the same message naming `httpx` and the exit 3 | |
+
+- *Means:* what `./arailctl doctor` prints for its Environment and Components sections; the exit is the module's (`arailctl` turns a non-zero module exit into `doctor: degraded`, exit 3, `arailctl:1058-1068`). *Bar and why:* every family member is listed with a version or `not installed`; the egress line names the clients the guard covered; a library the guard cannot patch fails a REQUIRED check and is named, because the doctor is where an operator learns the airgap is open. *Out of range:* `httpx: not installed` with no httpx2 line means `doctor.py` still has the old list. *Where:* DR-1 to DR-3; `doctor.check_components` and `check_environment`.
+- Before the change the same probe printed `egress guard : installed` in every venv and `httpx : not installed` (and no httpx2 line) in ci: the red-first table above.
+
+**Not verified here**: the portal's `/api/open-notebook/start` end to end (needs `docker compose` and the Open Notebook images); `seed()` as a whole and `_setup_ai_provider` (need a running Open Notebook; its `put` call is covered by ON-3 only, by signature); the real `./arailctl doctor` run (it walks the lab's PKB, models and database; the two checks this commit changes were run in isolation instead).
+
+**Self-check.** Scope: `open_notebook_seed.py`, `doctor.py`, `tests/test_httpx_family.py` and this file, all in the plan. Atomic: one change, "the two runtime consumers of the HTTP library resolve it through the one place that names it". The message names TD51 (runtime) and says what each consumer does now.
+
 ## Architect feedback required
 
 **AF-1 (non-blocking; worked around with the same intent; please correct ARCHITECTURE.md).** "Test strategy" says the in-process tests monkeypatch `socket.gethostbyname` to return a TEST-NET-3 address (`203.0.113.7`) for names, so that the local check is deterministic. `ipaddress` calls the documentation ranges private: `ip_address("203.0.113.7").is_private` is `True` on CPython 3.10.22 and 3.11.17 (also 192.0.2.0/24 and 198.51.100.0/24). `arail.airgap.is_local_ip` returns `addr.is_private or ...`, so a name that resolves there is **local** and the guard lets it through. With the literal as written, EG-1 to EG-4 could never see `EgressBlocked`. Intent kept (a deterministic answer for names, no DNS query, no real host): the in-process tests patch only `socket.gethostbyname`, and return a globally routable address, `151.101.64.81`, the one `tests/test_egress_guard.py` and `tests/test_qa_airgap_bypass_attempts.py` already use. `getaddrinfo` stays real, so a guard regression is still a fast `ConnectError` on a `.invalid` name and never a connection to the patched address. The constant is `PUBLIC_TEST_IP` in `tests/egress_family_support.py`, with this reason in a comment (landed in step 2). No design decision, contract or failure mode changes.
