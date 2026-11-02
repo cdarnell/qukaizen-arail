@@ -4,7 +4,7 @@
 **Branch:** `qukaizen/arail-egress-httpx2` (base `origin/main` `5997363e`, which is #210). Not pushed.
 **Started:** 2026-11-01
 **This pass:** commits 1 to 4 of the "Atomic commit plan" (the guard and its proof). Commits 5 to 7 are a later builder pass; commit 8 is the orchestrator's, after #211 merges. Nothing below row 4 has been started.
-**Status:** in progress (steps 0 to 2 done).
+**Status:** in progress (steps 0 to 3 done).
 
 ## Hard rules this pass keeps
 
@@ -20,7 +20,7 @@
 |---|---|---|---|---|
 | 0 | `sprints/2026-11-01-arail-egress-httpx2/BUILD_LOG.md` | This skeleton: the contract with the reviewer. | none (docs) | `052a6217` |
 | 1 | `src/arail/httpx_family.py` (new); `tests/test_httpx_family.py` (new); `tests/egress_family_support.py` (new, first part: `LITERAL_FAMILY`, `installed_independently`) | The one place that names httpx and httpx2: `FAMILY`, `is_installed`, `installed`, `preferred`. Pure addition. | HF-1 to HF-6, plus three small ones (`is_installed` never imports; a module whose `__spec__` is None; stdlib-only imports). Written first and seen failing (the module does not exist). | `da2057b6` |
-| 2 | `src/arail/egress.py`; `tests/egress_family_support.py` (extend: `declared_family`, `PROBE_URL`, `PUBLIC_TEST_IP`); `tests/test_egress_httpx.py` (rewritten); `tests/test_qa_airgap_bypass_attempts.py` (BY-1, docstrings) | The TD50 fix: the family patch keyed by (class, attribute); `coverage()`, `uncovered()`, `GUARDED_CLIENTS`, `EgressGuardIncomplete`; RLock; idempotent saving of the `requests` adapter; exact or dotted-prefix `_SKIP_MODULES`; `*args, **kwargs` pass-through; docstrings. | EG-0 to EG-22 and BY-1. **Run against the unmodified `egress.py` first**; the reds are recorded per venv in Execution. | pending |
+| 2 | `src/arail/egress.py`; `tests/egress_family_support.py` (extend: `declared_family`, `PROBE_URL`, `PUBLIC_TEST_IP`); `tests/test_egress_httpx.py` (rewritten); `tests/test_qa_airgap_bypass_attempts.py` (BY-1, docstrings) | The TD50 fix: the family patch keyed by (class, attribute); `coverage()`, `uncovered()`, `GUARDED_CLIENTS`, `EgressGuardIncomplete`; RLock; idempotent saving of the `requests` adapter; exact or dotted-prefix `_SKIP_MODULES`; `*args, **kwargs` pass-through; docstrings. | EG-0 to EG-22 and BY-1. **Run against the unmodified `egress.py` first**; the reds are recorded per venv in Execution. | `96d87fb2` |
 | 3 | `tests/test_egress_httpx_fresh.py` (new); `tests/test_egress_sdk_clients.py` (new); `tests/egress_family_support.py` (extend: `run_fresh`) | The brief's probe in a fresh interpreter, huggingface_hub, and the SDKs' default clients. No source change. | FR-1 to FR-5, SDK-1. Shown failing against commit 1's `egress.py` (a scratch tree), not only passing against commit 2's. | pending |
 | 4 | `tests/test_egress_httpx.py` (+EG-23, EG-24); `tests/test_qa_airgap_bypass_attempts.py` (+BY-2, BY-3, BY-4) | Tripwires for an unknown httpx-family module or transport, and pins for the documented lower-layer and proxy gaps. | EG-23, EG-24, BY-2 to BY-4. Each shown to fail on a planted change. | pending |
 | 5 | `src/arail/open_notebook_seed.py`; `src/arail/doctor.py`; `tests/test_httpx_family.py` | TD51 runtime consumers. | ON-1, ON-2, DR-1 to DR-3 | later builder pass |
@@ -85,7 +85,7 @@ Done as planned: `src/arail/httpx_family.py` (stdlib only: `FAMILY = ("httpx2", 
 **Self-check.** Scope: the three source and test files are in the plan (the support module early, as above), plus this file. Atomic: one new module and its tests, nothing else. The message names the module and the reason it exists.
 
 ### Step 2: guard every installed httpx-family library (TD50)
-Commit: pending (a commit cannot contain its own SHA; step 3's edit of this file fills it in).
+Commit: `96d87fb2`.
 
 **Done as planned.** `src/arail/egress.py`: the family patch keyed by (class, attribute) with `(owned, original)` state and a `setattr`/`delattr` reset; `coverage()`, `uncovered()`, `GUARDED_CLIENTS`, `EgressGuardIncomplete`; an RLock; the `requests` adapter saved only when the current class is not already the guarded one; `_SKIP_MODULES` matched by exact name or dotted prefix with `httpx2` and `httpcore2` named (from `httpx_family.FAMILY`); wrappers pass `*args, **kwargs`, carry `_arail_guarded` and `__wrapped__`, and do not use `functools.wraps`; the module, `install_guard`, `_reset_for_tests` and `_check_httpx_url` docstrings (the module docstring's first paragraph is the design's wording). Tests: `tests/egress_family_support.py` (+`declared_family`, `PROBE_URL`, `PUBLIC_TEST_IP`), `tests/test_egress_httpx.py` rewritten (EG-0 to EG-22), BY-1 and its docstrings in `tests/test_qa_airgap_bypass_attempts.py`.
 
@@ -169,8 +169,96 @@ One canary was invalid on its first try (my replacement text landed inside an `e
 
 **Self-check.** Scope: `egress.py`, the support module, the two test files and this file, all in the plan. Atomic: it is one change (the guard plus the tests that prove it); the docstrings are part of it because they describe the new behaviour. The message names TD50, what is guarded, and the loud failure.
 
-### Step 3
-pending
+### Step 3: the brief's probe, huggingface_hub and the SDKs, in a fresh interpreter
+Commit: pending (a commit cannot contain its own SHA; step 4's edit of this file fills it in).
+
+**Done as planned, with no source change** (`git diff --stat` for this commit touches only tests and this file): `tests/test_egress_httpx_fresh.py` (FR-1 to FR-5), `tests/test_egress_sdk_clients.py` (SDK-1), and `run_fresh` (with `CHECKOUT` and `CHECKOUT_SRC`) in `tests/egress_family_support.py`.
+
+**Deltas from the plan**
+
+1. **Two tests beyond FR-1 to FR-5 and SDK-1.** `test_run_fresh_rejects_a_child_that_imported_another_checkouts_guard` points a child at a stand-in package outside this checkout and expects `run_fresh` to refuse it: the F9 assertion would otherwise be a check nobody has seen fail. `test_the_sdk_declaration_names_only_sdks_this_file_knows`: a typo in `ARAIL_TEST_EXPECT_SDKS` (`antropic`) would silently stop declaring an SDK, the TD50 shape again; it never skips.
+2. **Evidence is printed, not recorded with `record_property`.** The default junit family (xunit2) does not carry test-case properties. Each probe prints an `EVIDENCE` table: pytest shows it on a failure and with `-s` or `-rP`. Step 7's workflow can add `-rP` to put it in the CI log.
+3. **No time assertion on hf or the probe.** The refusal count (exactly 1 per call) is the real F12 check; a wall-clock bar would fail on a runner whose resolver is slow, which is not a guard failure (`is_local_host` does a real DNS lookup in the fresh interpreter, as the brief's literal probe does). The seconds are reported (below).
+4. **Failing messages aggregate every failing cell** and carry the sprint's four parts (what it means, the bar and why, what out of range means, where a failure lives), so a red run teaches by itself (E1, E3, E4).
+5. **FR-3 uses the real `httpx2.alias_httpx()`** when the library is httpx2, and `sys.modules[other] = module` (the plan's stand-in) in the other direction.
+6. `run_fresh(timeout=180)` for FR-5 and SDK-1: on an unguarded library hf and the SDKs retry with backoff, so a red run reports its failure instead of hitting the 60 s default.
+7. **The `sdk` venv needed the same extension as `py310`**: it had pytest but not fastapi, starlette or the rest of what the conftest's autouse fixtures import. I installed the pinned CI-style dev set into it with `--no-deps`; httpx 0.28.1, httpx2 2.16.0, anthropic 2.3.0, openai 3.42.1, h2 and socksio are unchanged.
+
+**Red first: the new tests against the pre-fix `egress.py`** (a scratch tree holding this commit's tests and the guard from before step 2; passed / failed):
+
+| Venv | Result |
+|---|---|
+| ci | 0 / **5**: FR-1 all four shapes `ConnectError`; FR-2 `ConnectError`; FR-3 the class is not tracked (no `_PATCHED`); FR-4 "install_guard() returned quietly although httpx2 is installed and cannot be imported"; FR-5 `model_info` ends `ConnectError <- ConnectError <- gaierror`, `hf_hub_download` and `snapshot_download` end `LocalEntryNotFoundError <- ConnectError ...`, **0 refusals**, 23.9 s (B2 reproduced) |
+| py310 | 0 / **5**, same shapes |
+| both | 1 / **7**: the httpx2 cells as in ci; FR-1 for httpx is red only because `coverage()` does not exist; FR-2 for httpx passes |
+| lock | 2 / **3**: FR-2 and FR-5 PASS on the old guard (httpx 0.28.1 and hf 1.25.1 were guarded); FR-1 is red only for `coverage()`; FR-3, FR-4 red. Again the old httpx guard is an oracle for the expectations |
+| sdk (SDK-1) | 1 / **2**: both SDKs end `ConnectError <- ConnectError <- gaierror` with no `EgressBlocked` in the chain |
+
+**Can they fail? Six more mutations**, each in a scratch copy, each turned named tests red:
+
+| Mutation | Red | Named tests |
+|---|---|---|
+| install patches only libraries that are already imported (a lazy guard) | 3 | FR-2 (both libraries), FR-4 |
+| the marker check removed (alias wrapped twice) | 2 | FR-3 (both directions) |
+| an import error reported as absent | 1 | FR-4 |
+| `FAMILY = ("httpx",)`, seen from a fresh interpreter | 5 | FR-1, FR-2, FR-3, FR-4, FR-5 |
+| `run_fresh` stops checking which checkout the child imported | 1 | the `run_fresh` rejection test |
+| `FAMILY = ("httpx",)`, SDKs declared | 2 | SDK-1 (anthropic, openai) |
+
+**Green: after the change** (passed / failed / skipped):
+
+| File | ci | lock | both | neither | py310 | sdk |
+|---|---|---|---|---|---|---|
+| `test_httpx_family.py` | 9 / 0 / 0 | 9 / 0 / 0 | 9 / 0 / 0 | 9 / 0 / 0 | 9 / 0 / 0 | 9 / 0 / 0 |
+| `test_egress_bootstrap.py` | 22 / 0 / 0 | 22 / 0 / 0 | 22 / 0 / 0 | 22 / 0 / 0 | 22 / 0 / 0 | 22 / 0 / 0 |
+| `test_egress_guard.py` | 18 / 0 / 0 | 18 / 0 / 0 | 18 / 0 / 0 | 18 / 0 / 0 | 18 / 0 / 0 | 18 / 0 / 0 |
+| `test_egress_httpx.py` | 47 / 0 / 0 | 47 / 0 / 0 | 72 / 0 / 0 | 21 / **1** / 25 | 47 / 0 / 0 | 72 / 0 / 0 |
+| `test_egress_httpx_fresh.py` | 6 / 0 / 0 | 6 / 0 / 0 | 9 / 0 / 0 | 2 / **1** / 3 | 6 / 0 / 0 | 9 / 0 / 0 |
+| `test_egress_sdk_clients.py` | 1 / 0 / **2** | 1 / 0 / **2** | 1 / 0 / **2** | 1 / 0 / **2** | 1 / 0 / **2** | 3 / 0 / 0 |
+| `test_qa_airgap_bypass_attempts.py` | 16 / 0 / 0 | 16 / 0 / 0 | 17 / 0 / 0 | 15 / 0 / 1 | 16 / 0 / 0 | 17 / 0 / 0 |
+| `test_queuellm_rename_frozen_surface.py` | 3 / 2 / 0 | 3 / 2 / 0 | 3 / 2 / 0 | 3 / 2 / 0 | 3 / 2 / 0 | 3 / 2 / 0 |
+
+- **The 2 skips in the SDK file are the allowed ones**: in a venv with no SDK that does not declare one, SDK-1 skips because the SDKs are optional. In `sdk`, with both declared, there are none. (Declared but missing: the same test fails; shown by hand with the SDKs declared in the ci venv.)
+- **neither**: `test_egress_httpx.py` has its one required failure (EG-0). In `test_egress_httpx_fresh.py` the one failure is FR-5: that venv has huggingface_hub installed with its HTTP library removed, so hf cannot import (`No module named 'httpcore2'`); leg 5 never runs it. FR-4 and the `run_fresh` test pass there. The CI leg-5 selection is unchanged: exit 1, EG-0 failing with `UNPROVEN`, EG-0b passing.
+- The frozen-surface failure text is identical to pristine main in all six venvs.
+- **Order independence**: the twelve-file egress and airgap list in ONE process, forward and in reverse, gives identical counts: 230 passed and the 2 allowed skips in ci, lock and py310, 259 in both, 261 with no skips in sdk.
+
+**Evidence the sprint asked for** (all after the fix; fresh interpreters; `LAB_MODE=airgapped`; `egress-probe.invalid`):
+
+*E1, the brief's probe: library x client shape, outcome (seconds)*
+
+| Venv, library | sync-after (the literal probe) | sync-before | async-after | async-before |
+|---|---|---|---|---|
+| ci, httpx2 2.16.0 | EgressBlocked (0.011) | EgressBlocked (0.001) | EgressBlocked (0.002) | EgressBlocked (0.002) |
+| lock, httpx 0.28.1 | EgressBlocked (0.013) | EgressBlocked (0.001) | EgressBlocked (0.004) | EgressBlocked (0.002) |
+| py310, httpx2 2.14.0 (CI leg 2) | EgressBlocked (0.014) | EgressBlocked (0.002) | EgressBlocked (0.002) | EgressBlocked (0.002) |
+| both (sdk venv), httpx2 and httpx | EgressBlocked in all four cells for each library (0.001 to 0.014) | | | |
+
+- *Means:* `EgressBlocked` is the guard refusing before any socket I/O; `ConnectError` would be the request reaching the network layer. *Bar and why:* `EgressBlocked` in every cell, because the airgap promises that cloud calls are refused at the HTTP layer. *Before the fix* the same probe ended `ConnectError` in every httpx2 cell (the red table above), so it can fail. *Out of range:* any other outcome means the guard missed that client shape; `NO EXCEPTION` on a `.invalid` host means a DNS wildcard answers reserved names. *Where:* `arail.egress._install_httpx_family_guard`; FR-1.
+- FR-2 (install first, then import): EgressBlocked, sync and async, for every installed library in every venv above.
+
+*E3, huggingface_hub: call, final exception, refusals, seconds*
+
+| Venv | `HfApi(endpoint).model_info` | `hf_hub_download` | `snapshot_download` | `model_info` through a session built before install |
+|---|---|---|---|---|
+| ci, hf 2.4.0 | EgressBlocked, 1, 0.014 | EgressBlocked, 1, 0.002 | EgressBlocked, 1, 0.002 | EgressBlocked, 1, 0.001 |
+| lock, hf 1.25.1 | EgressBlocked, 1, 0.015 | EgressBlocked, 1, 0.002 | EgressBlocked, 1, 0.002 | EgressBlocked, 1, 0.001 |
+| py310, hf 2.4.0 | EgressBlocked, 1, 0.017 | EgressBlocked, 1, 0.003 | EgressBlocked, 1, 0.002 | EgressBlocked, 1, 0.002 |
+
+- *Means:* one audit line is one attempt the guard refused. *Bar and why:* final `EgressBlocked` and exactly 1 refusal per call, so a refusal never spends hf's retry budget on the network or floods the audit log (before the fix: 0 refusals and `ConnectError`, then `LocalEntryNotFoundError`, 23.9 s). *Out of range:* more than 1 refusal means hf started retrying a `RuntimeError`; a final `LocalEntryNotFoundError` with `EgressBlocked` in its chain means hf started wrapping it (decide on purpose, do not edit the test quietly); `ConnectError` means the library hf rides on is unguarded. *Where:* FR-5; `huggingface_hub.utils._http`.
+
+*E4, the SDKs (sdk venv): case, final exception, refusals, seconds*
+
+| SDK | built before install, `max_retries=0` | built after install, `max_retries=0` | built before, default retries | built after, default retries |
+|---|---|---|---|---|
+| anthropic 2.3.0 (on `httpx2.HTTPTransport`) | `APIConnectionError <- EgressBlocked`, 1, 0.075 | same, 1, 0.004 | same, **3**, 1.406 | same, **3**, 1.341 |
+| openai 3.42.1 (on `httpx2.HTTPTransport`) | `EgressBlocked`, 1, 0.041 | `EgressBlocked`, 1, 0.003 | `EgressBlocked`, 1, 0.002 | `EgressBlocked`, 1, 0.002 |
+
+- *Means:* anthropic wraps the refusal in `APIConnectionError` and retries it; openai lets `EgressBlocked` through. *Bar and why:* `EgressBlocked` in the chain, no network-error type in it, and exactly 1 refusal at `max_retries=0`, which is proof no attempt left the process; the retry count with defaults is the SDK's own business and is reported. *Out of range:* `ConnectError` or `gaierror` in the chain means the SDK's default client left the guarded transports (for example an aiohttp default): an architect decision, not a test edit. *Where:* SDK-1; the SDK's `_base_client`.
+
+**Not verified here**: client shapes that need `h2` or `socksio` (QA's E5); the SDKs' opt-in aiohttp client (a documented gap); the CI workflow (step 7); the full suite (the orchestrator's).
+
+**Self-check.** Scope: only the two new test files, the support module and this file; no source file. Atomic: the fresh-interpreter evidence for the guard and nothing else. The message names the three things proven (the brief's probe, huggingface_hub, the SDKs).
 
 ### Step 4
 pending

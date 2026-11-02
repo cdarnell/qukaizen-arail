@@ -13,7 +13,11 @@ from __future__ import annotations
 
 import importlib.metadata
 import importlib.util
+import json
 import os
+import subprocess
+import sys
+from pathlib import Path
 
 LITERAL_FAMILY: tuple[str, ...] = ("httpx2", "httpx")
 
@@ -92,3 +96,63 @@ def declared_family() -> tuple[str, ...] | None:
             f"{', '.join(LITERAL_FAMILY)} (comma separated) or the word none on its own"
         )
     return tuple(name for name in LITERAL_FAMILY if name in names)
+
+
+# This checkout, found from this file.  The editable install that put ``arail`` on sys.path may point
+# at ANOTHER checkout (tests/conftest.py documents how a git worktree ends up there), so a fresh
+# interpreter is pointed at this one explicitly and then checked.
+CHECKOUT = Path(__file__).resolve().parents[1]
+CHECKOUT_SRC = CHECKOUT / "src"
+
+
+def run_fresh(code, *args, tmp_path, extra_env=None, timeout=60):
+    """Run ``code`` in a fresh interpreter and return the JSON object it prints on its last line.
+
+    Fresh means no patch state is shared with the test process: this is how the brief's probe is
+    run, and how import order and aliasing are tested.  ``code`` receives ``args`` as ``sys.argv[1:]``
+    and must end by printing one JSON object that has the key ``egress_file`` (``arail.egress.__file__``).
+
+    The environment is the caller's with ``ARAIL_MODE``, ``HF_HUB_OFFLINE`` (offline mode would make
+    huggingface_hub refuse before it reached any transport, so nothing would be proven) and every
+    ``*_proxy`` variable removed, and ``LAB_MODE=airgapped``, ``ARAIL_DATA_DIR`` (``<tmp>/data``, where
+    the audit log goes), ``HF_HOME``, ``HF_HUB_DISABLE_TELEMETRY=1`` and ``ARAIL_ENV_FILE`` (a file
+    that does not exist) set.  ``PYTHONPATH`` is prefixed with this checkout's ``src``, and ``-I`` is
+    never used, so a test is never talking to another checkout's guard: the printed ``egress_file`` is
+    asserted to be inside this one.  Asserts exit code 0 (with both output tails in the message).
+    """
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in ("ARAIL_MODE", "HF_HUB_OFFLINE") and not key.lower().endswith("_proxy")
+    }
+    env.update(
+        LAB_MODE="airgapped",
+        ARAIL_DATA_DIR=str(Path(tmp_path) / "data"),
+        HF_HOME=str(Path(tmp_path) / "hf-home"),
+        HF_HUB_DISABLE_TELEMETRY="1",
+        ARAIL_ENV_FILE=str(Path(tmp_path) / "none.env"),
+    )
+    existing = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = str(CHECKOUT_SRC) + (os.pathsep + existing if existing else "")
+    env.update(extra_env or {})
+    proc = subprocess.run(
+        [sys.executable, "-c", code, *args],
+        cwd=str(tmp_path),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+    assert proc.returncode == 0, (
+        f"the fresh interpreter exited {proc.returncode}\n--- stdout (tail) ---\n{proc.stdout[-2000:]}"
+        f"\n--- stderr (tail) ---\n{proc.stderr[-3000:]}"
+    )
+    lines = [line for line in proc.stdout.splitlines() if line.strip()]
+    assert lines, f"the fresh interpreter printed nothing\n--- stderr (tail) ---\n{proc.stderr[-2000:]}"
+    result = json.loads(lines[-1])
+    egress_file = Path(result["egress_file"]).resolve()
+    assert CHECKOUT_SRC.resolve() in egress_file.parents, (
+        f"the fresh interpreter imported arail.egress from {egress_file}, not from this checkout "
+        f"({CHECKOUT_SRC}); the test would be exercising another tree's guard"
+    )
+    return result
