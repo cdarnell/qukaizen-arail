@@ -29,6 +29,8 @@ import importlib.machinery
 import importlib.util
 import json
 import os
+import pkgutil
+import re
 import socket
 import sys
 import threading
@@ -40,6 +42,7 @@ import requests
 import arail.egress as egress
 from arail.airgap import EgressBlocked
 from tests.egress_family_support import (
+    DECLARATION_ENV,
     LITERAL_FAMILY,
     PROBE_URL,
     PUBLIC_TEST_IP,
@@ -773,3 +776,115 @@ def test_a_class_that_refuses_the_patch_is_reported_and_the_other_target_is_stil
     )
     assert (HTTPTransport, "handle_request") not in egress._PATCHED
     assert getattr(vars(AsyncHTTPTransport)["handle_async_request"], "_arail_guarded", False)
+
+
+# --- EG-23, EG-24: tripwires on the ecosystem -------------------------------------------------
+#
+# The guard covers a FIXED list of libraries (arail.httpx_family.FAMILY).  It deliberately does not
+# discover them at runtime (that would import arbitrary packages at portal start).  The price is that
+# a new member, or a new kind of transport inside a covered library, is invisible to the guard until
+# someone looks.  These two tests are the someone: they turn red the day it happens (CI runs them
+# daily), and each message says what to do.
+
+LOWER_LAYERS = ("httpcore", "httpcore2")
+
+# What every covered library exports today, by name.  Seven names: the two bases, the two that do
+# network I/O (guarded), and the three that never touch a network (in-process).
+KNOWN_TRANSPORT_NAMES = {
+    "BaseTransport", "AsyncBaseTransport",
+    "HTTPTransport", "AsyncHTTPTransport",
+    "ASGITransport", "WSGITransport", "MockTransport",
+}
+
+
+def test_no_unknown_httpx_or_httpcore_module_is_installed():
+    """EG-23.  Tripwire: a top-level module named ``httpx<N>`` that is not in the family, or
+    ``httpcore<N>`` that is not a known lower layer, means a new HTTP client (a ``httpx3``, a fork with
+    a numbered name) is on ``sys.path`` and nothing guards it.  Nothing in the lab need USE it for this
+    to be red: it is cheaper to decide now than after an SDK moves to it."""
+    found = {info.name for info in pkgutil.iter_modules()}
+    new_clients = sorted(n for n in found if re.fullmatch(r"httpx\d*", n) and n not in LITERAL_FAMILY)
+    new_layers = sorted(n for n in found if re.fullmatch(r"httpcore\d*", n) and n not in LOWER_LAYERS)
+    assert not new_clients and not new_layers, (
+        f"New httpx-family module(s) on sys.path: {new_clients + new_layers}. "
+        "If it is an HTTP client, add it to arail.httpx_family.FAMILY, to tests/egress_family_support."
+        "LITERAL_FAMILY, and to the docs (README, docs/PRIVACY.md, the Network Policy modal, "
+        "airgap.KNOWN_GAPS); the guard then patches it and the tests parametrize over it. If it is a "
+        "lower layer (httpcore), add it to LOWER_LAYERS here and to the documented lower layers."
+    )
+
+
+def _subclasses(cls):
+    for sub in cls.__subclasses__():
+        yield sub
+        yield from _subclasses(sub)
+
+
+@lib_param
+def test_no_covered_library_has_a_network_transport_the_guard_does_not_patch(lib):
+    """EG-24.  Tripwire: every transport class DEFINED under the library (its optional
+    ``websockets`` module included, when its extra is installed) must derive from a class the guard
+    patches (``HTTPTransport``, ``AsyncHTTPTransport``) or from one that never touches a network
+    (``ASGITransport``, ``WSGITransport``, ``MockTransport``).  A transport that derives only from the
+    bases does its own I/O, and a request through it would pass the guard unseen.  The names the
+    library exports must also stay within the seven known ones."""
+    mod = importlib.import_module(lib)
+    try:
+        importlib.import_module(lib + ".websockets")  # needs wsproto (httpx2); httpx has no such module
+    except ImportError:
+        pass
+
+    exported = {name for name in dir(mod) if name.endswith("Transport")}
+    unknown = sorted(exported - KNOWN_TRANSPORT_NAMES)
+    assert not unknown, (
+        f"{lib} now exports transport(s) the guard has never seen: {unknown}. Read what they do: if they "
+        "perform network I/O, extend arail.egress._FAMILY_TARGETS and the tests; if they are in-process, "
+        "add the name to KNOWN_TRANSPORT_NAMES here."
+    )
+
+    patched = (mod.HTTPTransport, mod.AsyncHTTPTransport)
+    in_process = (mod.ASGITransport, mod.WSGITransport, mod.MockTransport)
+    stray = sorted(
+        f"{sub.__module__}.{sub.__qualname__}"
+        for base in (mod.BaseTransport, mod.AsyncBaseTransport)
+        for sub in _subclasses(base)
+        if (sub.__module__ == lib or sub.__module__.startswith(lib + "."))
+        and not issubclass(sub, patched + in_process)
+    )
+    assert not stray, (
+        f"{lib} defines transport class(es) the guard does not patch and that are not in-process: {stray}. "
+        "A request through one reaches the network without passing arail.egress. Extend "
+        "arail.egress._FAMILY_TARGETS to patch it (and add a test), or, if it never touches a network, "
+        "derive the allowlist here from its base class."
+    )
+
+
+# --- the declaration parser (tests/egress_family_support.declared_family) -------------------------
+
+@pytest.mark.parametrize("raw,expected", [
+    ("httpx2", ("httpx2",)),
+    ("httpx", ("httpx",)),
+    ("httpx,httpx2", ("httpx2", "httpx")),
+    (" httpx2 , httpx ", ("httpx2", "httpx")),
+    ("none", ()),
+    ("NONE", ()),
+])
+def test_the_declaration_parser_reads_every_documented_form(raw, expected, monkeypatch):
+    """EG-A7.  The CI legs declare ``httpx2``, ``httpx``, ``httpx,httpx2`` and ``none``; the answer is
+    in FAMILY order whatever order they were written in."""
+    monkeypatch.setenv(DECLARATION_ENV, raw)
+    assert declared_family() == expected
+
+
+def test_the_declaration_parser_returns_none_when_nothing_is_declared(monkeypatch):
+    monkeypatch.delenv(DECLARATION_ENV, raising=False)
+    assert declared_family() is None
+
+
+@pytest.mark.parametrize("raw", ["", "   ", "httpx3", "httpx2,httpx3", "none,httpx", "httpx2,,httpx", "httpx2;httpx"])
+def test_the_declaration_parser_rejects_a_mistake_instead_of_guessing(raw, monkeypatch):
+    """A leg whose declaration is mis-typed must fail, not quietly declare something else: a
+    declaration that cannot be wrong checks nothing."""
+    monkeypatch.setenv(DECLARATION_ENV, raw)
+    with pytest.raises(AssertionError, match=DECLARATION_ENV):
+        declared_family()

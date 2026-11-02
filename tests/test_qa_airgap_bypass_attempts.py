@@ -11,10 +11,11 @@ Architect's review listed these as the highest-leverage attack surface:
      time (before ``install_guard()`` runs).
   2. DNS rebind — ``evil.example.com`` → ``127.0.0.1``.
   3. ``aiohttp``, raw ``socket.connect``,
-     ``subprocess.run(["curl", ...])``, ``os.system("curl ...")`` —
-     declared NOT wrapped (documented gaps). ``httpx`` used to be on
-     this list; its transports, and those of its successor ``httpx2``,
-     are wrapped now.
+     ``subprocess.run(["curl", ...])``, ``os.system("curl ...")``,
+     ``urllib3`` / ``httpcore`` / ``httpcore2`` used directly, and the
+     hop to a configured proxy — declared NOT wrapped (documented
+     gaps). ``httpx`` used to be on this list; its transports, and
+     those of its successor ``httpx2``, are wrapped now.
   4. ``asyncio.create_task`` contextvars-leak from inside an
      ``@allow_egress`` block (documented behavior).
 
@@ -27,6 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import importlib.util
 import json
 import os
 import socket
@@ -156,11 +158,46 @@ class TestDNSRebind:
 # 3. Documented gaps — aiohttp / raw socket / subprocess curl (httpx and httpx2 are wrapped)
 # ──────────────────────────────────────────────────────────────────────
 
+# The lower layers the httpx family stands on, whichever are installed.  Computed here, not read from
+# arail.httpx_family, so a wrong list there cannot agree with itself.
+INSTALLED_CORES = tuple(
+    name for name in ("httpcore2", "httpcore") if importlib.util.find_spec(name) is not None
+)
+
+_GAP_CLOSED = (
+    "DOCUMENTED-GAP TRIPWIRE: {what} raised EgressBlocked, so the guard now covers it. That is good news. "
+    "Update docs/PRIVACY.md, README, the Network Policy modal and airgap.KNOWN_GAPS (TD53 / TD54), then "
+    "turn this pin into a closed-path test."
+)
+
+
+def _make_invalid_names_unresolvable(monkeypatch):
+    """The gap tests send requests PAST the guard on purpose.  Make ``getaddrinfo`` (what urllib3 and
+    httpcore call) fail for any ``.invalid`` name, so that even on a network whose resolver answers
+    reserved names, these requests cannot reach a real host: they end in a resolution error."""
+    real = socket.getaddrinfo
+
+    def getaddrinfo(host, *args, **kwargs):
+        name = host.decode("ascii", "replace") if isinstance(host, bytes) else str(host)
+        if name.endswith(".invalid"):
+            raise socket.gaierror(-2, "simulated: a .invalid name never resolves")
+        return real(host, *args, **kwargs)
+
+    monkeypatch.setattr(socket, "getaddrinfo", getaddrinfo)
+
+
+def _no_audit_lines(tmp_path):
+    path = tmp_path / "egress.jsonl"
+    return not path.exists() or not path.read_text().strip()
+
+
 class TestDocumentedGaps:
     """The README, PRIVACY.md, and modal copy list the remaining gaps:
-    ``aiohttp``, raw socket, subprocess shells. These tests pin the gaps
-    so a future PR that tries to close them (excellent!) triggers a
-    tripwire saying "update the docs and modal too."
+    ``aiohttp``, ``urllib3`` / ``httpcore`` / ``httpcore2`` used directly,
+    the hop to a configured proxy, raw socket, subprocess shells. These
+    tests pin the gaps so a future PR that tries to close them
+    (excellent!) triggers a tripwire saying "update the docs and modal
+    too."
 
     ``httpx`` WAS on this list; it is wrapped now, and so is its
     successor ``httpx2`` (see test_httpx_is_guarded_in_airgapped, which
@@ -288,6 +325,93 @@ class TestDocumentedGaps:
                 "DOCUMENTED-GAP TRIPWIRE: os.system raised EgressBlocked. "
                 "If shell wrapping landed, update PRIVACY.md and modal."
             )
+
+    def test_urllib3_used_directly_bypasses_guard(self, monkeypatch, tmp_path):
+        """``urllib3`` called directly is NOT wrapped (TD53).
+
+        Pin: the guard sits one layer up, in ``requests`` and the httpx
+        family. A request made with ``urllib3.PoolManager`` to a public
+        name is never seen by it: the call ends in urllib3's own
+        resolution error (the name is reserved and never resolves), not
+        in EgressBlocked, and writes no audit line.
+        """
+        import urllib3
+
+        monkeypatch.setenv("LAB_MODE", "airgapped")
+        monkeypatch.setenv("ARAIL_DATA_DIR", str(tmp_path))
+        _make_invalid_names_unresolvable(monkeypatch)
+        arail.egress._reset_for_tests()
+        arail.egress.install_guard()
+
+        try:
+            urllib3.PoolManager(retries=False).request("GET", PROBE_URL, timeout=3)
+        except arail.airgap.EgressBlocked:
+            pytest.fail(_GAP_CLOSED.format(what="urllib3.PoolManager().request"))
+        except Exception:
+            pass  # NameResolutionError: it reached urllib3's own network layer, as documented
+        else:
+            pytest.fail("a request to a .invalid name succeeded; the premise of this test (it never resolves) is false")
+        assert _no_audit_lines(tmp_path), "a direct urllib3 call should leave no audit line"
+
+    @pytest.mark.parametrize("core", INSTALLED_CORES)
+    def test_httpcore_used_directly_bypasses_guard(self, core, monkeypatch, tmp_path):
+        """``httpcore`` / ``httpcore2`` called directly is NOT wrapped (TD53).
+
+        Pin: they are the layer under the httpx family, below the transport
+        classes the guard patches. ``<core>.request(...)`` to a public name
+        ends in the library's own connect error and writes no audit line.
+        """
+        mod = importlib.import_module(core)
+
+        monkeypatch.setenv("LAB_MODE", "airgapped")
+        monkeypatch.setenv("ARAIL_DATA_DIR", str(tmp_path))
+        _make_invalid_names_unresolvable(monkeypatch)
+        arail.egress._reset_for_tests()
+        arail.egress.install_guard()
+
+        timeouts = {"connect": 3, "read": 3, "write": 3, "pool": 3}
+        try:
+            mod.request("GET", PROBE_URL, extensions={"timeout": timeouts})
+        except arail.airgap.EgressBlocked:
+            pytest.fail(_GAP_CLOSED.format(what=f"{core}.request"))
+        except Exception:
+            pass  # ConnectError: it reached the library's own network layer, as documented
+        else:
+            pytest.fail("a request to a .invalid name succeeded; the premise of this test (it never resolves) is false")
+        assert _no_audit_lines(tmp_path), f"a direct {core} call should leave no audit line"
+
+    @pytest.mark.parametrize("client", ["requests", *installed_independently()])
+    def test_a_configured_proxy_is_not_checked(self, client, monkeypatch, tmp_path):
+        """The hop to a configured proxy is NOT checked (TD54).
+
+        Pin: the guard decides on the DESTINATION. A request for a local
+        address (``127.0.0.1:9``) passes it, and if the client was
+        configured with a proxy at a public name, the client then connects
+        to that proxy. Here the proxy is a ``.invalid`` name, so the call
+        ends in a proxy or connect error rather than EgressBlocked, and the
+        guard writes no audit line. (The reverse, a loopback proxy and a
+        public destination, is refused: tests/test_egress_httpx.py EG-11.)
+        """
+        monkeypatch.setenv("LAB_MODE", "airgapped")
+        monkeypatch.setenv("ARAIL_DATA_DIR", str(tmp_path))
+        _make_invalid_names_unresolvable(monkeypatch)
+        arail.egress._reset_for_tests()
+        arail.egress.install_guard()
+
+        proxy = "http://egress-probe.invalid:8080"
+        destination = "http://127.0.0.1:9/"
+        try:
+            if client == "requests":
+                requests.get(destination, proxies={"http": proxy, "https": proxy}, timeout=3)
+            else:
+                importlib.import_module(client).Client(proxy=proxy, timeout=3).get(destination)
+        except arail.airgap.EgressBlocked:
+            pytest.fail(_GAP_CLOSED.format(what=f"a {client} request through a configured proxy"))
+        except Exception:
+            pass  # ProxyError / ConnectError: it tried the proxy, as documented
+        else:
+            pytest.fail("a request through an unresolvable proxy succeeded; the premise of this test is false")
+        assert _no_audit_lines(tmp_path), "a local destination through a proxy should leave no audit line"
 
 
 # ──────────────────────────────────────────────────────────────────────

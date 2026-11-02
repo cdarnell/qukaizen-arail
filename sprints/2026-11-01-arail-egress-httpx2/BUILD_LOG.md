@@ -3,8 +3,8 @@
 **Architecture:** [ARCHITECTURE.md](./ARCHITECTURE.md) at `ec2a12be` (accepted by the ledger at `982da749`)
 **Branch:** `qukaizen/arail-egress-httpx2` (base `origin/main` `5997363e`, which is #210). Not pushed.
 **Started:** 2026-11-01
-**This pass:** commits 1 to 4 of the "Atomic commit plan" (the guard and its proof). Commits 5 to 7 are a later builder pass; commit 8 is the orchestrator's, after #211 merges. Nothing below row 4 has been started.
-**Status:** in progress (steps 0 to 3 done).
+**This pass:** commits 1 to 4 of the "Atomic commit plan" (the guard and its proof). Commits 5 to 7 are a later builder pass; commit 8 is the orchestrator's, after #211 merges. Nothing below row 4 has been started. The first-pass work is committed as `da2057b6`, `96d87fb2`, `e7f868a7` and the step 4 commit (the one that holds this paragraph).
+**Status:** pass 1 done (steps 0 to 4 committed; step 4's SHA is in the report). Steps 5 to 7 are the next builder pass; step 8 is the orchestrator's.
 
 ## Hard rules this pass keeps
 
@@ -21,8 +21,8 @@
 | 0 | `sprints/2026-11-01-arail-egress-httpx2/BUILD_LOG.md` | This skeleton: the contract with the reviewer. | none (docs) | `052a6217` |
 | 1 | `src/arail/httpx_family.py` (new); `tests/test_httpx_family.py` (new); `tests/egress_family_support.py` (new, first part: `LITERAL_FAMILY`, `installed_independently`) | The one place that names httpx and httpx2: `FAMILY`, `is_installed`, `installed`, `preferred`. Pure addition. | HF-1 to HF-6, plus three small ones (`is_installed` never imports; a module whose `__spec__` is None; stdlib-only imports). Written first and seen failing (the module does not exist). | `da2057b6` |
 | 2 | `src/arail/egress.py`; `tests/egress_family_support.py` (extend: `declared_family`, `PROBE_URL`, `PUBLIC_TEST_IP`); `tests/test_egress_httpx.py` (rewritten); `tests/test_qa_airgap_bypass_attempts.py` (BY-1, docstrings) | The TD50 fix: the family patch keyed by (class, attribute); `coverage()`, `uncovered()`, `GUARDED_CLIENTS`, `EgressGuardIncomplete`; RLock; idempotent saving of the `requests` adapter; exact or dotted-prefix `_SKIP_MODULES`; `*args, **kwargs` pass-through; docstrings. | EG-0 to EG-22 and BY-1. **Run against the unmodified `egress.py` first**; the reds are recorded per venv in Execution. | `96d87fb2` |
-| 3 | `tests/test_egress_httpx_fresh.py` (new); `tests/test_egress_sdk_clients.py` (new); `tests/egress_family_support.py` (extend: `run_fresh`) | The brief's probe in a fresh interpreter, huggingface_hub, and the SDKs' default clients. No source change. | FR-1 to FR-5, SDK-1. Shown failing against commit 1's `egress.py` (a scratch tree), not only passing against commit 2's. | pending |
-| 4 | `tests/test_egress_httpx.py` (+EG-23, EG-24); `tests/test_qa_airgap_bypass_attempts.py` (+BY-2, BY-3, BY-4) | Tripwires for an unknown httpx-family module or transport, and pins for the documented lower-layer and proxy gaps. | EG-23, EG-24, BY-2 to BY-4. Each shown to fail on a planted change. | pending |
+| 3 | `tests/test_egress_httpx_fresh.py` (new); `tests/test_egress_sdk_clients.py` (new); `tests/egress_family_support.py` (extend: `run_fresh`) | The brief's probe in a fresh interpreter, huggingface_hub, and the SDKs' default clients. No source change. | FR-1 to FR-5, SDK-1. Shown failing against the pre-fix `egress.py` (a scratch tree), not only passing against the fixed one. | `e7f868a7` |
+| 4 | `tests/test_egress_httpx.py` (+EG-23, EG-24); `tests/test_qa_airgap_bypass_attempts.py` (+BY-2, BY-3, BY-4) | Tripwires for an unknown httpx-family module or transport, and pins for the documented lower-layer and proxy gaps. | EG-23, EG-24, BY-2 to BY-4, plus the declaration-parser tests (EG-A7). Each shown to fail on a planted change. | pending (this pass's report; the next builder pass fills it in) |
 | 5 | `src/arail/open_notebook_seed.py`; `src/arail/doctor.py`; `tests/test_httpx_family.py` | TD51 runtime consumers. | ON-1, ON-2, DR-1 to DR-3 | later builder pass |
 | 6 | README, `docs/PRIVACY.md`, modal, `airgap.py`, `router/core.py`, `portal/app.py`, `tests/test_egress_docs.py`, `tests/test_qa_airgap_happy_setup.py` | Docs say what is wrapped; `KNOWN_GAPS`; status endpoint. | DOC-1 to DOC-5 | later builder pass |
 | 7 | `.github/workflows/egress-guard.yml`; `tests/egress_ci_check.py`; `tests/test_egress_ci_check.py` | The five-leg workflow and its checker. | CI-1 to CI-4 | later builder pass |
@@ -170,7 +170,7 @@ One canary was invalid on its first try (my replacement text landed inside an `e
 **Self-check.** Scope: `egress.py`, the support module, the two test files and this file, all in the plan. Atomic: it is one change (the guard plus the tests that prove it); the docstrings are part of it because they describe the new behaviour. The message names TD50, what is guarded, and the loud failure.
 
 ### Step 3: the brief's probe, huggingface_hub and the SDKs, in a fresh interpreter
-Commit: pending (a commit cannot contain its own SHA; step 4's edit of this file fills it in).
+Commit: `e7f868a7`.
 
 **Done as planned, with no source change** (`git diff --stat` for this commit touches only tests and this file): `tests/test_egress_httpx_fresh.py` (FR-1 to FR-5), `tests/test_egress_sdk_clients.py` (SDK-1), and `run_fresh` (with `CHECKOUT` and `CHECKOUT_SRC`) in `tests/egress_family_support.py`.
 
@@ -260,12 +260,73 @@ Commit: pending (a commit cannot contain its own SHA; step 4's edit of this file
 
 **Self-check.** Scope: only the two new test files, the support module and this file; no source file. Atomic: the fresh-interpreter evidence for the guard and nothing else. The message names the three things proven (the brief's probe, huggingface_hub, the SDKs).
 
-### Step 4
-pending
+### Step 4: tripwires and pins
+Commit: pending (a commit cannot contain its own SHA; the next builder pass's first edit of this file fills it in, and the pass report carries it).
+
+**Done as planned:** EG-23 and EG-24 in `tests/test_egress_httpx.py`; BY-2, BY-3 and BY-4 in `TestDocumentedGaps` in `tests/test_qa_airgap_bypass_attempts.py`. No source file changed.
+
+**Deltas from the plan**
+
+1. **EG-A7, the declaration parser, three tests** (fourteen cases). `declared_family()` was added in step 2 and exercised only through its happy path by EG-0b. These pin every documented form (`httpx2`, `httpx`, `httpx,httpx2` in any order and with spaces, `none`, `NONE`), "nothing declared", and that a mistake (empty, unknown name, `none,httpx`, a doubled comma, a semicolon) raises and does not guess. A leg whose declaration is mis-typed must fail, or the declaration checks nothing. They live in `test_egress_httpx.py`, which this step edits anyway.
+2. **The three gap pins make `.invalid` names unresolvable at `socket.getaddrinfo`** (what urllib3 and httpcore call). They send requests PAST the guard on purpose; on a network whose resolver answers reserved names (a wildcard DNS) a plain `.invalid` request could reach a real host. With `getaddrinfo` failing for `.invalid`, every one ends in a resolution error. `gethostbyname` is left alone: the destination in BY-4 is an IP literal.
+3. **BY-3 uses `<core>.request(...)`** for `httpcore` 1.0.9 and `httpcore2` 2.16.0, which both export it (checked). BY-4 runs once for `requests` and once per installed family member.
+4. **Each pin also asserts the call raised** (a request to a `.invalid` name that *succeeds* means the premise is false and fails with that message) and that **no audit line was written**, as the plan says. The tripwire message names TD53/TD54 and the four places to update: "update docs/PRIVACY.md, README, the Network Policy modal and airgap.KNOWN_GAPS". `airgap.KNOWN_GAPS` does not exist until step 6; the message is text for the person who closes the gap.
+5. The module docstring and the `TestDocumentedGaps` docstring of the bypass file now list urllib3, httpcore/httpcore2 and the proxy hop among the documented gaps.
+6. **EG-24 was checked against `httpx2.websockets`.** That module imports only with `wsproto`, which the `sdk` venv has, and it defines `ASGIWebSocketTransport`. It derives from `ASGITransport`, so the rule (derive from a patched class or an in-process one) accepts it; the sdk run exercises that branch. The other venvs lack `wsproto`, and `httpx` has no such module, so there the branch is a no-op.
+
+**Red first.** These are tripwires, so "red" is the world changing. Nothing exists to run them against, so each was shown to fail on a planted change (scratch copies only):
+
+| Planted change | Red | Named tests |
+|---|---|---|
+| an empty `httpx3/` package on `sys.path` | 1 | EG-23 |
+| an empty `httpcore3/` package on `sys.path` | 1 | EG-23 |
+| a library defines a transport deriving only from the bases (class kept alive; see below) | 2 | EG-24 (httpx2 and httpx), naming `httpx2._stray.StrayTransport` |
+| a library exports a transport name nobody has seen | 2 | EG-24 |
+| the guard is extended to `urllib3` (pool `urlopen`) | 2 | BY-2, and BY-4 for `requests` (the proxy hop is a pool hop) |
+| the guard is extended to `httpcore` and `httpcore2` | 4 | BY-3 (both cores), and BY-4 for both family members |
+| the guard starts checking the configured proxy in `GuardedHTTPAdapter.send` | 1 | BY-4 for `requests` |
+
+One canary reported "nothing went red" on its first try. It was the canary: it created the stray class without keeping a reference, and `__subclasses__()` only lists classes that are still alive, so the collector had removed it. With the reference kept, EG-24 flags it by name. (EG-24 scans loaded classes; a class that no longer exists is not a transport anyone can use.)
+
+**Green** (passed / failed / skipped; each venv declares its leg):
+
+| File | ci | lock | both | neither | py310 | sdk |
+|---|---|---|---|---|---|---|
+| `test_httpx_family.py` | 9 / 0 / 0 | 9 / 0 / 0 | 9 / 0 / 0 | 9 / 0 / 0 | 9 / 0 / 0 | 9 / 0 / 0 |
+| `test_egress_bootstrap.py` | 22 / 0 / 0 | 22 / 0 / 0 | 22 / 0 / 0 | 22 / 0 / 0 | 22 / 0 / 0 | 22 / 0 / 0 |
+| `test_egress_guard.py` | 18 / 0 / 0 | 18 / 0 / 0 | 18 / 0 / 0 | 18 / 0 / 0 | 18 / 0 / 0 | 18 / 0 / 0 |
+| `test_egress_httpx.py` | 63 / 0 / 0 | 63 / 0 / 0 | 89 / 0 / 0 | 36 / **1** / 26 | 63 / 0 / 0 | 89 / 0 / 0 |
+| `test_egress_httpx_fresh.py` | 6 / 0 / 0 | 6 / 0 / 0 | 9 / 0 / 0 | 2 / **1** / 3 | 6 / 0 / 0 | 9 / 0 / 0 |
+| `test_egress_sdk_clients.py` | 1 / 0 / **2** | 1 / 0 / **2** | 1 / 0 / **2** | 1 / 0 / **2** | 1 / 0 / **2** | 3 / 0 / 0 |
+| `test_qa_airgap_bypass_attempts.py` | 20 / 0 / 0 | 20 / 0 / 0 | 23 / 0 / 0 | 17 / 0 / 2 | 20 / 0 / 0 | 23 / 0 / 0 |
+| `test_queuellm_rename_frozen_surface.py` | 3 / 2 / 0 | 3 / 2 / 0 | 3 / 2 / 0 | 3 / 2 / 0 | 3 / 2 / 0 | 3 / 2 / 0 |
+
+- Skips: only the 2 "SDK not installed and not declared" cases in venvs with no SDK (allowed: the SDKs are optional; with both declared in `sdk` there are none), and, in `neither`, the `[lib]` tests having an empty parameter set (26 in `test_egress_httpx.py`, 3 in the fresh file, 2 in the bypass file). Nothing is skipped for a present library.
+- neither: the failures are EG-0 (required) and FR-5 (huggingface_hub installed without its HTTP library; leg 5 never runs it). **The CI leg-5 selection again: exit 1, EG-0 failing with `UNPROVEN`, EG-0b passing.**
+- The frozen-surface text is identical to pristine main in all six venvs.
+- **Order independence**: the twelve-file egress and airgap list in ONE process, forward and in reverse: 250 passed and the 2 allowed skips in ci, lock and py310 (identical both ways), 282 in both, 284 with none skipped in sdk.
+- **Stability**: `test_egress_httpx.py`, `test_egress_httpx_fresh.py` and `test_qa_airgap_bypass_attempts.py` run five times in a row in ci (89 passed each time) and in both (121 each time).
+
+**Not verified here**: any socks5 or `http2=True` client shape (QA's E5); that the gap tripwires' wording matches the docs, which do not exist until step 6.
+
+**Self-check.** Scope: `test_egress_httpx.py`, `test_qa_airgap_bypass_attempts.py` and this file; no source change. Atomic: one idea, "the guard's list of libraries is fixed, so tell us when the world outgrows it, and pin what it does not cover". EG-A7 sits beside that because it is the same kind of guard on the test side. The message names the tripwires and the pins.
 
 ## Architect feedback required
 
 **AF-1 (non-blocking; worked around with the same intent; please correct ARCHITECTURE.md).** "Test strategy" says the in-process tests monkeypatch `socket.gethostbyname` to return a TEST-NET-3 address (`203.0.113.7`) for names, so that the local check is deterministic. `ipaddress` calls the documentation ranges private: `ip_address("203.0.113.7").is_private` is `True` on CPython 3.10.22 and 3.11.17 (also 192.0.2.0/24 and 198.51.100.0/24). `arail.airgap.is_local_ip` returns `addr.is_private or ...`, so a name that resolves there is **local** and the guard lets it through. With the literal as written, EG-1 to EG-4 could never see `EgressBlocked`. Intent kept (a deterministic answer for names, no DNS query, no real host): the in-process tests patch only `socket.gethostbyname`, and return a globally routable address, `151.101.64.81`, the one `tests/test_egress_guard.py` and `tests/test_qa_airgap_bypass_attempts.py` already use. `getaddrinfo` stays real, so a guard regression is still a fast `ConnectError` on a `.invalid` name and never a connection to the patched address. The constant is `PUBLIC_TEST_IP` in `tests/egress_family_support.py`, with this reason in a comment (landed in step 2). No design decision, contract or failure mode changes.
 
-## Final state
-pending
+## Final state (pass 1, steps 0 to 4)
+
+- **Commits:** `052a6217` (skeleton), `da2057b6` (step 1), `96d87fb2` (step 2), `e7f868a7` (step 3), and step 4 (the commit that holds this paragraph; its SHA is in the pass report). Branch `qukaizen/arail-egress-httpx2`, not pushed.
+- **Diff, `src/` and `tests/` only, against the ledger commit `982da749`:** 8 files, +2,236 / -172 (step 4 accounts for +246 / -7 of that, in two test files). Source: `src/arail/egress.py` (+292 / -101) and the new `src/arail/httpx_family.py` (+79). Tests: `tests/egress_family_support.py` (new), `tests/test_httpx_family.py` (new), `tests/test_egress_httpx_fresh.py` (new), `tests/test_egress_sdk_clients.py` (new), `tests/test_egress_httpx.py` (rewritten), `tests/test_qa_airgap_bypass_attempts.py` (BY-1 and BY-2 to BY-4).
+- **Tests now (passed / failed / skipped):** the commit-4 table above. In ci, lock, both, py310 and sdk: 0 failed. The only failures anywhere are the two pre-existing `test_queuellm_rename_frozen_surface.py` failures (identical to untouched main) and, in `neither`, EG-0 on purpose.
+- **Coverage:** not measured (no coverage tool was asked for). The new code paths each have a test that was seen failing against a planted fault: 16 mutations in step 2, 6 in step 3 and 7 in step 4, listed above.
+- **Not touched:** every path the brief lists as frozen. `README.md`, `docs/`, the modal, `airgap.py`, `router/core.py`, `portal/app.py`, `doctor.py` and `open_notebook_seed.py` belong to steps 5 and 6.
+- **Environment:** the `py310` and `sdk` scratch venvs were extended as described (pinned dev set, `--no-deps`); `wsproto` was already in `sdk`. Nothing was created in the worktree except committed files (`git status` clean after every commit).
+
+**Observations for the review (not defects)**
+
+1. With an incomplete guard (`_INSTALLED` stays False by design), every `install_guard()` call retries and logs one error line. In a running portal that is twice per process start (the startup hook and `agents.loader.load_all`; `load_all` has one caller, the startup hook), and once per `./arailctl doctor` or Model Forge worker run, not per request. That is bounded, but it is two identical error lines at boot.
+2. The strategy text calls the TEST-NET-3 address "public" (AF-1). Anything else in the design that relies on how `ipaddress` classifies an address is worth the same check.
+3. `starlette` 1.3.1 (the lock venv) prints a deprecation warning when `starlette.testclient` is imported ("Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead"). EG-13 imports it; the warning is harmless and not an error.
+4. For step 6 and 7: the gap tripwires' failure text already names `airgap.KNOWN_GAPS`; step 6 should make that name true. Step 7's workflow may want `-rP` on the pytest line so the `EVIDENCE` tables reach the CI log.
