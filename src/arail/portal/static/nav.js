@@ -65,6 +65,14 @@ window.__arailNavJs = true;
   var badge = document.getElementById('mode-badge');
   if (!badge) return;
 
+  // Whether the egress guard is whole, as of the last /api/airgap/status. The modal's pill is "ok" only
+  // when the mode is airgapped AND the guard is whole; every place that paints it goes through here, so
+  // flipping the mode cannot turn it green while a library is unguarded.
+  var guardIncomplete = false;
+  function pillClass(mode) {
+    return 'mp-pill ' + (mode === 'airgapped' && !guardIncomplete ? 'ok' : 'warn');
+  }
+
   function updateBadge(mode) {
     badge.className = 'mode-badge ' + mode;
     badge.textContent = mode === 'airgapped' ? '\u2B24 Airgapped' : '\u2B24 Hybrid';
@@ -87,10 +95,15 @@ window.__arailNavJs = true;
     fetch('/api/airgap/status')
       .then(function (r) { return r.json(); })
       .then(function (data) {
+        // An incomplete guard (an HTTP library it could not patch) is not "ok", whatever the mode
+        // says: the description names the library, and the known-gaps list is opened below.
+        guardIncomplete = data.guard_installed === false;
         var pill = document.getElementById('airgap-mode-pill');
         if (pill) {
           pill.textContent = data.lab_mode;
-          pill.className = 'mp-pill ' + (data.lab_mode === 'airgapped' ? 'ok' : 'warn');
+          pill.className = pillClass(data.lab_mode);
+          pill.title = guardIncomplete
+            ? 'The egress guard could not patch every HTTP library — see below.' : '';
         }
         var defEl = document.getElementById('airgap-definition');
         if (defEl) defEl.textContent = data.definition || '';
@@ -138,6 +151,10 @@ window.__arailNavJs = true;
             gapsList.appendChild(li);
           });
         }
+        // The list sits in a <details> that is closed by default; with an incomplete guard the
+        // entry naming the unguarded library must not be behind a click.
+        var gapsBox = document.getElementById('airgap-gaps');
+        if (gapsBox && guardIncomplete) gapsBox.open = true;
 
         // -- Segmented control wiring --
         var toggleSection = document.getElementById('airgap-toggle-section');
@@ -235,7 +252,7 @@ window.__arailNavJs = true;
     var pill = document.getElementById('airgap-mode-pill');
     if (pill) {
       pill.textContent = target;
-      pill.className = 'mp-pill ' + (target === 'airgapped' ? 'ok' : 'warn');
+      pill.className = pillClass(target);
     }
 
     var errEl = document.getElementById('airgap-toggle-error');
@@ -265,7 +282,7 @@ window.__arailNavJs = true;
           });
           if (pill) {
             pill.textContent = confirmedMode;
-            pill.className = 'mp-pill ' + (confirmedMode === 'airgapped' ? 'ok' : 'warn');
+            pill.className = pillClass(confirmedMode);
           }
           updateBadge(confirmedMode);
         } else {
@@ -275,7 +292,7 @@ window.__arailNavJs = true;
           });
           if (pill) {
             pill.textContent = prevActive;
-            pill.className = 'mp-pill ' + (prevActive === 'airgapped' ? 'ok' : 'warn');
+            pill.className = pillClass(prevActive);
           }
 
           var errCode = res.body && res.body.error;
@@ -307,7 +324,7 @@ window.__arailNavJs = true;
         });
         if (pill) {
           pill.textContent = prevActive;
-          pill.className = 'mp-pill ' + (prevActive === 'airgapped' ? 'ok' : 'warn');
+          pill.className = pillClass(prevActive);
         }
 
         if (errEl) {

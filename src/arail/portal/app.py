@@ -893,17 +893,32 @@ dictionary_store = dictionary_mod.DictionaryStore()
 _dict_gen_lock = asyncio.Lock()
 
 
-@app.on_event("startup")
-async def _startup():
-    import os
-    # Install the egress guard FIRST — before any agent loads, before any
-    # cloud-provider endpoint fires, before the security scan.  Idempotent.
+def _install_egress_guard() -> None:
+    """Install the egress guard; report a failure, never raise.
+
+    ``install_guard()`` raises ``EgressGuardIncomplete`` when an httpx-family library is installed
+    but cannot be patched.  The portal keeps starting anyway (decided in the egress sprint's review:
+    with an incomplete guard the portal and the agent loader keep serving with that library unguarded;
+    only Model Forge's worker exits), so what this MUST do is say so: one warning in the activity log.
+    ``/api/airgap/status`` then reports ``guard_installed: false``, the Network Policy modal names the
+    library and says its requests are NOT blocked, and ``./arailctl doctor`` fails its egress check.
+    tests/test_egress_docs.py pins this behaviour, because a start-up that swallowed the error
+    silently left the library open with every test green.
+    """
     try:
         from arail import egress as _egress
         _egress.install_guard()
     except Exception as _eg_err:  # noqa: BLE001
         activity_log.emit("system",
             f"Egress guard install failed: {_eg_err}", "warn")
+
+
+@app.on_event("startup")
+async def _startup():
+    import os
+    # Install the egress guard FIRST — before any agent loads, before any
+    # cloud-provider endpoint fires, before the security scan.  Idempotent.
+    _install_egress_guard()
 
     from arail import autochecks
     _autochecks_on = autochecks.enabled()
@@ -11945,7 +11960,8 @@ async def get_airgap_status():
 
     Response shape (see ARCHITECTURE.md §8):
       lab_mode: "airgapped" | "hybrid"
-      definition: human-readable description of what the mode enforces
+      definition: human-readable description of what the mode enforces; when the guard could not
+        patch an httpx-family library it names it and says its requests are NOT blocked
       recent_activity: last 5 egress.jsonl entries, each with a "kind" field
       host_can_reach_internet: null | true | false (only when BUDDY_EGRESS_PROBE=1)
       known_gaps: the gaps documented in PRIVACY.md (arail.airgap.KNOWN_GAPS), plus one
@@ -11959,12 +11975,28 @@ async def get_airgap_status():
 
     mode = _airgap_lab_mode()
 
+    # One snapshot of the libraries the guard found and could not patch, used for both the
+    # description and the gap list below.
+    _unguarded = uncovered()
+
+    # "Cloud-provider APIs are blocked." is false for a library the guard could not patch (a request
+    # through it reaches the network layer), so in that state say which one, in the sentence the reader
+    # trusts, instead of leaving the claim and a bullet in a collapsed list that contradicts it.
+    if _unguarded:
+        _cloud_sentence = (
+            f"Cloud-provider APIs are blocked, EXCEPT requests made through {', '.join(_unguarded)}: "
+            f"the guard could not patch {'it' if len(_unguarded) == 1 else 'them'}, "
+            "so those requests are NOT blocked. "
+        )
+    else:
+        _cloud_sentence = "Cloud-provider APIs are blocked. "
+
     _DEFINITIONS = {
         "airgapped": (
             "Agents cannot collect information from the public internet. "
             "Local services on this machine and your private network "
             "(loopback, RFC1918, link-local) stay reachable. "
-            "Cloud-provider APIs are blocked. "
+            + _cloud_sentence +
             "Toggle LAB_MODE=hybrid in .env to allow agent fetches."
         ),
         "hybrid": (
@@ -11977,7 +12009,7 @@ async def get_airgap_status():
     _KNOWN_GAPS = [
         *_AIRGAP_KNOWN_GAPS,
         *(f"{name}: installed, but the guard could not patch it ({why}); "
-          "its requests are NOT checked" for name, why in uncovered().items()),
+          "its requests are NOT checked" for name, why in _unguarded.items()),
     ]
 
     raw_blocks = read_recent_blocks(5)

@@ -129,7 +129,7 @@
       <div id="airgap-toggle-error" class="airgap-toggle-error" style="display:none"></div>
     </div>
 
-    <details class="airgap-gaps">
+    <details class="airgap-gaps" id="airgap-gaps">
       <summary class="chat-muted">
         Known gaps — what isn't wrapped
       </summary>
@@ -138,7 +138,8 @@
         The Python-level guard catches <code>requests</code>,
         <code>urllib.request</code>, <code>httpx</code> and its successor
         <code>httpx2</code> (so also the Hugging Face downloader and the
-        Anthropic/OpenAI SDKs built on them). Other clients
+        Anthropic/OpenAI SDKs built on them), unless the list above names
+        one of them as a library the guard could not patch. Other clients
         (<code>aiohttp</code>, <code>urllib3</code> or <code>httpcore</code>
         used directly, raw sockets, subprocess <code>curl</code>) are not
         wrapped, and a proxy you configure is not checked — see

@@ -11,8 +11,10 @@ is a privacy bug, so these tests tie the words to the code:
   family fails here until the docs say so (DOC-1);
 - every gap the docs list is named by the modal's list too, which is ``airgap.KNOWN_GAPS`` (DOC-2);
 - nobody says ``httpx`` is not wrapped (DOC-3), and the docstrings name the whole family (DOC-4);
-- a library the guard could not patch shows up in ``/api/airgap/status``, so the modal lists it (DOC-5,
-  DOC-6);
+- a library the guard could not patch shows up in ``/api/airgap/status``, so the modal lists it, and the
+  modal stops saying "Cloud-provider APIs are blocked" about it: the description names the library, the
+  pill turns amber and the known-gaps list opens (DOC-5, DOC-6); the portal's start-up says so once
+  (DOC-5, behavioural), and does so first (DOC-5, wiring);
 - the audit grep that PRIVACY.md hands to readers finds every client PRIVACY.md names (DOC-8), and the
   list of processes PRIVACY.md says the guard lives in is the list of processes that install it (DOC-9).
 
@@ -210,19 +212,39 @@ def status_env(monkeypatch, tmp_path):
     egress._reset_for_tests()
 
 
+def _portal_app():
+    return importlib.import_module("arail.portal.app")
+
+
 def _status():
-    portal_app = importlib.import_module("arail.portal.app")
-    status = asyncio.run(portal_app.get_airgap_status())
+    status = asyncio.run(_portal_app().get_airgap_status())
     json.dumps(status)  # it is a JSON response: nothing in it may be an exception or a tuple
     return status
 
 
+@pytest.fixture
+def activity_lines(monkeypatch):
+    """What the portal writes to the activity log, as (source, message, level), without writing it."""
+    lines = []
+    monkeypatch.setattr(
+        _portal_app().activity_log, "emit",
+        lambda source, message, level="info", data=None: lines.append((source, message, level)),
+    )
+    return lines
+
+
+CLOUD_SENTENCE = "Cloud-provider APIs are blocked."
+
+
 def test_a_whole_guard_lists_exactly_the_documented_gaps(status_env):
-    """DOC-5, the baseline: nothing is added when nothing failed."""
+    """DOC-5, the baseline: nothing is added when nothing failed, and the description is the one
+    the modal always showed."""
     egress.install_guard()
     status = _status()
     assert status["guard_installed"] is True
     assert status["known_gaps"] == list(airgap.KNOWN_GAPS)
+    assert CLOUD_SENTENCE in status["definition"]
+    assert "NOT blocked" not in status["definition"] and "EXCEPT" not in status["definition"]
 
 
 @lib_param
@@ -243,6 +265,95 @@ def test_a_library_the_guard_could_not_patch_is_listed_under_known_gaps(lib, mon
     assert "AsyncHTTPTransport" in extra[0] and extra[0].endswith("its requests are NOT checked")
 
 
+@lib_param
+def test_the_airgapped_description_names_a_library_whose_requests_are_not_blocked(lib, monkeypatch, status_env):
+    """DOC-5, the description (REVIEW.md B1).  The sentence the reader trusts, "Cloud-provider APIs are
+    blocked.", is false for a library the guard could not patch (a request through it reached the
+    network layer in the review's probe), so in that state it names the library and says so; the
+    rest of the text stays."""
+    monkeypatch.delattr(importlib.import_module(lib), "AsyncHTTPTransport")
+    with pytest.raises(egress.EgressGuardIncomplete):
+        egress.install_guard()
+    definition = _status()["definition"]
+    assert definition.startswith("Agents cannot collect information from the public internet. ")
+    assert definition.endswith("Toggle LAB_MODE=hybrid in .env to allow agent fetches.")
+    assert "Local services on this machine and your private network" in definition
+    assert f"EXCEPT requests made through {lib}" in definition, definition
+    assert "NOT blocked" in definition, definition
+    assert CLOUD_SENTENCE not in definition, "the unqualified claim is still there"
+
+
+@pytest.mark.parametrize("broken", [INSTALLED] if INSTALLED else [])
+def test_the_description_names_every_unguarded_library(broken, monkeypatch, status_env):
+    """DOC-5.  With every installed member unpatchable (both, in the leg that has both) the description
+    names all of them, in FAMILY order."""
+    for name in broken:
+        monkeypatch.delattr(importlib.import_module(name), "AsyncHTTPTransport")
+    with pytest.raises(egress.EgressGuardIncomplete):
+        egress.install_guard()
+    definition = _status()["definition"]
+    assert f"EXCEPT requests made through {', '.join(broken)}:" in definition, definition
+    assert ("could not patch it" if len(broken) == 1 else "could not patch them") in definition
+
+
+@lib_param
+def test_the_hybrid_description_is_left_alone(lib, monkeypatch, status_env):
+    """DOC-5.  Hybrid mode does not claim cloud calls are blocked, so there is nothing to qualify; the
+    unpatched library is still listed under known gaps."""
+    monkeypatch.setenv("LAB_MODE", "hybrid")
+    monkeypatch.delattr(importlib.import_module(lib), "AsyncHTTPTransport")
+    with pytest.raises(egress.EgressGuardIncomplete):
+        egress.install_guard()
+    status = _status()
+    assert status["definition"].startswith("Hybrid: cloud providers are reachable."), status["definition"]
+    assert "EXCEPT" not in status["definition"]
+    assert any(gap.startswith(f"{lib}: installed, but") for gap in status["known_gaps"])
+
+
+# --- DOC-5, the portal's start-up: one visible warning, and it comes first -------------------------
+
+@lib_param
+def test_the_portal_says_so_once_when_the_guard_is_incomplete(lib, monkeypatch, status_env, activity_lines):
+    """DOC-5, behavioural (REVIEW.md B1, mutant R6).  The portal's guard-install step does not stop the
+    portal (the stated decision: with an incomplete guard the portal and the agent loader keep serving
+    with that library unguarded) so the one thing it must do is say so: exactly one warning in the
+    activity log, naming the library, saying its requests are not checked, and giving the fix.  This was
+    pinned only by a source-string match, so a start-up that swallowed the error left every test green."""
+    monkeypatch.delattr(importlib.import_module(lib), "AsyncHTTPTransport")
+    _portal_app()._install_egress_guard()  # must not raise
+    assert len(activity_lines) == 1, activity_lines
+    source, message, level = activity_lines[0]
+    assert (source, level) == ("system", "warn")
+    assert message.startswith("Egress guard install failed: ")
+    assert lib in message and "NOT checked" in message, message
+    assert "install a supported version" in message and f"uninstall {lib}" in message, message
+    assert egress._INSTALLED is False
+
+
+def test_the_portal_is_silent_when_the_guard_is_whole(status_env, activity_lines):
+    """DOC-5, behavioural: no warning, and the guard is installed."""
+    _portal_app()._install_egress_guard()
+    assert activity_lines == []
+    assert egress._INSTALLED is True
+
+
+def test_the_portal_installs_the_guard_before_it_does_anything_else():
+    """DOC-5, wiring.  The guard goes in "FIRST - before any agent loads, before any cloud-provider
+    endpoint fires, before the security scan".  Moving the install into a function must not lose the call
+    or push it down: no call in ``_startup`` precedes it."""
+    source = _read(ROOT / "src" / "arail" / "portal" / "app.py")
+    startup = next(
+        node for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "_startup"
+    )
+    calls = sorted((node.lineno, node.col_offset, ast.unparse(node.func))  # the body, not the decorator
+                   for statement in startup.body for node in ast.walk(statement) if isinstance(node, ast.Call))
+    assert calls, "_startup() makes no calls at all"
+    assert calls[0][2] == "_install_egress_guard", (
+        f"the first call in _startup() is {calls[0][2]}(), not _install_egress_guard()"
+    )
+
+
 def test_the_modal_lists_whatever_the_status_endpoint_calls_a_known_gap():
     """DOC-6.  The path is /api/airgap/status -> nav.js -> the modal's list.  The entry for an
     unpatchable library carries a library's own error text, so nav.js must write it as text, never as
@@ -254,6 +365,41 @@ def test_the_modal_lists_whatever_the_status_endpoint_calls_a_known_gap():
         "nav.js no longer writes each known gap into the list with textContent"
     )
     assert 'id="airgap-gaps-list"' in _read(MODAL)
+
+
+def test_the_modal_turns_amber_and_opens_the_gaps_when_the_guard_is_incomplete():
+    """DOC-6 (REVIEW.md B1).  ``guard_installed`` was read nowhere, so the pill stayed green and the only
+    trace was a bullet in a collapsed ``<details>``.  Now nav.js reads it: the pill is ``warn`` unless the
+    mode is airgapped AND the guard is whole, and the known-gaps ``<details>`` is opened.  Source-level,
+    like the rest of DOC-6 (nav.js is not run here; the build log shows it run under node)."""
+    js = _read(NAV_JS)
+    assert re.search(r"guardIncomplete = data\.guard_installed === false;", js), (
+        "nav.js does not read guard_installed"
+    )
+    assert re.search(
+        r"function pillClass\(mode\) \{\s*return 'mp-pill ' \+ \(mode === 'airgapped' && !guardIncomplete \? 'ok' : 'warn'\);\s*\}",
+        js,
+    ), "the pill is not painted warn when the guard is incomplete"
+    # Every place that paints the pill goes through that one function (the status fetch, the optimistic
+    # flip, the confirmed flip and the two reverts), so flipping the mode cannot turn it green again
+    # while a library is unguarded; no paint from the mode alone is left.
+    assert len(re.findall(r"pill\.className = pillClass\(", js)) >= 5
+    assert "=== 'airgapped' ? 'ok' : 'warn'" not in js, "a paint of the pill from the mode alone is back"
+    assert re.search(r"var gapsBox = document\.getElementById\('airgap-gaps'\);", js)
+    assert re.search(r"if \(gapsBox && guardIncomplete\) gapsBox\.open = true;", js), (
+        "the known-gaps list is not opened when the guard is incomplete"
+    )
+    assert re.search(r'<details class="airgap-gaps" id="airgap-gaps">', _read(MODAL)), (
+        "the modal's known-gaps <details> has no id nav.js can open"
+    )
+
+
+def test_the_modal_paragraph_does_not_say_a_library_is_caught_without_qualification():
+    """DOC-6.  The paragraph under the list says the guard catches httpx2.  It sits right under an entry
+    that may say the opposite, so it says that too: unless the list above names a library the guard could
+    not patch."""
+    text = flat(modal_gap_paragraph())
+    assert "unless the list above names" in text and "could not patch" in text, text
 
 
 # --- DOC-8: the audit command in PRIVACY.md finds what PRIVACY.md names -----------------------------
@@ -311,12 +457,15 @@ def test_the_guard_is_installed_exactly_where_privacy_says():
         assert needle in bullet, f"PRIVACY.md's 'Other processes' bullet does not name {needle!r}"
 
 
-def test_the_failure_privacy_quotes_is_the_string_the_portal_emits():
+@lib_param
+def test_the_failure_privacy_quotes_is_the_string_the_portal_emits(lib, monkeypatch, status_env, activity_lines):
     """DOC-5, the words.  PRIVACY.md tells the reader what the portal records when the guard cannot be
-    installed completely; the quoted text must be what portal/app.py emits."""
+    installed completely; the quoted text must be what the portal's start-up really writes (run, not
+    matched in the source)."""
     quoted = re.search(r'"(Egress guard install failed)"', flat(privacy_known_gaps()))
     assert quoted, "PRIVACY.md no longer quotes the portal's warning"
-    portal_source = _read(ROOT / "src" / "arail" / "portal" / "app.py")
-    assert f'f"{quoted.group(1)}: {{_eg_err}}", "warn"' in portal_source, (
-        "portal/app.py no longer emits the warning that PRIVACY.md quotes"
+    monkeypatch.delattr(importlib.import_module(lib), "AsyncHTTPTransport")
+    _portal_app()._install_egress_guard()
+    assert len(activity_lines) == 1 and activity_lines[0][1].startswith(quoted.group(1) + ": "), (
+        f"the portal no longer writes the warning that PRIVACY.md quotes: {activity_lines}"
     )
