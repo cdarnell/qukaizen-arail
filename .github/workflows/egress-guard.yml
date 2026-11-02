@@ -113,8 +113,10 @@ jobs:
         run: |
           set -euo pipefail
           # EGRESS_TESTS is a space-separated list: the word splitting is the point.
+          # -rsP: name every skip, and show the output of passing tests (the tests print EVIDENCE
+          # tables: the probe per library, huggingface_hub's refusals), so a green run shows its evidence.
           # shellcheck disable=SC2086
-          .venv/bin/python -m pytest $EGRESS_TESTS -p no:cacheprovider -q -rs --junitxml=egress-junit.xml
+          .venv/bin/python -m pytest $EGRESS_TESTS -p no:cacheprovider -q -rsP --junitxml=egress-junit.xml
           # shellcheck disable=SC2086
           .venv/bin/python tests/egress_ci_check.py no-skips egress-junit.xml $EGRESS_TESTS
       - name: Cloud SDK default clients are refused (anthropic, openai)
@@ -129,7 +131,17 @@ jobs:
             if [ "$attempt" = 3 ]; then echo "::error::SDK install failed after 3 attempts"; exit 1; fi
             sleep $((attempt * 20))
           done
-          .venv/bin/python -m pytest tests/test_egress_sdk_clients.py -p no:cacheprovider -q -rs --junitxml=sdk-junit.xml
+          # The install floats: print which SDK versions this run proved (the step above ran before them).
+          .venv/bin/python - <<'PY'
+          import importlib.metadata as md
+          for n in ("anthropic", "openai", "httpx2"):
+              try:
+                  v = md.version(n)
+              except md.PackageNotFoundError:
+                  v = "not installed"
+              print(f"  {n:10} {v}")
+          PY
+          .venv/bin/python -m pytest tests/test_egress_sdk_clients.py -p no:cacheprovider -q -rsP --junitxml=sdk-junit.xml
           .venv/bin/python tests/egress_ci_check.py no-skips sdk-junit.xml tests/test_egress_sdk_clients.py
       # The sentinel must FAIL here (exit 1, its UNPROVEN message) and the declaration must PASS
       # (this venv really has neither). Anything else, including a collection error, is red.

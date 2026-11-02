@@ -401,3 +401,26 @@ def test_the_legs_that_run_the_tests_are_every_leg_but_the_negative_control_and_
     assert sdk["env"]["ARAIL_TEST_EXPECT_SDKS"] == "${{ matrix.sdks }}"
     assert "tests/egress_ci_check.py no-skips sdk-junit.xml tests/test_egress_sdk_clients.py" in sdk["run"]
     assert (ROOT / "tests" / "test_egress_sdk_clients.py").is_file()
+
+
+def test_a_green_run_shows_the_evidence_it_produced():
+    """CI-6, REVIEW.md W5 (the workspace rule that a run must teach).  The tests print EVIDENCE tables (the
+    brief's probe per library, huggingface_hub's refusals, the SDK chains) that pytest shows only for a
+    failure, so a green run said nothing.  `-rP` shows the captured output of passing tests; and the SDK
+    step installs the day's SDK versions after the 'What this leg installed' step has printed, so it
+    prints them itself."""
+    _, data = load_workflow()
+    steps = {step["name"]: step for step in data["jobs"]["guard"]["steps"]}
+    for name in ("Egress tests (no failure, no skip, every file ran)", "Cloud SDK default clients are refused (anthropic, openai)"):
+        pytest_line = next(line for line in steps[name]["run"].splitlines() if "-m pytest" in line)
+        reports = re.search(r"\s-r([A-Za-z]+)(\s|$)", pytest_line)
+        assert reports and "P" in reports.group(1) and "s" in reports.group(1), (
+            f"{name!r}: the pytest line does not pass -r with both s (skips) and P (output of passing tests): {pytest_line!r}"
+        )
+    run = steps["Cloud SDK default clients are refused (anthropic, openai)"]["run"]
+    installed, tested = run.index("pip install anthropic openai"), run.index("-m pytest")
+    printed = run[installed:tested]
+    for package in ("anthropic", "openai", "httpx2"):
+        assert f'"{package}"' in printed and "md.version" in printed, (
+            f"the SDK step does not print the installed version of {package} between the install and the tests"
+        )
