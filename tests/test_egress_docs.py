@@ -153,6 +153,35 @@ def test_the_first_three_known_gaps_are_the_strings_the_endpoint_always_listed()
     assert len(airgap.KNOWN_GAPS) == 5
 
 
+# --- the local-address check is Python's private set (REVIEW.md N1) ----------------------------------
+
+@pytest.mark.parametrize("address,range_name", [
+    ("192.0.2.7", "documentation"), ("198.51.100.7", "documentation"), ("203.0.113.7", "documentation"),
+    ("2001:db8::1", "documentation (IPv6)"), ("198.18.0.1", "benchmarking"), ("240.0.0.1", "reserved"),
+    ("fc00::1", "IPv6 unique-local"),
+])
+def test_the_local_check_lets_through_every_range_python_calls_private(address, range_name):
+    """PRIVACY.md listed loopback, RFC1918 and link-local.  ``airgap.is_local_ip`` is
+    ``is_loopback or is_private or is_link_local``, so it also passes the ranges Python's ``ipaddress`` calls
+    private: documentation, benchmarking and reserved ranges, IPv6 unique-local.  None is routed on the
+    public internet, so nothing leaks, but the doc must not describe a narrower check than the code runs."""
+    assert airgap.is_local_ip(address), f"{address} ({range_name}) is no longer local"
+
+
+@pytest.mark.parametrize("address", ["100.64.0.1", "8.8.8.8", "151.101.64.81", "2606:4700:4700::1111"])
+def test_the_local_check_still_refuses_public_and_carrier_grade_nat_addresses(address):
+    """The other side of N1: what is not in Python's private set is refused, so the airgap still holds."""
+    assert not airgap.is_local_ip(address), f"{address} would pass the airgap"
+
+
+def test_privacy_describes_the_local_check_as_pythons_private_set():
+    """REVIEW.md N1, the words."""
+    section = flat(privacy_enforces())
+    assert "Python's `ipaddress`" in section, section
+    for needle in ("documentation", "benchmarking", "reserved", "IPv6 unique-local"):
+        assert needle in section, f"PRIVACY.md's 'What airgapped mode enforces' does not mention {needle!r}"
+
+
 # --- DOC-3: nobody says httpx is not wrapped -----------------------------------------------------
 
 NOT_WRAPPED = re.compile(r"httpx\w*\W+(—|-)+\s*not wrapped", re.I)

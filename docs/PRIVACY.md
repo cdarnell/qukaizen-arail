@@ -46,6 +46,9 @@ yourself.
 - Loopback: `127.0.0.0/8`, `::1`, `localhost`
 - RFC1918: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`
 - Link-local: `169.254.0.0/16`, `fe80::/10`
+- Or another range Python's `ipaddress` treats as private (documentation,
+  benchmarking and reserved ranges, IPv6 unique-local): the guard uses its
+  `is_private` test as it is.
 
 The destination's hostname is resolved to an IP via the system
 resolver and the IP is checked against those ranges (so a public
