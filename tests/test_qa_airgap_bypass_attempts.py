@@ -13,7 +13,8 @@ Architect's review listed these as the highest-leverage attack surface:
   3. ``aiohttp``, raw ``socket.connect``,
      ``subprocess.run(["curl", ...])``, ``os.system("curl ...")`` —
      declared NOT wrapped (documented gaps). ``httpx`` used to be on
-     this list; its transports are wrapped now.
+     this list; its transports, and those of its successor ``httpx2``,
+     are wrapped now.
   4. ``asyncio.create_task`` contextvars-leak from inside an
      ``@allow_egress`` block (documented behavior).
 
@@ -25,6 +26,7 @@ a future PR *closes* the gap — that's the desired tripwire.
 from __future__ import annotations
 
 import asyncio
+import importlib
 import json
 import os
 import socket
@@ -38,6 +40,7 @@ import requests
 
 import arail.airgap
 import arail.egress
+from tests.egress_family_support import PROBE_URL, PUBLIC_TEST_IP, installed_independently
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -150,7 +153,7 @@ class TestDNSRebind:
 
 
 # ──────────────────────────────────────────────────────────────────────
-# 3. Documented gaps — httpx / aiohttp / raw socket / subprocess curl
+# 3. Documented gaps — aiohttp / raw socket / subprocess curl (httpx and httpx2 are wrapped)
 # ──────────────────────────────────────────────────────────────────────
 
 class TestDocumentedGaps:
@@ -159,8 +162,9 @@ class TestDocumentedGaps:
     so a future PR that tries to close them (excellent!) triggers a
     tripwire saying "update the docs and modal too."
 
-    ``httpx`` WAS on this list; it is wrapped now (see
-    test_httpx_is_guarded_in_airgapped, which pins the closure instead).
+    ``httpx`` WAS on this list; it is wrapped now, and so is its
+    successor ``httpx2`` (see test_httpx_is_guarded_in_airgapped, which
+    pins the closure for every installed httpx-family library instead).
     """
 
     def test_raw_socket_connect_bypasses_guard(self, monkeypatch, tmp_path):
@@ -198,30 +202,36 @@ class TestDocumentedGaps:
         finally:
             s.close()
 
-    def test_httpx_is_guarded_in_airgapped(self, monkeypatch, tmp_path):
-        """``httpx`` is no longer a gap — install_guard() patches its
-        transports (sprint airgapped-mode-toggles), which is what stops
-        the anthropic/openai SDKs from egressing while airgapped.
+    @pytest.mark.parametrize("lib", installed_independently())
+    def test_httpx_is_guarded_in_airgapped(self, lib, monkeypatch, tmp_path):
+        """The httpx family is no longer a gap — install_guard() patches
+        the transports of every installed member (``httpx``, ``httpx2``;
+        sprint airgapped-mode-toggles, then TD50), which is what stops
+        the cloud SDKs and the Hugging Face downloader from egressing
+        while airgapped.
 
-        Pin: in airgapped mode, an httpx call to a public host raises
-        EgressBlocked before any socket I/O. If this starts failing,
-        the httpx guard regressed — that reopens the primary cloud-SDK
-        leak; fix the guard, don't relax this test.
+        Pin, once per library that is actually installed (independently
+        computed, never skipped for being absent): in airgapped mode, a
+        call to a public host raises EgressBlocked before any socket
+        I/O. If this starts failing, the guard regressed for that
+        library — that reopens the primary cloud-SDK leak; fix the
+        guard, don't relax this test.
         """
-        try:
-            import httpx
-        except ImportError:
-            pytest.skip("httpx not installed in this env")
+        mod = importlib.import_module(lib)
 
         monkeypatch.setenv("LAB_MODE", "airgapped")
         monkeypatch.setenv("ARAIL_DATA_DIR", str(tmp_path))
+        # Deterministic locality check, no resolver (see PUBLIC_TEST_IP); the
+        # request itself targets a .invalid name, so a regression is a fast
+        # ConnectError, never a connection to a real host.
+        monkeypatch.setattr(socket, "gethostbyname", lambda h: PUBLIC_TEST_IP)
         arail.egress._reset_for_tests()
         arail.egress.install_guard()
 
-        client = httpx.Client(timeout=0.05)
+        client = mod.Client(timeout=0.05)
         try:
             with pytest.raises(arail.airgap.EgressBlocked):
-                client.get("https://example.com")
+                client.get(PROBE_URL)
         finally:
             client.close()
             arail.egress._reset_for_tests()

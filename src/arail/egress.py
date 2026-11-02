@@ -1,8 +1,22 @@
 """egress — Python-level outbound network guard.
 
-Installs a custom requests HTTPAdapter, a urllib opener, and guarded
-httpx transports that consult the airgap policy before passing a
-request through.
+Installs a guarded requests HTTPAdapter, a guarded urllib opener, and a
+check on the transports of every installed httpx-family library (``httpx``
+and its successor ``httpx2``, named once in ``arail.httpx_family``), each
+of which consults the airgap policy before a request leaves.
+
+The httpx-family check is patched onto ``HTTPTransport.handle_request`` and
+``AsyncHTTPTransport.handle_async_request`` at class level, so it also
+covers clients built before install_guard() ran and the clients SDKs build
+for themselves (huggingface_hub, anthropic, openai). In-process transports
+(ASGITransport, WSGITransport, MockTransport, starlette's TestClient) are
+other classes and are left alone. Not covered (docs/PRIVACY.md): aiohttp;
+urllib3 or httpcore/httpcore2 used directly; raw sockets; subprocesses; the
+hop to a configured proxy (the decision is made on the destination).
+
+If an httpx-family library is installed but cannot be patched,
+install_guard() patches everything else and raises EgressGuardIncomplete:
+a library the guard cannot see must never be a silent hole.
 
 Usage (called automatically at portal startup and agent-loader time):
 
@@ -26,6 +40,7 @@ context manager (see ``probe_internet``).
 from __future__ import annotations
 
 import contextlib
+import importlib
 import inspect
 import json
 import logging
@@ -33,16 +48,19 @@ import re
 import os
 import socket
 import sys
+import threading
 import time
+import types
 import urllib.request
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 from urllib.parse import urlparse
 
 import requests
 import requests.adapters
 import requests.sessions
 
+from arail import httpx_family
 from arail.airgap import EgressBlocked, is_airgapped, is_local_host, is_local_ip
 
 try:
@@ -63,11 +81,31 @@ _allow_egress_var: ContextVar[Optional[str]] = ContextVar(
     "_allow_egress_var", default=None
 )
 
-# Idempotency guard — install_guard() is a no-op after the first call.
+# Idempotency guard — install_guard() is a no-op after a COMPLETE install.  It stays False after an
+# install that raised EgressGuardIncomplete, so every later call retries and raises again.
 _INSTALLED: bool = False
+
+# Guards install_guard() and _reset_for_tests(): two threads installing at once must patch each
+# class once and must not save the first thread's GuardedHTTPAdapter as "the original".
+_LOCK = threading.RLock()
 
 # The original HTTPAdapter class before we monkeypatched it.
 _ORIGINAL_HTTP_ADAPTER: type = requests.adapters.HTTPAdapter
+
+# What the httpx-family patch replaced: (class, attribute) -> (owned, original).  ``owned`` is True
+# when the attribute was in the class's own __dict__ (``original`` is that exact object, put back
+# with setattr on reset) and False when the class only inherited it (reset deletes the attribute
+# again).  Keyed by class, not by library name, so one class reached under two names (httpx2's
+# alias_httpx(), a re-export) is patched once and restored once.
+_PATCHED: dict[tuple[type, str], tuple[bool, object]] = {}
+
+# What the last install attempt found, per client: "guarded", "absent", or "unguarded: <why>".
+# Rebound (never mutated) by install_guard(), so a reader always sees a complete snapshot.
+_COVERAGE: dict[str, str] = {}
+_UNGUARDED = "unguarded: "
+
+# What the docs must name: the clients the guard covers.
+GUARDED_CLIENTS: tuple[str, ...] = ("requests", "urllib.request", *httpx_family.FAMILY)
 
 # Process-level cache for the internet probe result {result: bool, ts: float}.
 _PROBE_CACHE: dict = {}
@@ -106,21 +144,32 @@ _SKIP_MODULES = frozenset({
     "urllib.request",
     "urllib3.connectionpool",
     "urllib3.connection",
-    "httpx",
+    # The httpx family, spelled out from the one list, and the layer under it.  Matching used to be
+    # str.startswith, which skipped httpx2 only because "httpx2".startswith("httpx") and would have
+    # skipped any unrelated module whose name merely began with one of these.  httpcore frames are
+    # never on the stack when the check runs; they are named so the set says the family on purpose.
+    *httpx_family.FAMILY,
     "httpcore",
+    "httpcore2",
     "anthropic",
 })
+
+
+def _is_guard_frame(module: str) -> bool:
+    """True if ``module`` is an entry of _SKIP_MODULES or lives inside one (``entry.sub.module``)."""
+    return any(module == entry or module.startswith(entry + ".") for entry in _SKIP_MODULES)
 
 
 def _current_caller() -> str:
     """Walk the stack and return the first frame outside the guard modules.
 
-    Falls back to ``"unknown"`` if no useful frame is found.
+    A guard frame is an exact _SKIP_MODULES name or a dotted child of one.  Falls back to
+    ``"unknown"`` if no useful frame is found.
     """
     try:
         for frame_info in inspect.stack():
             module = frame_info.frame.f_globals.get("__name__", "") or ""
-            if module and not any(module.startswith(s) for s in _SKIP_MODULES):
+            if module and not _is_guard_frame(module):
                 qualname = frame_info.frame.f_code.co_qualname if hasattr(
                     frame_info.frame.f_code, "co_qualname"
                 ) else frame_info.frame.f_code.co_name
@@ -333,18 +382,16 @@ class GuardedHTTPAdapter(requests.adapters.HTTPAdapter):
 
 
 # ---------------------------------------------------------------------------
-# Guarded httpx transports
+# Guarded httpx-family transports
 # ---------------------------------------------------------------------------
 
-# Originals of the patched httpx transport methods (None until installed).
-_ORIG_HTTPX_SYNC = None
-_ORIG_HTTPX_ASYNC = None
-
-
 def _check_httpx_url(url: str) -> None:
-    """Decision tree for httpx requests — same semantics as
+    """Decision tree for httpx-family requests — same semantics as
     ``GuardedHTTPAdapter.send``, including allow-context audit lines
-    (``_check_egress_or_raise`` leaves allow logging to its caller)."""
+    (``_check_egress_or_raise`` leaves allow logging to its caller).
+
+    The decision is on the DESTINATION in ``url``; a proxy the client was
+    configured with is not consulted (documented gap, docs/PRIVACY.md)."""
     try:
         host = urlparse(url).hostname or ""
     except Exception:
@@ -369,54 +416,119 @@ def _check_httpx_url(url: str) -> None:
         raise EgressBlocked(host or "?", caller, "airgapped")
 
 
-def _install_httpx_guard() -> None:
-    """Patch httpx's transport classes at class level.
+def _make_guarded_sync(original: Callable) -> Callable:
+    """Wrap a ``handle_request``: check the destination, then call the library's own method with
+    every argument it was given.  No functools.wraps: introspection shows this is ARAIL's wrapper."""
 
-    Class-level patching guards every httpx client — including ones built
-    *before* install_guard ran (method lookup happens on the class at call
-    time), which covers SDKs that construct their own internal client
-    (anthropic, openai, huggingface_hub). httpx is an optional dependency
-    (maximus tier); missing httpx is a silent no-op.
+    def _guarded_handle_request(self, request, *args, **kwargs):
+        _check_httpx_url(str(request.url))
+        return original(self, request, *args, **kwargs)
+
+    _guarded_handle_request._arail_guarded = True  # type: ignore[attr-defined]
+    _guarded_handle_request.__wrapped__ = original  # type: ignore[attr-defined]
+    return _guarded_handle_request
+
+
+def _make_guarded_async(original: Callable) -> Callable:
+    """The ``handle_async_request`` twin of ``_make_guarded_sync``."""
+
+    async def _guarded_handle_async_request(self, request, *args, **kwargs):
+        _check_httpx_url(str(request.url))
+        return await original(self, request, *args, **kwargs)
+
+    _guarded_handle_async_request._arail_guarded = True  # type: ignore[attr-defined]
+    _guarded_handle_async_request.__wrapped__ = original  # type: ignore[attr-defined]
+    return _guarded_handle_async_request
+
+
+# The two class-level patch targets every httpx-family library is expected to have: the class, the
+# method that performs the network I/O, and how to wrap it.
+_FAMILY_TARGETS = (
+    ("HTTPTransport", "handle_request", _make_guarded_sync),
+    ("AsyncHTTPTransport", "handle_async_request", _make_guarded_async),
+)
+
+
+def _patch_family_member(name: str, module: types.ModuleType) -> str:
+    """Put the guard on one family member's two transport classes.
+
+    Returns the member's coverage value: ``"guarded"``, or ``"unguarded: <why>"`` when a class or
+    method is missing (or cannot be set).  Everything that CAN be patched is patched either way.
+
+    A method that already carries ``_arail_guarded`` is skipped: it is the same class object
+    reached under another name (``httpx2.alias_httpx()`` makes ``sys.modules["httpx"]`` the httpx2
+    module; a package may re-export another's classes), so it is wrapped once and recorded once.
     """
-    global _ORIG_HTTPX_SYNC, _ORIG_HTTPX_ASYNC
-    try:
-        import httpx
-    except ImportError:
-        return
-    if getattr(httpx.HTTPTransport.handle_request, "_arail_guarded", False):
-        return
-
-    _ORIG_HTTPX_SYNC = httpx.HTTPTransport.handle_request
-    _ORIG_HTTPX_ASYNC = httpx.AsyncHTTPTransport.handle_async_request
-    orig_sync, orig_async = _ORIG_HTTPX_SYNC, _ORIG_HTTPX_ASYNC
-
-    def _guarded_handle_request(self, request):
-        _check_httpx_url(str(request.url))
-        return orig_sync(self, request)
-
-    async def _guarded_handle_async_request(self, request):
-        _check_httpx_url(str(request.url))
-        return await orig_async(self, request)
-
-    _guarded_handle_request._arail_guarded = True
-    _guarded_handle_async_request._arail_guarded = True
-    httpx.HTTPTransport.handle_request = _guarded_handle_request
-    httpx.AsyncHTTPTransport.handle_async_request = _guarded_handle_async_request
+    problems = []
+    for cls_name, attr, make_wrapper in _FAMILY_TARGETS:
+        cls = getattr(module, cls_name, None)
+        original = getattr(cls, attr, None) if isinstance(cls, type) else None
+        if not callable(original):
+            problems.append(f"{cls_name}.{attr} is missing")
+            continue
+        if getattr(original, "_arail_guarded", False):
+            continue
+        owned = attr in vars(cls)
+        saved = vars(cls)[attr] if owned else None
+        try:
+            setattr(cls, attr, make_wrapper(original))
+        except Exception as exc:  # noqa: BLE001 — a class that refuses the patch is a hole
+            problems.append(f"{cls_name}.{attr} could not be patched ({type(exc).__name__}: {exc})")
+            continue
+        _PATCHED[(cls, attr)] = (owned, saved)
+    if problems:
+        return _UNGUARDED + "; ".join(problems)
+    return "guarded"
 
 
-def _reset_httpx_guard() -> None:
-    """TEST USE ONLY — restore the original httpx transport methods."""
-    global _ORIG_HTTPX_SYNC, _ORIG_HTTPX_ASYNC
-    if _ORIG_HTTPX_SYNC is None:
-        return
-    try:
-        import httpx
-    except ImportError:
-        return
-    httpx.HTTPTransport.handle_request = _ORIG_HTTPX_SYNC
-    httpx.AsyncHTTPTransport.handle_async_request = _ORIG_HTTPX_ASYNC
-    _ORIG_HTTPX_SYNC = None
-    _ORIG_HTTPX_ASYNC = None
+def _install_httpx_family_guard() -> dict[str, str]:
+    """Patch every installed member of ``httpx_family.FAMILY``; return ``{name: coverage value}``.
+
+    The patch is on the classes, so it covers clients built before this ran and the clients SDKs
+    build for themselves (huggingface_hub, anthropic, openai).  A member that is NOT installed is
+    ``"absent"``: nothing in this process can use it.  A member that IS installed but cannot be
+    patched (its lookup or import raises, a class or method is missing) is ``"unguarded: <why>"``,
+    and install_guard() raises after everything else is patched.  The guard used to treat a
+    library it could not import as nothing to do, so it could not tell those two apart, which is
+    how TD50 stayed hidden.
+
+    Libraries are imported here, eagerly: the check must exist before any code can use them.
+    """
+    result: dict[str, str] = {}
+    for name in httpx_family.FAMILY:
+        try:
+            present = httpx_family.is_installed(name)
+        except Exception as exc:  # noqa: BLE001 — a broken finder: cannot say it is absent
+            result[name] = f"{_UNGUARDED}lookup raised {type(exc).__name__}: {exc}"
+            continue
+        if not present:
+            result[name] = "absent"
+            continue
+        try:
+            module = importlib.import_module(name)
+        except Exception as exc:  # noqa: BLE001 — installed but broken: fail closed, say why
+            result[name] = f"{_UNGUARDED}import raised {type(exc).__name__}: {exc}"
+            continue
+        result[name] = _patch_family_member(name, module)
+    return result
+
+
+def _reset_httpx_family_guard() -> None:
+    """TEST USE ONLY — put every patched class back exactly as install found it.
+
+    ``setattr`` the saved function for an attribute the class owned, ``delattr`` for one it merely
+    inherited.  Never raises: a restore that fails is logged and the rest are still attempted."""
+    for (cls, attr), (owned, saved) in list(_PATCHED.items()):
+        try:
+            if owned:
+                setattr(cls, attr, saved)
+            else:
+                delattr(cls, attr)
+        except AttributeError:
+            pass  # already gone: nothing to restore
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("arail.egress: could not restore %s.%s: %s", cls.__qualname__, attr, exc)
+    _PATCHED.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -436,72 +548,151 @@ class _GuardedHTTPSHandler(urllib.request.HTTPSHandler):
 
 
 # ---------------------------------------------------------------------------
-# install_guard / _reset_for_tests
+# install_guard / _reset_for_tests / coverage
 # ---------------------------------------------------------------------------
 
-def install_guard() -> None:
-    """Install the egress guard.  Idempotent; safe to call N times.
+class EgressGuardIncomplete(RuntimeError):
+    """install_guard() could not put the guard on an httpx-family library that is installed.
 
-    Mounts a GuardedHTTPAdapter via a monkey-patch on
-    ``requests.adapters.HTTPAdapter`` so any future ``requests.Session()``
-    constructor inherits the guarded adapter.  (Without the monkey-patch,
-    an agent calling ``requests.Session()`` directly gets a fresh default
-    adapter and bypasses the guard.)
-
-    Also installs a urllib opener via ``urllib.request.install_opener``
-    that runs ``should_allow_egress`` in a request-handler hook before
-    delegating to the default chain.
-
-    Idempotency is enforced via the module-level ``_INSTALLED`` flag.
-    Re-imports during test runs (which monkeypatch openers) don't
-    re-install; tests that need to reset must call ``_reset_for_tests()``
-    explicitly.
+    Everything else is guarded (``coverage()`` says what); the library named here is NOT: its
+    requests are not checked against LAB_MODE.  This is not an ``EgressBlocked`` — no request was
+    refused.  ``uncovered`` is ``{library: reason}``, the same content as ``uncovered()``.  Every
+    caller of install_guard() already turns an exception into something an operator sees (the
+    portal's activity warning, the agent loader's warning, ``arailctl doctor``'s required check,
+    the Model Forge worker's exit code); a log line alone would be the silent hole of TD50.
     """
-    global _INSTALLED, _ORIGINAL_HTTP_ADAPTER
+
+    def __init__(self, message: str, uncovered: Optional[dict] = None) -> None:
+        super().__init__(message)
+        self.uncovered: dict = dict(uncovered or {})
+
+
+def coverage() -> dict:
+    """What the last install attempt guarded, per client.
+
+    Keys are ``"requests"``, ``"urllib.request"``, then ``httpx_family.FAMILY`` in order; values
+    are ``"guarded"``, ``"absent"`` (not installed: nothing here can use it) or
+    ``"unguarded: <why>"``.  ``{}`` before the first install and after ``_reset_for_tests()``.
+    Reflects the last attempt, including one that raised EgressGuardIncomplete.  A copy.
+    """
+    return dict(_COVERAGE)
+
+
+def uncovered() -> dict:
+    """``{library: reason}`` for every client the last install attempt found installed but could
+    not guard.  Empty when the guard is complete."""
+    return {
+        name: value[len(_UNGUARDED):]
+        for name, value in _COVERAGE.items()
+        if value.startswith(_UNGUARDED)
+    }
+
+
+def _incomplete_message(missing: dict, coverage_now: dict) -> str:
+    still_guarded = [name for name, value in coverage_now.items() if value == "guarded"]
+    what = "; ".join(f"{name}: {why}" for name, why in missing.items())
+    return (
+        f"egress guard incomplete — {what}. Requests made through {', '.join(missing)} are NOT "
+        f"checked against LAB_MODE. Still guarded: {', '.join(still_guarded)}. "
+        f"Fix: install a supported version (httpx2<3, httpx<1) or uninstall {' and '.join(missing)}."
+    )
+
+
+def install_guard() -> None:
+    """Install the egress guard.  Idempotent; safe to call N times, from any thread.
+
+    1. ``requests``: a GuardedHTTPAdapter via a monkey-patch on
+       ``requests.adapters.HTTPAdapter`` (and ``requests.sessions.HTTPAdapter``, which
+       ``Session.__init__`` reads) so any future ``requests.Session()`` is guarded.  Without it, an
+       agent calling ``requests.Session()`` directly would get a fresh default adapter and bypass
+       the guard.  The stock class is saved only if the current one is not already the guarded
+       one, so a retried install cannot save the guard as "the original".
+    2. ``urllib.request``: an opener (``install_opener``) whose HTTP and HTTPS handlers consult
+       the airgap policy before delegating to the default chain.
+    3. The httpx family: the transports of every installed member of
+       ``arail.httpx_family.FAMILY`` (``httpx2``, ``httpx``), patched on the class so clients built
+       earlier, and the clients SDKs build for themselves, are covered.  A class reached under two
+       names (``httpx2.alias_httpx()``) is wrapped once; the ``_arail_guarded`` marker and
+       ``__wrapped__`` on each wrapper make a repeat harmless.
+
+    Idempotency: a COMPLETE install sets the module-level ``_INSTALLED`` flag, and later calls
+    return at once.  If an httpx-family library is installed but cannot be patched (its import
+    raises, or a class or method is missing), everything else is patched, ``coverage()`` records
+    why, the error is logged, and EgressGuardIncomplete is raised.  ``_INSTALLED`` stays False, so
+    every later call retries and raises again: the guard never reports itself installed while a
+    library it knows about is open.  This holds in hybrid mode too, because the airgap toggle flips
+    ``LAB_MODE`` in-process.
+
+    Tests that need a fresh install call ``_reset_for_tests()``.
+    """
+    global _INSTALLED, _ORIGINAL_HTTP_ADAPTER, _COVERAGE
 
     if _INSTALLED:
         return
 
-    # 1. Monkeypatch both requests.adapters.HTTPAdapter AND
-    #    requests.sessions.HTTPAdapter so new Sessions are guarded.
-    #    Session.__init__ does: from requests.adapters import HTTPAdapter
-    #    which means it holds a local reference inside requests.sessions
-    #    that we must also replace.
-    _ORIGINAL_HTTP_ADAPTER = requests.adapters.HTTPAdapter
-    requests.adapters.HTTPAdapter = GuardedHTTPAdapter  # type: ignore[misc]
-    requests.sessions.HTTPAdapter = GuardedHTTPAdapter  # type: ignore[attr-defined]
+    with _LOCK:
+        if _INSTALLED:
+            return
 
-    # 2. Install the urllib opener.
-    opener = urllib.request.build_opener(
-        _GuardedHTTPHandler, _GuardedHTTPSHandler
-    )
-    urllib.request.install_opener(opener)
+        found: dict[str, str] = {}
 
-    # 3. httpx transports (anthropic/openai SDKs, knowledge-canvas,
-    #    open-notebook seed). No-op when httpx isn't installed.
-    _install_httpx_guard()
+        # 1. requests.
+        if requests.adapters.HTTPAdapter is not GuardedHTTPAdapter:
+            _ORIGINAL_HTTP_ADAPTER = requests.adapters.HTTPAdapter
+        requests.adapters.HTTPAdapter = GuardedHTTPAdapter  # type: ignore[misc]
+        requests.sessions.HTTPAdapter = GuardedHTTPAdapter  # type: ignore[attr-defined]
+        found["requests"] = "guarded"
 
-    _INSTALLED = True
-    _log.debug("arail.egress: guard installed (mode=%s)", "airgapped" if is_airgapped() else "hybrid")
+        # 2. urllib.request.
+        opener = urllib.request.build_opener(
+            _GuardedHTTPHandler, _GuardedHTTPSHandler
+        )
+        urllib.request.install_opener(opener)
+        found["urllib.request"] = "guarded"
+
+        # 3. The httpx family (anthropic/openai SDKs, huggingface_hub, starlette's TestClient,
+        #    the Open Notebook seed).
+        found.update(_install_httpx_family_guard())
+        _COVERAGE = found
+
+        missing = uncovered()
+        if missing:
+            message = _incomplete_message(missing, found)
+            _log.error("arail.egress: %s", message)
+            raise EgressGuardIncomplete(message, missing)
+
+        _INSTALLED = True
+        _log.debug("arail.egress: guard installed (mode=%s)", "airgapped" if is_airgapped() else "hybrid")
 
 
 def _reset_for_tests() -> None:
     """Reset the guard to un-installed state.  TEST USE ONLY.
 
-    Restores the original ``requests.adapters.HTTPAdapter`` class and
-    resets the module-level ``_INSTALLED`` flag so the next
-    ``install_guard()`` call re-installs cleanly.
+    Restores the original ``requests.adapters.HTTPAdapter`` class and, for every httpx-family
+    class install patched, the exact pre-install state (``setattr`` if the class owned the
+    attribute, ``delattr`` if it inherited it).  Clears ``coverage()`` and the module-level
+    ``_INSTALLED`` flag so the next ``install_guard()`` call re-installs cleanly.  Never raises:
+    ``tests/conftest.py`` swallows exceptions from it, and a reset that fails silently would
+    pollute every later test.
 
     The urllib opener cannot be reset without re-importing urllib.request;
     tests that care about urllib isolation must monkeypatch
     ``urllib.request.urlopen`` or ``_GuardedHTTPSHandler.https_open``
     directly.
     """
-    global _INSTALLED
-    requests.adapters.HTTPAdapter = _ORIGINAL_HTTP_ADAPTER  # type: ignore[misc]
-    requests.sessions.HTTPAdapter = _ORIGINAL_HTTP_ADAPTER  # type: ignore[attr-defined]
-    _reset_httpx_guard()
-    _INSTALLED = False
+    global _INSTALLED, _COVERAGE
+    with _LOCK:
+        try:
+            requests.adapters.HTTPAdapter = _ORIGINAL_HTTP_ADAPTER  # type: ignore[misc]
+            requests.sessions.HTTPAdapter = _ORIGINAL_HTTP_ADAPTER  # type: ignore[attr-defined]
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("arail.egress: could not restore the requests adapter: %s", exc)
+        try:
+            _reset_httpx_family_guard()
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("arail.egress: could not restore the httpx family: %s", exc)
+        _COVERAGE = {}
+        _INSTALLED = False
 
 
 # ---------------------------------------------------------------------------
