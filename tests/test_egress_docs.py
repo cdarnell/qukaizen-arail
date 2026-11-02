@@ -27,6 +27,7 @@ import ast
 import asyncio
 import importlib
 import json
+import logging
 import re
 import socket
 import types
@@ -377,6 +378,43 @@ def test_the_model_forge_worker_still_starts_the_phase_when_the_guard_is_whole(m
     assert worker.main(["PA", "build-1"]) == 1  # the existing phase-boundary handler reports the stop
     assert started == [True]
     assert capsys.readouterr().err.startswith("worker: phase PA failed: stop here")
+
+
+@lib_param
+def test_the_agent_loader_logs_and_keeps_loading_agents_when_the_guard_is_incomplete(
+        lib, monkeypatch, tmp_path, status_env, caplog):
+    """DOC-5, the decision's other half (REVIEW.md B1).  The agent loader, like the portal, reports an
+    incomplete guard and carries on: that is the stated behaviour ("the portal and the agent loader keep
+    serving with that library unguarded; only Model Forge's worker exits"), pinned so that changing it
+    (TD56, fail closed) is a visible act that must also update docs/PRIVACY.md.  Nothing is seeded or
+    loaded: the seeding and the discovery are faked."""
+    from arail.agents import loader
+
+    monkeypatch.delattr(importlib.import_module(lib), "AsyncHTTPTransport")
+    monkeypatch.setattr(loader, "_SHIPPED", set())
+    monkeypatch.setattr(loader, "discover", lambda pkb_root=None: [])
+    with caplog.at_level(logging.WARNING, logger=loader.log.name):
+        assert loader.load_all(pkb_root=tmp_path) == {}  # returned: it did not stop
+    messages = [record.getMessage() for record in caplog.records if record.name == loader.log.name]
+    assert len(messages) == 1 and messages[0].startswith("Egress guard install failed in load_all: "), messages
+    assert lib in messages[0] and "NOT checked" in messages[0], messages
+
+
+def test_privacy_states_what_an_incomplete_guard_leaves_open_and_what_stops():
+    """REVIEW.md B1, the words.  PRIVACY.md says plainly what happens when the guard cannot patch a library:
+    where the lab says so (the activity log, the doctor, the modal), that the portal and the agents keep
+    running with that library unguarded, and that only Model Forge's worker stops.  Each sentence is
+    pinned by a behavioural test: the portal and the modal (DOC-5), the loader (above), the worker (above),
+    the doctor (DR-3 in test_httpx_family.py)."""
+    text = flat(privacy_known_gaps())
+    for needle in (
+        'the portal\'s activity log records "Egress guard install failed"',
+        "`./arailctl doctor` fails its egress check",
+        "description says that requests made through that library are NOT blocked",
+        "the portal and the agent loader keep serving with that library unguarded",
+        "only Model Forge's worker exits",
+    ):
+        assert needle in text, f"PRIVACY.md's Known gaps no longer says: {needle}"
 
 
 def test_the_portal_installs_the_guard_before_it_does_anything_else():

@@ -73,7 +73,15 @@ renamed its transport classes, say), requests made through that library
 are not checked, and the lab says so instead of staying silent: the
 portal's activity log records "Egress guard install failed",
 `./arailctl doctor` fails its egress check, and the Network Policy modal
-lists the library under known gaps.
+shows its mode pill as a warning and opens the known-gaps list with the
+library in it, and its description says that requests made through that
+library are NOT blocked.
+
+The lab does not stop, though. With an incomplete guard the portal and the
+agent loader keep serving with that library unguarded; only Model Forge's
+worker exits (with a message that names the library). Until you install a
+supported version of that library (`httpx2<3`, `httpx<1`) or uninstall it,
+and restart the lab, airgapped mode does not hold for it.
 
 It does NOT wrap:
 
