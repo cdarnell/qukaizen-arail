@@ -115,6 +115,8 @@ jobs:
           # EGRESS_TESTS is a space-separated list: the word splitting is the point.
           # -rsP: name every skip, and show the output of passing tests (the tests print EVIDENCE
           # tables: the probe per library, huggingface_hub's refusals), so a green run shows its evidence.
+          # It also shows the captured log and stderr of passing tests, so say what is in it.
+          echo "Note: -rP below also shows the captured log and stderr of passing tests. Besides the EVIDENCE tables it carries lines that tests of failure paths provoke on purpose (ERROR lines from a simulated broken library, 'record failed' from an unwritable audit log); under a passing test they are expected."
           # shellcheck disable=SC2086
           .venv/bin/python -m pytest $EGRESS_TESTS -p no:cacheprovider -q -rsP --junitxml=egress-junit.xml
           # shellcheck disable=SC2086

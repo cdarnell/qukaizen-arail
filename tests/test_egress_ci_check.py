@@ -78,6 +78,18 @@ def clean_cases(files=FILES):
     return cases
 
 
+@pytest.fixture(autouse=True)
+def _leave_no_checker_output_behind(capsys):
+    """Under `-rP` (REVIEW.md W5) a green CI log shows the captured output of passing tests. The checker
+    prints its verdicts to stdout ("... this leg is red"), so a test that calls it and does not read what
+    it printed would put a failure verdict into a green log. Every test here reads what it provokes."""
+    yield
+    leaked = capsys.readouterr().out
+    assert not leaked, (
+        "this test left the checker's output unread; under -rP it would appear in a green CI log:\n" + leaked[:300]
+    )
+
+
 def run_no_skips(tmp_path, cases, files=FILES, capsys=None):
     junit_path = write(tmp_path, cases)
     code = check.main(["no-skips", str(junit_path), *files])
@@ -191,7 +203,9 @@ def test_an_unreadable_or_empty_junit_file_fails(tmp_path, capsys):
     assert check.main(["no-skips", str(bad), *FILES]) == 1
     assert "cannot read" in capsys.readouterr().out
     assert check.main(["no-skips", str(tmp_path / "missing.xml"), *FILES]) == 1
+    assert "cannot read" in capsys.readouterr().out
     assert check.main(["no-skips", str(write(tmp_path, [])), *FILES]) == 1  # a run with no cases at all
+    assert "NO TESTS" in capsys.readouterr().out  # read, so it does not leak into a green log under -rP
 
 
 # --- CI-4: the negative control ---------------------------------------------------------------------
@@ -417,6 +431,13 @@ def test_a_green_run_shows_the_evidence_it_produced():
         assert reports and "P" in reports.group(1) and "s" in reports.group(1), (
             f"{name!r}: the pytest line does not pass -r with both s (skips) and P (output of passing tests): {pytest_line!r}"
         )
+    # -rP also prints the captured LOG of passing tests: the tests that simulate a broken library log
+    # ERROR lines (19 in leg 1's log). The log says so, before the pytest line, where the reader meets them.
+    egress_run = steps["Egress tests (no failure, no skip, every file ran)"]["run"]
+    noted, started = egress_run.index("Note: -rP"), egress_run.index("-m pytest")
+    assert noted < started and "ERROR lines" in egress_run[noted:started], (
+        "the egress step does not tell the reader that ERROR lines under simulated-failure tests are expected"
+    )
     run = steps["Cloud SDK default clients are refused (anthropic, openai)"]["run"]
     installed, tested = run.index("pip install anthropic openai"), run.index("-m pytest")
     printed = run[installed:tested]
