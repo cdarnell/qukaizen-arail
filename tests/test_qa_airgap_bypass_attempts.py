@@ -42,7 +42,7 @@ import requests
 
 import arail.airgap
 import arail.egress
-from tests.egress_family_support import PROBE_URL, PUBLIC_TEST_IP, installed_independently
+from tests.egress_family_support import PROBE_URL, PUBLIC_TEST_IP, installed_independently, run_fresh
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -749,3 +749,248 @@ class TestJsonlWriteFailures:
                 requests.get("https://example.com", timeout=1)
         finally:
             os.chmod(ro_dir, 0o700)
+
+
+# ──────────────────────────────────────────────────────────────────────
+# 7. QA pass of sprint 2026-11-01-arail-egress-httpx2: where the guard's
+#    view ends.  The guard patches CLASS objects and installs ONE urllib
+#    opener, at install time, and reads LAB_MODE on every request.  Each
+#    test below pins one side of that boundary.  The gap pins were found
+#    by the QA pass (sprints/2026-11-01-arail-egress-httpx2/TEST_REPORT.md)
+#    and, when written, were not yet listed in docs/PRIVACY.md.
+# ──────────────────────────────────────────────────────────────────────
+
+_QA_GAP_CLOSED = (
+    "GAP TRIPWIRE ({finding}): {what} raised EgressBlocked, so the guard now covers it. That is good "
+    "news. Take it off the list of what the guard does not catch in docs/PRIVACY.md (and README / "
+    "airgap.KNOWN_GAPS if they name it), see TEST_REPORT.md {finding}, then turn this pin into a "
+    "closed-path test."
+)
+
+
+def _audit_count(tmp_path):
+    path = tmp_path / "egress.jsonl"
+    return sum(1 for line in path.read_text().splitlines() if line.strip()) if path.exists() else 0
+
+
+class TestQaWhereTheGuardsViewEnds:
+    """The httpx family is patched on its classes, which covers every client and transport OBJECT,
+    whenever it was built (EG-3, FR-1).  It does not cover a reference to the original method taken
+    before the patch, or a class created after it.  urllib is covered through the opener that
+    ``install_guard()`` installs, and only through it.  The mode is read per request."""
+
+    @pytest.mark.parametrize("lib", installed_independently())
+    @pytest.mark.parametrize("shape", [
+        "bound-method-taken-before-the-guard",
+        "function-taken-before-the-guard",
+        "subclass-that-copied-the-method-before-the-guard",
+    ])
+    def test_a_reference_to_the_transport_method_taken_before_the_guard_is_not_checked(
+        self, lib, shape, monkeypatch, tmp_path
+    ):
+        """QA-N1 (pin).  ``t.handle_request`` (a bound method), ``HTTPTransport.handle_request`` (the
+        function) and a subclass whose body says ``handle_request = HTTPTransport.handle_request``, each
+        taken BEFORE ``install_guard()``, still point at the library's own function, so a request made
+        through them is never checked.  The contrast is covered and asserted at the end: the same
+        pre-install transport OBJECT, with the method looked up when the request is made, is refused.
+        docs/PRIVACY.md says the httpx family "has no such gap" (no object that already exists escapes);
+        that is true for objects, not for references to the method."""
+        mod = importlib.import_module(lib)
+        monkeypatch.setenv("LAB_MODE", "airgapped")
+        monkeypatch.setenv("ARAIL_DATA_DIR", str(tmp_path))
+        monkeypatch.setattr(socket, "gethostbyname", lambda host: PUBLIC_TEST_IP)
+        _make_invalid_names_unresolvable(monkeypatch)
+        arail.egress._reset_for_tests()
+
+        transport = mod.HTTPTransport()
+        bound = transport.handle_request
+        function = mod.HTTPTransport.handle_request
+
+        class CopiedBeforeTheGuard(mod.HTTPTransport):
+            handle_request = mod.HTTPTransport.handle_request
+
+        arail.egress.install_guard()
+        assert arail.egress.coverage()[lib] == "guarded"
+        request = mod.Request("GET", PROBE_URL)
+        other = mod.HTTPTransport()
+        attempts = {
+            "bound-method-taken-before-the-guard": lambda: bound(request),
+            "function-taken-before-the-guard": lambda: function(other, request),
+            "subclass-that-copied-the-method-before-the-guard": (
+                lambda: mod.Client(transport=CopiedBeforeTheGuard(), timeout=3).get(PROBE_URL)
+            ),
+        }
+        try:
+            attempts[shape]()
+        except arail.airgap.EgressBlocked:
+            pytest.fail(_QA_GAP_CLOSED.format(finding="QA-N1", what=shape))
+        except Exception:
+            pass  # ConnectError: the library's own transport ran, as pinned
+        else:
+            pytest.fail("a request to a .invalid name succeeded; the premise of this test (it never resolves) is false")
+        assert _no_audit_lines(tmp_path), f"{shape} should leave no audit line"
+
+        with pytest.raises(arail.airgap.EgressBlocked):  # the covered contrast: an object, looked up now
+            transport.handle_request(request)
+        transport.close()
+        other.close()
+
+    @pytest.mark.parametrize("shape", [
+        "urlopen-with-an-ssl-context-https",
+        "urlopen-with-an-ssl-context-http",
+        "http.client-used-directly",
+        "another-library-replaced-the-global-opener",
+    ])
+    def test_urllib_requests_that_do_not_go_through_the_installed_opener_are_not_checked(
+        self, shape, monkeypatch, tmp_path
+    ):
+        """QA-W1 (pin).  ``install_guard()`` installs one opener, the one ``urlopen(url)`` uses.  Three
+        everyday shapes do not use it:
+
+        - ``urlopen(url, context=ssl_context)`` builds a NEW opener with stock handlers (CPython's own
+          ``urlopen``; ``cafile=``/``capath=`` do the same on Python < 3.13), for http and https;
+        - ``http.client`` (the layer under urllib.request, as urllib3 is under requests) called directly;
+        - any later ``urllib.request.install_opener(...)`` replaces the guarded opener for everyone.
+
+        Each ends in the stdlib's own resolution error (a ``.invalid`` name, made unresolvable here),
+        never EgressBlocked, and writes no audit line.  The contrast (the installed opener) is refused.
+        README and docs/PRIVACY.md say ``urllib.request`` is guarded through "the default opener" /
+        "the opener urlopen uses"; none of these three is listed as a gap."""
+        import http.client
+        import ssl
+
+        monkeypatch.setenv("LAB_MODE", "airgapped")
+        monkeypatch.setenv("ARAIL_DATA_DIR", str(tmp_path))
+        monkeypatch.setattr(socket, "gethostbyname", lambda host: PUBLIC_TEST_IP)
+        _make_invalid_names_unresolvable(monkeypatch)
+        # The global opener is process state no reset puts back; restore whatever was there.
+        monkeypatch.setattr(urllib.request, "_opener", urllib.request._opener)
+        arail.egress._reset_for_tests()
+        arail.egress.install_guard()
+
+        with pytest.raises(arail.airgap.EgressBlocked):  # the covered contrast
+            urllib.request.urlopen(PROBE_URL, timeout=3)
+        before = _audit_count(tmp_path)
+        https_url = "https://" + PROBE_URL.split("://", 1)[1]
+
+        def attempt():
+            if shape == "urlopen-with-an-ssl-context-https":
+                return urllib.request.urlopen(https_url, timeout=3, context=ssl.create_default_context())
+            if shape == "urlopen-with-an-ssl-context-http":
+                return urllib.request.urlopen(PROBE_URL, timeout=3, context=ssl.create_default_context())
+            if shape == "http.client-used-directly":
+                connection = http.client.HTTPSConnection("egress-probe.invalid", timeout=3)
+                try:
+                    return connection.request("GET", "/")
+                finally:
+                    connection.close()
+            urllib.request.install_opener(urllib.request.build_opener())
+            return urllib.request.urlopen(PROBE_URL, timeout=3)
+
+        try:
+            attempt()
+        except arail.airgap.EgressBlocked:
+            pytest.fail(_QA_GAP_CLOSED.format(finding="QA-W1", what=shape))
+        except Exception:
+            pass  # URLError / gaierror: the stdlib's own network layer ran, as pinned
+        else:
+            pytest.fail("a request to a .invalid name succeeded; the premise of this test (it never resolves) is false")
+        assert _audit_count(tmp_path) == before, f"{shape} should add no audit line"
+
+    @pytest.mark.parametrize("lib", installed_independently())
+    def test_a_library_whose_classes_are_created_again_after_the_guard_is_not_guarded(self, lib, tmp_path):
+        """QA-N2 (pin), in a fresh interpreter because it re-imports the library.  The guard patched the
+        class objects that existed at install.  Purge the library from ``sys.modules`` and import it
+        again (a hot reloader, a "reinstall" path) and its classes are new objects: not patched, a
+        request through them is not checked, a second ``install_guard()`` is a no-op, and
+        ``coverage()`` (which the doctor and /api/airgap/status read) still says "guarded".  No code in
+        the lab does this today; BY-6 pins the sibling case (a library installed after the guard)."""
+        code = r"""
+import importlib, json, socket, sys
+lib = sys.argv[1]
+mod = importlib.import_module(lib)
+import arail.egress as egress
+egress.install_guard()
+old = mod.HTTPTransport
+for name in [m for m in list(sys.modules) if m == lib or m.startswith(lib + ".")]:
+    del sys.modules[name]
+new = importlib.import_module(lib)
+egress.install_guard()
+def no_dns(*args, **kwargs):
+    raise socket.gaierror(-2, "no DNS in this test")
+socket.getaddrinfo = no_dns
+try:
+    new.Client(timeout=3).get("http://egress-probe.invalid/")
+    outcome = "no exception"
+except Exception as exc:
+    outcome = "EgressBlocked" if type(exc).__name__ == "EgressBlocked" else "other: " + type(exc).__name__
+print(json.dumps({
+    "new_class": new.HTTPTransport is not old,
+    "new_class_guarded": bool(getattr(vars(new.HTTPTransport)["handle_request"], "_arail_guarded", False)),
+    "coverage": egress.coverage()[lib],
+    "outcome": outcome,
+    "egress_file": egress.__file__,
+}))
+"""
+        result = run_fresh(code, lib, tmp_path=tmp_path)
+        assert result["new_class"], result
+        assert result["coverage"] == "guarded", result  # what the doctor and the status endpoint report
+        closed = _QA_GAP_CLOSED.format(finding="QA-N2", what=f"a re-imported {lib}")
+        assert not result["new_class_guarded"], closed
+        assert result["outcome"].startswith("other: "), (closed if result["outcome"] == "EgressBlocked" else result)
+        audit = tmp_path / "data" / "egress.jsonl"
+        assert not audit.exists() or not audit.read_text().strip(), "a class the guard never saw should leave no audit line"
+
+    @pytest.mark.parametrize("client", ["requests", *installed_independently()])
+    def test_lab_mode_is_read_per_request_by_clients_that_already_exist(self, client, monkeypatch, tmp_path):
+        """Closed path (item 3 of the QA brief).  The airgap toggle writes ``os.environ["LAB_MODE"]`` (and
+        ``ARAIL_MODE``) in the running portal.  A client, async client or session that already exists
+        must follow it on its next request, in both directions, because the decision is taken per
+        request.  The transports are stubbed before the guard, so "passed the guard" is a marker, not
+        a network call."""
+
+        class Reached(Exception):
+            pass
+
+        def _reached(*args, **kwargs):
+            raise Reached()
+
+        async def _reached_async(*args, **kwargs):
+            raise Reached()
+
+        monkeypatch.setenv("ARAIL_DATA_DIR", str(tmp_path))
+        monkeypatch.setattr(socket, "gethostbyname", lambda host: PUBLIC_TEST_IP)
+        if client == "requests":
+            monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", _reached)
+        else:
+            mod = importlib.import_module(client)
+            monkeypatch.setattr(mod.HTTPTransport, "handle_request", _reached)
+            monkeypatch.setattr(mod.AsyncHTTPTransport, "handle_async_request", _reached_async)
+
+        def flip(mode):
+            monkeypatch.setenv("LAB_MODE", mode)
+            monkeypatch.setenv("ARAIL_MODE", mode)
+
+        flip("hybrid")
+        arail.egress._reset_for_tests()
+        arail.egress.install_guard()
+        url = "http://api.example-public.invalid/v1"
+        if client == "requests":
+            session = requests.Session()
+            calls = [lambda: session.get(url, timeout=3)]
+        else:
+            sync_client, async_client = mod.Client(timeout=3), mod.AsyncClient(timeout=3)
+            calls = [lambda: sync_client.get(url), lambda: asyncio.run(async_client.get(url))]
+
+        for call in calls:
+            with pytest.raises(Reached):  # hybrid: passes the guard
+                call()
+        flip("airgapped")  # what POST /api/airgap/toggle does in-process
+        for call in calls:
+            with pytest.raises(arail.airgap.EgressBlocked):  # the SAME objects are now refused
+                call()
+        flip("hybrid")
+        for call in calls:
+            with pytest.raises(Reached):  # and pass again
+                call()
+        assert _audit_count(tmp_path) == len(calls), "one refusal per airgapped call, nothing else"
