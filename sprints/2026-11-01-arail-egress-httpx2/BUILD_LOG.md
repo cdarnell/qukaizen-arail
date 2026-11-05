@@ -7,6 +7,7 @@
 **This pass (pass 2):** commits 5 to 7 (the consumers, the docs, the CI workflow), starting from head `5ea83b9f` (pass 1 plus the orchestrator's checkpoint 1). Commit 8 is the orchestrator's, after #211 merges. Pass 1's log is kept below, unedited except for back-filled SHAs.
 **Status:** pass 2 done: steps 5, 6 and 7 are committed (`d626a1cf`, `ac1bb82b`, `95c70aea`). Step 8 is the orchestrator's, after #211 merges.
 **Pass 3 (review fixes):** the fix pass after the architect's BLOCK (REVIEW.md). Done: commits `81548cd0` to `55107aeb` (W4, B1, N2, W3, W1, W2, B1 docs, N1, W5 and its follow-up), plus this file. Its own section is at the end of this file, "Pass 3 (review fixes)". The step 7 SHA above was back-filled by pass 3 (a commit cannot contain its own SHA).
+**Pass 4 (QA fixes):** the fix pass after QA's WEAK_PASS (TEST_REPORT.md): QA-W2, QA-W1 and the nits N1 to N8 (QA-W3 and PX-1 are filed as debt by the orchestrator, not built). In progress; its plan and results are in the section at the end of this file, "Pass 4 (QA fixes)".
 
 ## Hard rules (both passes)
 
@@ -982,3 +983,59 @@ The real GitHub run: the install steps on `ubuntu-latest` with PyPI as of the da
 - **Not touched:** `src/arail/deep_*.py`, `src/dac_world/`, `src/arail/buddy_host/contract/`, `tests/conftest.py`, `pyproject.toml`, `uv.lock`, `CHANGELOG.md`, `NOTICE`, the licences, `SPRINT.md`, `sprints/BACKLOG.md`; no `aerollm` / `AERO_*` name removed or added; the pass-2 wording rule holds (`grep -iw` for the forbidden cost word over the diff, this file included, finds nothing new). The airgapped default and the `allow_egress` ratchet are not relaxed.
 - **Not built, by decision:** TD56 (fail closed), TD57 (post-import hook), TD58 (subprocess guarding), TD59 (socket timeout); filing them, and AF-3's three sites, is the orchestrator's commit 8.
 - **Environment:** scratch only. New this pass: `pass3/` (harnesses, the mutant runner with the reviewer's R1 to R8 copied verbatim and 20 of mine, the node harness, the drivers), a pristine `origin/main` checkout in `base-wt` (already at `de1ce285`) for the frozen-surface and baseline comparisons. Nothing is created in the worktree except committed files; `git status` is clean.
+
+## Pass 4 (QA fixes)
+
+The fix pass after QA's WEAK_PASS ([TEST_REPORT.md](./TEST_REPORT.md)). The spec is that file ("Findings" and "The exact list the builder must change"), read in the file, not a summary of it. Start: head `15e3abc6`, tree clean, branch `qukaizen/arail-egress-httpx2`, not pushed.
+
+### Scope (set by the orchestrator)
+
+- **In:** QA-W2 (before merge), QA-W1 (docs), the nits N1, N2, N3, N4, N5, N6 and N8 as written in the report, and N7 (carry the guard state to the always-visible nav badge).
+- **Out, by decision:** QA-W3 (an `allow_egress` scope surviving a flip to airgapped: the three decision sites in `egress.py` are not changed) and PX-1 (the `innerHTML` rows of the Recent-activity list in `nav.js` are not changed). The orchestrator files both as debt in the BACKLOG commit, with QA's validated fixes recorded there.
+- **Not mine:** `SPRINT.md` and `sprints/BACKLOG.md`. The CI workflow is not edited unless a test I touch forces a pin to move; if that happens the log says exactly why.
+- **Frozen, untouched:** `src/arail/deep_*.py`, `src/dac_world/`, `src/arail/buddy_host/contract/`, `tests/conftest.py`, `pyproject.toml`, `uv.lock`, `CHANGELOG.md`, `NOTICE`, the licences, any `aerollm` / `AERO_*` name. The airgapped default and the `allow_egress` ratchet are not relaxed. The pass-2 wording rule for cost claims holds.
+- **Limits:** no full-suite run, nothing that binds `127.0.0.1:8089`, no `docker`, the home clone untouched. Mutation experiments run on scratch exports, never in the worktree. `git status` is clean between commits.
+
+### Baseline on `15e3abc6` (a scratch export, the 13 `EGRESS_TESTS` files, one pytest process per file, `CI=true`, each venv declaring its leg)
+
+| Venv | Cases | Failed | Skipped |
+|---|---|---|---|
+| ci (httpx2 2.16.0) | 372 | 0 | 0 |
+| lock (httpx 0.28.1) | 372 | 0 | 0 |
+| both | 421 | 0 | 0 |
+| py310 (httpx2 2.14.0) | 372 | 0 | 0 |
+| neither | 370 | 2 (EG-0 and FR-5, on purpose) | 49 (empty parameter sets) |
+
+*Means:* the starting point every later number is compared with; it equals QA's own counts (372 / 372 / 421 / 372). *Bar and why:* 0 failed and 0 skipped in the four library states, because a skip is how TD50 stayed hidden; neither must fail exactly the two tests that need a library. *Out of range:* a difference from QA's counts means the tree is not the one QA tested. *Where:* the per-file table in the scratch results (`b4/results/base-*`).
+
+### Plan
+
+A commit cannot contain its own SHA, so the "Commit ref" column is filled in by the final BUILD_LOG commit (row 12). Tests come first wherever the failure mode is new, and are run against the unmodified source (rows 1, 3, 5 to 8, 11); each row is green on its own in the four library states before it is committed.
+
+| # | Files | Change | Test | Commit ref |
+|---|---|---|---|---|
+| 0 | `sprints/2026-11-01-arail-egress-httpx2/BUILD_LOG.md` | This plan. | none (docs) | this commit |
+| 1 | `src/arail/egress.py` (`_install_httpx_family_guard`, two docstrings); `tests/test_egress_httpx.py`; `tests/test_egress_docs.py` | **QA-W2.** An exception raised by `_patch_family_member` (a module whose attribute lookup raises, the PEP 562 lazy-module shape) is contained as `unguarded: patch raised <Type>: <message>`, exactly as the report shows. The next library is still patched, and the failure reaches `coverage()`, `uncovered()`, `EgressGuardIncomplete` and so every surface the other incomplete states reach. | EG-A8 is QA's proposed test, next to EG-A3. EG-A9 adds either member broken, only the async lookup raising (the sync class is patched and a reset puts it back), and a healthy stub for the other member so "still patched" is not vacuous in a venv with one library. One status-level test (definition qualified, entry listed, one portal warning). **Run on HEAD first: they must be red**; then green. | |
+| 2 | `tests/test_egress_httpx.py` | **QA-N8.** Two comments say a missing httpcore makes `import httpx2` fail. It does not (the import is lazy; the client constructor fails). Reworded. | none (comments); the cases are unchanged | |
+| 3 | `docs/PRIVACY.md` (enforcement sentence, one gap bullet); `README.md`; `src/arail/airgap.py` (`KNOWN_GAPS`, docstring); `src/arail/portal/templates/_airgap_modal.html`; `tests/test_egress_docs.py`; `tests/test_qa_airgap_bypass_attempts.py` (docstring text only) | **QA-W1.** `urllib.request` is guarded through the opener the guard installs and only through it: `urlopen(url, context=...)` (and, before Python 3.13, `cafile=`, `capath=`, `cadefault=`), `http.client` used directly and a later `install_opener()` skip it. PRIVACY and README scope the claim, `KNOWN_GAPS` gains one entry, the modal paragraph names `http.client`. | DOC pins written first (red on HEAD); DOC-2 gains the word `http.client` for all four surfaces; a tripwire that nothing in `src/arail/` does any of the three things; Q2 (QA's pin) is unchanged. | |
+| 4 | `docs/PRIVACY.md`; `tests/test_egress_docs.py`; `tests/test_qa_airgap_bypass_attempts.py` (Q1 docstring) | **QA-N1.** The httpx family has no gap for objects built before the guard, but a reference to the method taken before it (a bound `handle_request`, a subclass that copies it) is outside the class patch. | A PRIVACY pin (red first); Q1 already pins the behaviour. | |
+| 5 | `docs/PRIVACY.md`; `tests/test_egress_docs.py`; `tests/test_qa_airgap_bypass_attempts.py` (Q3 docstring) | **QA-N2.** A library imported again after the guard ran has new, unpatched classes. | A PRIVACY pin (red first); Q3 already pins the behaviour. | |
+| 6 | `docs/PRIVACY.md`; `tests/test_egress_docs.py` | **QA-N3.** Children started with multiprocessing's `spawn` or `forkserver` method do not inherit the guard; a forked child does. | A PRIVACY pin (red first). | |
+| 7 | `src/arail/egress.py` (`_incomplete_message`); `docs/PRIVACY.md` (the remedy sentence); `tests/test_egress_httpx.py` (EG-A2); `tests/test_egress_docs.py` (the portal and worker assertions that quote the old words) | **QA-N5.** The remedy no longer says "or uninstall": on a standard install httpx2 is what the Hugging Face downloader and the cloud SDKs run on. It names a command and says to restart. | EG-A2 and the two quoting assertions move in the same commit, written first and red on HEAD. | |
+| 8 | `src/arail/nucleus/worker.py`; `tests/test_egress_docs.py` | **QA-N4, worker.** A real worker process printed the message twice (the guard's own log line through logging's last-resort handler, then `worker: ...`). | A fresh-interpreter test that counts the lines (red first); in-process tests cannot see the last-resort handler. | |
+| 9 | `src/arail/doctor.py`; `tests/test_httpx_family.py` (DR-3) | **QA-N4, doctor.** `egress guard : ? (EgressGuardIncomplete: ...)` becomes `INCOMPLETE — <message>`; a `?` reads as unknown for a state that is known. | DR-3 asserts the new line (red first). | |
+| 10 | `README.md` (225-228); `docs/the-lab.md` (299-301); `tests/test_egress_docs.py` | **QA-N6.** Two older paragraphs still say the guard covers `requests` and `urllib` and lists three address ranges. Aligned with the README's later paragraph and PRIVACY. | A pin that both name every guarded client and the `ipaddress` rule (red first). | |
+| 11 | `src/arail/portal/app.py` (`get_mode` only); `src/arail/portal/static/nav.js`; `docs/PRIVACY.md`; `tests/test_egress_docs.py` | **QA-N7.** `GET /api/system/mode` also carries `guard_installed`; the badge reads it, so it cannot say plain "Airgapped" while the guard is incomplete: amber (the existing `hybrid` style), "Airgapped, guard incomplete", a title that points to the Network Policy modal, `textContent` throughout. | The endpoint test (behavioural, red first) and source-level pins of `nav.js` in the style of DOC-6. The badge is also run under node with a DOM stub; that run is recorded here, not committed (no skip is allowed for the thing under test, and CI has no node harness). | |
+| 12 | `sprints/2026-11-01-arail-egress-httpx2/BUILD_LOG.md` | Pass 4 results and final state. | none (docs) | the orchestrator |
+
+### Where the plan differs from the report's text (decided before building, checked again in Execution)
+
+1. **QA-W1, "none in tree".** The report's grep says nothing in `scripts/` uses `http.client`. `scripts/s4_win_checks.py` does (an operator script, loopback only). The new sentences say "nothing in `src/arail/` does any of these today", which a tripwire test checks, instead of "none in tree".
+2. **QA-W1, two extra words.** `cadefault=` also builds its own opener and `xmlrpc.client` is built on `http.client`; both were run in this session (ci 3.11.17 and py310 3.10.22) before they are written down.
+3. **QA-N5.** The report's remedy is written for httpx2 alone; the message is generic over whichever libraries are unguarded, so each gets its own pin (`httpx2<3`, `httpx<1`, the ranges the old message already named). `docs/PRIVACY.md` carries the same "or uninstall it" advice, so it changes in the same commit: leaving it would keep the advice QA found harmful and break the sentence the earlier doc-claims table ties to the message.
+4. **QA-N4, worker.** The report suggests a `NullHandler` with `propagate=False`. A `NullHandler` alone is enough (logging's last-resort handler fires only when no handler is found in the whole hierarchy) and does not hide the record from a root handler someone configures later. It is added around `install_guard()` and removed afterwards, so an in-process caller does not inherit it.
+5. **QA-N7.** The badge reuses the `hybrid` amber style rather than adding CSS, as instructed; `guard_installed` is the same field the modal's pill reads, so the two always agree.
+
+### Verification protocol (the orchestrator's list, each result recorded below)
+
+The 13 `EGRESS_TESTS` files in ci, lock, both and py310 with `ARAIL_TEST_EXPECT_HTTPX_FAMILY` set per venv, after every commit and at the end (also neither, whose two failures must stay the two intended ones); leg 5's negative control; `tests/test_egress_sdk_clients.py` in `ci-sdk`; all five legs through `emulate.py`; `tests/test_queuellm_rename_frozen_surface.py` against `origin/main`'s failure text (it fails 2 cases there; the text must not change); QA's `state_status.py lazy-attr` in the `both` venv (httpx must now be `EgressBlocked`, the status qualified); the badge under node with a DOM stub; the doctor and the worker in an incomplete state; mutants for what this pass adds, run on a scratch export; the neighbours of each change against the untouched-main baseline. Every number recorded gets what it means, the bar and why, what out of range means, and where a failure lives.
