@@ -454,6 +454,10 @@ def _patch_family_member(name: str, module: types.ModuleType) -> str:
 
     Returns the member's coverage value: ``"guarded"``, or ``"unguarded: <why>"`` when a class or
     method is missing (or cannot be set).  Everything that CAN be patched is patched either way.
+    Looking a class up on the module can itself raise (a lazy module ``__getattr__`` whose import
+    fails raises ImportError, which ``getattr``'s default does not swallow); that propagates from here
+    and ``_install_httpx_family_guard`` reports the member as unguarded, so the next member is still
+    patched.
 
     A method that already carries ``_arail_guarded`` is skipped: it is the same class object
     reached under another name (``httpx2.alias_httpx()`` makes ``sys.modules["httpx"]`` the httpx2
@@ -490,10 +494,10 @@ def _install_httpx_family_guard() -> dict[str, str]:
     about the process: a library installed later in the same process (a plugin's ``pip install``
     into the running portal) is NOT guarded until the process restarts, because a complete
     ``install_guard()`` does not look again.  A member that IS installed but cannot be patched (its
-    lookup or import raises, a class or method is missing) is ``"unguarded: <why>"``, and
-    install_guard() raises after everything else is patched.  The guard used to treat a library it
-    could not import as nothing to do, so it could not tell those two apart, which is how TD50
-    stayed hidden.
+    lookup or import raises, looking its classes up raises, a class or method is missing) is
+    ``"unguarded: <why>"``, and install_guard() raises after everything else is patched.  The
+    guard used to treat a library it could not import as nothing to do, so it could not tell those
+    two apart, which is how TD50 stayed hidden.
 
     Libraries are imported here, eagerly: the check must exist before any code can use them.
     """
@@ -512,7 +516,10 @@ def _install_httpx_family_guard() -> dict[str, str]:
         except Exception as exc:  # noqa: BLE001 — installed but broken: fail closed, say why
             result[name] = f"{_UNGUARDED}import raised {type(exc).__name__}: {exc}"
             continue
-        result[name] = _patch_family_member(name, module)
+        try:
+            result[name] = _patch_family_member(name, module)
+        except Exception as exc:  # noqa: BLE001 — a lookup on the module raised (a lazy __getattr__)
+            result[name] = f"{_UNGUARDED}patch raised {type(exc).__name__}: {exc}"
     return result
 
 

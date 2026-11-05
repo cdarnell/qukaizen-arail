@@ -30,6 +30,7 @@ import json
 import logging
 import re
 import socket
+import sys
 import types
 from pathlib import Path
 
@@ -339,6 +340,39 @@ def test_the_hybrid_description_is_left_alone(lib, monkeypatch, status_env):
     assert status["definition"].startswith("Hybrid: cloud providers are reachable."), status["definition"]
     assert "EXCEPT" not in status["definition"]
     assert any(gap.startswith(f"{lib}: installed, but") for gap in status["known_gaps"])
+
+
+def test_a_library_whose_attribute_lookup_raises_is_reported_like_any_other_unguarded_library(
+        monkeypatch, status_env, activity_lines):
+    """DOC-5 (QA-W2).  A family member that imports but raises when its transport classes are looked up (a
+    lazily loaded attribute whose import fails) used to abort the guard's family step with a raw ImportError:
+    ``uncovered()`` stayed empty, so the status endpoint kept saying "Cloud-provider APIs are blocked" and its
+    list named no library, while the portal's only trace was a message with no library in it.  Now it is
+    reported through the same path as the missing-class case: one portal warning that names the library, the
+    description names it and says its requests are NOT blocked, and the known-gaps list has its entry."""
+    first = LITERAL_FAMILY[0]
+    lazy = types.ModuleType(first)
+
+    def __getattr__(name):
+        if name in ("HTTPTransport", "AsyncHTTPTransport"):
+            raise ImportError("simulated: a lazy attribute whose import fails")
+        raise AttributeError(name)
+
+    lazy.__getattr__ = __getattr__
+    monkeypatch.setitem(sys.modules, first, lazy)
+
+    _portal_app()._install_egress_guard()  # must not raise
+    assert len(activity_lines) == 1, activity_lines
+    message = activity_lines[0][1]
+    assert message.startswith("Egress guard install failed: ") and first in message and "NOT checked" in message, message
+
+    status = _status()
+    assert status["guard_installed"] is False
+    assert f"EXCEPT requests made through {first}" in status["definition"], status["definition"]
+    assert "NOT blocked" in status["definition"] and CLOUD_SENTENCE not in status["definition"]
+    extra = status["known_gaps"][len(airgap.KNOWN_GAPS):]
+    assert len(extra) == 1 and extra[0].startswith(f"{first}: installed, but the guard could not patch it ("), extra
+    assert "patch raised ImportError" in extra[0] and extra[0].endswith("its requests are NOT checked"), extra
 
 
 # --- DOC-5, the portal's start-up: one visible warning, and it comes first -------------------------

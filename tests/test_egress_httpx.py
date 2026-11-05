@@ -652,6 +652,110 @@ def test_a_library_that_cannot_even_be_imported_is_loud(mode, expected, monkeypa
             assert coverage[other] == "guarded"
 
 
+def test_a_member_whose_attribute_lookup_raises_is_loud_and_the_next_member_is_still_patched(monkeypatch):
+    """EG-A8 (QA-W2, TEST_REPORT.md).  EG-A3 makes the IMPORT of a member fail.  A member that imports fine can
+    still raise when its transport classes are looked up: a module-level ``__getattr__`` (PEP 562, the shape
+    httpx2 2.14 and 2.16 already use to load ``main`` lazily) whose own import fails raises ImportError, and
+    ``getattr(module, name, None)`` swallows AttributeError only.  The exception used to escape the family
+    step: ``install_guard()`` raised a raw ImportError, ``coverage()`` stayed empty, the next member was never
+    patched, and the portal's status endpoint said "Cloud-provider APIs are blocked".  Now the member is
+    reported like every other member the guard could not patch, and everything else is still patched."""
+    first = LITERAL_FAMILY[0]
+    lazy = types.ModuleType(first)
+
+    def __getattr__(name):
+        if name in ("HTTPTransport", "AsyncHTTPTransport"):
+            raise ImportError("simulated: a lazy attribute whose import fails")
+        raise AttributeError(name)
+
+    lazy.__getattr__ = __getattr__
+    monkeypatch.setitem(sys.modules, first, lazy)
+    with pytest.raises(egress.EgressGuardIncomplete) as excinfo:
+        egress.install_guard()
+    coverage = egress.coverage()
+    assert coverage[first].startswith("unguarded: ") and "ImportError" in coverage[first], coverage
+    assert first in excinfo.value.uncovered
+    assert coverage["requests"] == "guarded" and coverage["urllib.request"] == "guarded"
+    for other in INSTALLED:
+        if other != first:
+            assert coverage[other] == "guarded", coverage
+            assert getattr(_owned(importlib.import_module(other), "HTTPTransport", "handle_request"), "_arail_guarded", False)
+
+
+def _stub_member(name, lazy_failures=()):
+    """A family member made of stubs, so the test does not depend on which libraries are installed.
+
+    ``HTTPTransport`` and ``AsyncHTTPTransport`` are classes whose methods stand for the library's network
+    I/O.  A class named in ``lazy_failures`` is not an attribute of the module: looking it up reaches a
+    module-level ``__getattr__`` that raises ImportError, as a lazily loaded attribute whose import fails
+    does.  Returns ``(module, sync class, async class)``; a class that cannot be looked up is still returned,
+    so the test can see whether the guard touched it."""
+    module = types.ModuleType(name)
+
+    class HTTPTransport:
+        def handle_request(self, request):
+            return "reached the network layer"
+
+    class AsyncHTTPTransport:
+        async def handle_async_request(self, request):
+            return "reached the network layer"
+
+    for cls in (HTTPTransport, AsyncHTTPTransport):
+        if cls.__name__ not in lazy_failures:
+            setattr(module, cls.__name__, cls)
+
+    def __getattr__(attribute):
+        if attribute in lazy_failures:
+            raise ImportError(f"simulated: cannot import {attribute} (a lazy attribute whose import fails)")
+        raise AttributeError(attribute)
+
+    module.__getattr__ = __getattr__
+    return module, HTTPTransport, AsyncHTTPTransport
+
+
+@pytest.mark.parametrize("failing", [
+    ("HTTPTransport", "AsyncHTTPTransport"),
+    ("AsyncHTTPTransport",),
+], ids=["both lookups raise", "only the async lookup raises"])
+@pytest.mark.parametrize("broken", LITERAL_FAMILY)
+def test_a_member_whose_lookup_raises_does_not_stop_the_other_member_from_being_patched(broken, failing, monkeypatch):
+    """EG-A9 (QA-W2).  EG-A8 asserts that the member after the broken one is patched, but in a venv that has
+    one library that assertion has nothing to look at, so this one builds both members from stubs and runs
+    in every venv, with either member as the broken one.  It also covers the half-patched member: when only
+    the async lookup raises, the sync class WAS patched (everything that can be patched is), the member is
+    still reported as not guarded, and a reset puts the sync class back exactly."""
+    other = next(name for name in LITERAL_FAMILY if name != broken)
+    broken_module, broken_sync, _ = _stub_member(broken, failing)
+    healthy_module, healthy_sync, healthy_async = _stub_member(other)
+    monkeypatch.setitem(sys.modules, broken, broken_module)
+    monkeypatch.setitem(sys.modules, other, healthy_module)
+    stock_broken = vars(broken_sync)["handle_request"]
+    stock_healthy = vars(healthy_sync)["handle_request"]
+
+    with pytest.raises(egress.EgressGuardIncomplete) as excinfo:
+        egress.install_guard()
+
+    coverage = egress.coverage()
+    assert coverage[broken].startswith("unguarded: patch raised ImportError: "), coverage
+    assert coverage[other] == "guarded", coverage
+    assert list(excinfo.value.uncovered) == [broken] and egress.uncovered() == excinfo.value.uncovered
+    assert broken in str(excinfo.value) and "NOT checked against LAB_MODE" in str(excinfo.value)
+    assert egress._INSTALLED is False
+
+    request = types.SimpleNamespace(url=PROBE_URL)  # what the wrappers read: request.url
+    with pytest.raises(EgressBlocked):
+        healthy_sync().handle_request(request)
+    with pytest.raises(EgressBlocked):
+        asyncio.run(healthy_async().handle_async_request(request))
+
+    patched = getattr(vars(broken_sync)["handle_request"], "_arail_guarded", False)
+    assert patched is ("HTTPTransport" not in failing), "the guard patched what it could and nothing else"
+
+    egress._reset_for_tests()
+    assert vars(healthy_sync)["handle_request"] is stock_healthy
+    assert vars(broken_sync)["handle_request"] is stock_broken
+
+
 # --- EG-21, EG-22: audit attribution ----------------------------------------------------------
 
 def _probe_in_module(module_name):
