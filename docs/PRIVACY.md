@@ -126,8 +126,11 @@ It does NOT wrap:
   runs outside it: setup's and upgrade's model downloads, Docker
   containers such as Open Notebook's, opencode, the lab's own Python
   subprocesses (the goal parser's model subprocess and the AirLLM worker),
-  and the Python behind every other `./arailctl` command (apart from
-  `start`, which runs the portal).
+  the Python behind every other `./arailctl` command (apart from `start`,
+  which runs the portal), and child processes that Python code starts with
+  multiprocessing's `spawn` or `forkserver` method (the default on macOS
+  and, from Python 3.14, on Linux). A child started with `fork` inherits
+  the guard.
 
 These are documented gaps for the v1 guard. The threat model is
 well-meaning agent code that uses standard libraries; it is not

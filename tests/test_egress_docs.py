@@ -860,6 +860,22 @@ def test_privacy_says_other_arailctl_commands_run_outside_the_guard_and_readme_p
     )
 
 
+def test_privacy_says_spawned_and_forkserver_children_do_not_inherit_the_guard():
+    """QA-N3.  The guard is monkey-patched state of one interpreter.  A child started with multiprocessing's
+    `fork` method (or os.fork()) is a copy of it and refuses; a child started with `spawn` or `forkserver` is a
+    new interpreter and does not install the guard (run in ci, lock and py310: EgressBlocked for fork,
+    ConnectError for the other two).  `spawn` is the macOS default and `forkserver` is the default of every
+    other POSIX platform from Python 3.14 (read in 3.14.9's multiprocessing/context.py; not run on Linux here),
+    so 'Other processes' names them.  DOC-9 already fails if a call to install_guard() appears anywhere new."""
+    bullet = other_processes_bullet()
+    for needle in (
+        "child processes that Python code starts with multiprocessing's `spawn` or `forkserver` method",
+        "the default on macOS and, from Python 3.14, on Linux",
+        "A child started with `fork` inherits the guard",
+    ):
+        assert needle in bullet, f"PRIVACY.md's 'Other processes' bullet does not say {needle!r}: {bullet}"
+
+
 def test_the_router_comment_says_the_guard_blocks_only_in_a_process_that_installed_it():
     """REVIEW.md W2.  The comment above _CLOUD_BACKENDS said the egress guard 'would block the eventual API
     call anyway'.  In the goal parser's model subprocess, which does not install it, that is false: this
