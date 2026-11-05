@@ -71,7 +71,8 @@ clients SDKs build for themselves: Hugging Face downloads
 the Open Notebook seeding. `./arailctl doctor` prints which of the four
 the guard covered when that process started. The guard looks at what is
 installed once, at start: a library installed while the lab is running (a
-plugin's `pip install`, say) is not guarded until the lab restarts. If one
+plugin's `pip install`, say), or imported again after the guard ran (its
+classes are new objects), is not guarded until the lab restarts. If one
 of them is installed but the guard cannot patch it (a future release
 renamed its transport classes, say), requests made through that library
 are not checked, and the lab says so instead of staying silent: the

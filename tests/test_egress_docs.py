@@ -553,6 +553,18 @@ def test_privacy_says_a_library_installed_later_is_not_guarded_until_restart():
     assert "this lab's guard covered" not in text, "PRIVACY.md still describes the doctor line as a standing fact"
 
 
+def test_privacy_says_a_library_imported_again_after_the_guard_is_not_guarded_either():
+    """QA-N2.  The guard patched the class objects that existed when it ran.  A library purged from
+    ``sys.modules`` and imported again has new classes, which nothing patched, and ``coverage()`` (which the
+    doctor and the status endpoint read) still says "guarded".  PRIVACY.md said only that a library
+    INSTALLED later is not guarded; it now says the same for one imported again.  QA's pin
+    (TestQaWhereTheGuardsViewEnds, QA-N2, a fresh interpreter) holds the behaviour; this holds the words."""
+    text = flat(privacy_known_gaps())
+    assert "or imported again after the guard ran (its classes are new objects), is not guarded until the lab restarts" in text, (
+        "PRIVACY.md does not say that a library imported again after the guard ran is unguarded until a restart"
+    )
+
+
 @pytest.mark.parametrize("doc", [egress.coverage, egress._install_httpx_family_guard], ids=["coverage", "family-guard"])
 def test_the_guards_docstrings_do_not_call_a_not_yet_installed_library_unusable(doc):
     """REVIEW.md W3.  The docstrings said a member that is not installed is "absent: nothing in this
