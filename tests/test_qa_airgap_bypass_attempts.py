@@ -793,8 +793,9 @@ class TestQaWhereTheGuardsViewEnds:
         taken BEFORE ``install_guard()``, still point at the library's own function, so a request made
         through them is never checked.  The contrast is covered and asserted at the end: the same
         pre-install transport OBJECT, with the method looked up when the request is made, is refused.
-        docs/PRIVACY.md says the httpx family "has no such gap" (no object that already exists escapes);
-        that is true for objects, not for references to the method."""
+        docs/PRIVACY.md says the httpx family covers every client and transport object whenever it was
+        built, and that a reference to the method taken before the guard is not covered
+        (tests/test_egress_docs.py holds the words)."""
         mod = importlib.import_module(lib)
         monkeypatch.setenv("LAB_MODE", "airgapped")
         monkeypatch.setenv("ARAIL_DATA_DIR", str(tmp_path))

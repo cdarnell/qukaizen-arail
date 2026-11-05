@@ -583,6 +583,23 @@ def test_privacy_scopes_what_airgapped_mode_blocks_for_requests_and_urllib():
     assert "`urllib.request` (`urlopen` without an SSL context)" in text, text
 
 
+def test_privacy_says_the_httpx_family_covers_objects_but_not_a_method_reference_taken_before_the_guard():
+    """QA-N1.  PRIVACY.md said the httpx family "has no such gap" for objects that exist before the guard.
+    True for clients and transport objects (the patch is on the classes, so a transport built earlier is
+    refused), not for a reference to the method itself taken earlier: a bound `handle_request`, the
+    function `HTTPTransport.handle_request`, or a subclass whose body copies it still point at the library's
+    own function.  QA's pin (TestQaWhereTheGuardsViewEnds, QA-N1) holds the behaviour; this holds the words."""
+    bullet = flat(_between(privacy_known_gaps(), r"^(?=- A `requests` session or adapter created before\b)", r"\n(?=- |\S)",
+                           "PRIVACY.md's bullet about objects that exist before the guard"))
+    for needle in (
+        "The httpx family is patched on its classes, so every client and transport object is covered whenever it was built",
+        "a reference to the method itself taken before the guard",
+        "a bound `handle_request`", "a subclass that copies it into its class body",
+    ):
+        assert needle in bullet, f"PRIVACY.md's bullet does not say {needle!r}: {bullet}"
+    assert "has no such gap" not in bullet, "PRIVACY.md still says the httpx family has no gap at all"
+
+
 def test_privacy_lists_the_urllib_requests_that_skip_the_installed_opener_as_a_gap():
     """QA-W1.  `install_guard()` installs one opener, the one `urlopen(url)` uses.  Three everyday shapes do
     not use it, and the Known gaps list did not name them: `urlopen` with a context (and, before Python 3.13,

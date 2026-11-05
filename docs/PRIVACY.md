@@ -98,8 +98,11 @@ It does NOT wrap:
   and a `urllib` opener built with `build_opener()` — the guard swaps the
   defaults (the adapter class new sessions get, the opener `urlopen(url)`
   uses); it does not reach objects that already exist, or an opener you
-  build yourself. The httpx family is patched on its classes and has no
-  such gap.
+  build yourself. The httpx family is patched on its classes, so every
+  client and transport object is covered whenever it was built; a
+  reference to the method itself taken before the guard (a bound
+  `handle_request`, or a subclass that copies it into its class body) is
+  not.
 - A `urllib` request that does not go through the opener the guard
   installed: `urlopen(url, context=...)` (and, before Python 3.13,
   `cafile=`, `capath=` or `cadefault=`) builds an opener of its own;
