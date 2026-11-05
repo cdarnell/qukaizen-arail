@@ -583,8 +583,10 @@ def test_an_unpatchable_member_is_loud_and_everything_else_stays_guarded(lib, mo
     assert requests.sessions.HTTPAdapter is _STOCK_ADAPTER
 
 
-# A module that is not installed, imported from inside a "library" below: the same failure as a real
-# install that has httpx2 but not the httpcore2 it imports.
+# A module that is not installed, imported from inside a "library" below: the same exception as a real
+# install that has httpx2 but not a package it imports when it is imported (idna, say).  httpcore2 is not
+# such a package: httpx2 loads it when a transport is built, so without it `import httpx2` succeeds and the
+# client constructor raises instead (the guard reports httpx2 guarded, and no client can be built).
 _MISSING_DEPENDENCY = "arail_test_dependency_that_is_not_installed"
 
 
@@ -630,11 +632,12 @@ def test_a_library_that_cannot_even_be_imported_is_loud(mode, expected, monkeypa
     imported.  Everything else is still patched, and the install raises.
 
     The import is made to fail twice over: with a RuntimeError, and with the ModuleNotFoundError that
-    a real broken install raises (the library is there, a library it imports is not; this is exactly
-    what huggingface_hub reports in a venv with httpx2 but no httpcore2).  ModuleNotFoundError is an
-    ImportError, and "I could not import it" is also how a library that is not installed looks, so a
-    guard that read ImportError as "absent" would pass the RuntimeError case and leave a library that
-    IS installed open without a word (REVIEW.md W4, mutant R5)."""
+    a real broken install raises (the library is there, a package it imports at import time is not:
+    idna, say; a missing httpcore2 is not this case, because `import httpx2` succeeds without it and
+    only building a client raises).  ModuleNotFoundError is an ImportError, and "I could not import it"
+    is also how a library that is not installed looks, so a guard that read ImportError as "absent"
+    would pass the RuntimeError case and leave a library that IS installed open without a word
+    (REVIEW.md W4, mutant R5)."""
     first = LITERAL_FAMILY[0]
     monkeypatch.delitem(sys.modules, first, raising=False)
     monkeypatch.setattr(sys, "meta_path", [_BrokenLibraryFinder(first, mode), *sys.meta_path])
