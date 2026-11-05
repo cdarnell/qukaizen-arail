@@ -17,6 +17,8 @@ PRIVACY.md and listed by the Network Policy modal (``KNOWN_GAPS`` below):
 - A configured proxy — the guard decides on the destination, not the proxy.
 - Raw sockets — wrapping would break loopback paths underneath wrapped libs.
 - Subprocess shells — ``subprocess.run(["curl", ...])``, ``os.system("curl")``.
+- ``urllib`` requests that skip the opener the guard installs — ``urlopen`` with
+  an SSL context, ``http.client`` used directly, a later ``install_opener()``.
 """
 
 from __future__ import annotations
@@ -49,6 +51,9 @@ KNOWN_GAPS: tuple[str, ...] = (
     "up, in requests and httpx/httpx2; none in tree today)",
     "the hop to a configured proxy (HTTP_PROXY/HTTPS_PROXY or a client's "
     "proxy setting): the guard checks the destination, not the proxy",
+    "urllib requests that skip the opener the guard installed (urlopen with an "
+    "SSL context, http.client used directly, a later install_opener() by any "
+    "library; none in src/arail today)",
 )
 
 

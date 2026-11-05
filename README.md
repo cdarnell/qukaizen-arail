@@ -300,13 +300,14 @@ information from the public internet. Calls to loopback and your private
 network still work, so a LAN GPU box (Ollama, vLLM, a QueueLLM node)
 keeps inferring without changes. Cloud-provider APIs are blocked at the
 HTTP layer: the lab's Python-level guard wraps `requests` (new sessions),
-`urllib.request` (the default opener) and every client of `httpx` and its
-successor `httpx2`, such as the Hugging Face downloader and the Anthropic
-and OpenAI SDKs. The dashboard's **Airgapped** badge is clickable — it shows
-what is and isn't enforced, the recent blocks, and the known gaps the
-guard doesn't cover (`aiohttp`, `urllib3` or `httpcore` used directly, a
-proxy you configure, raw sockets, subprocess `curl`, other processes such
-as setup's and upgrade's model downloads; the full list is in
+`urllib.request` (`urlopen` without an SSL context) and every client of
+`httpx` and its successor `httpx2`, such as the Hugging Face downloader
+and the Anthropic and OpenAI SDKs. The dashboard's **Airgapped** badge is
+clickable — it shows what is and isn't enforced, the recent blocks, and
+the known gaps the guard doesn't cover (`aiohttp`, `urllib3`, `httpcore`
+or `http.client` used directly, a proxy you configure, raw sockets,
+subprocess `curl`, other processes such as setup's and upgrade's model
+downloads; the full list is in
 [docs/PRIVACY.md](docs/PRIVACY.md)). The threat model is well-meaning
 agent code, not an adversary on this host — for that, run a host
 firewall.

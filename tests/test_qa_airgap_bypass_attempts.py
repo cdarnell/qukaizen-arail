@@ -854,8 +854,8 @@ class TestQaWhereTheGuardsViewEnds:
 
         Each ends in the stdlib's own resolution error (a ``.invalid`` name, made unresolvable here),
         never EgressBlocked, and writes no audit line.  The contrast (the installed opener) is refused.
-        README and docs/PRIVACY.md say ``urllib.request`` is guarded through "the default opener" /
-        "the opener urlopen uses"; none of these three is listed as a gap."""
+        README, docs/PRIVACY.md, the modal and airgap.KNOWN_GAPS scope the claim to ``urlopen`` without an
+        SSL context and list these three as a gap (tests/test_egress_docs.py holds the words)."""
         import http.client
         import ssl
 

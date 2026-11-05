@@ -41,7 +41,8 @@ yourself.
 ## What airgapped mode enforces
 
 `LAB_MODE=airgapped` (the default) blocks calls made through
-`requests`, `urllib.request`, `httpx` or `httpx2` to anything that isn't:
+`requests` (new sessions), `urllib.request` (`urlopen` without an SSL
+context), `httpx` or `httpx2` to anything that isn't:
 
 - Loopback: `127.0.0.0/8`, `::1`, `localhost`
 - RFC1918: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`
@@ -95,10 +96,18 @@ It does NOT wrap:
   calls them directly today.
 - A `requests` session or adapter created before the guard was installed,
   and a `urllib` opener built with `build_opener()` — the guard swaps the
-  defaults (the adapter class new sessions get, the opener `urlopen`
+  defaults (the adapter class new sessions get, the opener `urlopen(url)`
   uses); it does not reach objects that already exist, or an opener you
   build yourself. The httpx family is patched on its classes and has no
   such gap.
+- A `urllib` request that does not go through the opener the guard
+  installed: `urlopen(url, context=...)` (and, before Python 3.13,
+  `cafile=`, `capath=` or `cadefault=`) builds an opener of its own;
+  `http.client` used directly (as is anything built on it, such as
+  `xmlrpc.client`) is the layer under `urllib`, as `urllib3` is under
+  `requests`; and a later `urllib.request.install_opener(...)` by any
+  library replaces the guarded opener for everyone. Nothing in
+  `src/arail/` does any of these today.
 - The hop to a proxy you configure (`HTTP_PROXY`/`HTTPS_PROXY`, or a
   client's `proxy=`/`proxies=` setting) — the guard decides on the
   destination, so a request for a local address can still be sent through

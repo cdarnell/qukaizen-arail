@@ -9,7 +9,10 @@ is a privacy bug, so these tests tie the words to the code:
 - every client the guard wraps (``egress.GUARDED_CLIENTS``, which is built from
   ``arail.httpx_family.FAMILY``) is named where the docs say what is wrapped, so adding a member to the
   family fails here until the docs say so (DOC-1);
-- every gap the docs list is named by the modal's list too, which is ``airgap.KNOWN_GAPS`` (DOC-2);
+- every gap the docs list is named by the modal's list too, which is ``airgap.KNOWN_GAPS`` (DOC-2); that
+  includes the ``urllib`` requests that skip the opener the guard installs (``urlopen`` with an SSL
+  context, ``http.client``, a later ``install_opener``), and a tripwire checks the sentence that nothing
+  in ``src/arail/`` does any of them (QA-W1);
 - nobody says ``httpx`` is not wrapped (DOC-3), and the docstrings name the whole family (DOC-4);
 - a library the guard could not patch shows up in ``/api/airgap/status``, so the modal lists it, and the
   modal stops saying "Cloud-provider APIs are blocked" about it: the description names the library, the
@@ -122,13 +125,15 @@ def test_privacy_says_what_airgapped_mode_blocks_with_every_client():
 
 # --- DOC-2: the gaps -----------------------------------------------------------------------------
 
-GAP_WORDS = ("aiohttp", "urllib3", "httpcore", "proxy")
+GAP_WORDS = ("aiohttp", "urllib3", "httpcore", "proxy", "http.client")
 
 
 @pytest.mark.parametrize("surface", ["README", "PRIVACY known gaps", "modal"])
 def test_each_surface_lists_the_gaps_the_guard_does_not_cover(surface):
     """DOC-2.  aiohttp, urllib3 and httpcore used directly, and the hop to a configured proxy, were
-    found while testing the guard (TD53, TD54).  The README is held to it too: it points at the list."""
+    found while testing the guard (TD53, TD54); http.client used directly (the layer under urllib, which
+    the guard reaches only through its opener) was found by QA (QA-W1).  The README is held to it too: it
+    points at the list."""
     text = SURFACES[surface]().lower()
     missing = [word for word in GAP_WORDS if word not in text]
     assert not missing, f"{surface} does not mention {missing} among the things the guard does not cover"
@@ -144,14 +149,24 @@ def test_the_status_endpoints_gap_list_names_the_same_gaps():
 
 def test_the_first_three_known_gaps_are_the_strings_the_endpoint_always_listed():
     """The three entries /api/airgap/status listed before TD50 move to airgap.KNOWN_GAPS unchanged; a
-    client that matched on them keeps working.  The two new ones come after them."""
+    client that matched on them keeps working.  The three new ones come after them (direct urllib3 or
+    httpcore, the proxy hop, and the urllib requests that skip the guard's opener)."""
     assert airgap.KNOWN_GAPS[:3] == (
         "raw socket connections (BUDDY_EGRESS_PROBE is the only audited use)",
         "subprocess-spawned tools (opencode CLI is config-gated to the local "
         "provider when airgapped; curl/wget: none in tree today)",
         "aiohttp (not in tree)",
     )
-    assert len(airgap.KNOWN_GAPS) == 5
+    assert len(airgap.KNOWN_GAPS) == 6
+
+
+def test_the_last_known_gap_is_the_urllib_requests_that_skip_the_guards_opener():
+    """QA-W1.  One entry names the three shapes (the same three PRIVACY.md's bullet and QA's pin list)
+    and scopes 'none today' to src/arail, where it was checked: scripts/s4_win_checks.py uses
+    http.client against 127.0.0.1, so 'none in tree' would be false."""
+    entry = airgap.KNOWN_GAPS[5]
+    for needle in ("urllib requests", "urlopen with an SSL context", "http.client", "install_opener", "none in src/arail today"):
+        assert needle in entry, f"airgap.KNOWN_GAPS[5] does not say {needle!r}: {entry!r}"
 
 
 # --- the local-address check is Python's private set (REVIEW.md N1) ----------------------------------
@@ -554,8 +569,87 @@ def test_readme_scopes_what_requests_and_urllib_are_wrapped_for():
     its classes. BY-5 pins the gap; the README must not claim more than the behaviour."""
     text = flat(readme_section())
     assert "`requests` (new sessions)" in text, "README does not say the requests guard is for new sessions"
-    assert "`urllib.request` (the default opener)" in text, "README does not say the urllib guard is the default opener"
+    assert "`urllib.request` (`urlopen` without an SSL context)" in text, (
+        "README does not say the urllib guard is for urlopen without an SSL context (QA-W1)"
+    )
     assert "everything built on them" not in text, "README still claims everything built on requests and urllib is wrapped"
+
+
+def test_privacy_scopes_what_airgapped_mode_blocks_for_requests_and_urllib():
+    """QA-W1.  The sentence that opens 'What airgapped mode enforces' named `urllib.request` without a scope,
+    so a reader took `urlopen(url, context=...)` to be blocked too.  It carries the same scope as the README."""
+    text = flat(privacy_enforces())
+    assert "`requests` (new sessions)" in text, text
+    assert "`urllib.request` (`urlopen` without an SSL context)" in text, text
+
+
+def test_privacy_lists_the_urllib_requests_that_skip_the_installed_opener_as_a_gap():
+    """QA-W1.  `install_guard()` installs one opener, the one `urlopen(url)` uses.  Three everyday shapes do
+    not use it, and the Known gaps list did not name them: `urlopen` with a context (and, before Python 3.13,
+    `cafile=`, `capath=` or `cadefault=`) builds an opener of its own; `http.client` is the layer under
+    urllib (and under `xmlrpc.client`); a later `install_opener()` replaces the guard's opener.  QA's pin
+    (TestQaWhereTheGuardsViewEnds, QA-W1) holds the behaviour; this holds the words."""
+    bullet = flat(_between(privacy_known_gaps(), r"^(?=- A `urllib` request that does not go through the opener the guard$)", r"\n(?=- |\S)",
+                           "PRIVACY.md's bullet about urllib requests that skip the guard's opener"))
+    assert bullet.startswith("- A `urllib` request that does not go through the opener the guard installed:"), bullet
+    for needle in (
+        "`urlopen(url, context=...)`", "before Python 3.13", "`cafile=`", "`capath=`", "`cadefault=`",
+        "`http.client`", "`xmlrpc.client`", "as `urllib3` is under `requests`",
+        "`urllib.request.install_opener(...)`", "replaces the guarded opener",
+        "Nothing in `src/arail/` does any of these today",
+    ):
+        assert needle in bullet, f"PRIVACY.md's bullet does not say {needle!r}: {bullet}"
+
+
+URLLIB_BYPASS_KEYWORDS = {"context", "cafile", "capath", "cadefault"}
+HTTP_CLIENT_MODULES = {"http.client", "xmlrpc.client"}
+
+
+def _imported_module_names(node):
+    """Every dotted name an import statement can bring in: `import http.client as hc` -> http.client;
+    `from http import client` -> http, http.client; `from http.client import HTTPConnection` -> http.client."""
+    if isinstance(node, ast.Import):
+        return [alias.name for alias in node.names]
+    module = node.module or ""
+    return [module, *(f"{module}.{alias.name}" for alias in node.names)]
+
+
+def test_no_lab_code_goes_around_the_opener_the_guard_installs():
+    """QA-W1, the sentence 'Nothing in `src/arail/` does any of these today' (PRIVACY.md, airgap.KNOWN_GAPS).
+    Like DOC-9 for the install sites, this reads the tree: no module under src/arail (apart from egress.py,
+    which installs the guard's opener) imports http.client or xmlrpc.client, calls install_opener(), or
+    passes context=, cafile=, capath= or cadefault= to urlopen().  A hit is code that talks to the network
+    around the airgap guard: use requests or the httpx family, or update the three places that say 'none'."""
+    found = []
+    for path in sorted((ROOT / "src" / "arail").rglob("*.py")):
+        if path == ROOT / "src" / "arail" / "egress.py":
+            continue
+        relative = path.relative_to(ROOT)
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"), filename=str(path))):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                for name in _imported_module_names(node):
+                    if name in HTTP_CLIENT_MODULES:
+                        found.append(f"{relative}:{node.lineno} imports {name}")
+            elif isinstance(node, ast.Call):
+                func = node.func
+                called = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+                if called == "install_opener":
+                    found.append(f"{relative}:{node.lineno} calls install_opener()")
+                elif called == "urlopen":
+                    for keyword in node.keywords:
+                        if keyword.arg in URLLIB_BYPASS_KEYWORDS:
+                            found.append(f"{relative}:{node.lineno} passes {keyword.arg}= to urlopen()")
+    assert not found, (
+        "lab code uses an urllib or stdlib HTTP path the airgap guard does not see: " + "; ".join(found)
+    )
+
+
+def test_the_tripwire_for_lab_code_that_skips_the_opener_can_fire():
+    """A scan that cannot find anything proves nothing: the helper recognises every spelling of the import."""
+    parsed = ast.parse("import http.client as hc\nfrom http import client\nfrom xmlrpc.client import ServerProxy\nimport json")
+    names = [name for node in parsed.body for name in _imported_module_names(node)]
+    assert {"http.client", "xmlrpc.client"} <= set(names) and "json" in names
+    assert sum(1 for name in names if name in HTTP_CLIENT_MODULES) == 3
 
 
 def test_privacy_lists_objects_created_before_the_guard_as_a_gap():
@@ -609,6 +703,14 @@ def test_the_modal_turns_amber_and_opens_the_gaps_when_the_guard_is_incomplete()
     assert re.search(r'<details class="airgap-gaps" id="airgap-gaps">', _read(MODAL)), (
         "the modal's known-gaps <details> has no id nav.js can open"
     )
+
+
+def test_the_modal_paragraph_scopes_urllib_and_names_http_client():
+    """QA-W1.  The paragraph under the list names `urllib.request` as caught and did not name `http.client` among
+    the clients that are not wrapped."""
+    text = flat(modal_gap_paragraph())
+    assert "<code>urllib.request</code> (<code>urlopen</code> without an SSL context)" in text, text
+    assert "<code>http.client</code>" in text and "used directly" in text, text
 
 
 def test_the_modal_paragraph_does_not_say_a_library_is_caught_without_qualification():
