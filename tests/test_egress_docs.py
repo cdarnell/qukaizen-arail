@@ -48,6 +48,7 @@ README = ROOT / "README.md"
 PRIVACY = ROOT / "docs" / "PRIVACY.md"
 MODAL = ROOT / "src" / "arail" / "portal" / "templates" / "_airgap_modal.html"
 NAV_JS = ROOT / "src" / "arail" / "portal" / "static" / "nav.js"
+THE_LAB = ROOT / "docs" / "the-lab.md"
 ROUTER_CORE = ROOT / "src" / "arail" / "router" / "core.py"
 
 INSTALLED = installed_independently()
@@ -658,6 +659,31 @@ def test_privacy_scopes_what_airgapped_mode_blocks_for_requests_and_urllib():
     text = flat(privacy_enforces())
     assert "`requests` (new sessions)" in text, text
     assert "`urllib.request` (`urlopen` without an SSL context)" in text, text
+
+
+# Two older paragraphs that describe the airgapped default in a sentence or two.  They said the guard covers
+# "`requests` and `urllib`" (no httpx family) and passes "loopback, RFC1918, or link-local" (the check is
+# Python's private set), which contradicted the README's "What local-first means" and PRIVACY.md.
+OLDER_AIRGAP_PARAGRAPHS = {
+    "README 'Airgapped guard'": (README, "**Airgapped guard.**"),
+    "docs/the-lab.md 'Default mode is airgapped'": (THE_LAB, "**Default mode is airgapped.**"),
+}
+
+
+@pytest.mark.parametrize("where", sorted(OLDER_AIRGAP_PARAGRAPHS))
+def test_the_older_airgap_paragraphs_agree_with_the_readme_and_privacy(where):
+    """QA-N6.  Each paragraph names every client the guard wraps (with the same scope as the README's later
+    paragraph and PRIVACY.md), says the allowed addresses are the ones Python's `ipaddress` calls private (not
+    only loopback, RFC1918 and link-local), and points at PRIVACY.md for what the guard does not cover."""
+    path, opening = OLDER_AIRGAP_PARAGRAPHS[where]
+    text = flat(_between(_read(path), rf"^(?={re.escape(opening)})", r"^$", where))
+    missing = [client for client in egress.GUARDED_CLIENTS if not names(text, client)]
+    assert not missing, f"{where} does not name {missing}; the guard wraps {list(egress.GUARDED_CLIENTS)}: {text}"
+    assert "`requests` (new sessions)" in text and "`urllib.request` (`urlopen` without an SSL context)" in text, text
+    assert "Python's `ipaddress`" in text, text
+    assert "PRIVACY.md" in text, text
+    assert "`requests` and `urllib`" not in text, "still the pre-httpx2 client list"
+    assert "loopback, RFC1918, or link-local" not in text, "still the three-range list (REVIEW.md N1)"
 
 
 def test_privacy_says_the_httpx_family_covers_objects_but_not_a_method_reference_taken_before_the_guard():
