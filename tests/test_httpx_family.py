@@ -415,7 +415,27 @@ def test_an_installed_library_the_guard_cannot_patch_fails_the_doctor_and_is_nam
     assert findings[0].level == "required" and findings[0].ok is False
     assert lib in findings[0].detail and "NOT checked" in findings[0].detail
     line = _doctor_value(output, "egress guard")
-    assert line is not None and "EgressGuardIncomplete" in line and lib in line, output
+    # QA-N4: a known state is not an unknown one.  The line used to read `? (EgressGuardIncomplete: ...)`, and a
+    # `?` in the doctor's report means "could not tell".  It says INCOMPLETE, then the guard's own message.
+    assert line is not None and line.startswith("INCOMPLETE — egress guard incomplete — ") and lib in line, output
+    assert not line.startswith("?") and "EgressGuardIncomplete" not in line, output
+    assert line.removeprefix("INCOMPLETE — ") == findings[0].detail, "the line and the finding carry the same message"
+
+
+def test_a_failure_that_is_not_an_incomplete_guard_still_reads_as_unknown(monkeypatch, capsys, guard_state):
+    """QA-N4, the other side.  Only EgressGuardIncomplete is a known state.  Any other exception from the install
+    (here a broken import of the guard's own module) is still reported as `? (<Type>: <message>)` and fails the
+    required check."""
+    def _boom():
+        raise OSError("simulated: the install failed for another reason")
+
+    monkeypatch.setattr(guard_state, "install_guard", _boom)
+    monkeypatch.setattr(doctor, "_FINDINGS", [])
+    doctor.check_environment()
+    line = _doctor_value(capsys.readouterr().out, "egress guard")
+    assert line == "? (OSError: simulated: the install failed for another reason)", line
+    findings = [f for f in doctor._FINDINGS if f.name == "egress_guard"]
+    assert len(findings) == 1 and findings[0].level == "required" and findings[0].ok is False
 
 
 def _only_the_environment_check(monkeypatch):

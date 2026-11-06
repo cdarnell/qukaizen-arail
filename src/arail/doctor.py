@@ -97,14 +97,21 @@ def check_environment() -> None:
         # doctor runs in its own process — install the guard here too so this
         # checkup's own probes (esp. --updates) obey the same airgap policy the
         # portal enforces, and the report reflects a genuinely guarded process.
-        egress.install_guard()
-        installed = bool(getattr(egress, "_INSTALLED", False))
-        _p("  egress guard      : "
-           + (_guard_summary(egress) if installed else "NOT installed"))
-        # Required check (ARCHITECTURE.md §5.2): the guard is expected to be
-        # installable in every supported environment (including CI, A8) —
-        # if it isn't, that's a real problem, not an optional one.
-        _record("egress_guard", "required", installed)
+        try:
+            egress.install_guard()
+        except egress.EgressGuardIncomplete as e:
+            # A known state, not an unknown one: the guard says which library it could not patch and
+            # what to do.  A "?" would read as "could not tell", so the line says INCOMPLETE.
+            _p(f"  egress guard      : INCOMPLETE — {e}")
+            _record("egress_guard", "required", False, str(e))
+        else:
+            installed = bool(getattr(egress, "_INSTALLED", False))
+            _p("  egress guard      : "
+               + (_guard_summary(egress) if installed else "NOT installed"))
+            # Required check (ARCHITECTURE.md §5.2): the guard is expected to be
+            # installable in every supported environment (including CI, A8) —
+            # if it isn't, that's a real problem, not an optional one.
+            _record("egress_guard", "required", installed)
     except Exception as e:  # noqa: BLE001
         _p(f"  egress guard      : ? ({type(e).__name__}: {e})")
         _record("egress_guard", "required", False, str(e))
