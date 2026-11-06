@@ -689,14 +689,14 @@ def test_a_member_whose_attribute_lookup_raises_is_loud_and_the_next_member_is_s
             assert getattr(_owned(importlib.import_module(other), "HTTPTransport", "handle_request"), "_arail_guarded", False)
 
 
-def _stub_member(name, lazy_failures=()):
+def _stub_member(name, lazy_failures=(), error=ImportError):
     """A family member made of stubs, so the test does not depend on which libraries are installed.
 
     ``HTTPTransport`` and ``AsyncHTTPTransport`` are classes whose methods stand for the library's network
     I/O.  A class named in ``lazy_failures`` is not an attribute of the module: looking it up reaches a
-    module-level ``__getattr__`` that raises ImportError, as a lazily loaded attribute whose import fails
-    does.  Returns ``(module, sync class, async class)``; a class that cannot be looked up is still returned,
-    so the test can see whether the guard touched it."""
+    module-level ``__getattr__`` that raises ``error`` (ImportError unless a test needs another type), as a
+    lazily loaded attribute whose import fails does.  Returns ``(module, sync class, async class)``; a class
+    that cannot be looked up is still returned, so the test can see whether the guard touched it."""
     module = types.ModuleType(name)
 
     class HTTPTransport:
@@ -713,7 +713,7 @@ def _stub_member(name, lazy_failures=()):
 
     def __getattr__(attribute):
         if attribute in lazy_failures:
-            raise ImportError(f"simulated: cannot import {attribute} (a lazy attribute whose import fails)")
+            raise error(f"simulated: cannot import {attribute} (a lazy attribute whose import fails)")
         raise AttributeError(attribute)
 
     module.__getattr__ = __getattr__
@@ -761,6 +761,32 @@ def test_a_member_whose_lookup_raises_does_not_stop_the_other_member_from_being_
     egress._reset_for_tests()
     assert vars(healthy_sync)["handle_request"] is stock_healthy
     assert vars(broken_sync)["handle_request"] is stock_broken
+
+
+@pytest.mark.parametrize("raised", [ImportError, RuntimeError, OSError, SyntaxError, KeyError, ValueError],
+                         ids=lambda error: error.__name__)
+@pytest.mark.parametrize("broken", LITERAL_FAMILY)
+def test_whatever_a_failing_lookup_raises_the_member_is_reported_and_the_other_is_patched(broken, raised, monkeypatch):
+    """EG-A10 (QA-W2, the breadth of the containment).  EG-A8 and EG-A9 raise ImportError, the shape a lazily
+    loaded attribute usually fails with.  The family step contains ``Exception`` and not only ImportError,
+    because what a lazy ``__getattr__`` raises is whatever the library's own import raises: a corrupt install
+    can fail with SyntaxError or OSError, a bad plugin with RuntimeError.  A catch narrowed to ImportError
+    would let those escape the family step again, which is QA-W2 for every exception but one: ``install_guard()``
+    would raise something that is not EgressGuardIncomplete, ``coverage()`` would stay empty and the next
+    member would never be patched."""
+    other = next(name for name in LITERAL_FAMILY if name != broken)
+    broken_module, _, _ = _stub_member(broken, ("HTTPTransport", "AsyncHTTPTransport"), error=raised)
+    healthy_module, _, _ = _stub_member(other)
+    monkeypatch.setitem(sys.modules, broken, broken_module)
+    monkeypatch.setitem(sys.modules, other, healthy_module)
+
+    with pytest.raises(egress.EgressGuardIncomplete) as excinfo:
+        egress.install_guard()
+
+    coverage = egress.coverage()
+    assert coverage[broken].startswith(f"unguarded: patch raised {raised.__name__}: "), coverage
+    assert coverage[other] == "guarded", coverage
+    assert list(excinfo.value.uncovered) == [broken] and egress._INSTALLED is False
 
 
 # --- EG-21, EG-22: audit attribution ----------------------------------------------------------
