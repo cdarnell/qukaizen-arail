@@ -478,21 +478,39 @@ def test_a_real_worker_process_prints_the_incomplete_guard_message_once(lib, tmp
 
 
 @lib_param
-def test_the_worker_keeps_the_guards_log_record_for_any_handler_that_is_configured(lib, monkeypatch, status_env, caplog):
+def test_the_worker_keeps_the_guards_log_record_for_any_handler_that_is_configured(lib, monkeypatch, status_env):
     """QA-N4, the other half of the fix.  What keeps the duplicate line off stderr is a NullHandler on the
     guard's logger while the guard installs; it must not make the record disappear for a handler somebody
     configures (so no ``propagate = False``), and it must be gone again afterwards, so that an in-process
-    caller of ``main()`` does not inherit it."""
+    caller of ``main()`` does not inherit it.
+
+    The logger is put in a known state first, and the "configured handler" is this test's own, on the root
+    logger.  Neither is incidental: pytest attaches its capture handler directly to every logger that is not
+    propagating when a test starts, so a ``propagate = False`` leaked by an earlier test (the mutant that adds
+    it never puts it back) lets the record through ``caplog`` and hides the bug; with caplog this test was red
+    when run alone and green after any other in-process worker test."""
     from arail.nucleus import worker
 
     monkeypatch.delattr(importlib.import_module(lib), "AsyncHTTPTransport")
     guard_logger = logging.getLogger(egress.__name__)
-    handlers_before, propagate_before = list(guard_logger.handlers), guard_logger.propagate
-    with caplog.at_level(logging.ERROR, logger=egress.__name__):
+    monkeypatch.setattr(guard_logger, "handlers", [])
+    monkeypatch.setattr(guard_logger, "propagate", True)
+    seen = []
+
+    class _ConfiguredOnRoot(logging.Handler):
+        def emit(self, record):
+            seen.append(record)
+
+    root_logger = logging.getLogger()
+    configured = _ConfiguredOnRoot(level=logging.ERROR)
+    root_logger.addHandler(configured)
+    try:
         assert worker.main(["PA", "build-1"]) == 1
-    records = [r for r in caplog.records if r.name == egress.__name__ and "egress guard incomplete" in r.getMessage()]
-    assert len(records) == 1, [r.getMessage() for r in caplog.records]
-    assert guard_logger.handlers == handlers_before and guard_logger.propagate is propagate_before
+    finally:
+        root_logger.removeHandler(configured)
+    records = [r for r in seen if r.name == egress.__name__ and "egress guard incomplete" in r.getMessage()]
+    assert len(records) == 1, [r.getMessage() for r in seen]
+    assert guard_logger.handlers == [] and guard_logger.propagate is True, "the worker did not leave the guard's logger as it found it"
 
 
 def test_the_model_forge_worker_still_starts_the_phase_when_the_guard_is_whole(monkeypatch, status_env, capsys):
