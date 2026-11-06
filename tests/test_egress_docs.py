@@ -362,6 +362,87 @@ def test_the_hybrid_description_is_left_alone(lib, monkeypatch, status_env):
     assert any(gap.startswith(f"{lib}: installed, but") for gap in status["known_gaps"])
 
 
+# --- DOC-5, Buddy: the one sentence the operator hears when they turn the airgap back on --------------
+
+SEALED_BACK_UP = "Sealed back up. Agents can't reach the public internet."
+
+
+@pytest.fixture
+def buddy_after_the_flip(monkeypatch, tmp_path, status_env):
+    """Buddy's airgap watcher, run once after the lab flipped from hybrid to airgapped (what the toggle does).
+
+    The watcher keeps its last-seen mode in a state file and reads the audit log from the data directory, so
+    both are pointed at tmp_path.  The fixture returns the function that runs it."""
+    buddy = importlib.import_module("arail.agents._builtin_buddy")
+    state = tmp_path / "state.json"
+    state.write_text(json.dumps({"airgap_last_lab_mode": "hybrid"}))
+    monkeypatch.setattr(buddy, "_state_file", lambda: state)
+    monkeypatch.setattr(egress, "_lab_data", lambda: tmp_path)
+    monkeypatch.setenv("LAB_MODE", "airgapped")
+    return buddy._watch_airgap_events
+
+
+def test_buddy_still_says_sealed_back_up_when_the_guard_is_whole(buddy_after_the_flip):
+    """R-W1, the unchanged half.  With nothing unguarded the line is the one it always was, at the severity it
+    always had, so the fix does not change what a healthy lab hears."""
+    egress.install_guard()
+    observation = buddy_after_the_flip()
+    assert observation.watcher == "airgap:mode-toggle"
+    assert observation.fact == SEALED_BACK_UP
+    assert observation.severity == "info"
+
+
+BUDDY_OPEN_LINES = {
+    ("httpx2",): "Sealed back up, except httpx2: the egress guard could not patch it, so its requests still go out. "
+                 "The Network Policy modal has the details.",
+    ("httpx",): "Sealed back up, except httpx: the egress guard could not patch it, so its requests still go out. "
+                "The Network Policy modal has the details.",
+    ("httpx2", "httpx"): "Sealed back up, except httpx2 and httpx: the egress guard could not patch them, so their "
+                         "requests still go out. The Network Policy modal has the details.",
+}
+
+
+@pytest.mark.parametrize(
+    "broken",
+    [(lib,) for lib in INSTALLED] + ([tuple(INSTALLED)] if len(INSTALLED) > 1 else []),
+    ids=lambda broken: "+".join(broken),
+)
+def test_buddy_does_not_say_the_lab_is_sealed_while_the_guard_knows_a_library_is_open(
+        broken, buddy_after_the_flip, monkeypatch):
+    """R-W1 (the architect's re-review).  Buddy's observation on a flip back to airgapped said "Sealed back up.
+    Agents can't reach the public internet." in every state, while the modal, the nav badge and the status
+    endpoint said a library's requests are NOT blocked (and an async request through it reached the network
+    layer).  It is the one sentence the operator hears at the moment they turn the airgap back on, so it
+    names the library and says its requests still go out, at the severity that outranks an ordinary info."""
+    for name in broken:
+        monkeypatch.delattr(importlib.import_module(name), "AsyncHTTPTransport")
+    with pytest.raises(egress.EgressGuardIncomplete):
+        egress.install_guard()
+    observation = buddy_after_the_flip()
+    assert observation is not None and observation.watcher == "airgap:mode-toggle"
+    assert observation.fact == BUDDY_OPEN_LINES[broken], observation.fact
+    assert SEALED_BACK_UP not in observation.fact, "the unqualified claim is still there"
+    assert observation.severity == "warn"
+
+
+@lib_param
+def test_buddys_door_open_line_is_left_alone_when_the_guard_is_incomplete(lib, monkeypatch, tmp_path, status_env):
+    """R-W1, the other direction.  Hybrid mode does not claim anything is sealed, so there is nothing to
+    qualify (as for the status description in DOC-5)."""
+    buddy = importlib.import_module("arail.agents._builtin_buddy")
+    state = tmp_path / "state.json"
+    state.write_text(json.dumps({"airgap_last_lab_mode": "airgapped"}))
+    monkeypatch.setattr(buddy, "_state_file", lambda: state)
+    monkeypatch.setattr(egress, "_lab_data", lambda: tmp_path)
+    monkeypatch.delattr(importlib.import_module(lib), "AsyncHTTPTransport")
+    with pytest.raises(egress.EgressGuardIncomplete):
+        egress.install_guard()
+    monkeypatch.setenv("LAB_MODE", "hybrid")
+    observation = buddy._watch_airgap_events()
+    assert observation.fact == "Door's open now \u2014 agent fetches go through. Per-domain consent still gates browser/curator."
+    assert observation.severity == "info"
+
+
 def test_a_library_whose_attribute_lookup_raises_is_reported_like_any_other_unguarded_library(
         monkeypatch, status_env, activity_lines):
     """DOC-5 (QA-W2).  A family member that imports but raises when its transport classes are looked up (a

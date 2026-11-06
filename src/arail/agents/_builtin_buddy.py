@@ -489,6 +489,19 @@ def _watch_study_streak() -> Optional[Observation]:
     return None
 
 
+def _unguarded_libraries() -> List[str]:
+    """The HTTP libraries the egress guard found installed and could not patch (``arail.egress.uncovered()``),
+    in the guard's order.  Empty when the guard is whole.
+
+    A watcher must never raise, so a failure to read the guard's state reads as nothing known and Buddy keeps
+    its usual line (the portal's modal and the activity log carry the warning either way)."""
+    try:
+        from arail.egress import uncovered
+        return list(uncovered())
+    except Exception:
+        return []
+
+
 def _watch_airgap_events() -> Optional[Observation]:
     """Tail egress.jsonl + detect LAB_MODE toggles.
 
@@ -535,13 +548,26 @@ def _watch_airgap_events() -> Optional[Observation]:
     # -- Check LAB_MODE toggle --
     current_mode = _lab_mode()
     if current_mode != last_mode:
+        severity = "info"
         if current_mode == "hybrid" and last_mode == "airgapped":
             fact = "Door's open now — agent fetches go through. Per-domain consent still gates browser/curator."
         else:
             fact = "Sealed back up. Agents can't reach the public internet."
+            unguarded = _unguarded_libraries() if current_mode == "airgapped" else []
+            if unguarded:
+                # The one sentence the operator hears when they turn the airgap back on must not contradict the
+                # Network Policy modal, the nav badge and the status endpoint, which all say these requests are
+                # NOT blocked.  A warn outranks an info when several observations land in one tick.
+                names = unguarded[0] if len(unguarded) == 1 else ", ".join(unguarded[:-1]) + " and " + unguarded[-1]
+                one = len(unguarded) == 1
+                fact = (
+                    f"Sealed back up, except {names}: the egress guard could not patch {'it' if one else 'them'}, "
+                    f"so {'its' if one else 'their'} requests still go out. The Network Policy modal has the details."
+                )
+                severity = "warn"
         observation = Observation(
             watcher="airgap:mode-toggle",
-            severity="info",
+            severity=severity,
             fact=fact,
             cooldown_sec=_AIRGAP_WATCHER_COOLDOWN_SEC,
             suggestion={"kind": "airgap", "link": "/api/airgap/status"},
