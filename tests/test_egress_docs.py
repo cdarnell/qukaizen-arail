@@ -841,6 +841,103 @@ def test_the_modal_paragraph_does_not_say_a_library_is_caught_without_qualificat
     assert "unless the list above names" in text and "could not patch" in text, text
 
 
+# --- QA-N7: the always-visible nav badge carries the guard state ------------------------------------------
+
+def _mode():
+    mode = asyncio.run(_portal_app().get_mode())
+    json.dumps(mode)  # a JSON response
+    return mode
+
+
+def test_the_mode_endpoint_carries_the_guard_state_the_badge_reads(status_env):
+    """QA-N7.  The badge in the nav bar (#mode-badge) is the one indicator on every page, and it read
+    /api/system/mode, which answered {"mode": ...} and nothing else, so it said plain "Airgapped" in
+    every state of the guard while the modal behind it (/api/airgap/status) said the guard was incomplete.
+    The endpoint now also carries ``guard_installed``, the field the modal reads."""
+    assert _mode() == {"mode": "airgapped", "guard_installed": False}  # nothing installed yet in this test
+    egress.install_guard()
+    assert _mode() == {"mode": "airgapped", "guard_installed": True}
+    assert _mode()["guard_installed"] == _status()["guard_installed"]
+
+
+@lib_param
+@pytest.mark.parametrize("mode", ["airgapped", "hybrid"])
+def test_the_mode_endpoint_says_the_guard_is_incomplete_and_agrees_with_the_status_endpoint(lib, mode, monkeypatch, status_env):
+    """QA-N7.  An unpatchable library makes ``guard_installed`` False on both endpoints, in either mode (the
+    toggle flips the mode in-process, so a hybrid lab with an incomplete guard that is switched to airgapped
+    must already show it)."""
+    monkeypatch.setenv("LAB_MODE", mode)
+    monkeypatch.delattr(importlib.import_module(lib), "AsyncHTTPTransport")
+    with pytest.raises(egress.EgressGuardIncomplete):
+        egress.install_guard()
+    reported = _mode()
+    assert reported == {"mode": mode, "guard_installed": False}
+    assert reported["guard_installed"] == _status()["guard_installed"]
+
+
+def test_the_mode_route_is_served_by_the_function_these_tests_call():
+    """QA-N7.  The tests call ``get_mode()`` directly (no server, no port, no auth); this ties that function to
+    the route the page fetches."""
+    portal = _portal_app()
+    routes = [r for r in portal.app.routes if getattr(r, "path", None) == "/api/system/mode" and "GET" in getattr(r, "methods", ())]
+    assert len(routes) == 1 and routes[0].endpoint is portal.get_mode
+
+
+def _js_function_body(js, name):
+    """The body of ``function <name>(mode) { ... }`` inside nav.js's mode-badge closure (two-space indent)."""
+    match = re.search(rf"^  function {name}\(mode\) \{{\n(.*?)^  \}}\n", js, re.S | re.M)
+    assert match, f"nav.js has no function {name}(mode)"
+    return match.group(1)
+
+
+def test_the_nav_badge_does_not_read_plain_airgapped_while_the_guard_is_incomplete():
+    """QA-N7.  Source-level, like the rest of DOC-6 (nav.js is not run here; the build log shows the badge run
+    under node with a DOM stub).  ``updateBadge`` consults the flag the modal's pill already uses; when the lab
+    is airgapped and the guard is not whole it paints the badge amber with the hybrid badge's existing style (no
+    new CSS), says "Airgapped, guard incomplete", and its title points at the Network Policy modal, where the
+    library is named.  The text goes in with textContent."""
+    js = _read(NAV_JS)
+    body = _js_function_body(js, "updateBadge")
+    assert "var incomplete = mode === 'airgapped' && guardIncomplete;" in body, body
+    assert "badge.className = 'mode-badge ' + (incomplete ? 'hybrid' : mode);" in body, body
+    assert "'\\u2B24 Airgapped, guard incomplete'" in body, body
+    assert "click to see which, in the Network Policy modal" in body, body
+    assert "badge.textContent =" in body and "innerHTML" not in body, body
+    # the plain text is still what a whole guard shows
+    assert "'\\u2B24 Airgapped'" in body and "'\\u2B24 Hybrid'" in body, body
+
+
+def test_the_nav_badge_is_given_the_guard_state_before_it_is_painted():
+    """QA-N7.  The page-load fetch of /api/system/mode sets the shared flag from ``guard_installed`` and only then
+    paints; the flag is declared once, so the modal's pill and the badge cannot disagree about it; and a flip in
+    the modal repaints the badge through the same function, which still consults the flag."""
+    js = _read(NAV_JS)
+    assert len(re.findall(r"^  var guardIncomplete = false;", js, re.M)) == 1
+    assert re.search(
+        r"fetch\('/api/system/mode'\)\s*\.then\(function \(r\) \{ return r\.json\(\); \}\)\s*"
+        r"\.then\(function \(d\) \{\s*guardIncomplete = d\.guard_installed === false;\s*updateBadge\(d\.mode\);\s*\}\)",
+        js,
+    ), "nav.js does not set the guard flag from /api/system/mode before it paints the badge"
+    assert "updateBadge(confirmedMode);" in js, "the confirmed flip no longer repaints the badge"
+
+
+def test_the_incomplete_badge_reuses_the_existing_amber_style():
+    """QA-N7.  No new CSS: the badge takes the hybrid badge's class, which is the lab's amber for a mode that is
+    not sealed.  If that rule stops being amber, the badge stops being a warning, so this ties them."""
+    css = _read(ROOT / "src" / "arail" / "portal" / "static" / "style.css")
+    rule = re.search(r"\.mode-badge\.hybrid \{([^}]*)\}", css)
+    assert rule, "style.css has no .mode-badge.hybrid rule"
+    assert "color: var(--warn);" in rule.group(1) and "var(--warn)" in rule.group(1), rule.group(1)
+
+
+def test_privacy_lists_the_nav_badge_among_the_places_that_say_the_guard_is_incomplete():
+    """QA-N7.  PRIVACY.md lists where the lab says so; the badge is the one every page shows."""
+    text = flat(privacy_known_gaps())
+    assert 'the Airgapped badge in the nav bar reads "Airgapped, guard incomplete" in amber' in text, (
+        "PRIVACY.md does not list the nav badge among the places an incomplete guard shows"
+    )
+
+
 # --- DOC-8: the audit command in PRIVACY.md finds what PRIVACY.md names -----------------------------
 
 def test_the_audit_grep_in_privacy_finds_every_client_the_doc_names():

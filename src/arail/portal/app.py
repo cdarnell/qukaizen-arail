@@ -11925,7 +11925,14 @@ async def system_metrics(request: Request):
 
 @app.get("/api/system/mode")
 async def get_mode():
-    return {"mode": _lab_mode()}
+    """The lab mode, and whether the egress guard is whole.
+
+    The nav bar's always-visible badge reads this once per page load. ``guard_installed`` is the field the
+    Network Policy modal reads from ``/api/airgap/status`` (False after an install_guard() that raised
+    EgressGuardIncomplete), so the badge can say "Airgapped, guard incomplete" instead of a plain
+    "Airgapped" that the modal's pill, description and list contradict."""
+    from arail.egress import _INSTALLED
+    return {"mode": _lab_mode(), "guard_installed": _INSTALLED}
 
 
 @app.post("/api/system/mode")

@@ -65,26 +65,39 @@ window.__arailNavJs = true;
   var badge = document.getElementById('mode-badge');
   if (!badge) return;
 
-  // Whether the egress guard is whole, as of the last /api/airgap/status. The modal's pill is "ok" only
-  // when the mode is airgapped AND the guard is whole; every place that paints it goes through here, so
-  // flipping the mode cannot turn it green while a library is unguarded.
+  // Whether the egress guard is whole, as of the last status the page read: /api/system/mode when the page
+  // loads, /api/airgap/status when the modal opens. The modal's pill is "ok" only when the mode is airgapped
+  // AND the guard is whole, and the badge below follows the same rule, so neither can say plain "Airgapped"
+  // while a library is unguarded. Every place that paints either goes through here, so flipping the mode
+  // cannot turn them green again.
   var guardIncomplete = false;
   function pillClass(mode) {
     return 'mp-pill ' + (mode === 'airgapped' && !guardIncomplete ? 'ok' : 'warn');
   }
 
   function updateBadge(mode) {
-    badge.className = 'mode-badge ' + mode;
-    badge.textContent = mode === 'airgapped' ? '\u2B24 Airgapped' : '\u2B24 Hybrid';
-    badge.title = mode === 'airgapped'
-      ? 'Airgapped \u2014 click to see the operational definition and recent blocks.'
-      : 'Hybrid \u2014 agent fetches are allowed. Click to see the egress audit.';
+    // An airgapped lab whose guard could not patch every HTTP library is not sealed. The badge says so, in
+    // the amber of the hybrid badge (an existing style, no new CSS), and its title points at the Network
+    // Policy modal, where the library is named.
+    var incomplete = mode === 'airgapped' && guardIncomplete;
+    badge.className = 'mode-badge ' + (incomplete ? 'hybrid' : mode);
+    badge.textContent = mode === 'airgapped'
+      ? (incomplete ? '\u2B24 Airgapped, guard incomplete' : '\u2B24 Airgapped')
+      : '\u2B24 Hybrid';
+    badge.title = incomplete
+      ? 'Airgapped, but the egress guard could not patch every HTTP library \u2014 click to see which, in the Network Policy modal.'
+      : (mode === 'airgapped'
+        ? 'Airgapped \u2014 click to see the operational definition and recent blocks.'
+        : 'Hybrid \u2014 agent fetches are allowed. Click to see the egress audit.');
   }
 
-  // Sync on load
+  // Sync on load. The same response carries the guard state, so the badge is painted once, with both.
   fetch('/api/system/mode')
     .then(function (r) { return r.json(); })
-    .then(function (d) { updateBadge(d.mode); })
+    .then(function (d) {
+      guardIncomplete = d.guard_installed === false;
+      updateBadge(d.mode);
+    })
     .catch(function () {});
 
   // Click \u2192 open airgap modal (populated from /api/airgap/status)

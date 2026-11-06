@@ -77,10 +77,11 @@ of them is installed but the guard cannot patch it (a future release
 renamed its transport classes, say), requests made through that library
 are not checked, and the lab says so instead of staying silent: the
 portal's activity log records "Egress guard install failed",
-`./arailctl doctor` fails its egress check, and the Network Policy modal
-shows its mode pill as a warning and opens the known-gaps list with the
-library in it, and its description says that requests made through that
-library are NOT blocked.
+`./arailctl doctor` fails its egress check, the Airgapped badge in the nav
+bar reads "Airgapped, guard incomplete" in amber, and the Network Policy
+modal shows its mode pill as a warning and opens the known-gaps list with
+the library in it, and its description says that requests made through
+that library are NOT blocked.
 
 The lab does not stop, though. With an incomplete guard the portal and the
 agent loader keep serving with that library unguarded; only Model Forge's
