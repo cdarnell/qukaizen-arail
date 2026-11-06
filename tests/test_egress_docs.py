@@ -334,14 +334,18 @@ def test_the_airgapped_description_names_a_library_whose_requests_are_not_blocke
 @pytest.mark.parametrize("broken", [INSTALLED] if INSTALLED else [])
 def test_the_description_names_every_unguarded_library(broken, monkeypatch, status_env):
     """DOC-5.  With every installed member unpatchable (both, in the leg that has both) the description
-    names all of them, in FAMILY order."""
+    names all of them, in FAMILY order, and the known-gaps list has one entry for each of them (the
+    architect's re-review, R-N2: a list that kept only the first library passed every test)."""
     for name in broken:
         monkeypatch.delattr(importlib.import_module(name), "AsyncHTTPTransport")
     with pytest.raises(egress.EgressGuardIncomplete):
         egress.install_guard()
-    definition = _status()["definition"]
+    status = _status()
+    definition = status["definition"]
     assert f"EXCEPT requests made through {', '.join(broken)}:" in definition, definition
     assert ("could not patch it" if len(broken) == 1 else "could not patch them") in definition
+    extra = status["known_gaps"][len(airgap.KNOWN_GAPS):]
+    assert [gap.split(":")[0] for gap in extra] == list(broken), extra
 
 
 @lib_param
