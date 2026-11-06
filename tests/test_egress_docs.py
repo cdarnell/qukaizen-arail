@@ -730,6 +730,8 @@ def _imported_module_names(node):
     `from http import client` -> http, http.client; `from http.client import HTTPConnection` -> http.client."""
     if isinstance(node, ast.Import):
         return [alias.name for alias in node.names]
+    if node.level:  # a relative import names a module of this package, not the standard library's
+        return []
     module = node.module or ""
     return [module, *(f"{module}.{alias.name}" for alias in node.names)]
 
@@ -770,6 +772,9 @@ def test_the_tripwire_for_lab_code_that_skips_the_opener_can_fire():
     names = [name for node in parsed.body for name in _imported_module_names(node)]
     assert {"http.client", "xmlrpc.client"} <= set(names) and "json" in names
     assert sum(1 for name in names if name in HTTP_CLIENT_MODULES) == 3
+    # ...and does not cry wolf: a relative import names a module of the package itself, never the standard library's.
+    relative = ast.parse("from .http import client\nfrom ..xmlrpc import client as other")
+    assert [name for node in relative.body for name in _imported_module_names(node)] == []
 
 
 def test_privacy_lists_objects_created_before_the_guard_as_a_gap():
