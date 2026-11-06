@@ -14,15 +14,39 @@ patch) the worker does NOT run the phase: it writes one ``worker: ...`` line
 to stderr and exits 1. It is the one caller of ``install_guard()`` that stops
 (the portal and the agent loader report and keep serving; see
 docs/PRIVACY.md). The parent inherits this stderr, so the line is what a
-Model Forge user reads; it must not be a traceback.
+Model Forge user reads; it must not be a traceback, and it must not be
+printed twice: the guard also logs the same message, and with logging
+unconfigured (as in this process) logging's last-resort handler would print
+that record to stderr as a second line, so the guard's logger is given a
+NullHandler for the duration of the install.
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
+import logging
 import sys
 from pathlib import Path
 from typing import Sequence
+
+
+@contextlib.contextmanager
+def _guard_log_kept_off_stderr(logger_name: str):
+    """While active, logging's last-resort handler does not print ``logger_name``'s records to stderr.
+
+    The last-resort handler prints a record only when no handler is found for its logger anywhere up
+    the hierarchy; a NullHandler is a handler, so the record is found to have one and nothing is printed.
+    It is not ``propagate = False``: the record still reaches a handler somebody configures on the root
+    logger, and the NullHandler is taken off again when the block ends, so an in-process caller of
+    ``main()`` (a test) does not inherit it."""
+    logger = logging.getLogger(logger_name)
+    handler = logging.NullHandler()
+    logger.addHandler(handler)
+    try:
+        yield
+    finally:
+        logger.removeHandler(handler)
 
 
 def _load_context(build_id: str) -> dict:
@@ -44,10 +68,11 @@ def main(argv: Sequence[str] = None) -> int:
     from arail import egress
 
     try:
-        egress.install_guard()
+        with _guard_log_kept_off_stderr(egress.__name__):
+            egress.install_guard()
     except egress.EgressGuardIncomplete as exc:
         # Still fail closed, but readable: the message names the library, says its requests are
-        # not checked, and gives the fix.
+        # not checked, and gives the fix.  This is the one place it is printed.
         sys.stderr.write(f"worker: {exc}\n")
         return 1
 

@@ -443,6 +443,57 @@ def test_the_model_forge_worker_stops_with_one_readable_line_when_the_guard_is_i
     assert "reinstall a version the lab was tested with" in captured.err and ".venv/bin/pip install" in captured.err
 
 
+# A real worker process, as `python -m arail.nucleus.worker` starts it: nothing has configured logging, so
+# a record at WARNING or above is printed by logging's last-resort handler, to whatever sys.stderr is when
+# it is emitted.  In pytest that handler never fires (pytest installs handlers on the root logger), which
+# is why the in-process worker tests above see one line while the process printed two.
+_WORKER_PROCESS = r'''
+import contextlib, importlib, io, json, sys
+
+lib = sys.argv[1]
+del importlib.import_module(lib).AsyncHTTPTransport   # the EG-20 simulation: install_guard() cannot patch this library
+from arail.nucleus import worker
+import arail.egress as egress
+
+buffer = io.StringIO()
+with contextlib.redirect_stderr(buffer):
+    rc = worker.main(["PA", "build-1"])
+print(json.dumps({"rc": rc, "stderr": buffer.getvalue(), "egress_file": egress.__file__}))
+'''
+
+
+@lib_param
+def test_a_real_worker_process_prints_the_incomplete_guard_message_once(lib, tmp_path):
+    """DOC-5, the worker (QA-N4).  The module says the worker writes "one ``worker: ...`` line" and exits 1.  In
+    a real process it printed two lines carrying the same message: the guard's own ``_log.error`` through
+    logging's last-resort handler (``arail.egress: egress guard incomplete ...``), then ``worker: ...``.  The
+    parent inherits this stderr, so a Model Forge user read the message twice."""
+    result = run_fresh(_WORKER_PROCESS, lib, tmp_path=tmp_path)
+    assert result["rc"] == 1
+    lines = result["stderr"].splitlines()
+    assert len(lines) == 1, f"the worker printed {len(lines)} lines, not one:\n{result['stderr']}"
+    assert lines[0].startswith("worker: egress guard incomplete") and lib in lines[0], lines[0]
+    assert "arail.egress:" not in result["stderr"], "the guard's own log line reached stderr as well"
+
+
+@lib_param
+def test_the_worker_keeps_the_guards_log_record_for_any_handler_that_is_configured(lib, monkeypatch, status_env, caplog):
+    """QA-N4, the other half of the fix.  What keeps the duplicate line off stderr is a NullHandler on the
+    guard's logger while the guard installs; it must not make the record disappear for a handler somebody
+    configures (so no ``propagate = False``), and it must be gone again afterwards, so that an in-process
+    caller of ``main()`` does not inherit it."""
+    from arail.nucleus import worker
+
+    monkeypatch.delattr(importlib.import_module(lib), "AsyncHTTPTransport")
+    guard_logger = logging.getLogger(egress.__name__)
+    handlers_before, propagate_before = list(guard_logger.handlers), guard_logger.propagate
+    with caplog.at_level(logging.ERROR, logger=egress.__name__):
+        assert worker.main(["PA", "build-1"]) == 1
+    records = [r for r in caplog.records if r.name == egress.__name__ and "egress guard incomplete" in r.getMessage()]
+    assert len(records) == 1, [r.getMessage() for r in caplog.records]
+    assert guard_logger.handlers == handlers_before and guard_logger.propagate is propagate_before
+
+
 def test_the_model_forge_worker_still_starts_the_phase_when_the_guard_is_whole(monkeypatch, status_env, capsys):
     """DOC-5, the worker: the guard is installed first, and a whole guard changes nothing."""
     from arail.nucleus import worker
