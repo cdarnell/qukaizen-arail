@@ -636,10 +636,11 @@ def test_the_agent_loader_logs_and_keeps_loading_agents_when_the_guard_is_incomp
 
 def test_privacy_states_what_an_incomplete_guard_leaves_open_and_what_stops():
     """REVIEW.md B1, the words.  PRIVACY.md says plainly what happens when the guard cannot patch a library:
-    where the lab says so (the activity log, the doctor, the modal), that the portal and the agents keep
-    running with that library unguarded, and that only Model Forge's worker stops.  Each sentence is
-    pinned by a behavioural test: the portal and the modal (DOC-5), the loader (above), the worker (above),
-    the doctor (DR-3 in test_httpx_family.py)."""
+    where the lab says so (the activity log, the doctor, the modal, Buddy's note on a switch back to
+    airgapped), that the portal and the agents keep running with that library unguarded, and that only
+    Model Forge's worker stops.  Each sentence is pinned by a behavioural test: the portal and the modal
+    (DOC-5), Buddy (R-W1, above), the loader (above), the worker (above), the doctor (DR-3 in
+    test_httpx_family.py)."""
     text = flat(privacy_known_gaps())
     for needle in (
         'the portal\'s activity log records "Egress guard install failed"',
@@ -647,6 +648,7 @@ def test_privacy_states_what_an_incomplete_guard_leaves_open_and_what_stops():
         "description says that requests made through that library are NOT blocked",
         "the portal and the agent loader keep serving with that library unguarded",
         "only Model Forge's worker exits",
+        "Buddy's note names the library too",
     ):
         assert needle in text, f"PRIVACY.md's Known gaps no longer says: {needle}"
 

@@ -81,7 +81,8 @@ portal's activity log records "Egress guard install failed",
 bar reads "Airgapped, guard incomplete" in amber, and the Network Policy
 modal shows its mode pill as a warning and opens the known-gaps list with
 the library in it, and its description says that requests made through
-that library are NOT blocked.
+that library are NOT blocked. When you switch the lab back to airgapped,
+Buddy's note names the library too ("Sealed back up, except httpx2: ...").
 
 The lab does not stop, though. With an incomplete guard the portal and the
 agent loader keep serving with that library unguarded; only Model Forge's
