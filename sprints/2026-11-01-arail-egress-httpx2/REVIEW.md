@@ -7,6 +7,7 @@
 **Reviewer:** architect (review mode), Claude Opus 5.5. Every result below marked *run* was executed in this session in the scratch venvs; the probe scripts are in the session scratch directory (`<scratch>/rev/*.py`, not committed).
 
 ## Verdict: BLOCK
+Superseded by the re-review at the end of this file (verdict: WEAK_PASS).
 
 The guard itself is right, and I re-derived that rather than read it: the brief's probe ends in `EgressBlocked` in all 20 cells (5 venvs, both libraries, sync/async, client built before/after), huggingface_hub is refused once per call on 2.4.0 and 1.25.1, the five CI legs pass from the workflow's own text with leg 5 green because its sentinel failed, and five of my eight new mutants are caught. One finding blocks, and it is on the airgap invariant: in the one state this PR newly detects (a family member installed but unpatchable), the portal and the agent loader keep serving in airgapped mode with that library open, the PR never states that as a decision, and every operator-facing surface contradicts what the guard knows: the modal's pill stays green, its definition says "Cloud-provider APIs are blocked", its paragraph says httpx2 is caught, and the only trace is a bullet inside a collapsed `<details>` plus one activity-log line that no test pins (I measured an async httpx2 request reach the network layer in exactly that state). No supported library version reaches that state today and `main` is strictly worse (silent), so the fix is small: make the UI stop contradicting itself, pin the portal's signal with a behavioural test, and write the decision down (with fail-closed filed for the operator). Five WEAK findings are documentation over-claims and test gaps the same fix pass should close. Severity scale used here: **BLOCK** = must change before QA; **WEAK** = change in this fix pass (or file, where the item says so); **NIT** = optional, or file.
 
@@ -249,3 +250,178 @@ ARCHITECTURE predicted TD52 to TD55. The review adds four rows, filed in ARCHITE
 8. Commit 8 (BACKLOG) adds TD56 to TD59 and AF-3's three sites to TD52, alongside TD52 to TD55.
 
 NITs N1, N2, N3 and N5 are at the builder's discretion in the same pass; N6 is filed as TD59; N4 needs no action; N7 is outside the diff.
+
+## Re-review (after pass 3, QA and pass 4)
+
+**Date:** 2026-11-06
+**Build:** HEAD `0472dc49` (code head `8fe63fbc`), compared against my first review's `97fe5ede` and against `origin/main` `de1ce285`
+**Reviewer:** architect (review mode), Claude Opus 5.5. *Ran* = executed in this session, on a `git archive HEAD` export (and an `origin/main` export) in the session scratch directory; probes are in `<scratch>/rev2/` (`decision_ast.py`, `states.py`, `doctor_lines.py`, `mutants2.py`, results `mutants2-ci.log` / `mutants2-*.json`). *Read* = read in the code or docs at HEAD; the BUILD_LOG tables were not taken as evidence. The orchestrator runs the five CI legs, QA's lazy-attribute probe, the frozen-surface failure text, the nav badge under node, and its own mutants; I did not repeat those.
+
+### Verdict: WEAK_PASS
+
+B1 is fixed where it mattered. In every incomplete state I could reach, the surfaces an operator checks for the airgap state now agree with the guard: the status endpoint, the definition sentence, the known-gaps entry, the activity warning, `/api/system/mode`, the doctor line and the worker's exit. All of them name the library that is open, and the start-up signal is now pinned by behaviour (R6 is red, where before it survived). W1 to W5, QA-W1, QA-W2 and the NITs that were taken are fixed in code or docs, and each fix I mutated has a test that goes red. The three egress decision sites, the `allow_egress` ratchet, the bootstrap allowlist and the locality checks are AST-identical to `origin/main`. No frozen path is touched.
+
+It is not a PASS, for three reasons:
+- Buddy's mode-toggle line still says "Sealed back up. Agents can't reach the public internet." in a state where the guard knows a library is open (R-W1).
+- The doctor prints the incomplete message twice, under a line that says "no cloud egress" (R-N1).
+- The ledger work my first review required before the PR has not been done: commit 8, which files TD52 to TD61 in BACKLOG, and the B1 decision row in SPRINT.md.
+
+None of the three is a fail-open in the guard itself, so none blocks.
+
+### What I re-derived (ran)
+
+| Check | Result | Means | Bar and why | Out of range | Where a failure lives |
+|---|---|---|---|---|---|
+| Decision sites, AST with docstrings stripped, HEAD vs `origin/main` (`decision_ast.py`) | 12 of 12 identical: `_check_egress_or_raise`, `GuardedHTTPAdapter.send`, `_check_httpx_url`, `allow_egress`, `_bootstrap_allows`, `allow_bootstrap_fetch`, both urllib handlers, `lab_mode`, `is_airgapped`, `is_local_ip`, `is_local_host` | The airgapped default and the allow ratchet decide exactly as on main | Identical, because the brief forbids relaxing the default, and QA-W3's fix is deliberately not in this PR | Any `DIFFERENT` line = this PR changed policy, not coverage | `src/arail/egress.py`, `src/arail/airgap.py` |
+| Scope greps on `git diff origin/main...HEAD` | 0 frozen paths (`deep_*.py`, `dac_world/`, `buddy_host/contract/`, `tests/conftest.py`, `pyproject.toml`, `uv.lock`, `CHANGELOG.md`, `NOTICE`, licences, `THIRD-PARTY`); 0 removed lines naming `aerollm`/`AERO_`; 0 added lines with the word "free"; `app.py` hunks only at the start-up function, `/api/system/mode` and `/api/airgap/status` (the toggle is untouched) | The brief's constraints hold | Zero of each | A hit is a constraint break | the diff |
+| Every operator surface per guard state (`states.py`; ci, both, lock; the portal's real `_install_egress_guard()`, `get_mode()`, `get_airgap_status()`, Buddy's `_watch_airgap_events()`, then real sync and async requests to a `.invalid` host) | **complete**: everything green, every installed library `EgressBlocked` sync and async. **unpatchable** (`AsyncHTTPTransport` deleted): 1 activity warning naming the library; mode `guard_installed: False`; status `False`, definition "…blocked, EXCEPT requests made through httpx2: … NOT blocked", 1 extra gap; async `ConnectError` (the documented hole); in both, httpx stays `EgressBlocked`. **lazy_attr** (QA-W2 shape): the same consistent set, `patch raised ImportError` named, and httpx stays guarded in both and lock. **late_install** (lock + httpx2 after start): every surface green, httpx2 `ConnectError` sync and async. **Buddy, every state: "Sealed back up. Agents can't reach the public internet."** | The B1 contradiction is gone from the endpoint, modal data, badge data and activity log; one surface (Buddy) was never wired | Every surface the operator reads agrees with `coverage()`, because B1's point was that the UI must not say "blocked" while the guard knows otherwise | A surface saying "blocked"/"sealed" while `uncovered()` is non-empty = B1 again | R-W1 (Buddy); late_install is W3/TD57 (the guard does not know, and PRIVACY and the plugin installer say so) |
+| Doctor in the unpatchable state (`doctor_lines.py`, ci) | stdout: `lab mode : airgapped (airgapped — no cloud egress)`, then `egress guard : INCOMPLETE — egress guard incomplete — httpx2: …`; stderr: `arail.egress: egress guard incomplete — …` (logging's last-resort handler) | QA-N4's doctor half is fixed (INCOMPLETE, not `?`); the worker's duplicate-line fix was not applied to the doctor | One line per fact, and no sentence that contradicts the next | Two copies of the message, and "no cloud egress" one line above "NOT checked" | R-N1 |
+| Mutants, ci venv, the 13 `EGRESS_TESTS` files one process per file, `CI=true`, declared `httpx2` (control: 402 cases, 0 skipped, 0 failing) | 16 of 17 caught (table below); 1 survives in ci and in both | Whether each fix has a test that fails without it | At least 1 new failing id per mutant | A survivor = a fix nothing pins | named per mutant |
+| The same, both venv (control 455, 0 skipped, 0 failing) | `DEF_names_only_first` caught (1); `GAPS_from_coverage_all` **survives**; `QW2_revert` 7; `R6` 5 | The two-library cases need the both leg | Same | Same | R-N2 |
+
+| Mutant (re-review) | ci | both | Caught by |
+|---|---|---|---|
+| R5 an `ImportError` counts as absent (W4) | **2** (was 0) | | EG-A3 `[ModuleNotFoundError]`, FR-4 `[ModuleNotFoundError]` |
+| R6 portal start-up swallows silently (B1) | **3** (was 0) | 5 | `test_the_portal_says_so_once…`, `…the_failure_privacy_quotes…`, `…attribute_lookup_raises_is_reported…` |
+| QW2_revert: the containment around `_patch_family_member` removed | 7 | 7 | EG-A8, the stub-member cases, the remedy test, DOC-5 lazy |
+| LOOP_break after an unguarded member | 3 | | stub-member cases, remedy test |
+| MODE_always_true (`/api/system/mode`) | 3 | | the mode-endpoint tests |
+| STATUS_gi_true (`/api/airgap/status`) | 4 | | DOC-5, mode/status agreement |
+| DEF_unqualified | 3 | | DOC-5 description tests |
+| DEF_names_only_first | 0 | 1 | `test_the_description_names_every_unguarded_library[broken0]` (both leg only, by construction) |
+| GAPS_from_coverage_all (gap list keeps only the first unguarded library) | 0 | **0** | none (R-N2) |
+| WK_no_nullhandler / WK_propagate_false / WK_traceback / WK_exit0 | 1 / 1 / 4 / 4 | | the worker tests, including the real-process one |
+| DOCTOR_question / DOCTOR_records_ok | 1 / 2 | | DR tests |
+| PLUGIN_no_restart / REMEDY_uninstall_back | 1 / 1 | | installer test, EG-A2 |
+
+### My findings, decided from the code at HEAD
+
+| Finding | Fixed? | Evidence (ran / read) | Residual |
+|---|---|---|---|
+| B1 incomplete guard, UI contradicts, decision unstated | **Yes**, for the surfaces named | Ran: `states.py` (3 venvs × 2 incomplete states), R6 red 3/5, MODE/STATUS/DEF mutants red. Read: `app.py:896-921` (`_install_egress_guard`), `:11926-11935`, `:11985-12019`; `nav.js:68-100,108-120,164-170`, `pillClass` at every pill paint; `_airgap_modal.html:132-148`; PRIVACY's "The lab does not stop" paragraph | The decision is written in PRIVACY and BUILD_LOG, **not yet in SPRINT.md's Decisions log**, and TD56 is not yet in BACKLOG (commit 8 not made). Buddy's line (R-W1) and the doctor's mode suffix (R-N1) were not wired |
+| W1 requests/urllib over-claim | Yes | Read: README `:226-232`, `:306-315`; PRIVACY `:44-45`, new gap bullets; BY-5 at `tests/test_qa_airgap_bypass_attempts.py:398`. The builder's mutant rows W1-m4…m9 are claims; I did not re-run them | none |
+| W2 other processes | Yes | Read: PRIVACY "Other processes" bullet; README parenthetical; `router/core.py:14-19` | TD58 to file. Wording: "every other `./arailctl` command (apart from `start`)" sits next to a list that includes `doctor` and Model Forge's worker, so "other" has to mean "other than those". Acceptable |
+| W3 late install | Yes (docs + installer line) | Ran: `states.py late_install` shows exactly the documented behaviour; PLUGIN mutant red. Read: docstrings `egress.py:489-501`, `:581-588`, `:651-652`; PRIVACY | TD57 to file; the state is still all-green while open, by design |
+| W4 `ImportError` untested | Yes | Ran: R5 red (2) | none |
+| W5 green run shows no evidence | Yes | Read: workflow `-rsP` on both pytest lines, SDK versions printed, the note on what `-rP` shows | none |
+| N1 `is_private` set | Yes | Read: PRIVACY bullet; the range tests in `test_egress_docs.py:175-200` | none |
+| N2 worker traceback | Yes | Ran: WK_traceback red 4 | none |
+| N3 audit caller names library frames | Not taken (optional) | Read: `_SKIP_MODULES` unchanged | Acceptable as decided |
+| N4 RLock untied | No action, as ruled | | none |
+| N5 workflow pip retries | Not taken (optional) | Read | Acceptable |
+| N6 global socket timeout | File as TD59 | | commit 8 |
+| N7 Knowledge Canvas comment | Outside the diff | | none |
+
+### QA's findings, decided from the code at HEAD
+
+| Finding | Fixed? | Evidence (ran / read) | Residual |
+|---|---|---|---|
+| QA-W2 attribute lookup raises | **Yes** | Ran: `states.py lazy_attr` in ci, both and lock. httpx is still `EgressBlocked` sync and async; the definition, gap entry and activity warning all name httpx2. QW2_revert red 7 (ci and both); LOOP_break red 3. Read: `egress.py:516-522`, and `except Exception` also covers a metaclass `__getattr__` and a `vars()` failure inside `_patch_family_member` | none |
+| QA-W1 urllib past the opener | Yes (docs) | Read: `airgap.py` docstring and the `KNOWN_GAPS` entry; the PRIVACY bullet; the modal names `http.client` and scopes urllib; tripwire `test_no_lab_code_goes_around_the_opener_the_guard_installs` with its can-fire twin | Closing the gap is TD53 work |
+| QA-N1 method reference | Yes | Read: PRIVACY bullet | none |
+| QA-N2 re-imported classes | Yes | Read: PRIVACY "or imported again after the guard ran" | none |
+| QA-N3 spawn/forkserver | Yes | Read: PRIVACY "Other processes" | none |
+| QA-N4 worker twice, doctor `?` | Worker yes; doctor half | Ran: WK_no_nullhandler, WK_propagate_false, DOCTOR mutants all red; `doctor_lines.py` | **The doctor still prints the message twice** (R-N1) |
+| QA-N5 remedy | Yes | Ran: REMEDY mutant red. Read: `egress.py:602-623`. `.venv/bin/pip` exists on a setup install (`scripts/setup.sh:485` uses `python -m venv`) | R-N3: the range given is a ceiling, not "a version the lab was tested with" |
+| QA-N6 older paragraphs | Yes | Read: README `:225-232`, `the-lab.md:299-308` | none |
+| QA-N7 nav badge | Yes | Ran: MODE mutant red 3. Read: `nav.js:68-100`. In CI the badge is pinned only by source regex; behavioural evidence is the orchestrator's node run | R-N4 |
+| QA-N8 test comments | Yes | Read: `test_egress_httpx.py:590-594` | none |
+
+### New findings (in what the fix passes added)
+
+#### R-W1 (WEAK). Buddy tells the operator the lab is "Sealed back up" while the guard knows a library is open
+
+- **Where:** `src/arail/agents/_builtin_buddy.py:541` (`_watch_airgap_events`, on a flip from hybrid to airgapped). The text is not in the diff, but this PR is what made the state detectable, and B1's fix wired every other surface to it.
+- **Evidence (ran):** `states.py`, unpatchable and lazy_attr states in ci, both and lock. The modal, badge and status all say httpx2 (or httpx) is NOT blocked, and the async request reaches the network layer, yet Buddy's observation is "Sealed back up. Agents can't reach the public internet."
+- **Why it matters here:** arail's paranoid checklist names Buddy over-confidence. Buddy is the surface this product puts front and center, and this is the one sentence the operator gets at the moment they turn the airgap back on.
+- **Why not BLOCK:**
+  - The state is unreachable on every supported library version, and the daily legs go red the day it becomes reachable.
+  - The modal, badge, status and activity log, which an operator would check, all say the opposite.
+  - Buddy's line already over-claims on `main` for every documented gap.
+- **Fix (about 5 lines and one test):** in `_watch_airgap_events`, when `arail.egress.uncovered()` is non-empty, the fact names the library and says its requests are not blocked. For example: "Sealed back up, except httpx2: the egress guard could not patch it, so its requests still go out. The Network Policy modal has the details." Test: in `tests/test_egress_docs.py`, delete `AsyncHTTPTransport` from an installed member, flip the Buddy state from hybrid to airgapped, and assert the fact names the library and does not say "Sealed back up." on its own. If not fixed in this PR, file it under TD56 (the same decision), together with R-N1's mode suffix and `admin.html:923` ("Airgapped: zero network calls, fully local.", which is pre-existing and static).
+
+#### R-N1 (NIT). The doctor prints the incomplete message twice, under a line that says "no cloud egress"
+
+- **Where:** `src/arail/doctor.py:91` (the `lab mode` line's suffix) and `:100-106`. The guard's `_log.error` reaches stderr through logging's last-resort handler, because the doctor configures no logging. This is the exact mechanism QA-N4 fixed in the worker.
+- **Evidence (ran):** `doctor_lines.py`, ci. One stderr line `arail.egress: egress guard incomplete — …`, plus the stdout `INCOMPLETE — …` line, plus `(airgapped — no cloud egress)` two lines above it.
+- **Fix:** reuse the worker's `_guard_log_kept_off_stderr` around the doctor's `install_guard()` (or move it to `egress`). When `egress.uncovered()` is non-empty after the install, the mode suffix says "(airgapped — except the libraries below)". Test: a fresh-interpreter doctor run, in the style of `test_a_real_worker_process_prints_the_incomplete_guard_message_once`.
+
+#### R-N2 (NIT). With two unguarded libraries, a gap list that drops one survives every test
+
+- **Where:** `tests/test_egress_docs.py:334-345` (`test_the_description_names_every_unguarded_library`) checks the definition but not `known_gaps`.
+- **Evidence (ran):** mutant `GAPS_from_coverage_all` (keep only the first unguarded entry) gives 0 new failing ids in ci and 0 in both.
+- **Fix:** in that test, assert `len(status["known_gaps"]) - len(airgap.KNOWN_GAPS) == len(broken)`. The mutant then goes red in the both leg.
+
+#### R-N3 (NIT). The remedy calls a ceiling "a version the lab was tested with"
+
+- **Where:** `src/arail/egress.py:604` (`_TESTED_RANGES`), `:620`; `docs/PRIVACY.md:89`.
+- **Evidence (read):** PRIVACY's own example of the trigger is "a future release renamed its transport classes". Such a release inside 2.x satisfies `httpx2<3`, so `pip install 'httpx2<3'` would report "Requirement already satisfied" and change nothing.
+- **Fix:** say "the range the lab supports (`httpx2<3`); if a release inside that range is the one that broke, pin the previous release, for example `pip install 'httpx2==<previous>'`", or record the last versions the daily legs saw. The state is unreachable today, so this is wording only.
+
+#### R-N4 (NIT). In CI, nav.js's incomplete-guard behaviour is pinned by source text only
+
+- **Where:** `tests/test_egress_docs.py:824-960` (regexes over `nav.js`). `tests/test_airgap_modal_dom.py` renders the template and runs no JS.
+- **Evidence (read):** the regexes are exact and the builder's N7 mutants turn them red. But a later statement that repaints the pill or badge would pass them. The only behavioural run is the orchestrator's node harness, outside CI.
+- **Fix:** file it: move the node DOM-stub harness into a test that is skipped only when `node` is absent, and is declared in the CI legs so that the skip is red.
+
+#### R-N5 (NIT, defence in depth). The definition is qualified from `uncovered()`, not from `guard_installed`
+
+- **Where:** `src/arail/portal/app.py:11985-11999`.
+- **Evidence (read):** if `install_guard()` raised anything other than `EgressGuardIncomplete` before `_COVERAGE` is set, `guard_installed` would be False (amber pill and badge) while the definition still said "Cloud-provider APIs are blocked." I found no reachable path: the requests and urllib steps cannot raise in practice, and the family step is now fully contained.
+- **Fix (optional):** also qualify the definition when `not _INSTALLED` ("the guard did not finish installing; see the activity log").
+
+No new way for the guard to fail open silently was found in the added code:
+- The new `except Exception` reports the member as unguarded and moves on to the next member.
+- `_INSTALLED` stays False on any incomplete install.
+- The worker still fails closed in both modes.
+- The mode endpoint reads the live flag.
+- No test relies on an `importorskip`. The only empty-parameter case (`[INSTALLED] if INSTALLED else []`) is in a file that leg 5 does not run. Legs 1 to 4 ran 0 skipped in my controls (ci 402, both 455).
+
+### Item 2: QA-W3 and PX-1 left out of this PR
+
+- **QA-W3 (an `allow_egress` scope that survives a flip to airgapped; TD60): defensible to leave out.**
+  - It is pre-existing on `main` for requests, urllib and httpx.
+  - For httpx2, this PR moves from "never checked" to "checked, except inside a scope that outlives a flip", which is strictly better.
+  - The fix changes the three decision sites. I verified that this PR keeps those sites AST-identical to main, which is a property worth keeping in a coverage PR.
+  - QA validated the fix only on the 13 files, not on the wider suite.
+  - It is still a fail-open of the airgapped invariant. TD60 should be the next egress PR, with QA's test, a shared decision helper (QA's note on the three copies), and the PRIVACY sentence "the change takes effect immediately" qualified in the same commit.
+- **PX-1 (innerHTML rows in the modal's Recent activity; TD61): defensible, less comfortably.**
+  - For leaving it out: it is pre-existing. QA measured that requests, httpx and httpx2 percent-encode the host, so this PR adds no route to the sink. The only route is urllib with a host string containing markup, in a guarded process, and nothing in the tree does that.
+  - Against: this PR edits the same `.then(function (data)` block, `nav.js:144-158`. The fix is about six lines in the DOC-6 pattern already used beside it. The sink's reasoned impact is a same-origin `POST /api/airgap/toggle`, which turns the airgap off.
+  - If the builder opens another pass for R-W1, I would take PX-1 in it. Otherwise file TD61 at high priority, with QA's node-harness check as its test.
+
+### Item 4: the operator-decision point
+
+The decision is "with an incomplete guard the portal and the agent loader keep serving with that library unguarded; only Model Forge's worker exits". It is now stated in `docs/PRIVACY.md` and pinned per caller: portal R6, the loader test, the worker tests, and the doctor DR tests.
+
+**Is there still a reachable state where an operator-facing surface contradicts what the guard knows? Yes, one live one, plus two static lines:**
+- Buddy's toggle observation ("Sealed back up…", R-W1). This is the live one.
+- The doctor's `(airgapped — no cloud egress)` suffix, printed directly above its own INCOMPLETE line (R-N1).
+- `admin.html:923`'s static help text, "zero network calls".
+
+The modal pill, definition, known-gaps list, nav badge, `/api/system/mode`, `/api/airgap/status`, activity log and worker all agree with `coverage()` in every incomplete state I reached (ran). The late-install state (all green while open) is not a contradiction of what the guard knows: the guard does not know. It is documented, and it is W3/TD57.
+
+**Would I still BLOCK? No.** B1 blocked because the decision was unstated and the surfaces an operator uses to check the airgap said the opposite of the guard. Both are fixed and mutation-tested. What remains are generic sentences, pre-existing on `main`, in a state no supported version reaches, and the daily legs go red the day one does. My recommendation for TD56 (fail closed: refuse to start airgapped, and refuse the toggle to airgapped, while `uncovered()` names a library whose import succeeded) stands. It is the operator's call, and the PR should say so in those words.
+
+### Required actions before push (WEAK_PASS: each fixed in this PR or filed, as stated)
+
+1. **Commit 8 (orchestrator), before push.** In `sprints/BACKLOG.md`, file:
+   - TD52 to TD55, with AF-3's three sites in TD52;
+   - TD56 to TD59;
+   - TD60 (QA-W3, with QA's validated fix and test, and the PRIVACY "takes effect immediately" sentence);
+   - TD61 (PX-1, with QA's fix);
+   - and, if R-W1 is not fixed, R-W1, R-N1's mode suffix and `admin.html:923`, under TD56 or as TD62.
+
+   Proof: `git diff origin/main...HEAD -- sprints/BACKLOG.md` shows every row (today the PR leaves the file untouched).
+2. **SPRINT.md's Decisions log and the PR description (orchestrator).** Add the B1 decision row, verbatim from PRIVACY, and the TD56 recommendation. Proof: `grep -n "keep serving" sprints/2026-11-01-arail-egress-httpx2/SPRINT.md` returns the row (today it returns nothing).
+3. **R-W1: fix, or file per action 1.** If fixed: `src/arail/agents/_builtin_buddy.py:541`, with the test described under R-W1 in `tests/test_egress_docs.py`. Prove the test can fail by reverting the Buddy line and seeing it go red. Then re-run the 13 files in ci, lock and both.
+4. **NITs R-N1 to R-N5:** at the builder's discretion in the same pass, or file. R-N2 is a one-line assertion and the cheapest of them.
+
+### What I could not verify here
+
+- The five CI legs, QA's lazy-attribute probe, the frozen-surface failure text and the nav badge under node: these are the orchestrator's runs this time, and I did not repeat them.
+- Any GitHub-hosted runner behaviour (installs, pip's resolution on the day, the schedule). The first real run would show it, as tabled in my first review.
+- A real browser rendering the amber badge and the opened `<details>`, and PX-1's script execution (reasoned, not executed).
+- The full suite after pass 4 (the orchestrator's "after" run).
+- Buddy's observation rendered in the Buddy panel: I called the watcher function directly and read the `fact` it returns, not the UI that shows it.
+- Python 3.12 and 3.13.
