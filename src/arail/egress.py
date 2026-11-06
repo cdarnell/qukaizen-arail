@@ -599,13 +599,27 @@ def uncovered() -> dict:
     }
 
 
+# The version range of each family member the lab was tested with: what the incomplete-guard message tells
+# the operator to reinstall (docs/PRIVACY.md names the same ranges).
+_TESTED_RANGES = {"httpx2": "httpx2<3", "httpx": "httpx<1"}
+
+
 def _incomplete_message(missing: dict, coverage_now: dict) -> str:
+    """The one message every caller shows (the portal's activity log, the doctor, the Model Forge worker).
+
+    The fix it offers is to reinstall a tested version and restart.  It does not offer to uninstall the
+    library: on a standard install httpx2 is what the Hugging Face downloader and the cloud SDKs run on, so
+    removing it disables them, and an operator who followed that advice would have a broken lab instead of an
+    open one."""
     still_guarded = [name for name, value in coverage_now.items() if value == "guarded"]
     what = "; ".join(f"{name}: {why}" for name, why in missing.items())
+    pins = " ".join(f"'{_TESTED_RANGES.get(name, name)}'" for name in missing)
     return (
         f"egress guard incomplete — {what}. Requests made through {', '.join(missing)} are NOT "
         f"checked against LAB_MODE. Still guarded: {', '.join(still_guarded)}. "
-        f"Fix: install a supported version (httpx2<3, httpx<1) or uninstall {' and '.join(missing)}."
+        f"Fix: reinstall a version the lab was tested with (for example `.venv/bin/pip install {pins}`) "
+        f"and restart the lab; uninstalling {' and '.join(missing)} would also disable what is built on "
+        f"{'it' if len(missing) == 1 else 'them'}, such as the Hugging Face downloader and the cloud SDKs."
     )
 
 

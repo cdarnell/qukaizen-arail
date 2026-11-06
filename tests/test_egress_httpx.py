@@ -61,6 +61,10 @@ _STOCK_ADAPTER = requests.adapters.HTTPAdapter
 # The two class-level patch targets the guard puts on every member.
 TARGETS = (("HTTPTransport", "handle_request"), ("AsyncHTTPTransport", "handle_async_request"))
 
+# The version ranges the lab was tested with, spelled out here and not read from the guard: the remedy in
+# the incomplete-guard message pins each unguarded library to its range.
+TESTED_RANGE = {"httpx2": "httpx2<3", "httpx": "httpx<1"}
+
 UNPROVEN = (
     "egress coverage of the httpx family is UNPROVEN in this environment: neither httpx2 nor "
     "httpx is importable, so no test here exercised the guard on them. Install one "
@@ -823,7 +827,29 @@ def test_the_incomplete_install_error_says_what_is_unchecked_and_how_to_fix_it(l
     assert "AsyncHTTPTransport" in message  # the reason
     assert "NOT checked against LAB_MODE" in message
     assert "requests" in message and "urllib.request" in message  # what is still guarded
-    assert "install a supported version (httpx2<3, httpx<1) or uninstall" in message
+    # The remedy (QA-N5): a command that reinstalls a tested version, and a warning about the other
+    # remedy.  "uninstall" used to be offered as the fix, but on a standard install httpx2 is what the
+    # Hugging Face downloader and the cloud SDKs run on, so removing it disables them.
+    assert (f"Fix: reinstall a version the lab was tested with (for example `.venv/bin/pip install '{TESTED_RANGE[lib]}'`) "
+            "and restart the lab; ") in message, message
+    assert f"uninstalling {lib} would also disable what is built on it, such as the Hugging Face downloader and the cloud SDKs" in message
+    assert "or uninstall" not in message and "install a supported version" not in message, "the old remedy is back"
+
+
+def test_the_remedy_names_a_tested_version_for_every_unguarded_library_and_a_command_that_installs_them(monkeypatch):
+    """QA-N5, several libraries.  When more than one member is unguarded (the leg that has both) the command
+    pins each of them, in family order, and the warning about uninstalling names both.  Built from stubs, so it
+    runs in every venv."""
+    for name in LITERAL_FAMILY:
+        module, _sync, _async = _stub_member(name, ("HTTPTransport", "AsyncHTTPTransport"))
+        monkeypatch.setitem(sys.modules, name, module)
+    with pytest.raises(egress.EgressGuardIncomplete) as excinfo:
+        egress.install_guard()
+    message = str(excinfo.value)
+    assert list(excinfo.value.uncovered) == list(LITERAL_FAMILY)
+    pins = " ".join(f"'{TESTED_RANGE[name]}'" for name in LITERAL_FAMILY)
+    assert f"(for example `.venv/bin/pip install {pins}`)" in message, message
+    assert "uninstalling httpx2 and httpx would also disable what is built on them" in message, message
 
 
 @lib_param

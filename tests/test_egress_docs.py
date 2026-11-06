@@ -406,7 +406,7 @@ def test_the_portal_says_so_once_when_the_guard_is_incomplete(lib, monkeypatch, 
     assert (source, level) == ("system", "warn")
     assert message.startswith("Egress guard install failed: ")
     assert lib in message and "NOT checked" in message, message
-    assert "install a supported version" in message and f"uninstall {lib}" in message, message
+    assert "reinstall a version the lab was tested with" in message and ".venv/bin/pip install" in message, message
     assert egress._INSTALLED is False
 
 
@@ -439,7 +439,8 @@ def test_the_model_forge_worker_stops_with_one_readable_line_when_the_guard_is_i
     assert captured.out == ""
     assert captured.err.startswith("worker: egress guard incomplete"), captured.err
     assert captured.err.count("\n") == 1 and "Traceback" not in captured.err, captured.err
-    assert lib in captured.err and "NOT checked" in captured.err and f"uninstall {lib}" in captured.err
+    assert lib in captured.err and "NOT checked" in captured.err
+    assert "reinstall a version the lab was tested with" in captured.err and ".venv/bin/pip install" in captured.err
 
 
 def test_the_model_forge_worker_still_starts_the_phase_when_the_guard_is_whole(monkeypatch, status_env, capsys):
@@ -551,6 +552,19 @@ def test_privacy_says_a_library_installed_later_is_not_guarded_until_restart():
         "PRIVACY.md does not say that a library installed while the lab runs is unguarded until a restart"
     )
     assert "this lab's guard covered" not in text, "PRIVACY.md still describes the doctor line as a standing fact"
+
+
+def test_privacy_gives_the_same_remedy_as_the_incomplete_guard_message():
+    """QA-N5.  The message tells the operator to reinstall a tested version and restart, and warns that
+    uninstalling also disables the Hugging Face downloader and the cloud SDKs.  PRIVACY.md is the document
+    form of that message and used to say 'or uninstall it' as if it were a fix."""
+    text = flat(privacy_known_gaps())
+    for needle in (
+        "Until you reinstall a version of that library the lab was tested with (`httpx2<3`, `httpx<1`) and restart the lab",
+        "Uninstalling it would also disable what is built on it, such as the Hugging Face downloader and the cloud SDKs",
+    ):
+        assert needle in text, f"PRIVACY.md no longer says: {needle}"
+    assert "or uninstall it" not in text and "install a supported version" not in text
 
 
 def test_privacy_says_a_library_imported_again_after_the_guard_is_not_guarded_either():

@@ -84,9 +84,11 @@ library are NOT blocked.
 
 The lab does not stop, though. With an incomplete guard the portal and the
 agent loader keep serving with that library unguarded; only Model Forge's
-worker exits (with a message that names the library). Until you install a
-supported version of that library (`httpx2<3`, `httpx<1`) or uninstall it,
-and restart the lab, airgapped mode does not hold for it.
+worker exits (with a message that names the library). Until you reinstall
+a version of that library the lab was tested with (`httpx2<3`, `httpx<1`)
+and restart the lab, airgapped mode does not hold for it. Uninstalling it
+would also disable what is built on it, such as the Hugging Face
+downloader and the cloud SDKs.
 
 It does NOT wrap:
 
