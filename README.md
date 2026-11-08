@@ -223,9 +223,13 @@ available models, or **remove** the token. Tokens persist to
 never echoed back to the UI after saving and never printed to logs.
 
 **Airgapped guard.** By default `LAB_MODE=airgapped`. Agent-originated
-outbound calls through `requests` and `urllib` are denied unless the
-destination resolves to loopback, RFC1918, or link-local. Denials raise
-`EgressBlocked` and append one line to `lab/data/egress.jsonl` for audit.
+outbound calls through `requests` (new sessions), `urllib.request`
+(`urlopen` without an SSL context), `httpx` and its successor `httpx2`
+are denied unless the destination resolves to loopback, your private
+network (RFC1918, link-local) or another range Python's `ipaddress`
+treats as private; what the guard does not cover is listed in
+[docs/PRIVACY.md](docs/PRIVACY.md). Denials raise `EgressBlocked` and
+append one line to `lab/data/egress.jsonl` for audit.
 The Compute Source row shows a banner, cloud radios grey out, and the
 save/test/models endpoints refuse. Click the **Airgapped** badge in the
 nav to see the operational definition and the most recent blocks.
@@ -299,12 +303,18 @@ By default `LAB_MODE=airgapped` — agents in the lab cannot collect
 information from the public internet. Calls to loopback and your private
 network still work, so a LAN GPU box (Ollama, vLLM, a QueueLLM node)
 keeps inferring without changes. Cloud-provider APIs are blocked at the
-HTTP layer. The dashboard's **Airgapped** badge is clickable — it shows
-what is and isn't enforced, the recent blocks, and the known gaps
-(raw sockets, subprocess `curl`) the Python-level guard
-doesn't cover — `requests`, `urllib`, and `httpx` (incl. the cloud
-SDKs built on it) are all wrapped. The threat model is well-meaning agent code, not an
-adversary on this host — for that, run a host firewall.
+HTTP layer: the lab's Python-level guard wraps `requests` (new sessions),
+`urllib.request` (`urlopen` without an SSL context) and every client of
+`httpx` and its successor `httpx2`, such as the Hugging Face downloader
+and the Anthropic and OpenAI SDKs. The dashboard's **Airgapped** badge is
+clickable — it shows what is and isn't enforced, the recent blocks, and
+the known gaps the guard doesn't cover (`aiohttp`, `urllib3`, `httpcore`
+or `http.client` used directly, a proxy you configure, raw sockets,
+subprocess `curl`, other processes such as setup's and upgrade's model
+downloads; the full list is in
+[docs/PRIVACY.md](docs/PRIVACY.md)). The threat model is well-meaning
+agent code, not an adversary on this host — for that, run a host
+firewall.
 
 Flip to `hybrid` and cloud vendors become fallbacks when the local model
 isn't enough. The Chat tab makes this explicit: you see which provider is

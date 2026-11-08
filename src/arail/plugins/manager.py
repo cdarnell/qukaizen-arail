@@ -87,7 +87,12 @@ class PluginManager:
         manifest[name] = meta
         self._save_manifest(manifest)
 
-        activity_log.emit("plugins", f"Plugin '{name}' installed successfully.", "success")
+        activity_log.emit(
+            "plugins",
+            f"Plugin '{name}' installed successfully. "
+            "Restart the lab so the egress guard covers any HTTP library it added.",
+            "success",
+        )
         return meta
 
     def uninstall(self, name: str) -> None:

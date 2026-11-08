@@ -129,17 +129,22 @@
       <div id="airgap-toggle-error" class="airgap-toggle-error" style="display:none"></div>
     </div>
 
-    <details class="airgap-gaps">
+    <details class="airgap-gaps" id="airgap-gaps">
       <summary class="chat-muted">
         Known gaps — what isn't wrapped
       </summary>
       <ul id="airgap-gaps-list" class="mp-note airgap-gaps-list"></ul>
       <p class="mp-note airgap-toggle-note">
         The Python-level guard catches <code>requests</code>,
-        <code>urllib.request</code>, and <code>httpx</code> (which covers
-        the Anthropic/OpenAI SDKs). Other clients
-        (<code>aiohttp</code>, raw sockets,
-        subprocess <code>curl</code>) are not wrapped — see
+        <code>urllib.request</code> (<code>urlopen</code> without an SSL
+        context), <code>httpx</code> and its successor <code>httpx2</code>
+        (so also the Hugging Face downloader and the Anthropic/OpenAI SDKs
+        built on them), unless the list above names one of them as a
+        library the guard could not patch. Other clients
+        (<code>aiohttp</code>, <code>urllib3</code>, <code>httpcore</code>
+        or <code>http.client</code> used directly, raw sockets, subprocess
+        <code>curl</code>) are not wrapped, and a proxy you configure is not
+        checked — see
         <a href="/docs/PRIVACY.md" class="airgap-privacy-link">docs/PRIVACY.md</a>
         for the full list. The threat model is well-meaning agent code,
         not an adversary on this host.

@@ -1,0 +1,161 @@
+name: Egress Guard
+
+# The airgap invariant (CLAUDE.md: LAB_MODE=airgapped "Don't relax this default") proven in every
+# httpx-family state an ARAIL install can be in. TD50: the guard patched `httpx` only, huggingface-hub
+# 2.x / anthropic 2.x / openai 3.x moved to `httpx2`, the tests that pinned the guard skipped themselves
+# where `httpx` was absent, and no workflow ran them, so nothing turned red.
+# Each leg builds ONE state from scratch and DECLARES it (ARAIL_TEST_EXPECT_HTTPX_FAMILY): a leg that
+# silently loses a library fails instead of testing less. A skipped test fails the leg (a skip is how
+# TD50 stayed hidden). The last leg has neither library and must FAIL its sentinel: the proof that the
+# sentinel cannot pass vacuously. No `|| true`, no continue-on-error.
+# Daily because CI installs float (TD49): the state can change on PyPI with no commit here.
+# No listed test goes through portal auth, so this workflow does not depend on #211 (TD48).
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "41 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: egress-guard-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  ARAIL_NONINTERACTIVE: "1"
+  ARAIL_SKIP_OLLAMA: "1"
+  EGRESS_TESTS: >-
+    tests/test_httpx_family.py tests/test_egress_httpx.py tests/test_egress_httpx_fresh.py
+    tests/test_egress_docs.py tests/test_egress_ci_check.py tests/test_egress_guard.py
+    tests/test_egress_bootstrap.py tests/test_qa_airgap_bypass_attempts.py
+    tests/test_qa_tier1_egress_guard.py tests/test_airgap_helpers.py
+    tests/test_qa_airgap_happy_setup.py tests/test_qa_airgap_ipv6_edge_cases.py
+    tests/test_airgap_modal_dom.py
+
+jobs:
+  guard:
+    name: "Egress guard: ${{ matrix.leg }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { leg: "httpx2 only (pip, floating)",             python: "3.11", install: floating, expect: "httpx2",       sdks: "anthropic,openai" }
+          - { leg: "httpx2 only (pip, floating, Python 3.10)", python: "3.10", install: floating, expect: "httpx2",       sdks: "" }
+          - { leg: "httpx only (uv.lock)",                     python: "3.11", install: lock,     expect: "httpx",        sdks: "" }
+          - { leg: "both (pip, floating + httpx)",             python: "3.11", install: both,     expect: "httpx,httpx2", sdks: "" }
+          - { leg: "neither (must fail its sentinel)",         python: "3.11", install: neither,  expect: "none",         sdks: "" }
+    env:
+      ARAIL_TEST_EXPECT_HTTPX_FAMILY: ${{ matrix.expect }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      # A fresh unpinned install, what users and the other workflows get. Retry for PyPI transients.
+      - name: Install (pip, floating)
+        if: matrix.install != 'lock'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          for attempt in 1 2 3; do
+            if .venv/bin/pip install -e ".[dev]"; then break; fi
+            if [ "$attempt" = 3 ]; then echo "::error::dependency install failed after 3 attempts"; exit 1; fi
+            echo "::warning::dependency install attempt ${attempt}/3 failed; retrying in $((attempt * 20))s"
+            sleep $((attempt * 20))
+          done
+          case "${{ matrix.install }}" in
+            both)    .venv/bin/pip install httpx ;;
+            neither) .venv/bin/pip uninstall -y httpx httpcore httpx2 httpcore2 ;;
+          esac
+      # What local development follows (uv.lock pins httpx 0.28.1 and no httpx2).
+      - name: Install (uv.lock)
+        if: matrix.install == 'lock'
+        shell: bash
+        env:
+          UV_PYTHON_DOWNLOADS: never
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip "uv>=0.8"
+          for attempt in 1 2 3; do
+            if uv sync --frozen --extra dev --python "$(command -v python)"; then break; fi
+            if [ "$attempt" = 3 ]; then echo "::error::uv sync failed after 3 attempts"; exit 1; fi
+            echo "::warning::uv sync attempt ${attempt}/3 failed; retrying in $((attempt * 20))s"
+            sleep $((attempt * 20))
+          done
+      - name: What this leg installed
+        shell: bash
+        run: |
+          .venv/bin/python - <<'PY'
+          import importlib.metadata as md, sys
+          print("python", sys.version.split()[0])
+          for n in ("httpx", "httpx2", "httpcore", "httpcore2", "huggingface-hub", "starlette", "anthropic", "openai"):
+              try:
+                  v = md.version(n)
+              except md.PackageNotFoundError:
+                  v = "not installed"
+              print(f"  {n:16} {v}")
+          PY
+      - name: Egress tests (no failure, no skip, every file ran)
+        if: matrix.install != 'neither'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # EGRESS_TESTS is a space-separated list: the word splitting is the point.
+          # -rsP: name every skip, and show the output of passing tests (the tests print EVIDENCE
+          # tables: the probe per library, huggingface_hub's refusals), so a green run shows its evidence.
+          # It also shows the captured log and stderr of passing tests, so say what is in it.
+          echo "Note: -rP below also shows the captured log and stderr of passing tests. Besides the EVIDENCE tables it carries lines that tests of failure paths provoke on purpose (ERROR lines from a simulated broken library, 'record failed' from an unwritable audit log); under a passing test they are expected."
+          # shellcheck disable=SC2086
+          .venv/bin/python -m pytest $EGRESS_TESTS -p no:cacheprovider -q -rsP --junitxml=egress-junit.xml
+          # shellcheck disable=SC2086
+          .venv/bin/python tests/egress_ci_check.py no-skips egress-junit.xml $EGRESS_TESTS
+      - name: Cloud SDK default clients are refused (anthropic, openai)
+        if: matrix.sdks != ''
+        shell: bash
+        env:
+          ARAIL_TEST_EXPECT_SDKS: ${{ matrix.sdks }}
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if .venv/bin/pip install anthropic openai; then break; fi
+            if [ "$attempt" = 3 ]; then echo "::error::SDK install failed after 3 attempts"; exit 1; fi
+            sleep $((attempt * 20))
+          done
+          # The install floats: print which SDK versions this run proved (the step above ran before them).
+          .venv/bin/python - <<'PY'
+          import importlib.metadata as md
+          for n in ("anthropic", "openai", "httpx2"):
+              try:
+                  v = md.version(n)
+              except md.PackageNotFoundError:
+                  v = "not installed"
+              print(f"  {n:10} {v}")
+          PY
+          .venv/bin/python -m pytest tests/test_egress_sdk_clients.py -p no:cacheprovider -q -rsP --junitxml=sdk-junit.xml
+          .venv/bin/python tests/egress_ci_check.py no-skips sdk-junit.xml tests/test_egress_sdk_clients.py
+      # The sentinel must FAIL here (exit 1, its UNPROVEN message) and the declaration must PASS
+      # (this venv really has neither). Anything else, including a collection error, is red.
+      - name: Negative control (neither library) - the sentinel must fail
+        if: matrix.install == 'neither'
+        shell: bash
+        run: |
+          set +e
+          .venv/bin/python -m pytest \
+            "tests/test_egress_httpx.py::test_httpx_family_coverage_is_provable_in_this_environment" \
+            "tests/test_egress_httpx.py::test_installed_httpx_family_matches_the_ci_leg_declaration" \
+            -p no:cacheprovider -q -rA --junitxml=neither-junit.xml
+          rc=$?
+          set -e
+          .venv/bin/python tests/egress_ci_check.py negative-control neither-junit.xml "$rc"

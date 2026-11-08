@@ -16,7 +16,13 @@ import platform
 import time
 from pathlib import Path
 
-import httpx  # noqa-airgap: localhost-only (all calls target the local surreal/open-notebook port)
+from arail import httpx_family
+
+# Whichever httpx-family library is installed (httpx2 first).  A fresh install can have httpx2 and
+# no httpx, and then `import httpx` here raised ModuleNotFoundError in /api/open-notebook/start
+# right after `docker compose up` (TD51).  With neither installed this still fails at import, now
+# with a message that names both.
+httpx = httpx_family.preferred()  # noqa-airgap: localhost-only (all calls target the local surreal/open-notebook port)
 
 log = logging.getLogger(__name__)
 
