@@ -22,7 +22,7 @@ CI installs with an unpinned `pip install -e ".[dev]"`, so it resolves what PyPI
 | diagnose | none (the orchestrating session) | this file | done | Reproduced in a venv built the way CI builds it: the same 3 and the same 52 ids, byte for byte. The cause is in the install log, not in the portal. |
 | build | none | 3 code commits | done | conftest wrapper, bearer canary, golden-path health check. |
 | review, test | none | none | skipped, on purpose | No portal code changed (`src/` is untouched), so the brief's trigger for an architect or QA pass is not met. The risk is in the CI wiring, which only a CI run can prove: see Evidence. |
-| ship | none | PR [#211](https://github.com/cdarnell/qukaizen-arail/pull/211) | open, not merged | All 5 checks green on head `9f557138` (the three target jobs, Import and route guardrail, Model Forge). The operator merges. |
+| ship | none | PR [#211](https://github.com/cdarnell/qukaizen-arail/pull/211) | merged 2026-11-02 00:59 UTC as `de1ce285` | All 5 checks green on head `9f557138` and on the docs-only head `d2374948`. After the merge, `main`'s push runs on `de1ce285` all succeeded: DaC Feature Tests, DB-Ensure CLI Drivers, Blueprint Smoke and Nucleus Tests (the first three had been red since #205). Merged by the `cdarnell` login. |
 
 ## Decisions log
 
