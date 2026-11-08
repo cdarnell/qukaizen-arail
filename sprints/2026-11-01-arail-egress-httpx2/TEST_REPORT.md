@@ -2,7 +2,7 @@
 
 **Date:** 2026-11-04
 **Build:** [BUILD_LOG.md](./BUILD_LOG.md) at `46099a64` (pass 3 results; code head `55107aeb`)
-**Reviewer:** qa, Claude Opus 5.5. Every result below marked *run* was executed in this session. Scratch probes live under `$S/qa/` (`$S` = the session scratchpad `/private/tmp/claude-501/-Users-netsushi-ProJects--claude-worktrees-dreamy-northcutt-f8cc5c/73360036-b55b-4ed7-8e00-fc0a6932d67c/scratchpad`); they are not committed.
+**Reviewer:** qa, Claude Opus 5.5. Every result below marked *run* was executed in this session. Scratch probes live under `$S/qa/` (`$S` = the session scratchpad `<session scratchpad>`); they are not committed.
 **Verdict:** WEAK_PASS
 
 ## Verdict and why
