@@ -65,18 +65,39 @@ window.__arailNavJs = true;
   var badge = document.getElementById('mode-badge');
   if (!badge) return;
 
-  function updateBadge(mode) {
-    badge.className = 'mode-badge ' + mode;
-    badge.textContent = mode === 'airgapped' ? '\u2B24 Airgapped' : '\u2B24 Hybrid';
-    badge.title = mode === 'airgapped'
-      ? 'Airgapped \u2014 click to see the operational definition and recent blocks.'
-      : 'Hybrid \u2014 agent fetches are allowed. Click to see the egress audit.';
+  // Whether the egress guard is whole, as of the last status the page read: /api/system/mode when the page
+  // loads, /api/airgap/status when the modal opens. The modal's pill is "ok" only when the mode is airgapped
+  // AND the guard is whole, and the badge below follows the same rule, so neither can say plain "Airgapped"
+  // while a library is unguarded. Every place that paints either goes through here, so flipping the mode
+  // cannot turn them green again.
+  var guardIncomplete = false;
+  function pillClass(mode) {
+    return 'mp-pill ' + (mode === 'airgapped' && !guardIncomplete ? 'ok' : 'warn');
   }
 
-  // Sync on load
+  function updateBadge(mode) {
+    // An airgapped lab whose guard could not patch every HTTP library is not sealed. The badge says so, in
+    // the amber of the hybrid badge (an existing style, no new CSS), and its title points at the Network
+    // Policy modal, where the library is named.
+    var incomplete = mode === 'airgapped' && guardIncomplete;
+    badge.className = 'mode-badge ' + (incomplete ? 'hybrid' : mode);
+    badge.textContent = mode === 'airgapped'
+      ? (incomplete ? '\u2B24 Airgapped, guard incomplete' : '\u2B24 Airgapped')
+      : '\u2B24 Hybrid';
+    badge.title = incomplete
+      ? 'Airgapped, but the egress guard could not patch every HTTP library \u2014 click to see which, in the Network Policy modal.'
+      : (mode === 'airgapped'
+        ? 'Airgapped \u2014 click to see the operational definition and recent blocks.'
+        : 'Hybrid \u2014 agent fetches are allowed. Click to see the egress audit.');
+  }
+
+  // Sync on load. The same response carries the guard state, so the badge is painted once, with both.
   fetch('/api/system/mode')
     .then(function (r) { return r.json(); })
-    .then(function (d) { updateBadge(d.mode); })
+    .then(function (d) {
+      guardIncomplete = d.guard_installed === false;
+      updateBadge(d.mode);
+    })
     .catch(function () {});
 
   // Click \u2192 open airgap modal (populated from /api/airgap/status)
@@ -87,10 +108,15 @@ window.__arailNavJs = true;
     fetch('/api/airgap/status')
       .then(function (r) { return r.json(); })
       .then(function (data) {
+        // An incomplete guard (an HTTP library it could not patch) is not "ok", whatever the mode
+        // says: the description names the library, and the known-gaps list is opened below.
+        guardIncomplete = data.guard_installed === false;
         var pill = document.getElementById('airgap-mode-pill');
         if (pill) {
           pill.textContent = data.lab_mode;
-          pill.className = 'mp-pill ' + (data.lab_mode === 'airgapped' ? 'ok' : 'warn');
+          pill.className = pillClass(data.lab_mode);
+          pill.title = guardIncomplete
+            ? 'The egress guard could not patch every HTTP library — see below.' : '';
         }
         var defEl = document.getElementById('airgap-definition');
         if (defEl) defEl.textContent = data.definition || '';
@@ -138,6 +164,10 @@ window.__arailNavJs = true;
             gapsList.appendChild(li);
           });
         }
+        // The list sits in a <details> that is closed by default; with an incomplete guard the
+        // entry naming the unguarded library must not be behind a click.
+        var gapsBox = document.getElementById('airgap-gaps');
+        if (gapsBox && guardIncomplete) gapsBox.open = true;
 
         // -- Segmented control wiring --
         var toggleSection = document.getElementById('airgap-toggle-section');
@@ -235,7 +265,7 @@ window.__arailNavJs = true;
     var pill = document.getElementById('airgap-mode-pill');
     if (pill) {
       pill.textContent = target;
-      pill.className = 'mp-pill ' + (target === 'airgapped' ? 'ok' : 'warn');
+      pill.className = pillClass(target);
     }
 
     var errEl = document.getElementById('airgap-toggle-error');
@@ -265,7 +295,7 @@ window.__arailNavJs = true;
           });
           if (pill) {
             pill.textContent = confirmedMode;
-            pill.className = 'mp-pill ' + (confirmedMode === 'airgapped' ? 'ok' : 'warn');
+            pill.className = pillClass(confirmedMode);
           }
           updateBadge(confirmedMode);
         } else {
@@ -275,7 +305,7 @@ window.__arailNavJs = true;
           });
           if (pill) {
             pill.textContent = prevActive;
-            pill.className = 'mp-pill ' + (prevActive === 'airgapped' ? 'ok' : 'warn');
+            pill.className = pillClass(prevActive);
           }
 
           var errCode = res.body && res.body.error;
@@ -307,7 +337,7 @@ window.__arailNavJs = true;
         });
         if (pill) {
           pill.textContent = prevActive;
-          pill.className = 'mp-pill ' + (prevActive === 'airgapped' ? 'ok' : 'warn');
+          pill.className = pillClass(prevActive);
         }
 
         if (errEl) {

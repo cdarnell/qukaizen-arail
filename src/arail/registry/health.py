@@ -18,7 +18,7 @@ import threading
 import time
 from typing import Optional
 
-from arail.registry.core import HealthState, ModelEntry, ModelRegistry
+from arail.registry.core import HealthState, ModelEntry, ModelRegistry, _deep_overlay
 
 _PROBE_TIMEOUT = 2.0
 
@@ -27,6 +27,7 @@ _PROBE_TIMEOUT = 2.0
 # wedged load can never freeze the display).
 _WARMING: dict[str, float] = {}
 _WARMING_STALE_SEC = 900.0
+
 
 
 def mark_warming(entry_id: str) -> None:
@@ -122,7 +123,14 @@ def _probe_aerollm(entry: ModelEntry) -> HealthState:
     if importlib.util.find_spec("aerollm_api") is None:
         return HealthState(status="unhealthy", checked_at=now,
                            detail="aerollm_api wheel not installed "
-                                  "(./arailctl deep rebuild)")
+                                  "(./arailctl deep install)")
+    # A recorded generation failure outranks everything below: residency says
+    # the weights are in memory, not that the runtime can answer a second call.
+    # Check, the warms and the opt-in loop all come through here, so none of
+    # them can erase the failure (only a passing deep probe does).
+    overlay = _deep_overlay(entry)
+    if overlay is not None:
+        return overlay
     models_dir = os.getenv("ARAIL_MODELS_DIR", "lab/models")
     model_path = (entry.model_id if os.path.isabs(entry.model_id)
                   else os.path.join(models_dir, entry.model_id))
@@ -231,8 +239,19 @@ def run_preflight(reg: ModelRegistry, *, announce: bool = True) -> None:
             problems.append(tier_entry)
     try:
         from arail.activity import activity_log
+        # What this registry last announced as "down", per entry: (status, detail).
+        # A sticky failure (deep generation failing until a probe passes) must not
+        # print the same MODEL TIER DOWN line every 60 s when the opt-in loop is on.
+        announced = reg.__dict__.setdefault("_announced_down", {})
+        for tier_entry in (tier0, tier1):
+            if tier_entry is not None and tier_entry.health.usable:
+                announced.pop(tier_entry.id, None)   # recovered: a later outage is announced again
         if problems:
             for p in problems:
+                said = (p.health.status, p.health.detail)
+                if announced.get(p.id) == said:
+                    continue            # same status, same detail: already announced
+                announced[p.id] = said
                 activity_log.emit(
                     "registry",
                     f"MODEL TIER DOWN — {_tier_line(p)}. The lab stays up, "

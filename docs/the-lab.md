@@ -297,10 +297,14 @@ honest version of Buddy Tunnel.
 This is the single most important mental model in the lab.
 
 **Default mode is airgapped.** Cloud providers are blocked at the HTTP
-layer — agent-originated outbound calls through `requests` and `urllib`
-are denied unless the destination is loopback, RFC1918, or link-local.
-LAN GPU boxes (Ollama, vLLM, a QueueLLM node) keep working — only the
-public internet is sealed. Denials append one line to
+layer — agent-originated outbound calls through `requests` (new
+sessions), `urllib.request` (`urlopen` without an SSL context), `httpx`
+and its successor `httpx2` are denied unless the destination is
+loopback, on your private network (RFC1918, link-local), or another
+range Python's `ipaddress` treats as private. LAN GPU boxes (Ollama,
+vLLM, a QueueLLM node) keep working — only the public internet is
+sealed. What the guard does not cover is listed in
+[PRIVACY.md](PRIVACY.md). Denials append one line to
 `lab/data/egress.jsonl` for audit.
 
 **Flip to `LAB_MODE=hybrid` and cloud vendors become fallbacks.** The

@@ -145,10 +145,12 @@ def test_setcompare_autopick_requires_model_ready_not_just_installed():
 
 def test_setcompare_never_falls_back_to_a_broken_default_silently():
     """When nothing deep is truly ready, the honest message must
-    distinguish 'not built' from 'built but no model downloaded' — never
-    silently pick something and claim success."""
+    distinguish 'not installed' from 'installed but no model downloaded' — never
+    silently pick something and claim success. (The first used to say 'isn’t
+    built' and send the user to `deep rebuild`, which refuses a QueueLLM clone:
+    review B2 of sprint 2026-10-29-arail-deep-honest.)"""
     assert "the deep model isn’t downloaded yet" in CHAT_HTML
-    assert "QueueLLM isn’t built" in CHAT_HTML
+    assert "QueueLLM isn’t installed — run ./arailctl deep install" in CHAT_HTML
 
 
 def test_comparison_strip_never_displays_deep_model_as_a_silent_fallback():

@@ -34,6 +34,8 @@ import sys
 from dataclasses import dataclass
 from importlib import metadata as importlib_metadata
 
+from arail import httpx_family
+
 
 @dataclass
 class Finding:
@@ -66,6 +68,20 @@ def _section(title: str) -> None:
     _p(f"── {title} " + "─" * max(0, 60 - len(title)))
 
 
+def _guard_summary(egress) -> str:
+    """What the egress guard covered, from ``egress.coverage()``: ``installed — guards requests,
+    urllib.request, httpx2 (not installed: httpx)``.  A client that is not installed cannot be
+    used, so it is named apart.  One that is installed but could not be patched never gets here:
+    ``install_guard()`` raises ``EgressGuardIncomplete`` and the caller reports that instead."""
+    coverage = egress.coverage()
+    guarded = [name for name, value in coverage.items() if value == "guarded"]
+    absent = [name for name, value in coverage.items() if value == "absent"]
+    summary = "installed — guards " + ", ".join(guarded)
+    if absent:
+        summary += " (not installed: " + ", ".join(absent) + ")"
+    return summary
+
+
 def check_environment() -> None:
     _section("Environment")
     try:
@@ -81,13 +97,21 @@ def check_environment() -> None:
         # doctor runs in its own process — install the guard here too so this
         # checkup's own probes (esp. --updates) obey the same airgap policy the
         # portal enforces, and the report reflects a genuinely guarded process.
-        egress.install_guard()
-        installed = bool(getattr(egress, "_INSTALLED", False))
-        _p(f"  egress guard      : {'installed' if installed else 'NOT installed'}")
-        # Required check (ARCHITECTURE.md §5.2): the guard is expected to be
-        # installable in every supported environment (including CI, A8) —
-        # if it isn't, that's a real problem, not an optional one.
-        _record("egress_guard", "required", installed)
+        try:
+            egress.install_guard()
+        except egress.EgressGuardIncomplete as e:
+            # A known state, not an unknown one: the guard says which library it could not patch and
+            # what to do.  A "?" would read as "could not tell", so the line says INCOMPLETE.
+            _p(f"  egress guard      : INCOMPLETE — {e}")
+            _record("egress_guard", "required", False, str(e))
+        else:
+            installed = bool(getattr(egress, "_INSTALLED", False))
+            _p("  egress guard      : "
+               + (_guard_summary(egress) if installed else "NOT installed"))
+            # Required check (ARCHITECTURE.md §5.2): the guard is expected to be
+            # installable in every supported environment (including CI, A8) —
+            # if it isn't, that's a real problem, not an optional one.
+            _record("egress_guard", "required", installed)
     except Exception as e:  # noqa: BLE001
         _p(f"  egress guard      : ? ({type(e).__name__}: {e})")
         _record("egress_guard", "required", False, str(e))
@@ -275,7 +299,7 @@ def check_components() -> None:
     # importlib.metadata only — no subprocess. The portal's Admin "Check
     # versions" button covers shell tools (ollama/npm/docker) on demand.
     for pkg in ("fastapi", "uvicorn", "lancedb", "pydantic", "requests",
-                "httpx", "neo4j"):
+                *httpx_family.FAMILY, "neo4j"):
         try:
             _p(f"  {pkg:<16}: {importlib_metadata.version(pkg)}")
         except importlib_metadata.PackageNotFoundError:

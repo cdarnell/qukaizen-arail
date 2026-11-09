@@ -896,17 +896,32 @@ dictionary_store = dictionary_mod.DictionaryStore()
 _dict_gen_lock = asyncio.Lock()
 
 
-@app.on_event("startup")
-async def _startup():
-    import os
-    # Install the egress guard FIRST — before any agent loads, before any
-    # cloud-provider endpoint fires, before the security scan.  Idempotent.
+def _install_egress_guard() -> None:
+    """Install the egress guard; report a failure, never raise.
+
+    ``install_guard()`` raises ``EgressGuardIncomplete`` when an httpx-family library is installed
+    but cannot be patched.  The portal keeps starting anyway (decided in the egress sprint's review:
+    with an incomplete guard the portal and the agent loader keep serving with that library unguarded;
+    only Model Forge's worker exits), so what this MUST do is say so: one warning in the activity log.
+    ``/api/airgap/status`` then reports ``guard_installed: false``, the Network Policy modal names the
+    library and says its requests are NOT blocked, and ``./arailctl doctor`` fails its egress check.
+    tests/test_egress_docs.py pins this behaviour, because a start-up that swallowed the error
+    silently left the library open with every test green.
+    """
     try:
         from arail import egress as _egress
         _egress.install_guard()
     except Exception as _eg_err:  # noqa: BLE001
         activity_log.emit("system",
             f"Egress guard install failed: {_eg_err}", "warn")
+
+
+@app.on_event("startup")
+async def _startup():
+    import os
+    # Install the egress guard FIRST — before any agent loads, before any
+    # cloud-provider endpoint fires, before the security scan.  Idempotent.
+    _install_egress_guard()
 
     from arail import autochecks
     _autochecks_on = autochecks.enabled()
@@ -2110,7 +2125,7 @@ async def providers_active(request: Request):
                 "error": "Airgapped mode — only local sources are active. Set LAB_MODE=hybrid to use cloud providers."}
     if provider == "aerollm" and not _is_aerollm_installed():
         return {"ok": False,
-                "error": "The QueueLLM engine isn't built on this machine. Run './arailctl deep rebuild' to enable it."}
+                "error": "The QueueLLM engine isn't installed on this machine. Run './arailctl deep install' to enable it."}
     os.environ["COMPUTE_SOURCE"] = provider
     activity_log.emit("chat", f"Compute source switched to '{provider}'.", "info")
     # Sprint 2: regenerate_config() THEN restart() — under a single lock.
@@ -4593,9 +4608,14 @@ def _research_models_block() -> dict | None:
     ``fast`` is the model the experiment engine and most planning calls
     use (a dry-run of the same resolve the researcher does); ``deep`` is
     the aeroLLM slot with a reason code the truth strip can render:
-    tier_locked | wheel_missing | disabled | deferred_now | ok.
+    tier_locked | wheel_missing | disabled | deep_failing | deferred_now | ok.
+    ``deep.generation`` (additive) says what is known about generation on the
+    binary this process loaded: state untested | passing | failing, and when
+    failing since when, from which consumer, and how many failure events.
     Availability (tier/wheel) outranks the operator's toggle so a
-    minimalist user sees a locked control, not a dead one. Never raises —
+    minimalist user sees a locked control, not a dead one, and so does a deep
+    that is failing: "flip the toggle" must never promise a deep that does not
+    generate. Never raises —
     returns None and the strip hides.
     """
     try:
@@ -4630,11 +4650,30 @@ def _research_models_block() -> dict | None:
 
         enabled_by_user = research_deep_enabled()
         eligible, code, detail = deep_policy.explain(foreground=False)
-        if not enabled_by_user and code not in ("tier_locked", "wheel_missing"):
+        if not enabled_by_user and code not in ("tier_locked", "wheel_missing", "deep_failing"):
             eligible = False
             code = "disabled"
             detail = ("deep passes are switched off — flip the toggle to use "
                       "the QueueLLM deep model for planning and interpretation")
+
+        generation = None
+        try:
+            from arail import deep_verdict
+            v = deep_verdict.current(import_if_needed=False)   # explain() has just imported the wheel
+            lp = v.last_probe or {}
+            generation = {
+                "state": v.state,
+                "since": v.since,
+                "source": v.source,
+                "consumer": (v.failure or {}).get("consumer"),
+                "lab": (v.failure or {}).get("lab"),
+                "failures": (v.failure or {}).get("count"),
+                "last_probe": ({"at": lp.get("at"), "passed": lp.get("passed"), "total": lp.get("total")}
+                               if lp else None),
+                "sha256_12": v.binary.sha256[:12] if v.binary is not None else None,
+            }
+        except Exception:  # noqa: BLE001 - the strip must render without it
+            generation = None
 
         return {
             "tier": get_current_tier(),
@@ -4647,6 +4686,7 @@ def _research_models_block() -> dict | None:
                 "eligible_now": eligible,
                 "reason_code": code,
                 "reason": detail,
+                "generation": generation,
             },
         }
     except Exception as e:  # noqa: BLE001 — status must never break on this
@@ -8865,10 +8905,13 @@ _OPTIONAL_CHAT_BACKEND_CONFIG: dict[str, dict[str, str]] = {
     "aerollm": {
         "label": "QueueLLM",
         "class_name": "AeroLLMBackend",
-        # Built from the local sibling repo ($ARAIL_AEROLLM_REPO) — not pip.
-        # `deep rebuild` re-runs the cargo build + dylib copy so active local
-        # aerollm changes flow into the lab.
-        "install_command": "./arailctl deep rebuild",
+        # `deep install` fetches a checksummed prebuilt binary from ARAIL's own
+        # Releases: no source repo or credentials. (`deep rebuild` is the dev
+        # build from the pre-rename checkout at $ARAIL_AEROLLM_REPO, for
+        # maintainers only: it re-runs the cargo build so local aerollm
+        # changes flow into the lab, and it refuses any checkout that has the
+        # renamed crate.)
+        "install_command": "./arailctl deep install",
         "model_env": "AEROLLM_MODEL",
         "default_model": "Qwen2.5-7B-Instruct-4bit",
     },
@@ -10181,7 +10224,7 @@ async def api_chat_models(provider: str = ""):
         "model_ready": _aerollm_model_ready(aero_model_name),
         "param_hint": _extract_param_hint(aero_model_name),
         "gated": aero_model_name.lower().startswith("meta-llama/"),
-        "install_command": "./arailctl deep rebuild",
+        "install_command": "./arailctl deep install",
         "description": "In-process Rust runtime — primary deep backend on Apple Silicon (Qwen2.5-7B-4bit default, ~4 GB resident; max tier ships Qwen2.5-72B-Instruct-4bit, ~40 GB resident, requires 48 GB+). Single Metal command buffer per generation; ~3× faster than mlx_lm baseline.",
         # C4/F-OVERSELL: aeroLLM keeps its model resident once loaded — it
         # does not stream (AERO_MOE_SELECT is off and absent from src/).
@@ -11962,7 +12005,14 @@ async def system_metrics(request: Request):
 
 @app.get("/api/system/mode")
 async def get_mode():
-    return {"mode": _lab_mode()}
+    """The lab mode, and whether the egress guard is whole.
+
+    The nav bar's always-visible badge reads this once per page load. ``guard_installed`` is the field the
+    Network Policy modal reads from ``/api/airgap/status`` (False after an install_guard() that raised
+    EgressGuardIncomplete), so the badge can say "Airgapped, guard incomplete" instead of a plain
+    "Airgapped" that the modal's pill, description and list contradict."""
+    from arail.egress import _INSTALLED
+    return {"mode": _lab_mode(), "guard_installed": _INSTALLED}
 
 
 @app.post("/api/system/mode")
@@ -11997,23 +12047,43 @@ async def get_airgap_status():
 
     Response shape (see ARCHITECTURE.md §8):
       lab_mode: "airgapped" | "hybrid"
-      definition: human-readable description of what the mode enforces
+      definition: human-readable description of what the mode enforces; when the guard could not
+        patch an httpx-family library it names it and says its requests are NOT blocked
       recent_activity: last 5 egress.jsonl entries, each with a "kind" field
       host_can_reach_internet: null | true | false (only when BUDDY_EGRESS_PROBE=1)
-      known_gaps: list of unwrapped clients documented in PRIVACY.md
-      guard_installed: bool — True once install_guard() has run
+      known_gaps: the gaps documented in PRIVACY.md (arail.airgap.KNOWN_GAPS), plus one
+        entry for each httpx-family library the guard found installed and could not patch
+      guard_installed: bool — True once install_guard() has completed (False after an
+        incomplete install, which known_gaps then explains)
     """
+    from arail.airgap import KNOWN_GAPS as _AIRGAP_KNOWN_GAPS
     from arail.airgap import lab_mode as _airgap_lab_mode
-    from arail.egress import read_recent_blocks, probe_internet, _INSTALLED
+    from arail.egress import read_recent_blocks, probe_internet, uncovered, _INSTALLED
 
     mode = _airgap_lab_mode()
+
+    # One snapshot of the libraries the guard found and could not patch, used for both the
+    # description and the gap list below.
+    _unguarded = uncovered()
+
+    # "Cloud-provider APIs are blocked." is false for a library the guard could not patch (a request
+    # through it reaches the network layer), so in that state say which one, in the sentence the reader
+    # trusts, instead of leaving the claim and a bullet in a collapsed list that contradicts it.
+    if _unguarded:
+        _cloud_sentence = (
+            f"Cloud-provider APIs are blocked, EXCEPT requests made through {', '.join(_unguarded)}: "
+            f"the guard could not patch {'it' if len(_unguarded) == 1 else 'them'}, "
+            "so those requests are NOT blocked. "
+        )
+    else:
+        _cloud_sentence = "Cloud-provider APIs are blocked. "
 
     _DEFINITIONS = {
         "airgapped": (
             "Agents cannot collect information from the public internet. "
             "Local services on this machine and your private network "
             "(loopback, RFC1918, link-local) stay reachable. "
-            "Cloud-provider APIs are blocked. "
+            + _cloud_sentence +
             "Toggle LAB_MODE=hybrid in .env to allow agent fetches."
         ),
         "hybrid": (
@@ -12024,10 +12094,9 @@ async def get_airgap_status():
     }
 
     _KNOWN_GAPS = [
-        "raw socket connections (BUDDY_EGRESS_PROBE is the only audited use)",
-        "subprocess-spawned tools (opencode CLI is config-gated to the local "
-        "provider when airgapped; curl/wget: none in tree today)",
-        "aiohttp (not in tree)",
+        *_AIRGAP_KNOWN_GAPS,
+        *(f"{name}: installed, but the guard could not patch it ({why}); "
+          "its requests are NOT checked" for name, why in _unguarded.items()),
     ]
 
     raw_blocks = read_recent_blocks(5)

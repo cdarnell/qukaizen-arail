@@ -70,7 +70,8 @@ def test_select_aerollm_refused_when_not_built(not_installed, monkeypatch):
     with TestClient(app) as c:
         r = c.post("/api/providers/active", json={"provider": "aerollm"}, headers=CSRF)
         assert r.json().get("ok") is False
-        assert "deep rebuild" in r.json().get("error", "")
+        err = r.json().get("error", "")
+        assert "./arailctl deep install" in err and "deep rebuild" not in err
 
 
 def test_cloud_still_blocked_airgapped(monkeypatch):

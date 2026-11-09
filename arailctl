@@ -254,7 +254,8 @@ EOF
     tier [<tier>]   switch (or print) the feature-set tier — minimalist | maximus
                     ('upgrade' is a permanent alias — see docs/cli.md)
     deep <op>       QueueLLM 2nd inference: install (bundled binary) | rebuild (source) |
-                    update (wheel) | status
+                    update (wheel) | status | probe [--json] [--force] (5 deep calls in
+                    a fresh process; the only test that deep actually generates)
     version         show installed component versions
     status [--json[=full|instances]] [--probe|--no-probe] [--quiet]  show what's
                     running (World instances + root lab); exits 0/3/4 — see docs/cli.md
@@ -784,7 +785,9 @@ case "$cmd" in
         ;;
     deep)
         # AeroLLM 2nd-inference: install (bundled binary) | rebuild (source) |
-        # update (published wheel) | status. `install` is the route an
+        # update (published wheel) | status | probe. `probe` is a generation
+        # test, not an install step: see docs/cli.md and
+        # sprints/2026-10-29-arail-deep-honest. `install` is the route an
         # outside user (no sibling repo, no private-index creds) actually
         # needs — see ARCHITECTURE.md (sprints/2026-08-05-arail-bundled-aerollm).
         #
@@ -792,20 +795,47 @@ case "$cmd" in
         # `python3` here is macOS system Python, whose site-packages is
         # missing/unwritable and is not the interpreter ARAIL runs anyway.
         # An explicit $PYTHON from the caller still wins (tests, power users).
+        #
+        # The op is read first, so the message can name it and `probe` can have its own exit code.
+        op="${1:-status}"; shift || true
+        case "$op" in
+            install|rebuild|update|status|probe) ;;
+            *) die "deep op must be one of: install | rebuild | update | status | probe" ;;
+        esac
         if [[ -z "${PYTHON:-}" ]]; then
             if [[ -x "$REPO_ROOT/.venv/bin/python" ]]; then
                 export PYTHON="$REPO_ROOT/.venv/bin/python"
+            elif [[ "$op" == probe ]]; then
+                # Exit 5 is the probe's "not run, nothing recorded" (docs/cli.md). Exit 1 means "the probe ran and
+                # deep generation is failing", and a script or CI step must not be told that on a machine where
+                # nothing ran (QA-13). No JSON is printed: there is no interpreter to build the document with.
+                echo -e "${RED}[${LAB_SHORT_NAME}]${RESET} not run: missing .venv — run ./arailctl setup first (deep probe tests the lab's own venv, not system Python). Nothing was recorded." >&2
+                exit 5
             else
-                die "missing .venv — run ./arailctl setup first (deep install targets the lab's venv, not system Python)"
+                die "missing .venv — run ./arailctl setup first (deep $op targets the lab's venv, not system Python)"
             fi
         fi
-        op="${1:-status}"; shift || true
         case "$op" in
             install) exec bash "$REPO_ROOT/scripts/build-aerollm.sh" bundle "$@" ;;
             rebuild) exec bash "$REPO_ROOT/scripts/build-aerollm.sh" build ;;
             update)  exec bash "$REPO_ROOT/scripts/build-aerollm.sh" update ;;
             status)  exec bash "$REPO_ROOT/scripts/build-aerollm.sh" status ;;
-            *) die "deep op must be one of: install | rebuild | update | status" ;;
+            probe)
+                # Exit 5 is the probe's "not run, nothing recorded" (docs/cli.md); exit 1 means "the probe ran and
+                # deep generation is failing". A $PYTHON that cannot run the probe (a stray `export PYTHON=python3`
+                # without arail, a path that does not exist) would end in Python's or bash's own exit 1, so look
+                # first (QA-17). find_spec reads where arail.deep_probe is without running it: about 10 ms.
+                probe_why=""
+                if ! command -v "$PYTHON" >/dev/null 2>&1; then
+                    probe_why="it is not an executable file"
+                elif ! probe_out="$("$PYTHON" -c 'import importlib.util as u, sys; sys.exit(0 if u.find_spec("arail.deep_probe") else "arail.deep_probe is not in this Python")' 2>&1)"; then
+                    probe_why="${probe_out##*$'\n'}"
+                fi
+                if [[ -n "$probe_why" ]]; then
+                    echo -e "${RED}[${LAB_SHORT_NAME}]${RESET} not run: $PYTHON cannot run arail.deep_probe (${probe_why:0:200}). Nothing was recorded. Run ./arailctl setup, or unset PYTHON so the lab's own .venv/bin/python is used." >&2
+                    exit 5
+                fi
+                exec "$PYTHON" -m arail.deep_probe "$@" ;;
         esac
         ;;
     install)

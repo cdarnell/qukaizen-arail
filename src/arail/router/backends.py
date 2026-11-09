@@ -13,6 +13,7 @@ import threading
 import time
 import uuid
 from abc import ABC, abstractmethod
+from concurrent.futures import CancelledError as _FuturesCancelledError
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any, Iterator, Optional
@@ -1506,6 +1507,56 @@ def _resolve_kv_budget() -> dict[str, Any]:
 _AEROLLM_SYSTEM_PROMPT = "You are a concise, helpful assistant."
 
 
+def _note_deep(ok: bool, error: object = None) -> None:
+    """Tell the deep verdict how one deep call ended (sprint 2026-10-29-arail-deep-honest).
+
+    ``arail.deep_verdict`` never raises, but a deep call must not depend on that:
+    this guard keeps a broken verdict module from breaking generation.
+    """
+    try:
+        from arail import deep_verdict
+        deep_verdict.note_call(ok, error=error)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+class _DeepBackendClosed(RuntimeError):
+    """ARAIL closed this backend (Eject, a deep-model switch, process exit) before or while a call ran.
+
+    That is ARAIL's own teardown, not a fault of the binary, so the deep verdict is never told about
+    it: a recorded failure is sticky and checkout-wide, and this one would put a false claim about the
+    binary on every surface (review B1 of sprint 2026-10-29-arail-deep-honest). A RuntimeError, so a
+    caller that handled the old "cannot schedule new futures" error handles this one too."""
+
+
+# "Run it again once the deep model is loaded" is true after an Eject (it is not loaded yet), after a
+# model switch (the new one is) and at lab shutdown (no step applies; the lab is going down).
+_CLOSED_MESSAGE = ("the deep model was closed (ejected from Chat, switched, or the lab is shutting "
+                   "down), so this call was not made. Run it again once the deep model is loaded.")
+
+# A call that ends because ARAIL closed the backend, not because the model failed: the backend's own
+# error, or a queued call that `_close()` cancelled. concurrent.futures.CancelledError is an Exception
+# on 3.11, which is why a cancelled call used to be filed as a failure. The Curator's counting wrapper
+# (portal/world_routes.py) reads the same tuple, so a pass that lost calls this way says so instead of
+# blaming the deep runtime.
+CLOSED_BY_ARAIL = (_FuturesCancelledError, _DeepBackendClosed)
+
+# What ends a deep call without saying anything about the binary: the caller was interrupted, or ARAIL
+# closed the backend. Everything else a call raises, BaseException subclasses included (PyO3's
+# PanicException derives from BaseException), is the runtime failing and is filed.
+_NOT_A_RUNTIME_FAULT = (KeyboardInterrupt, SystemExit, GeneratorExit) + CLOSED_BY_ARAIL
+
+
+def _note_deep_load(error: object, *, persist: bool) -> None:
+    """Same guard for a runtime that would not load. ``persist=False`` is a fault of
+    this lab (the model dir), not of the binary, so it is kept in this process only."""
+    try:
+        from arail import deep_verdict
+        deep_verdict.note_load_failure(error, persist=persist)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 class AeroLLMBackend(BaseBackend):
     """Drive the AeroLLM Rust runtime through its `aerollm_api` PyO3 wheel.
 
@@ -1568,8 +1619,10 @@ class AeroLLMBackend(BaseBackend):
                 "`./arailctl deep install` (fetches a checksummed prebuilt binary "
                 "from an ARAIL GitHub Release — no source repo or credentials "
                 "needed; this is the route for most people). Maintainer-only "
-                "alternatives: `./arailctl deep rebuild` (build from the local "
-                "sibling repo — set ARAIL_AEROLLM_REPO if it's not at "
+                "alternatives: `./arailctl deep rebuild` (build from a sibling "
+                "checkout that still has the pre-rename crates/aerollm-api; it "
+                "refuses a checkout with the renamed crates/queuellm-api — set "
+                "ARAIL_AEROLLM_REPO if the checkout is not at "
                 "~/ProJects/qukaizen-queuellm) or `./arailctl deep update` (pip "
                 "install the published wheel from the private index, needs "
                 "credentials). Do NOT use `maturin develop` — see scripts/setup.sh "
@@ -1577,6 +1630,13 @@ class AeroLLMBackend(BaseBackend):
             ) from e
         # Surface the wheel version for `deep status` / health (best-effort).
         self.api_version = getattr(_aero_mod, "__version__", "unknown")
+        # Pin which native binary this process loaded before anything below can
+        # fail, so every outcome is filed under the right sha256.
+        try:
+            from arail import deep_verdict as _dv
+            _dv.identity()
+        except Exception:  # noqa: BLE001
+            pass
 
         # Default model picks the 4-bit MLX quant — ~4 GB resident, fits a
         # 16 GB Apple Silicon Mac with ~6 GB headroom for portal + browser.
@@ -1601,12 +1661,15 @@ class AeroLLMBackend(BaseBackend):
             # default the operator landed on. The mlx-community/...-4bit
             # repo IDs are the canonical 4-bit MLX conversions.
             hf_repo = "mlx-community/" + self.model_name
-            raise RuntimeError(
+            missing = RuntimeError(
                 f"QueueLLM model dir not found: {model_path}. "
                 f"Set AEROLLM_MODEL and/or ARAIL_MODELS_DIR, or "
                 f"download the checkpoint with `huggingface-cli download "
                 f"{hf_repo} --local-dir {model_path}`."
             )
+            _note_deep_load(f"model dir not found: {model_path} (check AEROLLM_MODEL and ARAIL_MODELS_DIR)",
+                            persist=False)
+            raise missing
 
         # Optional speculative-decoding draft. When AEROLLM_DRAFT_MODEL
         # is set and points at a directory under ARAIL_MODELS_DIR, the
@@ -1696,7 +1759,11 @@ class AeroLLMBackend(BaseBackend):
         )
         self._runtime: Any = None  # populated on the worker thread
         self._closed = False
-        self._executor.submit(self._init_runtime, Runtime, model_path, rt_kwargs).result()
+        try:
+            self._executor.submit(self._init_runtime, Runtime, model_path, rt_kwargs).result()
+        except Exception as exc:
+            _note_deep_load(exc, persist=True)
+            raise
         # Drop the Runtime on the worker thread at process exit. Without
         # this, Python's GC can drop the unsendable handle from the main
         # thread and PyO3 raises RuntimeError during shutdown.
@@ -1841,14 +1908,27 @@ class AeroLLMBackend(BaseBackend):
 
     def _generate_on_worker(self, wrapped: str,
                             gen_kwargs: dict[str, Any]) -> str:
-        """Run on the executor worker. Holds the unsendable invariant."""
-        return self._runtime.generate(wrapped, **gen_kwargs)
+        """Run on the executor worker. Holds the unsendable invariant.
+
+        An empty runtime means two different things, and ``_closed`` tells them apart: a call that
+        was already queued when ``_close()`` dropped the Runtime is ARAIL's teardown (not filed); a
+        Runtime that is absent while the backend is open is a fault of this deep path (filed)."""
+        rt = self._runtime
+        if rt is None:
+            if self._closed:
+                raise _DeepBackendClosed(_CLOSED_MESSAGE)
+            raise RuntimeError("the deep runtime is not running (it never started on this backend)")
+        return rt.generate(wrapped, **gen_kwargs)
 
     def complete(self, prompt: str, max_tokens: int = 512,
                  temperature: float = 0.7,
                  top_p: Optional[float] = None,
                  *, system: Optional[str] = None,
                  messages: Optional[list] = None) -> ModelResponse:
+        if self._closed:
+            # Eject or a model switch closed this backend; a router that still holds it gets this,
+            # not a verdict about the binary.
+            raise _DeepBackendClosed(_CLOSED_MESSAGE)
         if system:
             prompt = f"{system}\n\n{prompt}"
         start = time.time()
@@ -1863,15 +1943,33 @@ class AeroLLMBackend(BaseBackend):
 
         # Hop to the dedicated runtime thread; .result() blocks until
         # it returns. If the worker raises, .result() re-raises here.
-        text = self._executor.submit(
-            self._generate_on_worker, wrapped, gen_kwargs
-        ).result()
+        # submit() is outside the try on purpose: a RuntimeError from the executor itself ("cannot
+        # schedule new futures after shutdown", or after interpreter shutdown) is ARAIL's own
+        # teardown, not a fault of the binary, and is not filed.
+        future = self._executor.submit(self._generate_on_worker, wrapped, gen_kwargs)
+        try:
+            text = future.result()
+        except BaseException as exc:
+            # A runtime fault is filed for every surface, BaseException subclasses included (a
+            # native panic). An interruption, a cancelled call and ARAIL's own teardown are not.
+            # Either way the caller gets the very object that was raised.
+            if not isinstance(exc, _NOT_A_RUNTIME_FAULT):
+                _note_deep(False, exc)
+            raise
 
         # The runtime returns just the decoded continuation, but it may
         # carry trailing turn markers; strip them using the model's own
         # special tokens. Older shim paths sometimes echo the prompt —
         # strip that defensively too.
         text = self._strip_special(text, wrapped)
+
+        # One definition of a working deep call: no exception, and non-empty
+        # text after _strip_special. An empty answer is a failed call, but it is
+        # returned as it always was; the callers decide what to do with it.
+        if text:
+            _note_deep(True)
+        else:
+            _note_deep(False, "the runtime returned no text")
 
         # aerollm_api doesn't surface output-token count yet (planned in
         # a follow-up via generate_with_stats). Approximate with a
@@ -1890,7 +1988,15 @@ class AeroLLMBackend(BaseBackend):
         )
 
     def health_check(self) -> bool:
-        return getattr(self, "_runtime", None) is not None
+        """Resident and not failing: weights in memory say nothing about whether
+        the runtime generates, so a recorded failure makes this False too."""
+        if getattr(self, "_runtime", None) is None:
+            return False
+        try:
+            from arail import deep_verdict
+            return not deep_verdict.is_failing()
+        except Exception:  # noqa: BLE001
+            return True
 
 
 # ---------------------------------------------------------------------------
