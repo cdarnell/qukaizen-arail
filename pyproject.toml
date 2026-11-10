@@ -132,6 +132,9 @@ cloud     = ["anthropic>=0.34.0"]
 # don't break — the package is now in the base dependency list.
 vector    = ["lancedb>=0.13.0"]
 langchain = ["langchain>=0.2.0", "langgraph>=0.2.0"]
+# Optional Mastra Studio surface (sprint 2026-10-13-mastra-studio-spike): the Python MCP
+# server that exposes the Researcher as a loopback-only tool. Off by default; not in any tier.
+mastra    = ["mcp>=1.0,<2"]
 
 # ── Dev / test ────────────────────────────────────────────────────────────
 dev   = ["pytest>=7.4.0", "cryptography>=42"]

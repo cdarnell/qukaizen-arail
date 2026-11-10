@@ -1,0 +1,3 @@
+node_modules/@mastra/core/dist/auth/ee
+node_modules/@mastra/core/dist/_types/@internal_auth/dist/ee
+node_modules/@mastra/core/dist/agent-builder/ee
