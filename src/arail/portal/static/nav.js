@@ -144,13 +144,23 @@ window.__arailNavJs = true;
               var row = document.createElement('div');
               row.className = 'airgap-row';
               var kind = item.kind || 'blocked';
-              var kindPill = '<span class="mp-pill ' + (kind === 'blocked' ? 'warn' : 'ok') + '">'
-                + kind + '</span>';
-              var ts = item.ts ? item.ts.replace('T', ' ').replace('Z', '') : '';
-              row.innerHTML = kindPill
-                + ' <code>' + (item.url_host || '?') + '</code>'
-                + ' <span class="chat-muted">' + (item.caller || '') + '</span>'
-                + ' <time datetime="' + (item.ts || '') + '">' + ts.slice(-8) + '</time>';
+              var pill = document.createElement('span');
+              pill.className = 'mp-pill ' + (kind === 'blocked' ? 'warn' : 'ok');
+              pill.textContent = kind;
+              var ts = item.ts ? String(item.ts).replace('T', ' ').replace('Z', '') : '';
+              var code = document.createElement('code');
+              code.textContent = item.url_host || '?';
+              var who = document.createElement('span');
+              who.className = 'chat-muted';
+              who.textContent = item.caller || '';
+              var time = document.createElement('time');
+              time.setAttribute('datetime', item.ts || '');
+              time.textContent = ts.slice(-8);
+              row.appendChild(pill);
+              [code, who, time].forEach(function (el) {
+                row.appendChild(document.createTextNode(' '));
+                row.appendChild(el);
+              });
               list.appendChild(row);
             });
           }
