@@ -187,6 +187,8 @@ def _hermetic_boot_models(request, monkeypatch, tmp_path):
         monkeypatch.setattr(model_pins, "_fetch_tags", lambda: None)
         monkeypatch.setattr(model_pins, "_fetch_show", lambda tag: None)
         model_pins.clear_caches()
+        from arail.buddy_host import brain as _brain
+        monkeypatch.setattr(_brain, "probe_thinking", lambda entry: False)
     # Pins/cache and the crash sentinel are per-test, never the session's or
     # a developer's real files.
     monkeypatch.setenv("ARAIL_MODEL_DEFAULTS_FILE",
