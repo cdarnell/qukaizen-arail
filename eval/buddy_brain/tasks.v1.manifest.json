@@ -1,0 +1,21 @@
+{
+  "schema": "arail.buddy-brain-tasks/v1",
+  "seed": 20261118,
+  "tasks_file": "tasks.v1.jsonl",
+  "tasks_sha256": "61d92c1a7ea570b20d4e0ab5b4704027e6a86cc7086e63f6f0c838332f259497",
+  "counts": {
+    "domain": 100,
+    "grounding": 32,
+    "out_of_world": 32,
+    "pressure": 30
+  },
+  "worlds": {
+    "ai": "c1914ba993a75f2f9cfa0dc3b08f91f50a2d27f1e5ae7b1487930f2665f29d4b",
+    "qukaizen": "fc6b5e473594996d71fa970ba577d81c2d20856f3b904c76691f722241271345"
+  },
+  "max_prompt_chars": 3936,
+  "generator": {
+    "path": "scripts/eval/buddy_brain_tasks.py",
+    "git_sha": "78165065a6336df717f7538bf85be533c4086962"
+  }
+}
