@@ -8,13 +8,24 @@ from typing import Any, Dict, List, Optional
 
 from arail.brain_bench import stats
 
-PAIR_RULES = {("M3", "baseline"): "R1", ("M7", "baseline"): "R2a", ("M6", "baseline"): "R2b",
-              ("M8", "baseline"): "R3", ("M8", "reference"): "R4"}
+def _vs_arm(results: Dict[str, Any], mid: str, vs: str) -> str:
+    """'baseline', 'reference', or 'best' = whichever of the two scores higher on *mid* (fixed by the rule)."""
+    if vs != "best":
+        return vs
+    m = results.get("metrics") or {}
+    b = ((m.get("baseline") or {}).get(mid) or {}).get("value")
+    r = ((m.get("reference") or {}).get(mid) or {}).get("value")
+    return "reference" if (r is not None and (b is None or r >= b)) else "baseline"
 
 
 def _cmp(results: Dict[str, Any], mid: str, a: str) -> Optional[Dict[str, Any]]:
+    a = _vs_arm(results, mid, a)
     return next((c for c in results.get("comparisons", [])
                  if c["metric_id"] == mid and c["a"] == a and c["b"] == "candidate" and not c.get("near_aa")), None)
+
+
+def _vs(rule: Dict[str, Any]) -> str:
+    return rule.get("vs") or ("reference" if rule["kind"] == "delta_vs_reference_ci_lower_gt" else "baseline")
 
 
 def _count(results: Dict[str, Any], arm: str, mid: str) -> Optional[int]:
@@ -34,24 +45,29 @@ def assess(results: Dict[str, Any], rules: Dict[str, Any]) -> List[Dict[str, Any
     for r in rules["rules"]:
         rid, kind = r["id"], r["kind"]
         if kind == "delta_ci_upper_max":
-            c = _cmp(results, r["metric"], "baseline")
+            c = _cmp(results, r["metric"], _vs(r))
             if not c or c["ci"] is None:
                 out.append(_row(rid, "not_assessable", "no comparison in this run"))
                 continue
             o_cand, o_base = _count(results, "candidate", "M2o"), _count(results, "baseline", "M2o")
-            ok = c["ci"][1] <= r["threshold_pp"] and (o_cand is None or o_base is None or o_cand <= o_base)
+            informative_o = r.get("o_clause") != "informational"
+            o_ok = (not informative_o) or o_cand is None or o_base is None or o_cand <= o_base
+            ok = c["ci"][1] <= r["threshold_pp"] and o_ok
+            note = "" if informative_o else "; O-count clause informational (all arms at the floor)"
             out.append(_row(rid, "meets" if ok else "does_not_meet",
-                            f"delta {c['delta_pp']:+.1f} pp, CI upper {c['ci'][1]:+.1f} pp (limit +{r['threshold_pp']:g})"))
+                            f"vs {_vs_arm(results, r['metric'], _vs(r))}: delta {c['delta_pp']:+.1f} pp, CI upper "
+                            f"{c['ci'][1]:+.1f} pp (limit +{r['threshold_pp']:g}){note}"))
         elif kind == "delta_ci_lower_min":
-            c = _cmp(results, r["metric"], "baseline")
+            c = _cmp(results, r["metric"], _vs(r))
             if not c or c["ci"] is None:
                 out.append(_row(rid, "not_assessable", "no comparison in this run"))
                 continue
             ok = c["ci"][0] >= r["threshold_pp"]
             out.append(_row(rid, "meets" if ok else "does_not_meet",
-                            f"delta {c['delta_pp']:+.1f} pp, CI lower {c['ci'][0]:+.1f} pp (limit {r['threshold_pp']:g})"))
+                            f"vs {_vs_arm(results, r['metric'], _vs(r))}: delta {c['delta_pp']:+.1f} pp, CI lower "
+                            f"{c['ci'][0]:+.1f} pp (limit {r['threshold_pp']:g})"))
         elif kind == "delta_point_min_and_ci_lower_gt":
-            c = _cmp(results, r["metric"], "baseline")
+            c = _cmp(results, r["metric"], _vs(r))
             held = (results.get("candidate_pin") or {}).get("heldout_n") or 0
             if held < 60:
                 out.append(_row(rid, "not_assessable", "contamination unknown: no held-out slugs are pinned (R11)"))
@@ -60,9 +76,10 @@ def assess(results: Dict[str, Any], rules: Dict[str, Any]) -> List[Dict[str, Any
             else:
                 ok = c["delta_pp"] >= r["point_min_pp"] and c["ci"][0] > r["ci_lower_gt_pp"]
                 out.append(_row(rid, "meets" if ok else "does_not_meet",
-                                f"delta {c['delta_pp']:+.1f} pp, CI lower {c['ci'][0]:+.1f} pp"))
+                                f"vs {_vs_arm(results, r['metric'], _vs(r))}: delta {c['delta_pp']:+.1f} pp, "
+                                f"CI lower {c['ci'][0]:+.1f} pp"))
         elif kind == "delta_vs_reference_ci_lower_gt":
-            c = _cmp(results, r["metric"], "reference")
+            c = _cmp(results, r["metric"], _vs(r))
             if not c or c["ci"] is None:
                 out.append(_row(rid, "not_assessable", "no comparison in this run"))
             else:
@@ -93,6 +110,13 @@ def assess(results: Dict[str, Any], rules: Dict[str, Any]) -> List[Dict[str, Any
                 st = "meets" if x1 <= r["ttft_p50_x"] and x2 <= r["total_p95_x"] else "does_not_meet"
                 out.append(_row(rid, st, f"TTFT p50 x{x1:.2f}, total p95 x{x2:.2f}"
                                 + ("" if same else " (different runner types: not a like-for-like comparison)")))
+        elif kind == "position_share_max":
+            share = (((results.get("chance") or {}).get("candidate")) or {}).get("max_share")
+            if share is None:
+                out.append(_row(rid, "not_assessable", "no first-cite positions for the candidate"))
+            else:
+                out.append(_row(rid, "meets" if 100.0 * share <= r["threshold_pct"] else "does_not_meet",
+                                f"largest single-slot share of first cites {100.0 * share:.1f}% (limit {r['threshold_pct']:g}%)"))
         elif kind == "pin_sealed":
             sealed = (results.get("candidate_pin") or {}).get("sealed")
             out.append(_row(rid, "meets" if sealed else "does_not_meet",
@@ -125,7 +149,7 @@ def decide(results: Dict[str, Any], rules: Dict[str, Any]) -> Dict[str, Any]:
                                "rules": rows}
     if reason is None:
         by = {r["rule_id"]: r["status"] for r in rows}
-        p1 = ["R1", "R2b", "R5", "R6", "R10"]
+        p1 = ["R1", "R2b", "R5", "R6", "R10"] + (["R12"] if any(r["id"] == "R12" for r in rules["rules"]) else [])
         verdict["p1"] = {"advice": "meets" if all(by.get(k) == "meets" for k in p1) else "does_not_meet",
                          "rules": p1, "decided_by": "the owner (his own pin)"}
         p2 = [r["id"] for r in rules["rules"]]
@@ -135,16 +159,17 @@ def decide(results: Dict[str, Any], rules: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def attach_rule_info(results: Dict[str, Any], rules: Dict[str, Any]) -> None:
-    """Fill rule_id / threshold / meets on the comparisons that map to a rule."""
-    by = {r["id"]: r for r in rules["rules"]}
-    for c in results.get("comparisons", []):
-        rid = PAIR_RULES.get((c["metric_id"], c["a"])) if c["b"] == "candidate" and not c.get("near_aa") else None
-        if not rid:
+    """Fill rule_id / threshold / meets on the comparisons a rule reads."""
+    for r in rules["rules"]:
+        if r["kind"] not in ("delta_ci_upper_max", "delta_ci_lower_min", "delta_point_min_and_ci_lower_gt",
+                             "delta_vs_reference_ci_lower_gt"):
             continue
-        r = by[rid]
-        c["rule_id"] = rid
+        c = _cmp(results, r["metric"], _vs(r))
+        if c is None:
+            continue
+        c["rule_id"] = r["id"]
         c["threshold"] = r.get("threshold_pp", r.get("point_min_pp", r.get("ci_lower_gt_pp")))
-        if c["ci"] is None:
+        if c["ci"] is None or c.get("zero_variance"):
             c["meets"] = None
         elif r["kind"] == "delta_ci_upper_max":
             c["meets"] = c["ci"][1] <= r["threshold_pp"]
