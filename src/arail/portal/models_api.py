@@ -274,6 +274,14 @@ def _validate_pin(slot: str, model: Optional[str]) -> Optional[str]:
         return "none"
 
     if slot == "a":
+        from arail import model_pins as _pins
+        rec = _pins.family_of(value)
+        if rec is not None:
+            # Opt-in family: the exact tag must serve the pinned weights.
+            chk = _pins.verify(rec, None if value == rec.id else value)
+            if not chk.ok:
+                raise HTTPException(status_code=400, detail=chk.reason)
+            return chk.tag
         from arail.chat import detect_installed_models
         installed = detect_installed_models()
         installed_ollama = {m["id"] for m in installed if m["runtime"] == "ollama"}
@@ -350,6 +358,7 @@ async def apply_pins(pins: Dict[str, Optional[str]], *, schedule_warm: bool = Tr
         raise HTTPException(status_code=500, detail=(
             f"couldn't write model_defaults.yaml: {exc}"))
     _BOOT_CANDIDATES_CACHE["payload"] = None
+    _record_pin_events(pins, res)
 
     if schedule_warm:
         try:
@@ -362,6 +371,26 @@ async def apply_pins(pins: Dict[str, Optional[str]], *, schedule_warm: bool = Tr
         except Exception:  # noqa: BLE001
             pass
     return {"resolution": res, "restart_required": restart_required}
+
+
+def _record_pin_events(pins: Dict[str, Optional[str]], res: Dict[str, Any]) -> None:
+    """One ``model_pin`` trace event per pin write, so pin flips are durable
+    in agent_traces. Ids and a state word only; never raises."""
+    try:
+        from arail import agent_trace
+        from arail import model_pins as _pins
+        for slot, value in pins.items():
+            rec = _pins.family_of(value) if value else None
+            # Family pins reach apply_pins only after verify() == match.
+            state = "match" if rec is not None else None
+            agent_trace.record(
+                record_type="event", kind="system", agent_id="arail",
+                label="models", origin="portal", event="model_pin",
+                attrs={"slot": slot, "pin": value,
+                       "resolved_model": (res.get(slot) or {}).get("model"),
+                       "pin_state": state})
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _event(kind: str, text: str, **extra: Any) -> None:

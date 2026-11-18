@@ -8507,6 +8507,14 @@ async def chat_default(request: Request):
             "error": "Airgapped — cloud default blocked. Set LAB_MODE=hybrid in .env to use cloud providers.",
         }
 
+    if model_id:
+        from arail import model_pins as _pins
+        _fam = _pins.family_of(model_id)
+        if _fam is not None:
+            _chk = _pins.verify(_fam, None if model_id == _fam.id else model_id)
+            if not _chk.ok:
+                return {"ok": False, "error": _chk.reason}
+
     import json as _json
     secrets = _read_secrets()
     secrets["COMPUTE_SOURCE"] = provider
