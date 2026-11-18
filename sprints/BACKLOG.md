@@ -2452,3 +2452,28 @@ last build commit.
   `python -m arail.brain_bench`).
 - **TD6: 60 s re-tag window.** Per-turn pin verification is cached for 60 s, so a model re-tagged under a
   running edge is noticed within a minute, not instantly.
+
+---
+
+## aiml-slm-engine review follow-ups (TD7, TD10, owner note)
+
+**Filed by:** `sprints/2026-11-18-aiml-slm-engine/` review loop 1 (REVIEW.md findings 10, 12, 14e).
+TD8 (the `ARAIL_MODEL_PINS_FILE` production override) was **fixed, not filed** (test-only now). TD9 (the frozen-surface test
+freezing all of `eval/`) is moot: the harness inputs moved to `bench/buddy_brain/` and the frozen test is untouched.
+
+- **TD7: a family value in `MODEL_NAME` bypasses verify outside the resolver.** `model_defaults.apply()` stamps the
+  cached or pinned slot-A value into `MODEL_NAME` at `arail.config` import without re-verifying it, and `stamp_env` never
+  erases `MODEL_NAME` when A is unresolved. A `.env` `MODEL_NAME=qkz-aiml-qwen3-1.7b:control-merge`, with only that tag
+  installed or Ollama down, leaves the unverified family tag where registry tier 0 and the chat tab can use it (the Buddy
+  edge is protected by `describe()`). Reachable only through an explicit operator edit. QA should probe the scenario once.
+- **TD10: the test suite writes into the real `lab/data`.** `agent_workflows.py` does `from arail.config import DATA_DIR`
+  (bound at import), so conftest's `monkeypatch.setattr(config, "DATA_DIR", ...)` cannot redirect it, and
+  `test_egress_bootstrap` writes the real `egress.jsonl`. Make `agent_workflows` and the egress audit default resolve
+  `DATA_DIR` per call, and add a suite-level guard that fails if `lab/data` changes during a test session. (The brain bench
+  now reports this as an inconclusive SC8b instead of a false isolation failure.)
+- **Owner note (cross-repo, nothing sent to `qukaizen-buddy`):** Buddy's persona (vendored verbatim at `d9d660c0`) says
+  "Pick the one term that is closest to what the question asks and put its slug first in cite" before "Use kind abstain only
+  when no term is about the question". A closest term always exists, and no tested 1-2B brain overrides it (M2 was 0/32 on all
+  three arms in the first full run). On Buddy's real path abstain is mostly enforced by code (retrieval withholding cards makes
+  `answer_schema([])` abstain-only). Whether unrelated cards reach the brain in production depends on Buddy's retrieval
+  threshold, which is unverified. The owner decides whether to raise it with the Buddy repo.

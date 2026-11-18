@@ -33,11 +33,19 @@ overwrites an earlier one. The whole run is capped at `--max-minutes` (default 4
 
 | Exit | Meaning |
 |---|---|
-| 0 | complete, no self-check failed (a verdict is printed only if all eight ran and passed on the full set) |
-| 3 | complete, a self-check failed: `HARNESS NOT TRUSTWORTHY: NO VERDICT` |
+| 0 | complete, no self-check failed, and (full run) a verdict printed. A `--limit-per-category` smoke run may exit 0 without a verdict |
+| 3 | complete, a self-check failed or did not run or was inconclusive, so no verdict: `HARNESS NOT TRUSTWORTHY: NO VERDICT` |
 | 4 | refused to start (Ollama not loopback, arm missing, hash mismatch, guard incomplete, estimate over the cap, pending pin) |
-| 5 | aborted (time cap); results are marked `"complete": false`, no verdict |
+| 5 | aborted (time cap or interrupt; residency is restored and the temp root removed); results are marked `"complete": false`, no verdict |
 | 2 | usage error |
+
+### Quiet lab precondition
+
+Any run that produces evidence needs a **quiet lab**: no portal, no pytest, no `arailctl` command and no other
+agent running on the same checkout while it runs. The harness proves its own children wrote only to a
+temporary root (SC8a: every write-capable path it resolved is inside the temp root, and a canary plus
+`agent_traces.jsonl` landed there). SC8b then compares the real lab roots before and after; if something
+else wrote to them, SC8b is **inconclusive** (no verdict, exit 3) rather than blaming the harness.
 
 ### Tasks and grading
 
@@ -49,15 +57,22 @@ the gold card, correct abstain, pressure rules (planted secret, injected instruc
 pause, off-task), and a template usable-sentence check. Lab-state and multi-turn questions, and any LLM
 judge, are out of scope.
 
-Every run executes eight self-checks (A/A, near-A/A, a synthetic and a real sensitivity check, served
-model and digests unchanged, grammar integrity, rerun determinism, isolation). If any fails there is no
+Every run executes the self-checks SC1-SC8b: A/A, near-A/A (a metric that is flat at 0% or 100% is
+"uninformative (zero variance)", not "inside"), a synthetic sensitivity check, **SC4** (on the reference arm, opaque
+cite ids `t1`-`t5` over the 86 example-form and short-form items: card content must beat ids-only by 15 pp with the
+interval excluding 0, ids-only must sit within 10 pp of the 20% chance rate, and content must reach 35%), served
+model and digests unchanged, grammar integrity, rerun determinism, and isolation (SC8a attribution, SC8b quiet lab).
+The slug+term "withheld" block is informational only (M9, content dependence). The report also shows, per arm,
+where the first cite lands and whether M1 is statistically at chance. If any fails there is no
 verdict, and the report says so first. Every number in the report is rendered through
 `arail/brain_bench/metrics.py`, which defines its meaning, unit, direction and rationale; the thresholds
-live in `bench/buddy_brain/rules.v1.json`.
+live in `bench/buddy_brain/rules.v2.json`, hash-pinned in `rules.pin.json`: a rules file whose sha256 is not
+in the pin record is refused, and `results.json` records the real path. `rules.v1.json` is kept unchanged as the
+superseded record.
 
 ### The promotion rules are a PROPOSAL
 
-`rules.v1.json` has `"status": "proposal"`. P1 (your own pin) is advisory; P2 (the blueprint default)
+`rules.v2.json` has `"status": "proposal"` (v2 measures R1 against the stock reference, R3 against the better of the default and the reference, and adds R12 on first-cite position bias, because the default brain scored at chance in the first full run). P1 (your own pin) is advisory; P2 (the blueprint default)
 needs every rule R1-R11. The first release candidate cannot pass R8 (sealed release). The owner decides.
 
 ## The opt-in model slot
