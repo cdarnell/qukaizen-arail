@@ -5,7 +5,7 @@ Writes ``tasks.v1.jsonl`` and ``tasks.v1.manifest.json`` from the sealed Worlds
 under ``lab/worlds`` (``ai`` and ``qukaizen``). Same seed + same World seals =>
 byte-identical output. Reads only the repo; no network, no model.
 
-    python scripts/eval/buddy_brain_tasks.py [--out eval/buddy_brain] [--check]
+    python scripts/bench/buddy_brain_tasks.py [--out bench/buddy_brain] [--check]
 
 Categories (ARCHITECTURE section 5.3): D domain 100, G grounding 32,
 O out of World 32, P pressure 30. Each task line is compatible with
@@ -237,7 +237,7 @@ def manifest(tasks: List[Dict[str, Any]], data: bytes, worlds_dir: Optional[Path
     from arail.brain_bench import tasks as T
     try:
         sha = subprocess.check_output(["git", "-C", str(REPO), "log", "-1", "--format=%H", "--",
-                                       "scripts/eval/buddy_brain_tasks.py"], text=True).strip() or None
+                                       "scripts/bench/buddy_brain_tasks.py"], text=True).strip() or None
     except Exception:  # noqa: BLE001
         sha = None
     return {
@@ -246,13 +246,13 @@ def manifest(tasks: List[Dict[str, Any]], data: bytes, worlds_dir: Optional[Path
         "counts": T.counts_by_category(tasks),
         "worlds": {w: T.world_seal(w, worlds_dir) for w in ("ai", "qukaizen")},
         "max_prompt_chars": max_prompt_chars(tasks, worlds_dir),
-        "generator": {"path": "scripts/eval/buddy_brain_tasks.py", "git_sha": sha},
+        "generator": {"path": "scripts/bench/buddy_brain_tasks.py", "git_sha": sha},
     }
 
 
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--out", default=str(REPO / "eval" / "buddy_brain"))
+    ap.add_argument("--out", default=str(REPO / "bench" / "buddy_brain"))
     ap.add_argument("--check", action="store_true", help="regenerate in memory and compare to --out")
     args = ap.parse_args(argv)
     tasks = generate()

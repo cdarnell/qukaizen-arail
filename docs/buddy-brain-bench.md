@@ -27,7 +27,7 @@ python -m arail.brain_bench run ... --dry-run      # the plan, nothing sent to a
 python -m arail.brain_bench run ... --limit-per-category 2   # smoke run: no verdict
 ```
 
-Outputs land in `eval/buddy_brain/runs/<UTC time>-<git sha8>/`: `results.json` (schema
+Outputs land in `bench/buddy_brain/runs/<UTC time>-<git sha8>/`: `results.json` (schema
 `arail.buddy_brain_ab/v1`), `report.md`, and `rows.jsonl` (every call; git-ignored). A run never
 overwrites an earlier one. The whole run is capped at `--max-minutes` (default 45).
 
@@ -41,8 +41,8 @@ overwrites an earlier one. The whole run is capped at `--max-minutes` (default 4
 
 ### Tasks and grading
 
-`eval/buddy_brain/tasks.v1.jsonl` (194 items, frozen by sha256 in `tasks.v1.manifest.json` together with
-the seals of the `ai` and `qukaizen` Worlds) comes from `scripts/eval/buddy_brain_tasks.py` (seed
+`bench/buddy_brain/tasks.v1.jsonl` (194 items, frozen by sha256 in `tasks.v1.manifest.json` together with
+the seals of the `ai` and `qukaizen` Worlds) comes from `scripts/bench/buddy_brain_tasks.py` (seed
 `20261118`): 100 domain, 32 grounding, 32 out-of-World, 30 pressure items. Grading is code only: JSON
 valid for the sent schema, no control-token or `<think>` leak, not empty or cut off, first cite equals
 the gold card, correct abstain, pressure rules (planted secret, injected instruction, false and true
@@ -53,7 +53,7 @@ Every run executes eight self-checks (A/A, near-A/A, a synthetic and a real sens
 model and digests unchanged, grammar integrity, rerun determinism, isolation). If any fails there is no
 verdict, and the report says so first. Every number in the report is rendered through
 `arail/brain_bench/metrics.py`, which defines its meaning, unit, direction and rationale; the thresholds
-live in `eval/buddy_brain/rules.v1.json`.
+live in `bench/buddy_brain/rules.v1.json`.
 
 ### The promotion rules are a PROPOSAL
 
@@ -80,5 +80,5 @@ needs every rule R1-R11. The first release candidate cannot pass R8 (sealed rele
 * `qkz-aiml-qwen3-1.7b:control-merge` on a dev machine is an **untrained zero-adapter control**. It is
   a plumbing stand-in for the harness only, labelled as such in every report, and must never be pinned.
 
-Files: `src/arail/model_pins.py`, `src/arail/brain_bench/`, `eval/buddy_brain/`,
+Files: `src/arail/model_pins.py`, `src/arail/brain_bench/`, `bench/buddy_brain/`,
 `tests/test_model_pins.py`, `tests/test_brain_bench_*.py`.

@@ -1,4 +1,4 @@
-"""Evaluate the PROPOSAL promotion rules (eval/buddy_brain/rules.v1.json) against a results dict.
+"""Evaluate the PROPOSAL promotion rules (bench/buddy_brain/rules.v1.json) against a results dict.
 
 Pure function of ``results`` + ``rules``: no Ollama, no files. A verdict is printed
 only when every self-check passed on the full frozen task set (R10)."""

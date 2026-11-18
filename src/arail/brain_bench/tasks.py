@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-EVAL_DIR = REPO_ROOT / "eval" / "buddy_brain"
+EVAL_DIR = REPO_ROOT / "bench" / "buddy_brain"
 WORLDS_DIR = REPO_ROOT / "lab" / "worlds"
 TASKS_PATH = EVAL_DIR / "tasks.v1.jsonl"
 MANIFEST_PATH = EVAL_DIR / "tasks.v1.manifest.json"

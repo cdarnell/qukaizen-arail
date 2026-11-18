@@ -2,7 +2,7 @@
 
 ``report.md`` renders a number only through this registry: a metric with no
 definition here cannot be rendered. Thresholds are the PROPOSAL rules in
-``eval/buddy_brain/rules.v1.json``; the ``rule_id`` links a metric to them."""
+``bench/buddy_brain/rules.v1.json``; the ``rule_id`` links a metric to them."""
 from __future__ import annotations
 
 from typing import Any, Dict

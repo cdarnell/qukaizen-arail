@@ -620,9 +620,9 @@ def run(opts: Dict[str, Any]) -> int:
     res.update({
         "schema": brain_bench.RESULTS_SCHEMA, "run_id": run_id, "git_sha": sha, "git_dirty": bool(_git("status", "--porcelain")),
         "started_utc": res.pop("started"), "finished_utc": res.pop("finished"), "subset": sub,
-        "tasks": {"path": "eval/buddy_brain/tasks.v1.jsonl", "sha256": man["tasks_sha256"],
+        "tasks": {"path": "bench/buddy_brain/tasks.v1.jsonl", "sha256": man["tasks_sha256"],
                   "manifest_sha256": T.sha256_file(T.MANIFEST_PATH), "counts_by_category": man["counts"]},
-        "rules": {"path": "eval/buddy_brain/rules.v1.json", "sha256": T.sha256_file(Path(opts.get("rules") or T.RULES_PATH)),
+        "rules": {"path": "bench/buddy_brain/rules.v1.json", "sha256": T.sha256_file(Path(opts.get("rules") or T.RULES_PATH)),
                   "status": rules.get("status")},
         "vendor": {"buddy_prompt_sha256": vendor_data.prompt_sha256(),
                    "source_repo": vendor_data.provenance()["source_repo"],

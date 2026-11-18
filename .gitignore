@@ -173,5 +173,7 @@ examples/worlds/*/librarian-scout.json
 logs/scheduler/
 
 # Buddy brain A/B harness: per-call raw rows and scratch (results.json and report.md are committed for reference runs)
-eval/buddy_brain/runs/*/rows.jsonl
-eval/buddy_brain/.scratch/
+bench/buddy_brain/runs/*/rows.jsonl
+bench/buddy_brain/.scratch/
+# Pre-fix record of the first full run (review loop 1): kept on disk, never committed
+bench/buddy_brain/runs/20261118T170647Z-e2c47bca/
