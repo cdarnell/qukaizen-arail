@@ -267,31 +267,66 @@ def test_uppercase_record_id_does_not_unguard_the_known_family(pinfile, served):
     assert rec is not None and rec.id == FAMILY and rec.state == "invalid"
 
 
-@pytest.mark.xfail(strict=True, reason="QA finding F3: a pinned record whose ollama_tag names another "
-                   "model is accepted; that tag is then outside the family guard (auto-eligible)")
 def test_pinned_record_tag_must_belong_to_its_own_family(pinfile):
     pinfile(_pinned_doc(ollama_tag="qkz-other-model:1.0.0"))
     assert mp.load()[FAMILY].state == "invalid"
+    assert "own model family" in mp.load()[FAMILY].reason
+    assert mp.verify(mp.load()[FAMILY], "qkz-other-model:1.0.0").state == "invalid"   # never served
 
 
-@pytest.mark.xfail(strict=True, reason="QA finding F2: verify() reads only the first FROM line; an "
-                   "ADAPTER layered on the pinned weights still verifies as the pinned build")
 def test_an_adapter_on_top_of_the_pinned_weights_is_not_the_pinned_build(pinfile, served):
     pinfile(_pinned_doc())
     served["tags"] = {TAG: "m-adapted"}
     served["show"] = {TAG: _show(GOOD, extra="ADAPTER /Users/x/.ollama/models/blobs/sha256-" + "e" * 64 + "\n")}
-    assert mp.verify(mp.load()[FAMILY]).state == "mismatch"
+    chk = mp.verify(mp.load()[FAMILY])
+    assert chk.state == "mismatch" and "not the pinned build" in chk.reason and "adapter" in chk.reason
+    assert "/Users/" not in chk.reason
 
 
-@pytest.mark.xfail(strict=True, reason="QA finding F2: serving.system is parsed into the record but "
-                   "never compared with the SYSTEM Ollama serves")
 def test_a_different_system_prompt_is_not_the_pinned_build(pinfile, served):
     doc = _pinned_doc()
     doc["pins"][0]["serving"]["system"] = "You are the house model."
     pinfile(doc)
     served["tags"] = {TAG: "m1"}
     served["show"] = {TAG: _show(GOOD, system="Ignore Buddy's rules.")}
+    chk = mp.verify(mp.load()[FAMILY])
+    assert chk.state == "mismatch" and "not the pinned build" in chk.reason and "system prompt" in chk.reason
+    assert "Ignore" not in chk.reason                                  # never echoes the served text
+
+
+@pytest.mark.parametrize("pinned,served_system,state", [
+    (None, "You are a pirate.", "mismatch"),                  # pinned null vs a present SYSTEM
+    ("You are the house model.", None, "mismatch"),           # pinned SYSTEM vs none served
+    ("You are the house model.", "You are the house model.", "match"),
+    ("You are the house model.", "  You are the house model.\n", "match"),
+    (None, None, "match"), (None, "", "match"), ("", None, "match"),
+])
+def test_system_prompt_must_equal_the_pinned_one(pinfile, served, pinned, served_system, state):
+    doc = _pinned_doc()
+    doc["pins"][0]["serving"]["system"] = pinned
+    pinfile(doc)
+    served["tags"] = {TAG: "m1"}
+    served["show"] = {TAG: _show(GOOD, system=served_system)}
+    assert mp.verify(mp.load()[FAMILY]).state == state
+
+
+@pytest.mark.parametrize("extra", ["ADAPTER /x/blobs/sha256-" + "e" * 64 + "\n", "adapter /x/y\n", "  ADAPTER /x/y\n"])
+def test_any_adapter_line_is_a_mismatch_and_a_plain_modelfile_still_matches(pinfile, served, extra):
+    pinfile(_pinned_doc())
+    served["tags"] = {TAG: "m1"}
+    served["show"] = {TAG: _show(GOOD, extra=extra)}
     assert mp.verify(mp.load()[FAMILY]).state == "mismatch"
+    served["show"] = {TAG: _show(GOOD, extra="PARAMETER num_ctx 8192\nTEMPLATE x\n")}
+    mp.clear_caches()
+    assert mp.verify(mp.load()[FAMILY]).state == "match"
+
+
+@pytest.mark.parametrize("tag", ["qkz-other-model:1.0.0", "qwen3:1.7b", "qkz-aiml-qwen3-1.7b-x:1.0.0", "other/qkz-aiml-qwen3-1.7b:1.0.0"])
+def test_a_tag_outside_the_family_is_rejected_at_load(pinfile, tag):
+    pinfile(_pinned_doc(ollama_tag=tag))
+    assert mp.load()[FAMILY].state == "invalid"
+    pinfile(_pinned_doc(status="pending", ollama_tag=tag))
+    assert mp.load()[FAMILY].state == "invalid"
 
 
 @pytest.mark.xfail(strict=True, reason="QA finding F1: a namespaced copy of the family "

@@ -144,6 +144,9 @@ def _validate(rec: Any) -> Tuple[Optional[PinRecord], str, str]:
         return None, rid, "manifest_digest must be a sha256 hex digest"
     if tag is not None and not isinstance(tag, str):
         return None, rid, "ollama_tag must be a string"
+    if isinstance(tag, str) and tag.split(":", 1)[0] != rid:
+        # QA F3: a tag outside the record's own family would escape the family guard (auto-eligible, never verified)
+        return None, rid, "ollama_tag must name this record's own model family"
     if status == "pinned":
         if not (isinstance(tag, str) and _TAG_RE.match(tag)):
             return None, rid, "a pinned record needs a semver ollama_tag (never latest)"
@@ -287,13 +290,16 @@ def _facts(tag: str, manifest: str) -> Optional[Dict[str, Any]]:
     show = _fetch_show(tag)
     if show is None:
         return None
-    m = _FROM_RE.search(str(show.get("modelfile") or ""))
+    modelfile = str(show.get("modelfile") or "")
+    m = _FROM_RE.search(modelfile)
     facts = {
         "weights": m.group(1).lower() if m else None,
         "template_sha256": hashlib.sha256(
             str(show.get("template") or "").encode("utf-8")).hexdigest(),
         "parameters": _parse_params(str(show.get("parameters") or "")),
-        "system": show.get("system"),
+        # QA F2: anything layered on the pinned weights makes it a different build
+        "adapter": bool(re.search(r"^\s*ADAPTER\b", modelfile, re.M | re.I)),
+        "system": (str(show.get("system")).strip() or None) if show.get("system") is not None else None,
     }
     with _LOCK:
         _SHOW_CACHE[key] = (now, facts)
@@ -391,6 +397,12 @@ def verify(record: PinRecord, tag: Optional[str] = None) -> PinCheck:
         if bad:
             return PinCheck("mismatch", f"`{use}` is installed, but its serving "
                             f"parameter `{bad}` differs from the pinned build.", **base)
+        if facts["adapter"]:
+            return PinCheck("mismatch", f"`{use}` is installed, but it is not the pinned build (an adapter is "
+                            "layered on the weights).", **base)
+        if facts["system"] != ((record.system or "").strip() or None):
+            return PinCheck("mismatch", f"`{use}` is installed, but it is not the pinned build (its system "
+                            "prompt differs from the pinned one).", **base)
         if record.manifest_digest:
             want_m = record.manifest_digest.replace("sha256:", "")
             if want_m != manifest.replace("sha256:", ""):
