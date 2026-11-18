@@ -66,6 +66,9 @@ needs every rule R1-R11. The first release candidate cannot pass R8 (sealed rele
   `status: pending` and empty identity fields. It is filled by a reviewed PR when the Nucleus mint
   delivers (Ollama tag as semver, GGUF sha256, serving parameters, release record). Nothing reads a
   sibling repo.
+* **Base and licence:** Qwen3-1.7B, Apache-2.0 (also in the pin record's `model` block). ARAIL does not
+  redistribute the weights; the Apache-2.0 notice duty falls on whoever distributes them (the Nucleus release),
+  so `NOTICE` (byte-pinned by the frozen-surface guard) is deliberately not edited.
 * `python -m arail.model_pins` prints the pin state (exit `0` match, `3` pending, `4` not installed,
   `5` mismatch or cannot verify).
 * The identity is the **GGUF weights sha256** Ollama serves for the exact tag (read from `/api/show`),

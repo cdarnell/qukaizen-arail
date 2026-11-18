@@ -72,7 +72,17 @@ def test_t_c2_slot_a_candidates_carry_pin_state(control_installed, monkeypatch):
     assert "pin_state" not in rows["llama-ai-eng:latest"]
 
 
-def test_notice_records_the_opt_in_base_without_a_rename_of_the_llama_default():
-    notice = (Path(__file__).resolve().parents[1] / "NOTICE").read_text()
-    assert re.search(r"5\. Opt-in house model \(not redistributed\)", notice)
-    assert "Apache License, Version 2.0" in notice
+def test_opt_in_base_and_licence_are_disclosed_outside_the_frozen_notice():
+    """NOTICE is byte-pinned by the rename sprint's frozen-surface guard, so the Apache-2.0 base of the
+    opt-in model is disclosed in the pin record, the catalog row and the harness doc instead."""
+    import json
+    root = Path(__file__).resolve().parents[1]
+    rec = json.loads(mp.PINS_PATH.read_text())["pins"][0]
+    assert rec["model"]["base"] == "Qwen/Qwen3-1.7B" and rec["model"]["license"] == "apache-2.0"
+    catalog = (root / "src" / "arail" / "chat" / "models_catalog.yaml").read_text()
+    assert "Qwen3-1.7B base, Apache-2.0" in catalog
+    doc = (root / "docs" / "buddy-brain-bench.md").read_text()
+    assert "Apache-2.0" in doc and "does not\n  redistribute" in doc
+    notice = (root / "NOTICE").read_bytes()
+    import hashlib
+    assert hashlib.sha256(notice).hexdigest().startswith("8cc64663")

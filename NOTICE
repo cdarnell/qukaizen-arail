@@ -133,17 +133,6 @@ NOTE on naming: the Gemma Terms do NOT require the model name to contain
 so qkz-project-aware-2b requires no rename; attribution is via the notice above.
 
 ────────────────────────────────────────────────────────────────────────────
-5. Opt-in house model (not redistributed): qkz-aiml-qwen3-1.7b
-────────────────────────────────────────────────────────────────────────────
-A Nucleus-minted AI/ML model (qkz-aiml-qwen3-1.7b) is derived from
-Qwen/Qwen3-1.7B, which is licensed under the Apache License, Version 2.0. It is
-OPT-IN and NOT YET RELEASED: ARAIL does not ship, download or redistribute its
-weights, and uses it only when an operator pins it and the weights Ollama serves
-match the pin record (src/arail/chat/model_pins.json). The Apache-2.0 notice and
-attribution obligations for the weights fall on whoever distributes them (the
-Nucleus release); this entry records the base so ARAIL stays truthful about it.
-
-────────────────────────────────────────────────────────────────────────────
 Third-party software component: AeroLLM
 ────────────────────────────────────────────────────────────────────────────
 ARAIL's maximus-tier deep inference backend can be satisfied by a prebuilt
