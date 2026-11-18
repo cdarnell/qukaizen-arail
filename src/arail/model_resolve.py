@@ -116,10 +116,12 @@ def slot_a_candidates(airgapped: bool) -> List[Dict[str, Any]]:
     seen: set = set()
     for m in _ollama_installed_models():
         rid = m["id"]
-        rows.append({"id": rid, "name": rid, "source": "ollama",
-                     "size_gb": m.get("size_gb"), "present": True,
-                     "fit": fit_primary(rid), "install_command": None,
-                     "hf_url": None})
+        row = {"id": rid, "name": rid, "source": "ollama",
+               "size_gb": m.get("size_gb"), "present": True,
+               "fit": fit_primary(rid), "install_command": None,
+               "hf_url": None}
+        _add_pin_state(row, rid)
+        rows.append(row)
         seen.add(rid)
         seen.add(rid.split(":", 1)[0])
     catalog = sorted(
@@ -128,12 +130,29 @@ def slot_a_candidates(airgapped: bool) -> List[Dict[str, Any]]:
     for e in catalog:
         if e.id in seen or e.id.split(":", 1)[0] in seen:
             continue
-        rows.append({"id": e.id, "name": e.name, "source": "ollama",
-                     "size_gb": e.size_gb, "present": False,
-                     "fit": fit_primary(e.id),
-                     "install_command": e.install or None, "hf_url": None})
+        row = {"id": e.id, "name": e.name, "source": "ollama",
+               "size_gb": e.size_gb, "present": False,
+               "fit": fit_primary(e.id),
+               "install_command": e.install or None, "hf_url": None}
+        _add_pin_state(row, e.id)
+        rows.append(row)
         seen.add(e.id)
     return rows
+
+
+def _add_pin_state(row: Dict[str, Any], tag: str) -> None:
+    """Opt-in family rows carry ``pin_state`` / ``pin_note`` and are pickable
+    only on a digest match. Other rows are left exactly as they were."""
+    from arail import model_pins as _pins
+    rec = _pins.family_of(tag)
+    if rec is None:
+        return
+    chk = _pins.verify(rec, None if tag == rec.id else tag)
+    row["pin_state"] = chk.state
+    row["pin_note"] = chk.reason
+    row["pickable"] = chk.ok
+    if not chk.ok:
+        row["install_command"] = None
 
 
 def slot_b_candidates(airgapped: bool) -> List[Dict[str, Any]]:
