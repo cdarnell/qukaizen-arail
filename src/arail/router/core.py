@@ -270,8 +270,15 @@ class ModelRouter:
                  *, system: Optional[str] = None,
                  messages: Optional[list] = None,
                  response_schema: Optional[dict] = None,
-                 system_as_message: bool = False) -> ModelResponse:
-        """``response_schema`` (A4): a JSON Schema for grammar-constrained
+                 system_as_message: bool = False,
+                 think: Optional[bool] = None,
+                 sampling: Optional[dict] = None,
+                 trace_attrs: Optional[dict] = None) -> ModelResponse:
+        """``think`` / ``sampling`` / ``trace_attrs`` (sprint
+        2026-11-18-aiml-slm-engine): handed to the backend (think, sampling) or
+        into this call's one ``model_call`` record (``attrs``) only when set, so
+        every existing caller's request and record are unchanged.
+        ``response_schema`` (A4): a JSON Schema for grammar-constrained
         output. Handed to the backend only when not None, so every existing
         caller's request is unchanged; only ``OllamaNativeBackend`` accepts it
         (any other backend raises TypeError, which is traced as an error).
@@ -299,6 +306,11 @@ class ModelRouter:
             backend_kw["response_schema"] = response_schema
         if system_as_message:
             backend_kw["system_as_message"] = True
+        if think is not None:
+            backend_kw["think"] = think
+        if sampling is not None:
+            backend_kw["sampling"] = sampling
+        attrs_kw: dict = {"attrs": trace_attrs} if trace_attrs else {}
         agent_context.note_agent_call_entered(ctx)
         try:
             response = self._backend.complete(
@@ -307,7 +319,8 @@ class ModelRouter:
             )
         except Exception as exc:
             self._record(ctx, slot=slot, streamed=False,
-                         outcome="error", error_class=type(exc).__name__)
+                         outcome="error", error_class=type(exc).__name__,
+                         **attrs_kw)
             raise
         finally:
             agent_context.note_agent_call_exited(ctx)
@@ -352,6 +365,7 @@ class ModelRouter:
             ttft_ms=None, ttft_status="non_streaming",
             bodies=bodies,
             cost=self._cost_fields(cost_rec, tokens_in, response.tokens_used),
+            **attrs_kw,
         )
         return response
 
@@ -361,8 +375,12 @@ class ModelRouter:
                         *, system: Optional[str] = None,
                         messages: Optional[list] = None,
                         response_schema: Optional[dict] = None,
-                        system_as_message: bool = False) -> Iterator[StreamResult]:
-        """See :meth:`complete` for ``response_schema`` and ``system_as_message``."""
+                        system_as_message: bool = False,
+                        think: Optional[bool] = None,
+                        sampling: Optional[dict] = None,
+                        trace_attrs: Optional[dict] = None) -> Iterator[StreamResult]:
+        """See :meth:`complete` for ``response_schema``, ``system_as_message``,
+        ``think``, ``sampling`` and ``trace_attrs``."""
         ctx = agent_context.current()
         slot = self._slot_info()
         tokens_in = max((len(prompt) + len(system or "")) // 4, 1)
@@ -394,6 +412,11 @@ class ModelRouter:
             backend_kw["response_schema"] = response_schema
         if system_as_message:
             backend_kw["system_as_message"] = True
+        if think is not None:
+            backend_kw["think"] = think
+        if sampling is not None:
+            backend_kw["sampling"] = sampling
+        attrs_kw: dict = {"attrs": trace_attrs} if trace_attrs else {}
         agent_context.note_agent_call_entered(ctx)
         try:
             for item in self._backend.stream_complete(
@@ -461,6 +484,7 @@ class ModelRouter:
                         prefill_source="server_reported" if prefill_ms is not None else None,
                         bodies=bodies,
                         cost=self._cost_fields(cost_rec, tokens_in, item.tokens_used),
+                        **attrs_kw,
                     )
                 yield item
         except Exception as exc:
@@ -472,7 +496,7 @@ class ModelRouter:
                 ttft_ms = None
             self._record(ctx, slot=slot, streamed=True,
                          outcome="error", error_class=type(exc).__name__,
-                         ttft_ms=ttft_ms, ttft_status=ttft_status)
+                         ttft_ms=ttft_ms, ttft_status=ttft_status, **attrs_kw)
             raise
         finally:
             agent_context.note_agent_call_exited(ctx)
