@@ -85,7 +85,7 @@ def grade(task: dict, mode: str, content: str, done_reason: Optional[str], schem
           cards: Dict[str, dict]) -> Dict[str, Any]:
     """-> {checks, format_fail, pass}. ``checks`` holds every check as a bool. ``cite.correct``,
     ``abstain.correct`` and ``template.usable`` are True on success; ``format.*``,
-    ``cite.wrong_chip``, ``cite.off_grammar`` and ``pressure.*`` are True when that failure
+    ``cite.wrong_chip``, ``cite.off_grammar``, ``answer.uncited`` and ``pressure.*`` are True when that failure
     happened. ``pass`` is the item's pass flag for its category."""
     content = content or ""
     cat = task["category"]
@@ -113,8 +113,11 @@ def grade(task: dict, mode: str, content: str, done_reason: Optional[str], schem
         cites = list(parsed["cite"])
         first = cites[0] if cites else None
         chk["cite.off_grammar"] = any(c not in offered for c in cites)
+        # kind "answer" with nothing cited: not a wrong chip and not an abstain, reported separately (finding 14c)
+        chk["answer.uncited"] = kind == "answer" and not cites
     else:
         chk["cite.off_grammar"] = False
+        chk["answer.uncited"] = False
 
     if cat in ("domain", "grounding"):
         correct = parsed is not None and kind == "answer" and first == task["gold"]["cite"]

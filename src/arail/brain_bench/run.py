@@ -77,29 +77,36 @@ def build_plan(opts: Dict[str, Any], all_tasks: List[Dict[str, Any]]) -> List[Di
     ids = [t["id"] for t in all_tasks]
     aa_ids = set(rng.sample(ids, max(1, round(len(ids) * 0.25)))) if ids else set()
     dg = [t["id"] for t in all_tasks if t["category"] in ("domain", "grounding")]
-    base_tag, cand_tag = opts["baseline"], opts["candidate_tag"]
-    arms: List[Tuple[str, str, str, str, Optional[List[str]], Optional[List[str]]]] = [
-        ("baseline", base_tag, "baseline", "default", None, None),
-        ("aa", base_tag, "aa", "default, rerun (A/A)", sorted(aa_ids), None),
-        ("withheld", base_tag, "sensitivity", "default, cards show slug+term only", dg, ["slug", "term"]),
-        ("reference", opts["reference"], "reference", "stock reference", None, None),
-        ("candidate", cand_tag, "candidate", opts.get("candidate_label") or "candidate", None, None),
+    content_items = [t["id"] for t in all_tasks if t["category"] in ("domain", "grounding")
+                     and t.get("form") in ("example", "short")]
+    base_tag, cand_tag, ref_tag = opts["baseline"], opts["candidate_tag"], opts["reference"]
+    # (arm, tag, role, label, only-these-items, card fields, opaque, modes)
+    arms: List[Tuple[str, str, str, str, Optional[List[str]], Optional[List[str]], Optional[str], Tuple[str, ...]]] = [
+        ("baseline", base_tag, "baseline", "default", None, None, None, ("structured", "template")),
+        ("aa", base_tag, "aa", "default, rerun (A/A)", sorted(aa_ids), None, None, ("structured", "template")),
+        ("withheld", base_tag, "content_dependence", "default, cards show slug+term only", dg, ["slug", "term"], None, ("structured",)),
+        ("reference", ref_tag, "reference", "stock reference", None, None, None, ("structured", "template")),
+        ("withheld_reference", ref_tag, "content_dependence", "reference, cards show slug+term only", dg, ["slug", "term"], None, ("structured",)),
+        ("sc4_content", ref_tag, "sensitivity", "reference, opaque ids + card content", content_items, None, "content", ("structured",)),
+        ("sc4_empty", ref_tag, "sensitivity", "reference, opaque ids only", content_items, None, "empty", ("structured",)),
+        ("candidate", cand_tag, "candidate", opts.get("candidate_label") or "candidate", None, None, None, ("structured", "template")),
+        ("withheld_candidate", cand_tag, "content_dependence", "candidate, cards show slug+term only", dg, ["slug", "term"], None, ("structured",)),
     ]
-    have = {opts["reference"], cand_tag}
+    have = {ref_tag, cand_tag}
     for i, tag in enumerate(opts.get("near_aa") or []):
         if tag not in have:
-            arms.append((f"near_aa_{i}", tag, "near_aa", "near-A/A arm", None, None))
+            arms.append((f"near_aa_{i}", tag, "near_aa", "near-A/A arm", None, None, None, ("structured", "template")))
             have.add(tag)
     blocks = []
-    for arm, tag, role, label, only, fields in arms:
-        for mode in (["structured"] if arm == "withheld" else ["structured", "template"]):
+    for arm, tag, role, label, only, fields, opaque, modes in arms:
+        for mode in modes:
             items = [t["id"] for t in all_tasks if mode in t["modes"] and (only is None or t["id"] in only)]
             if items:
                 blocks.append({"arm": arm, "tag": tag, "role": role, "label": label, "mode": mode,
-                               "items": items, "fields": fields})
+                               "items": items, "fields": fields, "opaque": opaque})
     # reruns: every model arm, seeded 10% of its (task, mode) pairs, after all other blocks
-    for arm, tag, role, label, only, fields in arms:
-        if role in ("aa", "sensitivity"):
+    for arm, tag, role, label, only, fields, opaque, modes in arms:
+        if role in ("aa", "sensitivity", "content_dependence"):
             continue
         for mode in ("structured", "template"):
             pool = [t["id"] for t in all_tasks if mode in t["modes"]]
@@ -107,7 +114,7 @@ def build_plan(opts: Dict[str, Any], all_tasks: List[Dict[str, Any]]) -> List[Di
                 k = max(1, round(len(pool) * 0.10))
                 blocks.append({"arm": f"rerun:{arm}", "tag": tag, "role": "rerun", "label": f"{arm} rerun", "mode": mode,
                                "items": sorted(random.Random(SEED + len(blocks)).sample(pool, min(k, len(pool)))),
-                               "fields": None, "of": arm})
+                               "fields": None, "opaque": None, "of": arm})
     return blocks
 
 
@@ -129,6 +136,7 @@ class Runner:
         self.ol = ollama.Ollama(opts.get("ollama_root"))
         self.cards = {w: T.load_world_cards(w) for w in ("ai", "qukaizen")}
         self.aborted = False
+        self.sc4: Optional[Dict[str, Any]] = None
 
     # -- binding --------------------------------------------------------------
     def bind(self, tag: str):
@@ -206,13 +214,23 @@ class Runner:
                 self.aborted = True
                 break
             task = by_id[tid]
-            req = compose.build(task, mode, self.cards[task["world"]], llama=llama, fields=blk.get("fields"))
+            req = compose.build(task, mode, self.cards[task["world"]], llama=llama, fields=blk.get("fields"),
+                                opaque=blk.get("opaque"))
             r = self.call(brain, router, view, req)
             errors = errors + 1 if r["error"] else 0
-            g = grade.grade(task, mode, r["content"], r["done_reason"], req.schema, self.cards[task["world"]])
+            # an opaque-id reply is mapped back to slugs and graded against the slug schema (SC4 blocks)
+            graded = compose.map_cites(r["content"], req.id_map)
+            schema = compose.answer_schema(task["offered"]) if req.id_map else req.schema
+            g = grade.grade(task, mode, graded, r["done_reason"], schema, self.cards[task["world"]])
             if r["error"]:
                 g["format_fail"] = True
+            cite_pos = None
+            if mode == "structured":
+                parsed = grade.parse_structured(graded, schema)
+                if parsed and parsed["cite"] and parsed["cite"][0] in task["offered"]:
+                    cite_pos = task["offered"].index(parsed["cite"][0])
             self.rows.append({"arm": arm, "task_id": tid, "category": task["category"], "mode": mode, "tag": tag,
+                              "cite_pos": cite_pos,
                               "content": r["content"], "done_reason": r["done_reason"],
                               "prompt_tokens": r["prompt_tokens"], "tokens_out": r["tokens_out"],
                               "ttft_ms": r["ttft_ms"], "total_ms": r["total_ms"], "served_model": r["served_model"],
@@ -295,9 +313,34 @@ class Runner:
                               ("M4i", lambda g: g["checks"].get("pressure.injection", False))):
                 n = sum(1 for r in p if pred(r["grade"]))
                 m[mid] = {"value": n, "numerator": n, "denominator": None, "unit": metrics.define(mid)["unit"]}
+        if o:
+            n = sum(1 for r in o if r["grade"]["checks"].get("answer.uncited"))
+            m["M2u"] = {"value": n, "numerator": n, "denominator": None, "unit": metrics.define("M2u")["unit"]}
+        ch = self.chance_for(arm)
+        if ch and ch["max_share"] is not None:
+            pct = round(100.0 * ch["max_share"], 1)
+            m["M10"] = {"value": pct, "numerator": pct, "denominator": None, "unit": metrics.define("M10")["unit"]}
         n = sum(1 for r in rows if r["grade"]["format_fail"])
         m["M5"] = {"value": n, "numerator": n, "denominator": None, "unit": metrics.define("M5")["unit"]}
         return m
+
+    def chance_for(self, arm: str) -> Optional[Dict[str, Any]]:
+        """First-cite slot distribution and the M1 interval against the 20 % chance rate (D+G, structured)."""
+        rows = [r for r in self.rows if r["arm"] == arm and r["mode"] == "structured"
+                and r["category"] in ("domain", "grounding")]
+        if not rows:
+            return None
+        pos = [0] * 5
+        for r in rows:
+            if r.get("cite_pos") is not None and r["cite_pos"] < 5:
+                pos[r["cite_pos"]] += 1
+        cited = sum(pos)
+        k = sum(1 for r in rows if r["grade"]["checks"]["cite.correct"])
+        ci = stats.wilson(k, len(rows))
+        chance = 1.0 / 5
+        return {"positions": pos, "cited": cited, "max_share": (max(pos) / cited) if cited else None,
+                "m1": k / len(rows), "m1_ci": ci, "n": len(rows),
+                "at_chance": bool(ci and ci[0] <= chance <= ci[1])}
 
     def self_checks(self, blocks: List[Dict[str, Any]], complete: bool) -> List[Dict[str, Any]]:
         out: Dict[str, Dict[str, Any]] = {}
@@ -320,22 +363,27 @@ class Runner:
             f"{len(diff)} of {len(aa)} items graded differently" if aa else "no A/A items ran")
         if bytes_diff and not diff:
             self.warnings.append(f"A/A: {len(bytes_diff)} replies differ in bytes with identical grades")
-        # SC2 near-A/A
+        # SC2 near-A/A. A metric where both arms are constant and equal (all 0 % or all 100 %) is
+        # uninformative, not "inside" (finding 14b).
         pair = self.o.get("near_aa") or []
         if len(pair) == 2:
             a_arm = self._arm_by_tag(pair[0])
             b_arm = self._arm_by_tag(pair[1])
-            bad, seen = [], 0
+            bad, seen, flat = [], 0, []
             for mid in ("M1", "M2", "M6"):
                 fa, fb = self.flags(a_arm, mid), self.flags(b_arm, mid)
                 if not fa or not fb:
                     continue
-                seen += 1
                 d = stats.paired_delta(fa, fb, level=1 - 0.05 / 3)
+                if d["zero_variance"]:
+                    flat.append(mid)
+                    continue
+                seen += 1
                 if d["ci"][0] > 0 or d["ci"][1] < 0:
                     bad.append(f"{mid} delta {d['delta_pp']:+.1f} pp CI {d['ci'][0]:+.1f}..{d['ci'][1]:+.1f}")
-            put("SC2", (not bad) if seen else None, "98.33% CI contains 0 for M1, M2, M6",
-                "; ".join(bad) or (f"{seen} metrics inside" if seen else "no near-A/A items ran"))
+            note = (f"; uninformative (zero variance): {', '.join(flat)}" if flat else "")
+            put("SC2", (not bad) if seen else None, "98.33% CI contains 0 for each informative one of M1, M2, M6",
+                ("; ".join(bad) or (f"{seen} informative metrics inside" if seen else "no informative metric ran")) + note)
         else:
             put("SC2", None, "98.33% CI contains 0 for M1, M2, M6", "not run: --near-aa needs two tags")
         # SC3 synthetic sensitivity
@@ -351,14 +399,26 @@ class Runner:
         ok3 = abs(d["delta_pp"] - (-100.0 * k / len(base))) <= 100.0 / len(base) and d["ci"][1] < 0
         put("SC3", ok3, "an injected -20 pp gap is seen: delta within one item of -20, CI upper < 0",
             f"delta {d['delta_pp']:+.1f} pp, CI upper {d['ci'][1]:+.1f}" + (" (synthetic baseline)" if synthetic else ""))
-        # SC4 sensitivity, real
-        fw, fb = self.flags("withheld", "M1"), self.flags("baseline", "M1")
-        if fw and fb:
-            d4 = stats.paired_delta(fb, fw)
-            put("SC4", d4["delta_pp"] <= -15.0 and d4["ci"][1] < 0, "withheld cards score >= 15 pp below baseline, CI upper < 0",
-                f"delta {d4['delta_pp']:+.1f} pp, CI {d4['ci'][0]:+.1f}..{d4['ci'][1]:+.1f}")
+        # SC4: opaque-id content sensitivity on the reference arm (finding 13). Thresholds are pre-registered
+        # in the pinned rules file (its "sc4" block); these defaults match rules.v2.json.
+        t4 = {"min_content_gain_pp": 15.0, "empty_chance_pct": 20.0, "empty_chance_tolerance_pp": 10.0,
+              "min_content_m1_pct": 35.0, **(self.o.get("sc4") or {})}
+        fc, fe = self.flags("sc4_content", "M1"), self.flags("sc4_empty", "M1")
+        if fc and fe:
+            m_c, m_e = 100.0 * sum(fc.values()) / len(fc), 100.0 * sum(fe.values()) / len(fe)
+            d4 = stats.paired_delta(fe, fc)           # content minus empty
+            d_ec = stats.paired_delta(fc, fe)         # empty minus content: its CI upper bound must be < 0
+            ok4 = (m_c - m_e >= t4["min_content_gain_pp"] and d_ec["ci"][1] < 0
+                   and abs(m_e - t4["empty_chance_pct"]) <= t4["empty_chance_tolerance_pp"]
+                   and m_c >= t4["min_content_m1_pct"])
+            put("SC4", ok4, "opaque ids: content beats empty by >= %g pp (CI upper of empty-minus-content < 0), empty within "
+                "+-%g pp of %g %% chance, content >= %g %%" % (t4["min_content_gain_pp"], t4["empty_chance_tolerance_pp"],
+                                                            t4["empty_chance_pct"], t4["min_content_m1_pct"]),
+                f"content {m_c:.1f}%, empty {m_e:.1f}%, gain {m_c - m_e:+.1f} pp, empty-minus-content CI "
+                f"{d_ec['ci'][0]:+.1f}..{d_ec['ci'][1]:+.1f} (n={len(fc)})")
+            self.sc4 = {"m1_content": m_c, "m1_empty": m_e, "gain_pp": m_c - m_e, "n": len(fc), "ci_empty_minus_content": d_ec["ci"]}
         else:
-            put("SC4", None, "withheld cards score >= 15 pp below baseline", "no withheld items ran")
+            put("SC4", None, "opaque-id content sensitivity on the reference arm", "no opaque-id items ran")
         # SC5 (filled by run_block failures) + SC6 + SC7
         put("SC5", True, "served model, digests and context are as declared, before and after every block", "unchanged")
         off = sum(1 for r in self.rows if r["grade"]["checks"].get("cite.off_grammar"))
@@ -420,12 +480,24 @@ class Runner:
             self.run_block(blk, by_id)
         complete = not self.aborted
         arms = list(self.arm_info.values())
-        for a in ("aa", "withheld"):
+        derived = {"aa": ("baseline", "aa"), "withheld": ("baseline", "content_dependence"),
+                   "withheld_reference": ("reference", "content_dependence"),
+                   "withheld_candidate": ("candidate", "content_dependence"),
+                   "sc4_content": ("reference", "sensitivity"), "sc4_empty": ("reference", "sensitivity")}
+        labels = {b["arm"]: b["label"] for b in blocks}
+        for a, (src, role) in derived.items():
             if any(r["arm"] == a for r in self.rows):
-                base = self.arm_info.get("baseline", {})
-                arms.append({**base, "id": a, "role": "sensitivity" if a == "withheld" else "aa",
-                             "label": "default, cards show slug+term only" if a == "withheld" else "default, rerun (A/A)"})
+                arms.append({**self.arm_info.get(src, {}), "id": a, "role": role, "label": labels.get(a, a)})
         mets = {a["id"]: self.metrics_for(a["id"]) for a in arms}
+        # content dependence (informational): M1 on D+G minus M1 with only slug+term shown
+        for full, wh in (("baseline", "withheld"), ("reference", "withheld_reference"), ("candidate", "withheld_candidate")):
+            ff, fw = self.flags(full, "M1"), self.flags(wh, "M1")
+            ids = sorted(set(ff) & set(fw))
+            if ids and full in mets:
+                dlt = round(100.0 * (sum(ff[i] for i in ids) - sum(fw[i] for i in ids)) / len(ids), 1)
+                mets[full]["M9"] = {"value": dlt, "numerator": dlt, "denominator": None, "unit": metrics.define("M9")["unit"]}
+        chance = {a["id"]: self.chance_for(a["id"]) for a in arms
+                  if a["id"] in ("baseline", "reference", "candidate") or a["id"].startswith("near_aa")}
         comps = []
         for mid in ("M1", "M2", "M3", "M6", "M7", "M8"):
             for a_arm in ("baseline", "reference"):
@@ -459,6 +531,7 @@ class Runner:
         return {"blocks": blocks, "complete": complete, "started": started, "arms": arms, "metrics": mets,
                 "comparisons": comps, "latency": lat, "failures": fails,
                 "self_checks": self.self_checks(blocks, complete), "estimate_s": est,
+                "chance": chance, "sc4": self.sc4,
                 "item_flags": {a["id"]: {m: self.flags(a["id"], m) for m in ("M1", "M2", "M3", "M6", "M7", "M8")} for a in arms}}
 
 
@@ -597,6 +670,7 @@ def run(opts: Dict[str, Any]) -> int:
     child_opts = {k: opts.get(k) for k in ("baseline", "reference", "near_aa", "candidate_label",
                                            "limit_per_category", "pin_id", "candidate_tag", "max_minutes")}
     child_opts["candidate_tag_pinned"] = cand_tag if pin_id else None
+    child_opts["sc4"] = rules.get("sc4")
     child_opts.update(out=str(out), ollama_root=root, max_minutes=opts.get("max_minutes") or DEFAULT_MAX_MINUTES)
     cfg = tmp / "child.json"
     cfg.write_text(json.dumps(child_opts))
@@ -647,6 +721,7 @@ def run(opts: Dict[str, Any]) -> int:
                    "restored": restore["restored"]},
         "sampling": {"lane": "greedy", "temperature": 0, "seed": SEED, "num_predict": dict(compose.MAX_TOKENS)},
     })
+    res["borderline_o_items"] = rules.get("borderline_o_items", [])
     res["candidate_pin"] = _pin_summary(pin_id)
     cand_arm = next((a for a in res["arms"] if a["id"] == "candidate"), {})
     base_arm = next((a for a in res["arms"] if a["id"] == "baseline"), {})

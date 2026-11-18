@@ -15,7 +15,8 @@ def paired_delta(a: Dict[str, int], b: Dict[str, int], *, level: float = 0.95,
     ids = sorted(set(a) & set(b))
     n = len(ids)
     if n == 0:
-        return {"n": 0, "delta_pp": None, "ci": None, "ci_level": level, "discordant": 0}
+        return {"n": 0, "delta_pp": None, "ci": None, "ci_level": level, "discordant": 0, "zero_variance": False}
+    zero_var = len({int(a[i]) for i in ids} | {int(b[i]) for i in ids}) == 1
     diffs = [int(b[i]) - int(a[i]) for i in ids]
     delta = 100.0 * sum(diffs) / n
     rng = random.Random(seed)
@@ -24,7 +25,8 @@ def paired_delta(a: Dict[str, int], b: Dict[str, int], *, level: float = 0.95,
     lo = means[int(lo_q * resamples)]
     hi = means[min(resamples - 1, int((1 - lo_q) * resamples))]
     return {"n": n, "delta_pp": delta, "ci": [100.0 * lo / n, 100.0 * hi / n], "ci_level": level,
-            "discordant": sum(1 for d in diffs if d)}
+            "discordant": sum(1 for d in diffs if d),
+            "zero_variance": zero_var}
 
 
 def inject_gap(flags: Dict[str, int], gap_pp: float, seed: int) -> Optional[Dict[str, int]]:
@@ -49,3 +51,14 @@ def percentile(values: List[float], q: float) -> Optional[float]:
         return None
     v = sorted(values)
     return v[min(len(v) - 1, int(q * len(v)))]
+
+
+def wilson(k: int, n: int, z: float = 1.96) -> Optional[List[float]]:
+    """Wilson score interval for k successes in n, as fractions."""
+    if n <= 0:
+        return None
+    p = k / n
+    d = 1 + z * z / n
+    centre = (p + z * z / (2 * n)) / d
+    half = z * ((p * (1 - p) / n + z * z / (4 * n * n)) ** 0.5) / d
+    return [max(0.0, centre - half), min(1.0, centre + half)]
