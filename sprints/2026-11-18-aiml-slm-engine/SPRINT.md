@@ -31,8 +31,8 @@ and security gates green.
 |---|---|---|---|---|---|---|
 | think | visionary | VISION.md | done | 2026-11-18 | 2026-11-18 | proceed (`1867ce99`) |
 | plan | architect (design) | ARCHITECTURE.md | done | 2026-11-18 | 2026-11-18 | complete (`d0922a40`) |
-| build | builder | BUILD_LOG.md | in progress | 2026-11-18 | — | — |
-| review | architect (review) | REVIEW.md | pending | — | — | — |
+| build | builder | BUILD_LOG.md | done | 2026-11-18 | 2026-11-18 | done (`31ef7a08..e2c47bca`) |
+| review | architect (review) | REVIEW.md | in progress | 2026-11-18 | — | — |
 | test | qa | TEST_REPORT.md | pending | — | — | — |
 | ship | — | PR | pending | — | — | — |
 
