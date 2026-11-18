@@ -183,3 +183,27 @@ PYTHONPATH=src /Users/netsushi/ProJects/qukaizen-arail/.venv/bin/python -m arail
 
 Outputs: `bench/buddy_brain/runs/<UTC>-<git sha8>/` (`results.json`, `report.md`, `rows.jsonl`); run it on a quiet machine
 (no portal, pytest or `arailctl` on this checkout). The default rules file is the pinned `rules.v2.json`.
+
+## Review loop 2
+
+Source: REVIEW.md "Re-review 1" (WEAK_PASS, `27f2d4ee`), findings 16-20. No model call, no harness run.
+
+| Finding | What changed | Commit | Test |
+|---|---|---|---|
+| 16 (`.env` re-enables the override) | `_path()` also requires `"pytest" in sys.modules`. The test runs a subprocess whose `.env` sets `PYTEST_CURRENT_TEST` and `ARAIL_MODEL_PINS_FILE`, asserts the `.env` really loaded, and asserts `PINS_PATH` is returned; it fails without the fix (checked) | `6b5f2460` | `test_model_pins::test_finding_16_*` |
+| 20 (whose verdict) | P1/P2 lines and `summary_line` name the candidate tag and its label; the doubled "[UNTRAINED ... [UNTRAINED ...]]" is gone | `cf8ac79e` | `test_20_*` |
+| 19 (R7 noisy) | `verdict.shared_ollama()` reads the recorded `ps_before`: a model outside the arm set or an arm tag already resident makes R7 `not_assessable` ("latency ... not evidence"), and the report prints a warning (also for mixed runner types). For the committed run: `nomic-embed-text` outside the set, `qwen3:1.7b` resident, ggml vs llamacpp. The renderer re-evaluates the rules from recorded data, so `results.json` was not touched. Per-block `/api/ps` sampling is filed as `aiml-TD11`; "Ollama exclusive" added to the quiet-lab precondition | `cf8ac79e`, `674487cc` | `test_19_*` |
+| 17 (M5 hides the cause) | new check `format.duplicate_cite` (still a format failure), `grade.format_kind` / `format_breakdown`, M5 table by sub-check, `uniqueItems` caveat line; new runs store `format_breakdown` in `results.json`. For the committed run it is re-derived from the local `rows.jsonl` into a committed sidecar `format_breakdown.json` (matches the recorded M5 for all 9 arms: baseline 45, reference 1, candidate 1, all duplicate cites, plus the other arms) | `cf8ac79e`, `02f93e73` | `test_17_*` |
+| 18 (overflow points at an uncommitted file) | overflow line points to `results.json` `failures[]`; candidate rows are listed first | `cf8ac79e` | `test_18_*` |
+| committed report | `bench/buddy_brain/runs/20261118T175243Z-620ebcfa/report.md` re-rendered; `results.json` byte-identical (cmp before/after) | `02f93e73` | `test_committed_run_report_matches_its_renderer` |
+
+Re-render command: `PYTHONPATH=src python -m arail.brain_bench report bench/buddy_brain/runs/20261118T175243Z-620ebcfa/results.json > .../report.md`
+(`--derive-breakdown` first writes the sidecar from a local `rows.jsonl`).
+
+Filed rather than fixed: only the *mid-run* `/api/ps` sampling (`aiml-TD11`). The R7 status for the committed run is fixed in the report from
+recorded data, so nothing about 17-20 is left as a ticket except that.
+
+Tests: `test_model_pins`, `..._pinned_family`, `test_models_pin_pinned_family`, `test_catalog_pinned_row`, `test_brain_stream_turn`,
+`test_router_think_sampling`, all `test_brain_bench_*` and `test_egress_docs` + the frozen-surface file: 208 passed, 2 failed (the two
+frozen-surface tests that also fail at `845f9b25`). The brain-bench group alone (review-loop, grade, isolation with the fake Ollama, tasks,
+generator): 84 passed.
