@@ -229,3 +229,23 @@ def test_finding_8_load_is_memoised_on_mtime_and_size(pinfile, monkeypatch):
     pinfile(json.dumps(_pinned_doc(note="changed")))
     mp.load()
     assert len(reads) == 2
+
+
+def test_finding_16_a_dotenv_cannot_switch_the_override_back_on(tmp_path):
+    """A production process whose .env sets PYTEST_CURRENT_TEST and ARAIL_MODEL_PINS_FILE still reads the in-repo file."""
+    import subprocess
+    import sys
+    from pathlib import Path
+    root = Path(mp.__file__).resolve().parents[2]
+    other = tmp_path / "other.json"
+    other.write_text("{}")
+    envfile = tmp_path / ".env"
+    envfile.write_text(f"PYTEST_CURRENT_TEST=x\nARAIL_MODEL_PINS_FILE={other}\n")
+    code = ("import arail.config, os\nfrom arail import model_pins\n"
+            "assert os.environ.get('PYTEST_CURRENT_TEST') == 'x' and os.environ.get('ARAIL_MODEL_PINS_FILE'), 'repro: .env not loaded'\n"
+            "assert 'pytest' not in __import__('sys').modules\nprint(model_pins._path() == model_pins.PINS_PATH)")
+    env = {"PATH": "/usr/bin:/bin", "PYTHONPATH": str(root / "src"), "ARAIL_ENV_FILE": str(envfile),
+           "LAB_ROOT": str(tmp_path / "lab"), "HOME": str(tmp_path)}
+    out = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, cwd=str(tmp_path))
+    assert out.returncode == 0, out.stderr[-400:]
+    assert out.stdout.strip() == "True"

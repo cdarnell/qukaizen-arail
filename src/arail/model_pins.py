@@ -93,7 +93,8 @@ def _path() -> Path:
     """The in-repo pin file. ``ARAIL_MODEL_PINS_FILE`` is honoured only under pytest, so no .env or shell
     can point a running lab's pin record at another path (review finding 6; ARCHITECTURE 4.5, FM12)."""
     override = os.getenv("ARAIL_MODEL_PINS_FILE", "").strip()
-    if override and os.getenv("PYTEST_CURRENT_TEST"):
+    # Both are required: a .env line can set PYTEST_CURRENT_TEST, but it cannot import pytest (review finding 16).
+    if override and os.getenv("PYTEST_CURRENT_TEST") and "pytest" in sys.modules:
         return Path(override)
     return PINS_PATH
 
