@@ -286,6 +286,12 @@ def _parse_params(text: str) -> Dict[str, List[str]]:
     return out
 
 
+def weights_from_show(show: Optional[Dict[str, Any]]) -> Optional[str]:
+    """The GGUF weights sha256 in an ``/api/show`` body, or None. Only the 64-hex group is returned."""
+    m = _FROM_RE.search(str((show or {}).get("modelfile") or ""))
+    return m.group(1).lower() if m else None
+
+
 def _short(d: str) -> str:
     return (d or "")[:8] + "…"
 

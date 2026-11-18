@@ -171,3 +171,7 @@ examples/worlds/*/librarian-scout.json
 
 # scheduler run artifacts written by any portal start (QA-S4-5)
 logs/scheduler/
+
+# Buddy brain A/B harness: per-call raw rows and scratch (results.json and report.md are committed for reference runs)
+eval/buddy_brain/runs/*/rows.jsonl
+eval/buddy_brain/.scratch/
