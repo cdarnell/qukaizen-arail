@@ -207,3 +207,25 @@ def test_cli_exit_codes(pinfile, ollama, capsys):
     mp.clear_caches()
     assert mp.main([]) == 5
     assert mp.main(["--bogus"]) == 2
+
+
+def test_finding_6_the_pins_file_override_is_ignored_outside_pytest(tmp_path, monkeypatch):
+    other = tmp_path / "other.json"
+    other.write_text(json.dumps(_pinned_doc()))
+    monkeypatch.setenv("ARAIL_MODEL_PINS_FILE", str(other))
+    assert mp._path() == other                      # under pytest: honoured
+    monkeypatch.delenv("PYTEST_CURRENT_TEST")
+    assert mp._path() == mp.PINS_PATH               # a running lab: never
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "x")
+
+
+def test_finding_8_load_is_memoised_on_mtime_and_size(pinfile, monkeypatch):
+    pinfile(_pinned_doc())
+    reads = []
+    real = mp._load_uncached
+    monkeypatch.setattr(mp, "_load_uncached", lambda: reads.append(1) or real())
+    mp.load(), mp.load(), mp.family_of(CONTROL)
+    assert len(reads) == 1
+    pinfile(json.dumps(_pinned_doc(note="changed")))
+    mp.load()
+    assert len(reads) == 2

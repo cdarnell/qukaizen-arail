@@ -90,8 +90,12 @@ class PinCheck:
 # ── loading ────────────────────────────────────────────────────────
 
 def _path() -> Path:
+    """The in-repo pin file. ``ARAIL_MODEL_PINS_FILE`` is honoured only under pytest, so no .env or shell
+    can point a running lab's pin record at another path (review finding 6; ARCHITECTURE 4.5, FM12)."""
     override = os.getenv("ARAIL_MODEL_PINS_FILE", "").strip()
-    return Path(override) if override else PINS_PATH
+    if override and os.getenv("PYTEST_CURRENT_TEST"):
+        return Path(override)
+    return PINS_PATH
 
 
 def _unknown(d: Any, allowed: set, where: str) -> Optional[str]:
@@ -162,10 +166,28 @@ def _invalid_all(reason: str) -> Dict[str, PinRecord]:
             for fid in KNOWN_FAMILIES}
 
 
+_LOAD_MEMO: Dict[str, Any] = {}
+
+
 def load() -> Dict[str, PinRecord]:
     """All pin records by id. Never raises; no network. An unreadable or
     malformed file marks every known family ``invalid`` (unusable, like
-    pending)."""
+    pending). Memoised on the file's path, mtime and size (finding 8)."""
+    try:
+        p = _path()
+        st = p.stat()
+        key = (str(p), st.st_mtime_ns, st.st_size)
+    except OSError:
+        key = None
+    if key is not None and _LOAD_MEMO.get("key") == key:
+        return dict(_LOAD_MEMO["value"])
+    value = _load_uncached()
+    if key is not None:
+        _LOAD_MEMO.update(key=key, value=value)
+    return dict(value)
+
+
+def _load_uncached() -> Dict[str, PinRecord]:
     try:
         data = json.loads(_path().read_text(encoding="utf-8"))
     except Exception as exc:  # noqa: BLE001
