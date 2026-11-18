@@ -207,3 +207,17 @@ Tests: `test_model_pins`, `..._pinned_family`, `test_models_pin_pinned_family`, 
 `test_router_think_sampling`, all `test_brain_bench_*` and `test_egress_docs` + the frozen-surface file: 208 passed, 2 failed (the two
 frozen-surface tests that also fail at `845f9b25`). The brain-bench group alone (review-loop, grade, isolation with the fake Ollama, tasks,
 generator): 84 passed.
+
+## QA loop 1
+
+Owner-approved scope: QA findings F2 and F3 only (TEST_REPORT.md). No design decision beyond ARCHITECTURE C1/C2 was needed.
+
+| Finding | Fix | Test |
+|---|---|---|
+| F2 (adapter / SYSTEM not compared) | `_facts` records whether the served Modelfile has an `ADAPTER` line and the stripped served `system`; `verify` returns `mismatch` ("installed, but it is not the pinned build (an adapter is layered on the weights)" / "(its system prompt differs from the pinned one)") for an adapter, or when served SYSTEM != pinned `serving.system` (null/empty on both sides is equal; whitespace is trimmed). Neither the adapter path nor the system text appears in the message | `test_an_adapter_on_top_of_the_pinned_weights...`, `test_a_different_system_prompt...`, `test_system_prompt_must_equal_the_pinned_one` (7 cases), `test_any_adapter_line_is_a_mismatch...` (3 cases + plain modelfile still matches) |
+| F3 (out-of-family tag) | `_validate` rejects an `ollama_tag` whose bare name is not the record's `id` ("ollama_tag must name this record's own model family"); the record is `invalid`, so it is unusable and never verified or served (checked for pending and pinned) | `test_pinned_record_tag_must_belong_to_its_own_family`, `test_a_tag_outside_the_family_is_rejected_at_load` (4 tags x 2 statuses) |
+
+The F2 and F3 xfail markers are removed; F1, F4-F9 xfails are untouched. The shipped pin record is unchanged (pending, empty).
+Tests: `test_qa_aiml_slm_engine`, `test_model_pins`, resolver (3 files), models-api pin (2), catalog (2), `test_brain_stream_turn`,
+`test_host_edge_brain`, `test_llama_disclosure`: **233 passed, 7 xfailed** (the 7 are the remaining QA xfails), 0 failed.
+Commit: see `git log` ("fix(model_pins): an adapter, a different SYSTEM or an out-of-family tag...").
