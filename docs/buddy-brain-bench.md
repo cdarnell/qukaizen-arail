@@ -47,6 +47,11 @@ temporary root (SC8a: every write-capable path it resolved is inside the temp ro
 `agent_traces.jsonl` landed there). SC8b then compares the real lab roots before and after; if something
 else wrote to them, SC8b is **inconclusive** (no verdict, exit 3) rather than blaming the harness.
 
+Ollama must also be **exclusive to the run**: no other client (an embedder, a mint session, a chat) may have a model
+loaded. The report marks R7 (latency) `not_assessable` and prints a warning when the recorded `/api/ps` from before the run
+shows a model outside the arm set or an arm model already resident, or when the arms ran on different runner types.
+Correctness results are not affected (grading is deterministic per item).
+
 ### Tasks and grading
 
 `bench/buddy_brain/tasks.v1.jsonl` (194 items, frozen by sha256 in `tasks.v1.manifest.json` together with

@@ -2477,3 +2477,17 @@ freezing all of `eval/`) is moot: the harness inputs moved to `bench/buddy_brain
   three arms in the first full run). On Buddy's real path abstain is mostly enforced by code (retrieval withholding cards makes
   `answer_schema([])` abstain-only). Whether unrelated cards reach the brain in production depends on Buddy's retrieval
   threshold, which is unverified. The owner decides whether to raise it with the Buddy repo.
+
+## aiml-slm-engine review loop 2 follow-up (finding 19)
+
+**Filed by:** `sprints/2026-11-18-aiml-slm-engine/` re-review 1 (REVIEW.md finding 19). Prefix: `aiml-TD11`, to avoid
+colliding with other sprints' TD labels.
+
+- **aiml-TD11: sample `/api/ps` during the run.** The harness records `/api/ps` only before and after. R7 is now
+  `not_assessable` when the "before" sample shows another client (this fixes the committed run's report), but a client that
+  starts mid-run goes unseen. Sample `/api/ps` before, per block and after; if a model outside the arm set appears, or an arm
+  tag was already resident at the start, set R7 to `not_assessable` and warn. SC8b's quiet-lab check covers lab files, not
+  Ollama. **The R7 latency in `bench/buddy_brain/runs/20261118T175243Z-620ebcfa/` is not evidence** (the nucleus mint shared
+  Ollama; the arms ran on ggml and llamacpp). Correctness numbers are unaffected.
+- **Note (from re-review):** the TD7/TD10 labels above reuse numbers other sprints' sections already use; read them inside
+  their own section (or as `aiml-TD7`, `aiml-TD10`).
