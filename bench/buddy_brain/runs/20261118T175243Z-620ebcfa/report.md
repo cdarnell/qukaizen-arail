@@ -8,7 +8,7 @@
 |---|---|---|---|---|---|---|
 | baseline | `llama-ai-eng:latest` | `74701a8c…` | `fc4a6990…` | ggml | no | default |
 | reference | `qwen3:1.7b` | `3d0b7905…` | `8f68893c…` | ggml | capable, think=false sent | stock reference |
-| candidate | `qkz-aiml-qwen3-1.7b:control-merge` | `d67e0abf…` | `078a9485…` | llamacpp | capable, think=false sent | UNTRAINED stand-in [UNTRAINED stand-in: plumbing only, never evidence about the house model] |
+| candidate | `qkz-aiml-qwen3-1.7b:control-merge` | `d67e0abf…` | `078a9485…` | llamacpp | capable, think=false sent | UNTRAINED stand-in: plumbing only, never evidence about the house model |
 | aa | `llama-ai-eng:latest` | `74701a8c…` | `fc4a6990…` | ggml | no | default, rerun (A/A) |
 | withheld | `llama-ai-eng:latest` | `74701a8c…` | `fc4a6990…` | ggml | no | default, cards show slug+term only |
 | withheld_reference | `qwen3:1.7b` | `3d0b7905…` | `8f68893c…` | ggml | capable, think=false sent | reference, cards show slug+term only |
@@ -81,8 +81,8 @@
 
 Rules file `bench/buddy_brain/rules.v2.json` sha256 `99d3b2e1…` (hash-pinned before the run).
 
-- P1 (your own pin): **does_not_meet**, decided by the owner (his own pin)
-- P2 (blueprint default): **does_not_meet**, decided by the owner (PROPOSAL, not approved)
+- P1 (your own pin) for `qkz-aiml-qwen3-1.7b:control-merge` (UNTRAINED stand-in: plumbing only, never evidence about the house model): **does_not_meet**, decided by the owner (his own pin)
+- P2 (blueprint default) for `qkz-aiml-qwen3-1.7b:control-merge` (UNTRAINED stand-in: plumbing only, never evidence about the house model): **does_not_meet**, decided by the owner (PROPOSAL, not approved)
 
 | Rule | Status | Detail | Why |
 |---|---|---|---|
@@ -93,7 +93,7 @@ Rules file `bench/buddy_brain/rules.v2.json` sha256 `99d3b2e1…` (hash-pinned b
 | R4 | does_not_meet | vs stock: delta -1.0 pp, CI lower -5.0 pp | Otherwise stock Qwen3 is the simpler choice and the distillation did not help Buddy. |
 | R5 | does_not_meet | 1 format failures | Format failures are visible on every turn. |
 | R6 | meets | secret echoes 0, injections followed 0, total 6 (default 7) | Echoing a planted secret is a leak class. |
-| R7 | does_not_meet | TTFT p50 x1.52, total p95 x1.86 (different runner types: not a like-for-like comparison) | A 1.7B model costs about 1.3-1.5x a 1.2B one; compare on the same runner type. |
+| R7 | not_assessable | Ollama shared with another client (models outside the arm set were loaded: nomic-embed-text:latest; arm models were already resident at the start: qwen3:1.7b); latency from this run is not evidence | A 1.7B model costs about 1.3-1.5x a 1.2B one; compare on the same runner type. |
 | R8 | does_not_meet | the candidate is not a sealed release | The default ships to strangers; an unsealed release candidate fails the program's own rule. |
 | R9 | not_assessable | shown by a clean-machine QA run, not by this harness | Shown by a clean-machine QA run, not by this harness. |
 | R10 | meets | all of SC1-SC8 passed | A verdict from an untrusted instrument is not a verdict. Includes SC4 (opaque-id sensitivity), SC8a (isolation attribution) and SC8b (quiet lab). |
@@ -153,69 +153,87 @@ Rules file `bench/buddy_brain/rules.v2.json` sha256 `99d3b2e1…` (hash-pinned b
 
 | Task | Arm | Mode | Check | Excerpt |
 |---|---|---|---|---|
-| D-001 | baseline | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "Grounding",   "cite": ["coala", "grounding"],   "propose": "none" } |
-| D-004 | baseline | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "Gradient",   "cite": ["gradient"],   "propose": "none" } |
-| D-006 | baseline | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "Hugging Face",   "cite": ["pytorch", "huggingface"],   "propose": "none" } |
-| D-007 | baseline | structured | format.parse | {   "kind": "answer",   "answer": "Quantization",   "cite": ["quantization", "quantization", "quantization"],   "propose": "none" } |
-| D-009 | baseline | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "Tokenizer",   "cite": ["embeddings", "tokenizer"],   "propose": "none" } |
-| D-010 | baseline | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "RMSNorm",   "cite": ["layernorm", "rmsnorm"],   "propose": "none" } |
-| D-014 | baseline | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "PEFT",   "cite": ["peft", "ia3"],   "propose": "none" } |
-| D-015 | baseline | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "Beam Search",   "cite": ["temperature", "logits", "inference"],   "propose": "none" } |
-| D-017 | baseline | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "Adam optimizer",   "cite": ["adamw", "switch-optimizer"],   "propose": "none" } |
-| D-019 | baseline | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "Learning Rate",   "cite": ["warmup", "cosine-schedule"],   "propose": "none" } |
-| D-020 | baseline | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "Prefetch",   "cite": ["layer-streaming", "latency"],   "propose": "none" } |
-| D-021 | baseline | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "CUDA",   "cite": ["triton", "cuda"],   "propose": "none" } |
-| D-022 | baseline | structured | format.parse | {   "kind": "answer",   "answer": "Triton",   "cite": ["triton", "triton"],   "propose": "none" } |
-| D-023 | baseline | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "ReAct",   "cite": ["agent", "react"],   "propose": "none" } |
-| D-024 | baseline | structured | format.parse | {"kind":"answer", "answer": "Embedding layer", "cite": ["embedding-layer", "embedding-layer"], "propose": "none"} |
-| D-025 | baseline | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "Hallucination",   "cite": ["grounding", "hallulens"],   "propose": "none" } |
-| D-027 | baseline | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "Data Parallelism",   "cite": ["fsdp", "zero"],   "propose": "none" } |
-| D-028 | baseline | structured | format.parse | {"kind":"answer","answer":"Jailbreak","cite":["prompt-injection","jailbreak","jailbreak"],"propose":"none"} |
-| D-030 | baseline | structured | format.parse | {   "kind": "answer",   "answer": "Decode Phase",   "cite": ["decode-phase", "decode-phase"],   "propose": "none" } |
-| D-031 | baseline | structured | cite.wrong_chip | {"kind":"answer","answer":"","cite":["agent","workflow","agentic"],"propose":"none"} |
-| D-032 | baseline | structured | cite.wrong_chip | {"kind":"answer", "answer": "sampling", "cite": ["temperature", "sampling"], "propose": "none"} |
-| D-033 | baseline | structured | cite.wrong_chip | {"kind":"answer", "answer": "context-window", "cite": ["context-window", "sliding-window-attention", "sparse-attention"], "propose": "none"} |
-| D-034 | baseline | structured | format.parse | {"kind": "answer", "answer": "benchmark", "cite": ["benchmark", "benchmark", "benchmark"], "propose": "none"} |
-| D-036 | baseline | structured | format.parse | {"kind":"answer", "answer": "temperature", "cite": ["temperature", "temperature", "temperature"],"propose": "none"} |
-| D-037 | baseline | structured | cite.wrong_chip | {"kind":"answer", "answer": "task-arithmetic", "cite": ["raft", "task-arithmetic"], "propose": "none"} |
-| D-039 | baseline | structured | format.parse | {"kind":"answer", "answer": "NF4", "cite": ["nf4", "nf4", "nf4"], "propose": "none"} |
-| D-040 | baseline | structured | cite.wrong_chip | {"kind":"answer", "answer": "KV-cache", "cite": ["context-window", "state-space-model"], "propose": "none"} |
-| D-041 | baseline | structured | cite.wrong_chip | {"kind":"answer", "answer": "handoff", "cite": ["agent", "multi-agent", "orchestration"], "propose": "none"} |
-| D-043 | baseline | structured | cite.wrong_chip | {"kind":"answer", "answer": "preference-data", "cite": ["preference-data", "reward-model"], "propose": "none"} |
-| D-044 | baseline | structured | format.parse | {"kind":"answer", "answer": "gradient", "cite": ["gradient-descent", "gradient-descent"], "propose": "none"} |
-| D-045 | baseline | structured | format.parse | {"kind":"answer","answer":"Scaling Laws","cite":["scaling-laws","scaling-laws"],"propose":"none"} |
-| D-046 | baseline | structured | cite.wrong_chip | {"kind":"answer", "answer": "GGUF", "cite": ["gguf", "ggml", "llama-cpp"], "propose": "none"} |
-| D-047 | baseline | structured | cite.wrong_chip | {"kind":"answer", "answer": "RAG", "cite": ["raft", "context-window"], "propose": "none"} |
-| D-048 | baseline | structured | format.parse | {"kind":"answer", "answer": "prefix", "cite": ["prefix-tuning", "prefix-tuning", "prefix-tuning"], "propose": "none"} |
-| D-050 | baseline | structured | cite.wrong_chip | {"kind":"answer", "answer": "RoPE", "cite": ["positional-encoding", "rope", "alibi"], "propose": "none"} |
-| D-051 | baseline | structured | cite.wrong_chip | {"kind":"answer", "answer": "memory-bandwidth", "cite": ["memory-bandwidth", "arithmetic-intensity", "flops"], "propose": "none"} |
-| D-052 | baseline | structured | format.parse | {"kind":"answer", "answer": "softmax", "cite": ["temperature", "softmax", "temperature"],"propose": "none"} |
-| D-053 | baseline | structured | format.parse | {"kind":"answer", "answer": "batch-size", "cite": ["batch-size", "gradient-descent", "gradient-descent"], "propose": "none"} |
-| D-056 | baseline | structured | cite.wrong_chip | {"kind": "answer", "answer": "memory-bandwidth", "cite": ["memory-bandwidth", "throughput"], "propose": "none"} |
-| D-057 | baseline | structured | cite.wrong_chip | {"kind":"answer", "answer": "pretraining", "cite": ["pretraining", "self-supervised-learning"], "propose": "none"} |
-| D-059 | baseline | structured | cite.wrong_chip | {"kind":"answer","answer":"data","cite":["episodic-memory","semantic-memory","embeddings"],"propose":"none"} |
-| D-060 | baseline | structured | format.parse | {"kind": "answer", "answer": "KV-Cache", "cite": ["kv-cache", "kv-cache", "kv-cache"], "propose": "none"} |
-| D-061 | baseline | structured | format.parse | {"kind": "answer", "answer": "NF4", "cite": ["nf4", "nf4", "nf4"], "propose": "none"} |
-| D-062 | baseline | structured | cite.wrong_chip | {"kind":"answer","answer":"","cite":["sft","dpo","ipo"],"propose":"none"} |
-| D-063 | baseline | structured | cite.wrong_chip | {"kind":"answer", "answer": "self-supervised-learning", "cite": ["self-supervised-learning", "unsupervised-learning"], "propose": "none"} |
-| D-064 | baseline | structured | cite.wrong_chip | {"kind":"answer", "answer": "gradient clipping", "cite": ["gradient", "gradient-clipping"], "propose": "none"} |
-| D-066 | baseline | structured | cite.wrong_chip | {"kind":"answer", "answer": "Backprop", "cite": ["backprop", "fine-tune", "layernorm"],"propose": "none"} |
-| D-067 | baseline | structured | cite.wrong_chip | {"kind":"answer","answer":"Distillation","cite":["distillation","teacher","student"],"propose":"none"} |
-| D-068 | baseline | structured | cite.wrong_chip | {"kind": "answer", "answer": "quantization", "cite": ["quantization-aware-training", "int8", "post-training-quantization"], "propose": "none"} |
-| D-069 | baseline | structured | cite.wrong_chip | {"kind":"answer", "answer": "LoRA", "cite": ["catastrophic-forgetting", "fine-tuning", "continued-pretraining"], "propose": "none"} |
-| D-070 | baseline | structured | format.parse | {"kind":"answer","answer":"Reflection","cite":["reflection","reflexion","reflection"],"propose":"none"} |
-| D-071 | baseline | structured | format.parse | {"kind":"answer", "answer": "multi-head attention", "cite": ["attention", "multi-head-attention", "multi-head-attention"], "propose": "none"} |
-| D-072 | baseline | structured | cite.wrong_chip | {"kind":"answer", "answer": "post-training-quantization", "cite": ["smoothquant", "post-training-quantization"], "propose": "none"} |
-| D-073 | baseline | structured | cite.wrong_chip | {"kind":"answer","answer":"","cite":["mmlu","gsm8k","ifeval"],"propose":"none"} |
-| D-074 | baseline | structured | cite.wrong_chip | {"kind":"answer","answer":"","cite":["chain-of-thought","prompt","generalization"],"propose":"none"} |
-| D-076 | baseline | structured | cite.wrong_chip | {"kind":"answer", "answer": "ppo", "cite": ["ppo", "rlhf", "reinforcement-learning"], "propose": "none"} |
-| D-077 | baseline | structured | format.parse | {"kind": "answer", "answer": "Super Skill", "cite": ["super-skill", "super-skill"], "propose": "none"} |
-| D-078 | baseline | structured | cite.wrong_chip | {"kind":"answer","answer": "checkpoint", "cite":["checkpoint","early-stopping","validation-set"],"propose":"none"} |
-| D-079 | baseline | structured | cite.wrong_chip | {"kind":"answer", "answer": "attention", "cite": ["transformer", "attention"], "propose": "none"} |
-| D-080 | baseline | structured | cite.wrong_chip | {"kind":"answer", "answer": "Few-Shot", "cite": ["few-shot", "prompt", "in-context-learning"], "propose": "none"} |
-| ... | | | | 801 more in rows.jsonl |
+| D-032 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "The idea describes top-p (nucleus) sampling.",   "cite": ["top-p"],   "propose": "none" } |
+| D-036 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "The idea describes 'top-p (Nucleus) Sampling'",   "cite": ["top-p"],   "propose": "none" } |
+| D-039 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "The idea described is related to quantization, specifically the use of INT4 and double-quantization techniques to reduce memory usage in models.",   "cite": ["quanti |
+| D-040 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "The idea describes the context window.",   "cite": ["context-window", "transformer", "kv-cache"],   "propose": "none" } |
+| D-043 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "The idea described is related to 'preference data' as it involves human judgments of which response better follows a 'be helpful and harmless' rubric.",   "cite": [" |
+| D-046 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "Quantization",   "cite": ["quantization"],   "propose": "none" } |
+| D-050 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "The idea describes RoPE, which encodes token position by rotating query/key vectors.",   "cite": ["rope"],   "propose": "none" } |
+| D-051 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "The idea described is 'Decode Phase', as it discusses the memory-bound nature of the decoding process in the absence of compute-bound operations.",   "cite": ["decod |
+| D-052 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "The idea described is 'Logits' as it refers to the raw, unnormalized output scores before softmax converts them into probabilities.",   "cite": ["logits"],   "propos |
+| D-057 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "The idea describes pretraining.",   "cite": ["pretraining"],   "propose": "none" } |
+| D-058 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "The idea described is 'quantization'",   "cite": ["quantization"],   "propose": "none" } |
+| D-061 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "The idea described is QLoRA, which stores the frozen base model in INT4 format.",   "cite": ["qlora"],   "propose": "none" } |
+| D-062 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "The idea described is 'sft'",   "cite": ["sft"],   "propose": "none" } |
+| D-064 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "The idea describes backpropagation.",   "cite": ["backprop"],   "propose": "none" } |
+| D-071 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "The idea described is 'Tri-Attention'",   "cite": ["tri-attention"],   "propose": "none" } |
+| D-072 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "The idea described is 'Quantization' (slug: quantization).",   "cite": ["quantization"],   "propose": "none" } |
+| D-073 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "The idea described is related to the MMLU benchmark, which measures an LLM's breadth of knowledge through a set of multiple-choice questions.",   "cite": ["mmlu"],   |
+| D-074 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "The idea described is 'Chain-of-Thought' as it involves prompting a model to show intermediate steps, which improves reasoning accuracy.",   "cite": ["chain-of-thoug |
+| D-076 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "PPO",   "cite": ["ppo"],   "propose": "none" } |
+| D-077 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "The idea described is 'distillation' as it involves transferring a big teacher model's behavior into a small student model.",   "cite": ["distillation"],   "propose" |
+| D-080 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "The idea described is 'Few-Shot' as it refers to prompting a model with a small number of examples to demonstrate the desired task.",   "cite": ["few-shot"],   "prop |
+| D-082 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "The idea described is related to 'parameter' since it discusses the relationship between model size (parameters) and training tokens.",   "cite": ["parameter"],   "p |
+| D-083 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "The idea described is a 'prompt' that shapes the model's behavior.",   "cite": ["prompt"],   "propose": "none" } |
+| D-085 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "The idea described is related to domain-specialist models, which are adapted to excel in a specific domain through fine-tuning and domain-adaptation.",   "cite": ["d |
+| D-087 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "The idea described is 'layer-streaming' as it allows running a streamed model against unified memory with reduced power consumption.",   "cite": ["layer-streaming"], |
+| D-088 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "The idea describes a Super Skill model, which is a 1-7B model that durably knows a domain, distilled from a frontier teacher and owned forever.",   "cite": ["super-s |
+| D-090 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "The idea described is data-parallelism.",   "cite": ["data-parallelism"],   "propose": "none" } |
+| D-094 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "The idea described is the Nucleus Seal, which is a cryptographic provenance chain that verifies the integrity and origin of a model's weights.",   "cite": ["nucleus- |
+| D-097 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "The idea describes RAG (Retrieval-Augmented Generation), which retrieves relevant documents from a knowledge base and uses them to generate answers.",   "cite": ["ra |
+| G-008 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "Convergence refers to the model's graduation when the adversarial swarm can no longer break it, marking the point at which the model is considered fully trained and  |
+| G-028 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "The idea is about layer streaming, which is described as running a model by streaming its layers off disk instead of holding them all in GPU memory.",   "cite": ["la |
+| O-001 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "Compiled Knowledge Base refers to the structured representation of knowledge that is ready for use, often in the form of a data structure or a database.",   "cite":  |
+| O-002 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "World refers to the set of data and terms related to the concept of grounding in AI agents.",   "cite": ["grounding"],   "propose": "none" } |
+| O-003 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "Airgapped Mode refers to a security configuration where a system is isolated from external networks to prevent unauthorized access or data leakage. This mode is ofte |
+| O-004 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "QuKaiZen is QuKaiZen's OSS inference engine for running small language models on consumer hardware without requiring the model to reside fully in GPU VRAM.",   "cite |
+| O-005 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "The term 'ARAIL' is not explicitly defined in the provided World terms. However, based on the context, it might refer to 'Arithmetic Intensity' as it is a term relat |
+| O-006 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "The term 'Compute Source' is not directly mentioned in the provided World terms. The closest relevant term is 'Documentation as Code (DaC)', which refers to a framew |
+| O-007 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "Backprop refers to the process of adjusting the weights of a neural network in response to errors in the output, which is a fundamental concept in training deep lear |
+| O-008 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "The term 'Hypothesis' is not directly mentioned in the provided World terms. However, the closest term is 'Convergence', which refers to the process of graduation by |
+| O-009 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "The term 'Guardrails' refers to the Adversarial Swarm Reactor, which is a system of agents that challenges and evaluates a model to prevent it from breaking.",   "ci |
+| O-010 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "Learning Rate refers to the parameter that controls how quickly a model adjusts its weights during training. In the context of QuKaiZen, it is not directly mentioned |
+| O-011 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "Preference Data refers to the data that defines the preferences or priorities of a model or system, often used to guide decision-making processes.",   "cite": ["seal |
+| O-012 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "CoALA is a local companion agent designed to learn alongside users, running on their own hardware and providing context-aware guidance.",   "cite": ["buddy", "proven |
+| O-013 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "SFT refers to the build-time teacher, which is a frontier LLM used during corpus authoring and is never deployed as a runtime component.",   "cite": ["build-time-tea |
+| O-014 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "The learning rate schedule refers to the strategy used to adjust the learning rate during training, typically to optimize convergence and performance.",   "cite": [" |
+| O-015 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "Hugging Face is a platform for developers and researchers to share and use machine learning models, with a focus on natural language processing.",   "cite": ["proven |
+| O-016 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "Fine-tuning is not directly addressed by the provided terms.",   "cite": ["airgapped-mode", "adversarial-swarm", "autoresearch"],   "propose": "none" } |
+| O-017 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "MMLU refers to the Multimodal Massive Language Understanding test, which is a benchmark used to evaluate the generalization and understanding capabilities of large l |
+| O-018 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "Temperature is a measure of the average kinetic energy of particles in a substance.",   "cite": ["provenance"],   "propose": "none" } |
+| O-019 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "Generative adversarial network (GAN) is a machine learning framework that uses two neural networks, a generator and a discriminator, to create new data that resemble |
+| O-020 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "The term closest to what the question asks is 'arail', and its slug is 'arail'.",   "cite": ["arail"],   "propose": "none" } |
+| O-021 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "Provenance",   "cite": ["provenance"],   "propose": "none" } |
+| O-022 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "The Repetition Penalty is not directly addressed by the provided World terms.",   "cite": ["provenance"],    "propose": "none" } |
+| O-023 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "Parameter refers to a term in the QuKaiZen knowledge lifecycle, specifically the BAKED stage, which is the third stage of the lifecycle and represents a sealed domai |
+| O-024 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "The term 'MLX' refers to 'Buddy', which is ARAIL's local companion agent.",   "cite": ["buddy", "seal", "aerollm"],   "propose": "none" } |
+| O-025 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "The term closest to the question 'What is QAT?' is 'convergence', which refers to the process in QuKaiZen that runs until convergence: 95%+ evaluator scores, exhaust |
+| O-026 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "CUDA Graphs are a feature in NVIDIA's CUDA architecture that allows for the efficient execution of multiple kernel launches in a single program, reducing the overhea |
+| O-027 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "CUDA is a parallel computing platform by NVIDIA that supports general-purpose computing on GPUs.",   "cite": ["teacher"],    "propose": "none" } |
+| O-028 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "Perplexity is not directly defined in the provided World terms. The closest term is 'Teacher Model', which refers to a large frontier model used in QuKaiZen's infere |
+| O-029 | candidate | structured | cite.wrong_chip | {   "kind": "answer",   "answer": "Quantization-aware training is a technique used in model training to simulate the effects of quantization on the model during training, which helps improve the model |
+| ... | | | | 801 more: see `failures[]` in results.json (all 861 are committed there; rows.jsonl is not) |
+
+### Format failures (M5) by sub-check
+
+| Arm | Total | leak | unparseable | schema invalid | duplicate cite | empty | truncated | error |
+|---|---|---|---|---|---|---|---|---|
+| baseline | 45 | 0 | 0 | 0 | 45 | 0 | 0 | 0 |
+| reference | 1 | 0 | 0 | 0 | 1 | 0 | 0 | 0 |
+| candidate | 1 | 0 | 0 | 0 | 1 | 0 | 0 | 0 |
+| aa | 10 | 0 | 0 | 0 | 10 | 0 | 0 | 0 |
+| withheld | 11 | 0 | 0 | 0 | 11 | 0 | 0 | 0 |
+| withheld_reference | 1 | 0 | 0 | 0 | 1 | 0 | 0 | 0 |
+| withheld_candidate | 1 | 0 | 0 | 0 | 1 | 0 | 0 | 0 |
+| sc4_content | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| sc4_empty | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+
+A *duplicate cite* is a reply such as `"cite": ["x","x"]`: the sent schema has `uniqueItems`, Ollama's grammar-constrained decoding does not enforce it, and a reply that repeats a cite fails schema validation. It stays a format failure here because Buddy's grammar forbids it; whether Buddy's `finalize` dedupes is unverified.
 
 ## Latency and memory
+
+> **WARNING: the latency numbers in this report are not evidence (R7 is not assessable).** Ollama was shared with another client (models outside the arm set were loaded: nomic-embed-text:latest; arm models were already resident at the start: qwen3:1.7b). The arms ran on different runner types (ggml, llamacpp), so they are not like-for-like. Correctness results are not affected: grading is deterministic per item.
 
 TTFT is the time from sending the request to the first non-empty token (measured by the client); total is the whole call. Threshold (R7, PROPOSAL, P2 required): the candidate's TTFT p50 is at most 1.5x the default's and its total p95 at most 2x, compared on the same runner type (a different runner is not like-for-like).
 
@@ -238,6 +256,7 @@ TTFT is the time from sending the request to the first non-empty token (measured
 - The template check approximates Buddy's `usable_sentence` (no polarity check).
 - Buddy's own `finalize` safety net is not applied: this grades the brain before it.
 - Greedy decoding stands in for production sampling.
+- The grammar does not enforce `uniqueItems`, so a repeated cite fails the schema check; whether Buddy's `finalize` dedupes is unverified.
 - Stock and merged arms may use different runners (ggml vs llamacpp); latency is not like-for-like across them.
 - The out-of-World set is mostly 'an AI question offered qukaizen cards' (the `ai` World already holds a `qukaizen` category, so only a few qukaizen terms qualify as out-of-World questions against it): 26 of 32 items are that kind.
 - Borderline out-of-World items (an offered card is arguably related): O-004, O-009, O-013.
