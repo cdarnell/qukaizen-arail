@@ -32,8 +32,8 @@ and security gates green.
 | think | visionary | VISION.md | done | 2026-11-18 | 2026-11-18 | proceed (`1867ce99`) |
 | plan | architect (design) | ARCHITECTURE.md | done | 2026-11-18 | 2026-11-18 | complete (`d0922a40`) |
 | build | builder | BUILD_LOG.md | done | 2026-11-18 | 2026-11-18 | done (`31ef7a08..e2c47bca`) |
-| review | architect (review) | REVIEW.md | BLOCK → fix loop 1 | 2026-11-18 | — | BLOCK (`94a247f3`) |
-| test | qa | TEST_REPORT.md | pending | — | — | — |
+| review | architect (review) | REVIEW.md | done | 2026-11-18 | 2026-11-18 | BLOCK (`94a247f3`) → fix loop 1 (`a3940129..620ebcfa`) → WEAK_PASS (`27f2d4ee`) → fix loop 2 for findings 16–20 (`6b5f2460..7f34f822`) |
+| test | qa | TEST_REPORT.md | in progress | 2026-11-18 | — | — |
 | ship | — | PR | pending | — | — | — |
 
 ## Decisions log
@@ -52,3 +52,6 @@ and security gates green.
 - Plan findings (ARCHITECTURE.md): (1) same-base-name fallback would serve `:control-merge` for a pin on the real tag — closed by exact-tag + GGUF-digest check; (2) Qwen3 thinks by default on Ollama 0.40.11 and Buddy's path never sends `think`, so replies come back empty — fix is `think:false` only for models reporting the thinking capability. Owner questions O1–O10 are open; none blocks the build.
 - Review 1 BLOCK: the build's NOTICE edit (`298d5898`) turned the frozen NOTICE-sha256 test red and BUILD_LOG called it pre-existing. Nine further ASK/INFO findings. Fix loop waits for the in-flight harness run to end (the loop moves/edits harness files), then a fresh evidence run is made on the fixed code.
 - Full harness run 1 (`e2c47bca`, 901 s, exit 3): no verdict, SC4 and SC8 failed. Architect addendum `d1643204`: SC8 was the reviewer's own concurrent pytest writing into the real `lab/data` (not the harness child) → split into SC8a/SC8b + quiet-lab rule; SC4 mis-designed (default is at chance; withheld cards still showed slug+term) → redesigned on the reference arm; abstain 0/32 on all arms is real behaviour (Buddy's persona says pick the closest term) → report must say so; promotion rules change → `rules.v2`. Run 1 is not evidence. Builder fix loop 1 started.
+- Full harness run 2 (`620ebcfa`, 535 s, committed `c6174cc4` at `bench/buddy_brain/runs/20261118T175243Z-620ebcfa/`): 9/9 self-checks pass; verdict under PROPOSAL `rules.v2` for the UNTRAINED stand-in: P1 and P2 not met (expected). **This run's R7 latency is not evidence**: the nucleus mint session shared Ollama during the run and the arms ran on different runner types; report re-rendered with R7 not assessable. Correctness figures stand (determinism checks passed).
+- Fix loop 2 was not separately re-reviewed by the architect; QA is asked to verify findings 16–20.
+- Housekeeping: 136 leaked portal/memory-service test-fixture processes from this sprint's test runs (temp dirs) and one hung builder debug shell were stopped by the orchestrator before run 2. The leak itself (setup-ladder tests leaving uvicorn children) is for QA to attribute.
