@@ -235,7 +235,17 @@ class Runner:
             self.arm_info[arm]["pin_state"] = pin_state
         if not ok or wrong:
             self._fail("SC5", f"served model changed or differs from the declared tag during {arm}/{mode}", "digest_changed")
-        if ctx is None or ctx < MIN_CONTEXT:
+        if ctx is None:
+            # Some runners (ggml) do not report context_length in /api/ps. Then the only evidence of an
+            # untruncated prompt is the prompt size Ollama says it evaluated: it must stay clear of 4096.
+            seen = [r["prompt_tokens"] for r in self.rows if r["arm"] == arm and r["mode"] == mode and r["prompt_tokens"]]
+            note = f"context length of {tag} is not reported by /api/ps; checked prompt_eval_count only"
+            if note not in self.warnings:
+                self.warnings.append(note)
+            if seen and max(seen) >= MIN_CONTEXT - 512:
+                self._fail("SC5", f"prompts for {arm} reach {max(seen)} tokens and the context is unreported",
+                           "context_unverifiable")
+        elif ctx < MIN_CONTEXT:
             self._fail("SC5", f"context length for {arm} is {ctx}, need at least {MIN_CONTEXT}", "context_too_small")
         return True
 
