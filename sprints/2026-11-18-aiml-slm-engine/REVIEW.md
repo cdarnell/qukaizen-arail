@@ -225,3 +225,101 @@ Items 2–7 are ASKs. If the builder files them as follow-up tickets instead, a 
 **Informational, not a verdict:** the stand-in and stock qwen3 are near-identical (M1 101 vs 102/132; SC2 passed). Both beat the default by about 50 pp on M1 because the default is at chance. This run says nothing about the house model. The report labels this correctly.
 
 **Updated required actions:** add findings 12–15 to the list above (items 10–13). Before any re-run, findings 2, 3, 4, 12, 13 and 14(b–d) must land, and `rules.v2.json` must be committed and pinned. Then re-run once on a quiet machine.
+
+---
+
+## Re-review 1
+
+**Date:** 2026-11-18
+**Fix loop:** `a3940129..620ebcfa`. Includes `a3940129`, the move to `bench/buddy_brain/`.
+**Evidence run:** `c6174cc4`, `bench/buddy_brain/runs/20261118T175243Z-620ebcfa/`, at `620ebcfa`, `git_dirty: false`. 9/9 self-checks pass, rules `rules.v2.json` (PROPOSAL, sha `99d3b2e1…`), 535 s.
+
+**What I checked:** code and tests, not BUILD_LOG's summary.
+- Targeted list, all `test_brain_bench_*`, frozen-surface, egress gate and `test_imports`: **1192 passed, 2 skipped, 3 failed.** All 3 failures are pre-existing and fail identically at `845f9b25`:
+  - `test_backends_raises_on_sentinel_before_any_load`
+  - `test_env_vars_and_frozen_ids_unchanged_in_every_modified_file` (token counts unchanged by this branch)
+  - `test_sealed_and_frozen_paths_are_byte_identical_to_base` (its diff now lists only mastra licences and `pyproject.toml`; no NOTICE, no `eval/`)
+- I did not start a harness run. Only targeted tests.
+
+## Verdict: WEAK_PASS
+
+No BLOCK remains. Findings 1–15 are fixed or acceptably filed. Five new ASKs (16–20) came out of the fix loop and the committed report. Two of them (16 and 20) are one-line fixes and should land in this branch. The other three can be filed as follow-up tickets in `sprints/BACKLOG.md` before merge. That is the WEAK_PASS condition. QA's own items (W1 clean-machine before/after, the FM26 `MODEL_BACKEND` check, the three CLI drivers) are still QA's.
+
+### Status of findings 1–15 (verified in code and tests)
+
+| # | Status | Evidence |
+|---|---|---|
+| 1 NOTICE | **Fixed** | `sha256(NOTICE)` = `8cc64663…`, byte-identical to `845f9b25`. `test_bundled_notice_and_bundle_manifest_are_byte_identical` passes. The base and licence are disclosed in the catalog comment, the pin record and the docs. BUILD_LOG corrects the attribution. |
+| 2 thresholds | **Fixed** | Every metric has a `threshold` (or "none: informational"). M1 `rule_id` is None. The report has a Threshold column, and the latency table has a meaning line and the R7 ratios. |
+| 3 exit code | **Fixed** | `run.exit_code` returns 3 for a full run with a withheld verdict. |
+| 4 rules pin | **Fixed** | `bench/buddy_brain/rules.pin.json` lists both rules files, and the sha256s match the files on disk. `tasks.verify_rules` refuses an unlisted name or a wrong digest. The real path is recorded in results (`bench/buddy_brain/rules.v2.json`, `pinned: true`). `rules.v2.json` was committed (`cf7337f5`) before the run commit and carries `"status": "proposal"`. |
+| 5 interrupt | **Fixed** | `try/finally` around the child: restore and snapshot always run, the temp root is removed, exit 5. |
+| 6 pin-file override | **Partly fixed. See finding 16.** | Test-only on paper, but a `.env` line can switch it back on. |
+| 7 picker wording | **Fixed** | `model_resolve.py:156-157`. |
+| 8 re-parse | **Fixed** | `load()` memoised on (path, mtime_ns, size), and it returns a copy. |
+| 9 report text | **Fixed** | Contamination note conditional on `heldout_n` (`report.py:60-69`). The O-split and borderline-item lines are in the report. |
+| 10 TD7 | **Filed** | `sprints/BACKLOG.md`, section "aiml-slm-engine review follow-ups". |
+| 11 | n/a | Informational. |
+| 12 SC8 | **Fixed** | `brain_bench/isolation.py`. SC8a checks 11 resolved paths, the canary and the trace inside the temp root. SC8b gives `None` (inconclusive) for a foreign writer and groups changes by directory. The child now also gets `ARAIL_DATA_DIR`, which closes a real hole the builder found. The evidence keeps no absolute child paths. TD10 and the quiet-lab precondition are filed and documented. |
+| 13 SC4 | **Fixed** | Opaque `t1`–`t5` ids on the reference arm over 86 example/short items. Thresholds come from the pinned rules `sc4` block. In the run, content is 62.8 % vs ids-only 23.3 % (CI −53.5..−24.4). M9 (content dependence) is informational. The chance guard is in place. |
+| 14 M2 | **Fixed** (a–d). (e) **Filed** as an owner note. | The M2 wording is in the report. SC2 lists M2 as zero-variance. M2u is graded, and `test_14d` validates abstain for all 32 O items. Recording the persona note in BACKLOG instead of SPRINT.md is acceptable. |
+| 15 rules v2 | **Fixed** | R1 vs reference, R3 vs the better of default and reference, R12 ≤ 35 %, a pre-registered `sc4` block, `rules.v1.json` kept unchanged. |
+
+### Checked and clean: nothing new introduced
+
+- **Default unchanged.** `SHIPPED_DEFAULT`, `scripts/setup.sh`, `arailctl`, `scripts/status.sh`, `model_defaults.py` and `registry/` are untouched since `845f9b25`. The `llama-ai-eng` row is unchanged.
+- **Pin record.** `chat/model_pins.json` is unchanged since its first commit: `pending`, with null identity fields.
+- **Frozen surface.** `tests/test_queuellm_rename_frozen_surface.py`, `THIRD-PARTY-LICENSES/`, `licenses/` and `pyproject.toml` are untouched by this branch. Moving the frozen task set to `bench/` changed no bytes, and its sha still matches the manifest.
+- **The report labels the stand-in UNTRAINED** on every arm row that uses it, including `withheld_candidate`.
+
+### New findings
+
+16. **[ASK] `model_pins.py:95-97`. A `.env` line turns the pytest-only override back on.**
+    - `arail.config` runs `load_dotenv()` at import, so a `.env` containing `PYTEST_CURRENT_TEST=x` and `ARAIL_MODEL_PINS_FILE=<any path>` makes a production process read that pin file.
+    - Reproduced: run with `env -i`, `ARAIL_ENV_FILE` pointing at such a file, then `import arail.config` and `model_pins._path()`. It returned the scratch path.
+    - The risk is the same class as TD7 (a deliberate operator edit), but finding 6 asked for "cannot be triggered in production".
+    - **Fix (one line):** also require `"pytest" in sys.modules`. Add a subprocess test that does exactly the repro above and asserts `PINS_PATH`.
+
+17. **[ASK] M5 / R5 hide the cause. Almost every format failure is a duplicate cite that Ollama's grammar does not prevent.**
+    - The sent schema has `uniqueItems: true`, but Ollama 0.40.11's grammar-constrained decoding does not enforce it. Replies such as `"cite": ["quantization","quantization","quantization"]` fail schema validation and count as `format.parse`.
+    - **Scale:** 43 of the baseline's 45 M5 failures are this. The candidate's single R5 failure (P-010) and the reference's single failure are the same.
+    - **Effect:** R5 "does_not_meet" for the stand-in is caused only by this. The M5 meaning ("leaked a control token or `<think>`, invalid JSON, empty, or cut off") does not tell the reader.
+    - The builder's smoke SC1 flake (`G-005`) was also a duplicate-cite reply.
+    - **Fix:**
+      - (a) Grade a duplicate cite as its own check, `format.duplicate_cite`. Keep it a format failure, because Buddy's grammar forbids it.
+      - (b) Break M5 down by sub-check in the report: leak, unparseable, schema-invalid, duplicate cite, empty, truncated.
+      - (c) Add one line under "What this run cannot tell you": the grammar does not enforce `uniqueItems`, and whether Buddy's `finalize` dedupes is unverified.
+    - This can be re-rendered from `results.json` once (a) is computed from the stored content. No re-run needed.
+
+18. **[ASK] `report.md` "Where the failures are" points at a file that is not committed.**
+    - It prints 60 rows, then "801 more in rows.jsonl", but `rows.jsonl` is git-ignored (`.gitignore:176`).
+    - The committed per-task locations live in `results.json` `failures[]` (861 entries).
+    - **Fix:** point the overflow line at `results.json` → `failures[]`. Optionally order the 60 rows by candidate first, since they are the decision-relevant ones.
+
+19. **[ASK] The R7 latency figures in this run are noisy, and must be reported as such.**
+    - The nucleus mint session was using the same Ollama during the run. `ps_before` shows `qwen3:1.7b` (the reference arm's tag) and `nomic-embed-text` already resident, so another client was loaded on that Ollama. The harness's reload step unloaded `qwen3:1.7b` under that client.
+    - The R7 ratios are TTFT ×1.52 (limit 1.5) and total p95 ×1.86. They differ from the limit by less than plausible contention noise, and the arms run on different runners (ggml vs llamacpp).
+    - **Ruling:**
+      - R7 from `20261118T175243Z-620ebcfa` is **not evidence**. Record that in SPRINT.md beside the run.
+      - Correctness results are not affected: grading is deterministic per item, and SC1 0/82 and SC7 0/96 passed.
+      - SC8b's quiet-lab check covers lab files, not Ollama.
+    - **Fix (follow-up ticket):**
+      - Sample `/api/ps` before, during (per block) and after.
+      - If a model outside the arm set is loaded, or an arm tag was already resident at start, set R7 to `not_assessable: Ollama shared with another client` and add a warning.
+      - Add "Ollama exclusive to the run" to the documented quiet-lab precondition.
+
+20. **[ASK] The verdict lines do not say whose verdict it is.**
+    - The report prints "P1 (your own pin): **does_not_meet**" and "P2 … **does_not_meet**" without naming the candidate. Read alone, they look like a ruling on the house model.
+    - The arm table labels the stand-in, but the verdict line is the one people quote.
+    - **Fix (one line in `report.py`):** append the candidate tag and its label to each verdict line, e.g. "for `qkz-aiml-qwen3-1.7b:control-merge` [UNTRAINED stand-in: plumbing only, never evidence about the house model]". Do the same in `summary_line`. Re-render the committed `report.md`; no re-run needed.
+
+**Informational, not a finding:**
+- The run's correctness numbers are internally consistent: near-A/A M1 −0.8 pp, CI −3.8..+2.3.
+- Stock qwen3 and the untrained stand-in are indistinguishable, as expected. R4 "does_not_meet" correctly says the stand-in adds nothing over stock.
+- The BACKLOG reuses the labels TD7/TD10 that other sprints' sections already use. Unambiguous inside its section, but a sprint prefix (`aiml-TD7`) would avoid confusion.
+
+### Required before merge
+
+1. Findings 16 and 20: fix in this branch, and re-render `report.md` for 20.
+2. Findings 17, 18, 19: fix, or file as tickets in `sprints/BACKLOG.md` with this review's text. Record in SPRINT.md that R7 from this run is not evidence (finding 19).
+3. QA: W1 clean-machine before/after, FM26, the three CLI drivers, and a TD7 probe.
