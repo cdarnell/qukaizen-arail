@@ -222,3 +222,113 @@ def test_15_r1_vs_reference_r3_vs_best_and_r12_position_share():
     verdict.attach_rule_info(res, RULES2)
     assert next(c for c in res["comparisons"] if c["metric_id"] == "M3" and c["a"] == "reference")["rule_id"] == "R1"
     assert not next(c for c in res["comparisons"] if c["metric_id"] == "M3" and c["a"] == "baseline").get("rule_id")
+
+
+# ── review loop 2: findings 17, 18, 19, 20 ──────────────────────────────────────────────
+
+CTRL = "qkz-aiml-qwen3-1.7b:control-merge"
+
+
+def _full(**kw):
+    res = _results(**kw)
+    res["arms"][1] = {"id": "candidate", "role": "candidate", "label": "UNTRAINED stand-in", "served_model": CTRL, "runner": "llamacpp"}
+    res["arms"][0]["runner"] = "ggml"
+    res["verdict"] = verdict.decide(res, RULES2)
+    return res
+
+
+def test_20_verdict_lines_name_the_candidate_and_its_label():
+    res = _full()
+    md = report.render(res, RULES2)
+    line = next(x for x in md.splitlines() if x.startswith("- P1"))
+    assert f"`{CTRL}`" in line and "UNTRAINED stand-in: plumbing only, never evidence about the house model" in line
+    assert "[UNTRAINED stand-in [" not in md
+    res["self_checks"] = [{"id": "SC1", "passed": True, "expected": "e", "observed": "o"}]
+    res["verdict"] = verdict.decide(res, RULES2)
+    summary = report.summary_line(res)
+    assert CTRL in summary and "UNTRAINED" in summary
+    assert "stand-in" not in report.candidate_phrase({"arms": []})
+
+
+def test_19_r7_is_not_assessable_and_the_report_warns_when_ollama_was_shared():
+    quiet = _full(ollama={"version": "x", "ps_before": []})
+    assert verdict.shared_ollama(quiet) is None
+    rows = {r["rule_id"]: r for r in verdict.assess(quiet, RULES2)}
+    assert rows["R7"]["status"] != "not_assessable"
+    shared = _full(ollama={"version": "x", "ps_before": ["nomic-embed-text:latest", CTRL]})
+    why = verdict.shared_ollama(shared)
+    assert "nomic-embed-text:latest" in why and CTRL in why
+    r7 = {r["rule_id"]: r for r in verdict.assess(shared, RULES2)}["R7"]
+    assert r7["status"] == "not_assessable" and "not evidence" in r7["detail"]
+    md = report.render(shared, RULES2)
+    assert "latency numbers in this report are not evidence" in md and "ggml, llamacpp" in md
+    calm = _full(ollama={"version": "x", "ps_before": []})
+    calm["arms"][1]["runner"] = "ggml"
+    assert "not evidence" not in report.render(calm, RULES2)
+
+
+SCHEMA = compose.answer_schema(["a", "b"])
+
+
+def _kind(obj, done="stop", structured=True):
+    content = obj if isinstance(obj, str) else json.dumps(obj)
+    return grade.format_kind(content, done, SCHEMA if structured else None, structured)
+
+
+def test_17_format_kinds():
+    ok = {"kind": "answer", "answer": "", "cite": ["a"], "propose": "none"}
+    assert _kind(ok) is None
+    assert _kind(dict(ok, cite=["a", "a", "a"])) == "duplicate_cite"
+    assert _kind(dict(ok, cite=["zzz"])) == "schema_invalid"
+    assert _kind(dict(ok, kind="nope")) == "schema_invalid"
+    assert _kind("not json") == "unparseable" and _kind("[1]") == "unparseable"
+    assert _kind("") == "empty" and _kind(ok, done="length") == "truncated"
+    assert _kind(dict(ok, answer="<think>x</think>")) == "leak"
+    assert grade.format_kind("hi <|im_end|>", "stop", None, False) == "leak"
+    assert grade.format_kind("fine", "stop", None, False) is None
+    assert grade.format_kind("x", "stop", None, False, error="ReadTimeout") == "error"
+
+
+def test_17_a_duplicate_cite_is_a_graded_check_and_still_a_format_failure():
+    t = {"id": "T", "category": "domain", "offered": ["a", "b"], "gold": {"cite": "a"}, "planted": None}
+    dup = json.dumps({"kind": "answer", "answer": "", "cite": ["a", "a"], "propose": "none"})
+    g = grade.grade(t, "structured", dup, "stop", SCHEMA, {})
+    assert g["checks"]["format.duplicate_cite"] is True and g["format_fail"] is True and g["pass"] is False
+    other = grade.grade(t, "structured", "not json", "stop", SCHEMA, {})
+    assert other["checks"]["format.duplicate_cite"] is False
+
+
+def test_17_breakdown_is_re_derived_from_stored_replies_and_rendered():
+    tasks = {t["id"]: t for t in ALL}
+    d = next(t for t in ALL if t["category"] == "domain" and t["form"] == "example")
+    dup = json.dumps({"kind": "answer", "answer": "", "cite": [d["offered"][0]] * 3, "propose": "none"})
+    opaque_dup = json.dumps({"kind": "answer", "answer": "", "cite": ["t1", "t1"], "propose": "none"})
+    rows = [{"arm": "baseline", "task_id": d["id"], "mode": "structured", "content": dup, "done_reason": "stop"},
+            {"arm": "baseline", "task_id": d["id"], "mode": "structured", "content": "", "done_reason": "stop"},
+            {"arm": "sc4_empty", "task_id": d["id"], "mode": "structured", "content": opaque_dup, "done_reason": "stop"},
+            {"arm": "candidate", "task_id": d["id"], "mode": "structured", "content": dup.replace("[", "[").replace('"cite"', '"cite"'),
+             "done_reason": "stop", "error": "ReadTimeout"}]
+    b = grade.format_breakdown(rows, tasks)
+    assert b["baseline"]["duplicate_cite"] == 1 and b["baseline"]["empty"] == 1 and b["baseline"]["total"] == 2
+    assert b["sc4_empty"]["duplicate_cite"] == 1 and b["candidate"]["error"] == 1
+    md = report.render(_full(), RULES2, breakdown=b)
+    assert "Format failures (M5) by sub-check" in md and "does not enforce `uniqueItems`" in md
+    assert "breakdown unavailable" in report.render(_full(), RULES2, breakdown=None)
+
+
+def test_18_failures_overflow_points_at_results_json_and_candidate_rows_come_first():
+    fails = [{"task_id": f"D-{i}", "category": "domain", "arm": "baseline", "mode": "structured", "check": "x", "excerpt": "e"}
+             for i in range(70)] + [{"task_id": "D-C", "category": "domain", "arm": "candidate", "mode": "structured", "check": "x", "excerpt": "e"}]
+    md = report.render(_full(failures=fails), RULES2)
+    assert "11 more: see `failures[]` in results.json (all 71 are committed there; rows.jsonl is not)" in md
+    rows = [x for x in md.splitlines() if x.startswith("| D-")]
+    assert rows[0].startswith("| D-C |") and len(rows) == 60
+    assert "in rows.jsonl" not in md
+
+
+def test_committed_run_report_matches_its_renderer():
+    """The committed report.md is the renderer's output for the committed results.json (+ sidecar)."""
+    run = T.EVAL_DIR / "runs" / "20261118T175243Z-620ebcfa"
+    if not (run / "results.json").exists():
+        pytest.skip("reference run not present")
+    assert (run / "report.md").read_text() == report.render_file(str(run / "results.json"))

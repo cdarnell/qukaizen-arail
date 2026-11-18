@@ -532,6 +532,7 @@ class Runner:
                 "comparisons": comps, "latency": lat, "failures": fails,
                 "self_checks": self.self_checks(blocks, complete), "estimate_s": est,
                 "chance": chance, "sc4": self.sc4,
+                "format_breakdown": grade.format_breakdown(self.rows, {t["id"]: t for t in all_tasks}),
                 "item_flags": {a["id"]: {m: self.flags(a["id"], m) for m in ("M1", "M2", "M3", "M6", "M7", "M8")} for a in arms}}
 
 

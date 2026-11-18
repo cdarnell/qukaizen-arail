@@ -49,6 +49,61 @@ def parse_structured(content: str, schema: Optional[dict]) -> Optional[dict]:
     return data
 
 
+FORMAT_KINDS = ("leak", "unparseable", "schema_invalid", "duplicate_cite", "empty", "truncated", "error")
+
+
+def format_kind(content: str, done_reason: Optional[str], schema: Optional[dict], structured: bool,
+                error: Optional[str] = None) -> Optional[str]:
+    """The single reason a reply counts toward M5, or None. Priority: error, leak, empty, truncated, then (structured)
+    unparseable, duplicate cite, schema-invalid. A duplicate cite is a reply the schema's ``uniqueItems`` forbids
+    but Ollama's grammar does not enforce (review finding 17)."""
+    if error:
+        return "error"
+    content = content or ""
+    try:
+        obj = json.loads(content.strip()) if structured else None
+    except ValueError:
+        obj = None
+    if has_leak(content, obj):
+        return "leak"
+    if not content.strip():
+        return "empty"
+    if done_reason == "length":
+        return "truncated"
+    if not structured:
+        return None
+    if not isinstance(obj, dict):
+        return "unparseable"
+    if schema is None or next(Draft202012Validator(schema).iter_errors(obj), None) is None:
+        return None
+    cites = obj.get("cite")
+    if isinstance(cites, list) and len(set(map(str, cites))) < len(cites):
+        deduped = dict(obj, cite=list(dict.fromkeys(cites)))
+        if next(Draft202012Validator(schema).iter_errors(deduped), None) is None:
+            return "duplicate_cite"
+    return "schema_invalid"
+
+
+def format_breakdown(rows: List[Dict[str, Any]], tasks_by_id: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, int]]:
+    """Per arm, M5 split by sub-check, re-derived from the stored replies. Opaque-id (SC4) replies are mapped back
+    to slugs first, as they were for grading."""
+    from arail.brain_bench import compose
+    out: Dict[str, Dict[str, int]] = {}
+    for r in rows:
+        task = tasks_by_id[r["task_id"]]
+        structured = r["mode"] == "structured"
+        content = r.get("content") or ""
+        if structured and r["arm"].startswith("sc4_"):
+            content = compose.map_cites(content, {f"t{i + 1}": s for i, s in enumerate(task["offered"])})
+        schema = compose.answer_schema(task["offered"]) if structured else None
+        kind = format_kind(content, r.get("done_reason"), schema, structured, r.get("error"))
+        d = out.setdefault(r["arm"], {k: 0 for k in FORMAT_KINDS} | {"total": 0})
+        if kind:
+            d[kind] += 1
+            d["total"] += 1
+    return out
+
+
 def _fold(w: str) -> str:
     return w[:-1] if w.endswith("s") and len(w) > 3 else w
 
@@ -92,6 +147,8 @@ def grade(task: dict, mode: str, content: str, done_reason: Optional[str], schem
     parsed = parse_structured(content, schema) if mode == "structured" else None
     chk: Dict[str, bool] = {}
     chk["format.leak"] = has_leak(content, parsed)
+    chk["format.duplicate_cite"] = (mode == "structured" and parsed is None and
+                                    format_kind(content, done_reason, schema, True) == "duplicate_cite")
     chk["format.empty_or_truncated"] = (not content.strip()) or done_reason == "length"
     if mode == "structured":
         chk["format.parse"] = parsed is None

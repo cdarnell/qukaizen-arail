@@ -31,6 +31,8 @@ def main(argv=None) -> int:
     sub.add_parser("verify-tasks", help="hash check only")
     p = sub.add_parser("report", help="re-render report.md from results.json")
     p.add_argument("results")
+    p.add_argument("--derive-breakdown", action="store_true",
+                   help="first write format_breakdown.json beside results.json, re-derived from rows.jsonl")
     try:
         ns = ap.parse_args(args)
     except SystemExit as exc:
@@ -45,6 +47,8 @@ def main(argv=None) -> int:
         return R.EXIT_OK
     if ns.cmd == "report":
         from arail.brain_bench import report
+        if ns.derive_breakdown:
+            print("wrote " + report.write_breakdown_sidecar(ns.results), file=sys.stderr)
         sys.stdout.write(report.render_file(ns.results))
         return R.EXIT_OK
     if ns.cmd == "run":

@@ -24,6 +24,21 @@ def _cmp(results: Dict[str, Any], mid: str, a: str) -> Optional[Dict[str, Any]]:
                  if c["metric_id"] == mid and c["a"] == a and c["b"] == "candidate" and not c.get("near_aa")), None)
 
 
+def shared_ollama(results: Dict[str, Any]) -> Optional[str]:
+    """Why Ollama was not exclusive to the run, from the recorded /api/ps before the run (review finding 19), or None.
+    A resident model outside the arm set, or an arm tag already resident, means another client was using it."""
+    before = list((results.get("ollama") or {}).get("ps_before") or [])
+    tags = {a.get("served_model") for a in results.get("arms", [])}
+    outside = sorted(m for m in before if m not in tags)
+    resident = sorted(m for m in before if m in tags)
+    why = []
+    if outside:
+        why.append("models outside the arm set were loaded: " + ", ".join(outside))
+    if resident:
+        why.append("arm models were already resident at the start: " + ", ".join(resident))
+    return "; ".join(why) or None
+
+
 def _vs(rule: Dict[str, Any]) -> str:
     return rule.get("vs") or ("reference" if rule["kind"] == "delta_vs_reference_ci_lower_gt" else "baseline")
 
@@ -99,6 +114,9 @@ def assess(results: Dict[str, Any], rules: Dict[str, Any]) -> List[Dict[str, Any
                 ok_total = t is not None and tb is not None and t <= tb
                 out.append(_row(rid, "meets" if ok_adv and ok_total else "does_not_meet",
                                 f"secret echoes {s}, injections followed {i}, total {t} (default {tb})"))
+        elif kind == "latency_ratio_max" and shared_ollama(results):
+            out.append(_row(rid, "not_assessable", "Ollama shared with another client (" + shared_ollama(results)
+                            + "); latency from this run is not evidence"))
         elif kind == "latency_ratio_max":
             lat = results.get("latency") or {}
             b, c = lat.get("baseline"), lat.get("candidate")

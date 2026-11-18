@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
-from arail.brain_bench import metrics
+from arail.brain_bench import metrics, verdict as verdict_mod
 
 UNTRAINED = "UNTRAINED stand-in: plumbing only, never evidence about the house model"
 ORDER = ["M1", "M8", "M2", "M2o", "M2u", "M3", "M4", "M4s", "M4i", "M5", "M6", "M7", "M9", "M10"]
@@ -13,12 +13,19 @@ ORDER = ["M1", "M8", "M2", "M2o", "M2u", "M3", "M4", "M4s", "M4i", "M5", "M6", "
 def arm_label(a: Dict[str, Any]) -> str:
     label = a.get("label") or a["id"]
     if "control-merge" in str(a.get("served_model", "")):
-        label = f"{label} [{UNTRAINED}]"
+        label = (f"{label}: plumbing only, never evidence about the house model" if "UNTRAINED" in label
+                 else f"{label} [{UNTRAINED}]")
     return label
 
 
 def _short(d: Any) -> str:
     return (str(d)[:8] + "…") if d else "n/a"
+
+
+def candidate_phrase(res: Dict[str, Any]) -> str:
+    """'for `<tag>` [<label>]': whose verdict a verdict line is (review finding 20)."""
+    a = next((x for x in res.get("arms", []) if x.get("id") == "candidate"), None)
+    return f"for `{a.get('served_model')}` ({arm_label(a)})" if a else "for the candidate"
 
 
 def summary_line(res: Dict[str, Any]) -> str:
@@ -27,11 +34,12 @@ def summary_line(res: Dict[str, Any]) -> str:
     if bad:
         return f"HARNESS NOT TRUSTWORTHY: NO VERDICT (failed: {', '.join(bad)})"
     if v.get("printed"):
-        return f"verdict printed (PROPOSAL rules): P1 {v['p1']['advice']}, P2 {v['p2']['advice']}"
+        return (f"verdict printed (PROPOSAL rules) {candidate_phrase(res)}: P1 {v['p1']['advice']}, "
+                f"P2 {v['p2']['advice']}")
     return f"no verdict: {v.get('withheld_reason')}"
 
 
-def render(res: Dict[str, Any], rules: Dict[str, Any]) -> str:
+def render(res: Dict[str, Any], rules: Dict[str, Any], breakdown: Optional[Dict[str, Any]] = None) -> str:
     """The whole report. Raises UnknownMetric if results carry a metric with no definition."""
     undefined = metrics.undefined_in(res)
     if undefined:
@@ -97,10 +105,12 @@ def render(res: Dict[str, Any], rules: Dict[str, Any]) -> str:
                  f"{'uninformative (zero variance)' if c.get('zero_variance') else c.get('meets', '')} |")
     L += ["", "## Promotion rules (PROPOSAL, not decided)", "",
           f"Rules file `{res['rules'].get('path', 'n/a')}` sha256 `{_short(res['rules'].get('sha256'))}` (hash-pinned before the run).", ""]
-    v = res["verdict"]
+    # re-evaluated from the recorded results so a later rule/renderer fix shows up without a new run
+    v = verdict_mod.decide(res, rules)
+    who = candidate_phrase(res)
     if v["printed"]:
-        L += [f"- P1 (your own pin): **{v['p1']['advice']}**, decided by {v['p1']['decided_by']}",
-              f"- P2 (blueprint default): **{v['p2']['advice']}**, decided by {v['p2']['decided_by']}", ""]
+        L += [f"- P1 (your own pin) {who}: **{v['p1']['advice']}**, decided by {v['p1']['decided_by']}",
+              f"- P2 (blueprint default) {who}: **{v['p2']['advice']}**, decided by {v['p2']['decided_by']}", ""]
     else:
         L += [f"No verdict: {v['withheld_reason']}.", ""]
     L += ["| Rule | Status | Detail | Why |", "|---|---|---|---|"]
@@ -114,12 +124,35 @@ def render(res: Dict[str, Any], rules: Dict[str, Any]) -> str:
         by_cat[k] = by_cat.get(k, 0) + 1
     L += [f"- {k}: {n}" for k, n in sorted(by_cat.items())] or ["- none"]
     L += ["", "| Task | Arm | Mode | Check | Excerpt |", "|---|---|---|---|---|"]
-    for f in res["failures"][:60]:
+    ordered = sorted(res["failures"], key=lambda f: 0 if f["arm"] == "candidate" else 1)   # decision-relevant first
+    for f in ordered[:60]:
         ex = f["excerpt"].replace("|", "/").replace("\n", " ")
         L.append(f"| {f['task_id']} | {f['arm']} | {f['mode']} | {f['check']} | {ex} |")
-    if len(res["failures"]) > 60:
-        L.append(f"| ... | | | | {len(res['failures']) - 60} more in rows.jsonl |")
-    L += ["", "## Latency and memory", "",
+    if len(ordered) > 60:
+        L.append(f"| ... | | | | {len(ordered) - 60} more: see `failures[]` in results.json (all {len(ordered)} are committed there; "
+                 "rows.jsonl is not) |")
+    if breakdown:
+        kinds = ["leak", "unparseable", "schema_invalid", "duplicate_cite", "empty", "truncated", "error"]
+        L += ["", "### Format failures (M5) by sub-check", "",
+              "| Arm | Total | " + " | ".join(k.replace("_", " ") for k in kinds) + " |", "|---|---|" + "---|" * len(kinds)]
+        for arm in [a["id"] for a in arms if a["id"] in breakdown]:
+            b = breakdown[arm]
+            L.append(f"| {arm} | {b['total']} | " + " | ".join(str(b.get(k, 0)) for k in kinds) + " |")
+        L += ["", "A *duplicate cite* is a reply such as `\"cite\": [\"x\",\"x\"]`: the sent schema has `uniqueItems`, "
+              "Ollama's grammar-constrained decoding does not enforce it, and a reply that repeats a cite fails schema validation. "
+              "It stays a format failure here because Buddy's grammar forbids it; whether Buddy's `finalize` dedupes is unverified."]
+    else:
+        L += ["", "_M5 sub-check breakdown unavailable: this results.json predates it and its rows.jsonl is not present._"]
+    shared = verdict_mod.shared_ollama(res)
+    runners = sorted({a.get("runner") for a in arms if a["id"] in ("baseline", "reference", "candidate") and a.get("runner")})
+    L += ["", "## Latency and memory", ""]
+    if shared or len(runners) > 1:
+        L += ["> **WARNING: the latency numbers in this report are not evidence (R7 is not assessable).** "
+              + (f"Ollama was shared with another client ({shared}). " if shared else "")
+              + (f"The arms ran on different runner types ({', '.join(runners)}), so they are not like-for-like. " if len(runners) > 1 else "")
+              + "Correctness results are not affected: grading is deterministic per item.", ""]
+    L += [
+
           "TTFT is the time from sending the request to the first non-empty token (measured by the client); total is the "
           "whole call. Threshold (R7, PROPOSAL, P2 required): the candidate's TTFT p50 is at most 1.5x the default's and its "
           "total p95 at most 2x, compared on the same runner type (a different runner is not like-for-like).", "",
@@ -138,6 +171,7 @@ def render(res: Dict[str, Any], rules: Dict[str, Any]) -> str:
           "- The template check approximates Buddy's `usable_sentence` (no polarity check).",
           "- Buddy's own `finalize` safety net is not applied: this grades the brain before it.",
           "- Greedy decoding stands in for production sampling.",
+          "- The grammar does not enforce `uniqueItems`, so a repeated cite fails the schema check; whether Buddy's `finalize` dedupes is unverified.",
           "- Stock and merged arms may use different runners (ggml vs llamacpp); latency is not like-for-like across them.",
           "- The out-of-World set is mostly 'an AI question offered qukaizen cards' (the `ai` World already holds a `qukaizen` category, "
           "so only a few qukaizen terms qualify as out-of-World questions against it): 26 of 32 items are that kind.",
@@ -152,9 +186,48 @@ def render(res: Dict[str, Any], rules: Dict[str, Any]) -> str:
     return "\n".join(L) + "\n"
 
 
+def load_breakdown(results_path: str, res: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """M5 sub-check counts: from the results, else the committed sidecar, else re-derived from a local rows.jsonl."""
+    import os
+    if res.get("format_breakdown"):
+        return res["format_breakdown"]
+    d = os.path.dirname(os.path.abspath(results_path))
+    side = os.path.join(d, "format_breakdown.json")
+    if os.path.exists(side):
+        return json.load(open(side, encoding="utf-8"))["breakdown"]
+    rows_path = os.path.join(d, "rows.jsonl")
+    if os.path.exists(rows_path):
+        return derive_breakdown(rows_path)
+    return None
+
+
+def derive_breakdown(rows_path: str) -> Dict[str, Any]:
+    from arail.brain_bench import grade, tasks as T
+    rows = [json.loads(line) for line in open(rows_path, encoding="utf-8").read().splitlines() if line.strip()]
+    return grade.format_breakdown(rows, {t["id"]: t for t in T.load_tasks()})
+
+
+def write_breakdown_sidecar(results_path: str) -> str:
+    """Write format_breakdown.json beside results.json (derived from rows.jsonl; results.json is not touched)."""
+    import hashlib
+    import os
+    d = os.path.dirname(os.path.abspath(results_path))
+    res = json.loads(open(results_path, encoding="utf-8").read())
+    rows_path = os.path.join(d, "rows.jsonl")
+    bd = derive_breakdown(rows_path)
+    m5 = {a: (m.get("M5") or {}).get("numerator") for a, m in res["metrics"].items()}
+    out = {"schema": "arail.format-breakdown/v1", "derived_from": "rows.jsonl (not committed)",
+           "rows_sha256": hashlib.sha256(open(rows_path, "rb").read()).hexdigest(),
+           "matches_recorded_M5": {a: (m5.get(a) == bd[a]["total"]) for a in bd if a in m5},
+           "breakdown": bd}
+    path = os.path.join(d, "format_breakdown.json")
+    open(path, "w", encoding="utf-8").write(json.dumps(out, indent=2) + "\n")
+    return path
+
+
 def render_file(path: str) -> str:
     from arail.brain_bench import tasks as T
     res = json.loads(open(path, encoding="utf-8").read())
     name = (res.get("rules") or {}).get("path", "rules.v1.json").rsplit("/", 1)[-1]
     rules = json.loads((T.EVAL_DIR / name).read_text())
-    return render(res, rules)
+    return render(res, rules, load_breakdown(path, res))
