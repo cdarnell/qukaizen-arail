@@ -105,8 +105,7 @@ present in the local Ollama store.
 
 ## Open before the pin is filled (QA TEST_REPORT.md, all Low; 10 strict-xfail tests document them)
 
-F2 (pin check says `match` for a model with an extra `ADAPTER` or a different `SYSTEM`) and F3 (`ollama_tag` may
-name a different model) must be fixed before the record is filled. F1 (registry/user-prefixed copy not recognised
+F2 and F3 were fixed on the owner's go (2026-11-18, "Yes, fix F2/F3") in `41be23e2`: an extra `ADAPTER` or a different `SYSTEM` now reports "not the pinned build", and a record whose `ollama_tag` is outside its own family is invalid at load. Verified by the orchestrator: QA + pin + resolver suites 141 passed, 7 xfailed (the remaining findings). F1 (registry/user-prefixed copy not recognised
 as the family), F4, F5 (nothing on ARAIL's side strips a `<think>` block), F6 (SIGTERM leaves the harness child),
 F7 (9 delta rows without a threshold), F8, F9: follow-up sprint.
 
