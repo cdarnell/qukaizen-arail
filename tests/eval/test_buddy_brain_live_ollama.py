@@ -52,4 +52,5 @@ def test_smoke_run_over_two_local_models(tmp_path):
     assert qwen and all(r["content"].strip() for r in qwen), "an empty reply means thinking ate the token cap"
     assert not any("<think>" in r["content"] for r in rows)
     sc = {c["id"]: c for c in res["self_checks"]}
-    assert sc["SC5"]["passed"] is True and sc["SC6"]["passed"] is True and sc["SC8"]["passed"] is True
+    assert sc["SC5"]["passed"] is True and sc["SC6"]["passed"] is True and sc["SC8a"]["passed"] is True
+    assert sc["SC8b"]["passed"] is not False        # None = someone else wrote to the lab (inconclusive)
