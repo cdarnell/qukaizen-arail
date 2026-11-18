@@ -1076,6 +1076,7 @@ PROCESSES_THAT_INSTALL_THE_GUARD = {
     "src/arail/agents/loader.py",
     "src/arail/nucleus/worker.py",
     "src/arail/doctor.py",
+    "src/arail/brain_bench/run.py",
 }
 
 

@@ -126,7 +126,8 @@ It does NOT wrap:
   `os.system("curl ...")` go straight to the OS network stack.
 - Other processes — the guard lives inside the Python processes that
   install it: the portal, any process that loads agents through the agent
-  loader, Model Forge's worker, and `./arailctl doctor`. Everything else
+  loader, Model Forge's worker, `./arailctl doctor`, and the Buddy brain A/B
+  harness's child process (`python -m arail.brain_bench`). Everything else
   runs outside it: setup's and upgrade's model downloads, Docker
   containers such as Open Notebook's, opencode, the lab's own Python
   subprocesses (the goal parser's model subprocess and the AirLLM worker),
