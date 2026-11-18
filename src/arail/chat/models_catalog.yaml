@@ -243,6 +243,28 @@
   install: "ollama pull qwen3:8b"
   tier: optional
 
+# ── QuKaiZen AI/ML 1.7B — opt-in house model (DORMANT: not released yet) ──
+# Nucleus-minted student (Qwen3-1.7B base, Apache-2.0). ARAIL does not redistribute the
+# weights, so no NOTICE entry (NOTICE is byte-pinned by the rename sprint); the base and
+# licence are recorded in chat/model_pins.json and docs/buddy-brain-bench.md.
+# Never auto-picked and never downloaded by ARAIL: it is usable only through an
+# explicit pin, and only while the weights Ollama serves match the pin record
+# in chat/model_pins.json (status `pending` until the mint delivers).
+# Keep this row away from `llama-ai-eng`: the disclosure tests read that row's
+# block up to the next `- id:`.
+- id: qkz-aiml-qwen3-1.7b
+  name: QuKaiZen AI/ML 1.7B (opt-in, not released)
+  family: qwen
+  size_gb: 1.4
+  released: ""
+  source: ollama
+  good_at: [ai-ml, reasoning]
+  description: "Opt-in AI/ML house model from the Nucleus program. Not released yet. ARAIL never downloads it,
+               and uses it only when you pin it and the installed weights match the pinned build."
+  install: "# Not released yet. Arrives with a Nucleus release; ARAIL never downloads it."
+  tier: optional
+  pin: qkz-aiml-qwen3-1.7b
+
 - id: qwen2.5-coder:7b
   name: Qwen 2.5 Coder 7B
   family: qwen

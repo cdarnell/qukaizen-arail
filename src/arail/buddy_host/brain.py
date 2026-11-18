@@ -36,6 +36,7 @@ _PROBE_OK_TTL_S = 60.0
 _PROBE_FAIL_TTL_S = 10.0
 
 _probe_cache: dict[str, tuple[float, bool]] = {}
+_think_cache: dict[tuple[str, str], tuple[float, bool]] = {}
 _probe_lock = threading.Lock()
 
 
@@ -94,6 +95,35 @@ def probe_structured_output(entry: Any) -> bool:
     return ok
 
 
+def probe_thinking(entry: Any) -> bool:
+    """True if the model behind ``entry`` reports the ``thinking`` capability (``/api/show``). Cached per
+    ``(root, tag)`` for 60 s (10 s when the probe failed). (seam)
+
+    Such a model thinks by default on Ollama, the trace goes to ``message.thinking`` (which ARAIL drops) and
+    uses up ``num_predict``: on Buddy's 400-token path the reply comes back empty or cut off."""
+    root = ollama_root(entry)
+    tag = str(getattr(entry, "model_id", "") or "")
+    key = (root, tag)
+    now = time.monotonic()
+    with _probe_lock:
+        hit = _think_cache.get(key)
+        if hit is not None and hit[0] > now:
+            return hit[1]
+    ok = known = False
+    try:
+        import requests
+        resp = requests.post(root + "/api/show", json={"model": tag}, timeout=1.5)
+        resp.raise_for_status()
+        caps = resp.json().get("capabilities")
+        ok = isinstance(caps, list) and "thinking" in caps
+        known = True
+    except Exception:  # noqa: BLE001 - unreachable or odd Ollama reads as "not a thinking model"
+        ok = False
+    with _probe_lock:
+        _think_cache[key] = (now + (_PROBE_OK_TTL_S if known else _PROBE_FAIL_TTL_S), ok)
+    return ok
+
+
 def catalog_family(model_id: str) -> Optional[str]:
     """The model catalog's ``family`` for ``model_id`` (tag stripped), or None. (seam)"""
     try:
@@ -143,6 +173,17 @@ def describe() -> BrainView:
     if not local:
         return BrainView(False, False, None, None, False, None, "brain_not_local")
     try:
+        from arail import model_pins
+        rec = model_pins.family_of(str(entry.model_id))
+        if rec is not None:
+            # An opt-in house model answers only while the weights Ollama
+            # serves under that tag still match its pin (re-checked every 60 s).
+            tag = str(entry.model_id)
+            if not model_pins.verify_cached(rec, None if tag == rec.id else tag).ok:
+                return BrainView(False, False, None, None, False, None, "brain_unavailable")
+    except Exception:  # noqa: BLE001 - cannot verify an opt-in model: fail closed
+        return BrainView(False, False, None, None, False, None, "brain_unavailable")
+    try:
         structured = bool(probe_structured_output(entry))
     except Exception:  # noqa: BLE001
         structured = False
@@ -172,6 +213,47 @@ def build_router() -> Any:
     if getattr(router, "backend_name", None) != "ollama_native":
         raise EdgeError("brain_not_local")
     return router
+
+
+def _served_attrs(entry: Any) -> dict:
+    """What was asked to answer, for the ``model_call`` record. Digests only for an opt-in family model (read
+    from the 60 s verification cache); nothing extra is fetched for any other model."""
+    tag = str(getattr(entry, "model_id", "") or "") or None
+    served: dict = {"tag": tag, "manifest_digest": None, "weights_sha256": None, "pin_state": None}
+    try:
+        from arail import model_pins
+        rec = model_pins.family_of(tag)
+        if rec is not None:
+            chk = model_pins.verify_cached(rec, None if tag == rec.id else tag)
+            served.update(manifest_digest=chk.manifest_digest, weights_sha256=chk.weights_sha256,
+                          pin_state=chk.state)
+    except Exception:  # noqa: BLE001
+        pass
+    return served
+
+
+def stream_turn(router: Any, *, system: str, prompt: str, max_tokens: int, schema: Optional[dict],
+                entry: Any = None, sampling: Optional[dict] = None):
+    """The single call site of ``router.stream_complete(..., system_as_message=True)``, shared by the edge and the
+    brain A/B harness so the two cannot drift.
+
+    ``think=False`` is sent only to a model that reports the ``thinking`` capability, so a model without it gets the
+    request bytes it always got. ``sampling`` is passed only when not None; the edge always passes None."""
+    kw: dict = {}
+    think = None
+    if entry is not None:
+        try:
+            if probe_thinking(entry):
+                think = False
+        except Exception:  # noqa: BLE001
+            think = None
+        if think is not None:
+            kw["think"] = think
+        kw["trace_attrs"] = {"served": _served_attrs(entry), "think": think}
+    if sampling is not None:
+        kw["sampling"] = sampling
+    yield from router.stream_complete(prompt, max_tokens, system=system, response_schema=schema,
+                                      system_as_message=True, **kw)
 
 
 # --------------------------------------------------------------------------- request handling
@@ -285,3 +367,4 @@ def estimate_prompt_tokens(system: str, prompt: str) -> int:
 def _reset_for_tests() -> None:
     with _probe_lock:
         _probe_cache.clear()
+        _think_cache.clear()

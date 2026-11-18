@@ -48,6 +48,10 @@ class CatalogEntry:
     # could never be derived without parsing shell commands. Empty string
     # (not None) when unset, matching the rest of this dataclass's "" convention.
     hf_repo: str = field(default="")
+    # Opt-in house model: the id of its record in model_pins.json. Empty for
+    # every other row. A pinned row is never auto-picked and is installable
+    # only as the exact build the record names.
+    pin: str = field(default="")
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -68,6 +72,7 @@ class CatalogEntry:
             "hf_repo": self.hf_repo,
             "hf_url": (f"https://huggingface.co/{self.hf_repo}"
                        if self.hf_repo else None),
+            "pin": self.pin,
         }
 
 
@@ -103,6 +108,7 @@ def load_catalog() -> list[CatalogEntry]:
                 provider=(str(entry["provider"]) if entry.get("provider") else None),
                 ctx=(str(entry["ctx"]) if entry.get("ctx") else None),
                 hf_repo=str(entry.get("hf_repo") or ""),
+                pin=str(entry.get("pin") or ""),
             ))
         except (KeyError, TypeError, ValueError):
             continue
@@ -310,6 +316,28 @@ def _resolve_hint_for_gallery(
     }
 
 
+def _apply_pin_state(d: dict[str, Any], pin_id: str, installed_ids: set) -> None:
+    """Opt-in row: installed only when the served weights match the pin record.
+    An installed tag of the family that is not the pinned build (for example an
+    untrained control) is shown, but is not pickable."""
+    from arail import model_pins
+    rec = model_pins.load().get(pin_id)
+    if rec is None:
+        d.update(installed_state="available", pin_state="invalid", pickable=False,
+                 pin_note=f"{pin_id} has no pin record.")
+        return
+    chk = model_pins.verify(rec)
+    d["pin_state"] = chk.state
+    d["pin_note"] = chk.reason
+    d["installed_state"] = "installed" if chk.ok else "available"
+    d["pickable"] = chk.ok
+    others = sorted(i for i in installed_ids
+                    if i.split(":", 1)[0] == pin_id and i != chk.tag)
+    if others and not chk.ok:
+        d["pin_note"] = (f"{chk.reason} Installed but not the pinned build: "
+                         f"{', '.join('`' + o + '`' for o in others)}.")
+
+
 def gallery_view() -> dict[str, Any]:
     """Build the unified chat-page gallery payload.
 
@@ -329,6 +357,8 @@ def gallery_view() -> dict[str, Any]:
     for entry in load_catalog():
         d = entry.as_dict()
         d["installed_state"] = "installed" if entry.id in installed_ids else "available"
+        if entry.pin:
+            _apply_pin_state(d, entry.pin, installed_ids)
         catalog.append(d)
         catalog_by_id[entry.id] = d
     # Tally

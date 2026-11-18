@@ -1,0 +1,138 @@
+{
+  "schema": "arail.format-breakdown/v1",
+  "derived_from": "rows.jsonl (not committed)",
+  "rows_sha256": "64b6994a6dbf12c7858b55e4cdc170f4fabe7b68820cf805533a5a4290b234f4",
+  "matches_recorded_M5": {
+    "baseline": true,
+    "aa": true,
+    "withheld": true,
+    "reference": true,
+    "withheld_reference": true,
+    "sc4_content": true,
+    "sc4_empty": true,
+    "candidate": true,
+    "withheld_candidate": true
+  },
+  "breakdown": {
+    "baseline": {
+      "leak": 0,
+      "unparseable": 0,
+      "schema_invalid": 0,
+      "duplicate_cite": 45,
+      "empty": 0,
+      "truncated": 0,
+      "error": 0,
+      "total": 45
+    },
+    "aa": {
+      "leak": 0,
+      "unparseable": 0,
+      "schema_invalid": 0,
+      "duplicate_cite": 10,
+      "empty": 0,
+      "truncated": 0,
+      "error": 0,
+      "total": 10
+    },
+    "withheld": {
+      "leak": 0,
+      "unparseable": 0,
+      "schema_invalid": 0,
+      "duplicate_cite": 11,
+      "empty": 0,
+      "truncated": 0,
+      "error": 0,
+      "total": 11
+    },
+    "reference": {
+      "leak": 0,
+      "unparseable": 0,
+      "schema_invalid": 0,
+      "duplicate_cite": 1,
+      "empty": 0,
+      "truncated": 0,
+      "error": 0,
+      "total": 1
+    },
+    "withheld_reference": {
+      "leak": 0,
+      "unparseable": 0,
+      "schema_invalid": 0,
+      "duplicate_cite": 1,
+      "empty": 0,
+      "truncated": 0,
+      "error": 0,
+      "total": 1
+    },
+    "sc4_content": {
+      "leak": 0,
+      "unparseable": 0,
+      "schema_invalid": 0,
+      "duplicate_cite": 0,
+      "empty": 0,
+      "truncated": 0,
+      "error": 0,
+      "total": 0
+    },
+    "sc4_empty": {
+      "leak": 0,
+      "unparseable": 0,
+      "schema_invalid": 0,
+      "duplicate_cite": 0,
+      "empty": 0,
+      "truncated": 0,
+      "error": 0,
+      "total": 0
+    },
+    "candidate": {
+      "leak": 0,
+      "unparseable": 0,
+      "schema_invalid": 0,
+      "duplicate_cite": 1,
+      "empty": 0,
+      "truncated": 0,
+      "error": 0,
+      "total": 1
+    },
+    "withheld_candidate": {
+      "leak": 0,
+      "unparseable": 0,
+      "schema_invalid": 0,
+      "duplicate_cite": 1,
+      "empty": 0,
+      "truncated": 0,
+      "error": 0,
+      "total": 1
+    },
+    "rerun:baseline": {
+      "leak": 0,
+      "unparseable": 0,
+      "schema_invalid": 0,
+      "duplicate_cite": 6,
+      "empty": 0,
+      "truncated": 0,
+      "error": 0,
+      "total": 6
+    },
+    "rerun:reference": {
+      "leak": 0,
+      "unparseable": 0,
+      "schema_invalid": 0,
+      "duplicate_cite": 0,
+      "empty": 0,
+      "truncated": 0,
+      "error": 0,
+      "total": 0
+    },
+    "rerun:candidate": {
+      "leak": 0,
+      "unparseable": 0,
+      "schema_invalid": 0,
+      "duplicate_cite": 0,
+      "empty": 0,
+      "truncated": 0,
+      "error": 0,
+      "total": 0
+    }
+  }
+}

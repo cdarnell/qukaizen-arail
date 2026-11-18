@@ -324,6 +324,13 @@ MODEL_METADATA_OVERRIDES: List[tuple] = [
         "total_params_b": 1.0,
         "notes": "v1.0.0 name for llama-ai-eng.",
     }),
+    # Opt-in house model (Qwen3-1.7B student). The GGUF header reports
+    # 2,031,739,904 parameters (embeddings included); the name regex alone
+    # would say 1.7B. Either is far under the 8B ceiling.
+    (_re.compile(r"^qkz-aiml-qwen3-1\.7b(?::|$)", _re.IGNORECASE), {
+        "total_params_b": 2.03,
+        "notes": "Opt-in Nucleus-minted Qwen3-1.7B student (chat/model_pins.json).",
+    }),
     (_re.compile(r"^ai-engineer(?::|$)", _re.IGNORECASE), {
         "total_params_b": 7.0,
         "notes": "Maximus deep persona wrap over Qwen2.5-7B-Instruct (models/ai-eng/Modelfile.deep). NOT a rename of ai-eng/llama-ai-eng.",

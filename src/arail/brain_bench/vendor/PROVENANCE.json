@@ -1,0 +1,16 @@
+{
+  "schema": "arail.vendor-stamp/v1",
+  "source_repo": "cdarnell/qukaizen-buddy",
+  "source_commit": "d9d660c095eac297ef3cfd8b13ab7efdd15c9c73",
+  "source_dir": "buddy/src/buddy",
+  "source_files": {
+    "persona.py": "sha256:9153f955962e8a76fd20ee0b47772d813f6253f072f5a64a6fd89a41e39d9145",
+    "answer.py": "sha256:28cfe795e6e554ea5e96462bb04f01630db582a33ff12de9c9b1decd94f3c03e",
+    "world.py": "sha256:c3a835d49501e112863fcc8b1ff15a550ebb467a0e566fa3572cdf151e6b4248"
+  },
+  "files": {
+    "buddy_prompt.v1.json": "sha256:2795df6ac7c008a9d75d1d0c7b092c02d32ed6195f5f2be6ebbeb6356791327d"
+  },
+  "vendored_from": "persona.STRUCTURED, persona.TEMPLATE, persona.LLAMA_LINE, world._STOPWORDS, world.context_block (heading, line format, limits), answer.answer_schema (kinds, proposals, limits). Copied by hand; no automatic drift check (TD2).",
+  "synced_on": "2026-11-18"
+}

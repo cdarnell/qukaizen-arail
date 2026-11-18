@@ -1,0 +1,45 @@
+{
+  "schema": "arail.model-pins/v1",
+  "pins": [
+    {
+      "id": "qkz-aiml-qwen3-1.7b",
+      "status": "pending",
+      "ollama_tag": null,
+      "weights_sha256": null,
+      "manifest_digest": null,
+      "serving": {
+        "template_sha256": null,
+        "parameters": {
+          "stop": null,
+          "temperature": null,
+          "top_k": null,
+          "top_p": null,
+          "repeat_penalty": null,
+          "num_ctx": null
+        },
+        "system": null,
+        "thinking": {"capable": true, "buddy": "off"}
+      },
+      "model": {
+        "base": "Qwen/Qwen3-1.7B",
+        "license": "apache-2.0",
+        "parameter_count": null,
+        "context_length": null,
+        "quantization": null
+      },
+      "release": {
+        "public_name": "qkz-aiml-qwen3-1.7b",
+        "version": null,
+        "isotope_id": null,
+        "source_repo": "cdarnell/qukaizen-nucleus",
+        "source_commit": null,
+        "release_record_sha256": null,
+        "sealed": false,
+        "verdict_sha256": null
+      },
+      "heldout": {"world": "ai", "world_sha256": null, "slugs": null, "slugs_sha256": null},
+      "filled_by": null,
+      "note": "Pending: no trained adapter exists. The tag qkz-aiml-qwen3-1.7b:control-merge on a dev machine is an UNTRAINED zero-adapter control and must never be pinned here."
+    }
+  ]
+}

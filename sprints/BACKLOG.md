@@ -2430,3 +2430,64 @@ marker with the fix: it is strict and fails the day the debt is paid.
 | TD61 | **FIXED (row sink only; the node-harness-in-CI part remains open).** **The Network Policy modal builds its Recent-activity rows with `innerHTML` from the audit log's `url_host` and `caller`, so a stored string acts as markup** (found by QA in the egress-guard sprint; pre-existing, security, not in that PR's diff). `src/arail/portal/static/nav.js` builds each row with `row.innerHTML = ...`. A refused `urllib.request.urlopen("http://<img src=x onerror=alert(document.cookie)>/")` stores `url_host` verbatim and the row renders as `<code><img src=x onerror=...></code>` (run, with a DOM stub under node). `requests`, `httpx` and `httpx2` percent-encode the host, so only the `urllib` path reaches it, and reaching the sink needs code in a guarded process that passes a host containing whitespace to `urllib.request`; the in-tree `urlopen` calls use fixed or loopback URLs. Script running in the portal's origin would pass the toggle's same-origin gates and could `POST /api/airgap/toggle` (reasoned, not run). Fix: build each row with `createElement` and `textContent`, as the known-gaps list next to it already does (about six lines), with a test that renders a hostile host under the node harness or pins the source. The same harness is what the badge and the pill need: in CI their incomplete-guard behaviour is pinned only by regexes over `nav.js` (the architect's R-N4), and the only behavioural run is a node DOM stub run by hand; it belongs in CI, skipped only when `node` is absent and declared in the egress legs so that the skip is red. | High priority: the next change to `nav.js`, or any change that lets a user-chosen string reach `urlopen`. |
 | TD62 | **Two older paragraphs describe a two-step confirmation of the airgap toggle that was removed.** `docs/PRIVACY.md` ("Toggling LAB_MODE from the UI": "deliberately two-step ... wait 3 seconds for the confirm button to enable") and `README.md` ("Toggling LAB_MODE from the UI") still describe it; `post_airgap_toggle`'s docstring says the confirm-token two-step was removed (sprint 2026-05-14-airgap-onetap-toggle) and that the same-origin and loopback-bind gates cover what the token did. Pre-existing; found while aligning the other airgap paragraphs in TD50's PR, left alone there. Fix: say what the toggle does now (one click, the gates, the audit line). | The next change to either paragraph or to the toggle. |
 | TD63 | **Loose ends of the incomplete-guard wording, from the architect's re-review of TD50's PR** (all in a state no supported library version reaches; the tests simulate it). (1) `./arailctl doctor` prints the incomplete message twice: the guard's own log line reaches stderr through logging's last-resort handler (the Model Forge worker had the same fault, fixed with a `NullHandler` around its `install_guard()`), and the doctor's `lab mode : airgapped (airgapped — no cloud egress)` line sits two lines above its own `INCOMPLETE` line. Fix: the same `NullHandler` around the doctor's `install_guard()` (move `_guard_log_kept_off_stderr` into `egress`), and a mode suffix that says "except the libraries below" when `egress.uncovered()` is non-empty; test: a fresh-interpreter doctor run, in the style of the worker's. (2) The remedy calls a ceiling "a version the lab was tested with" (`_TESTED_RANGES`, `docs/PRIVACY.md`): a release inside `httpx2<3` that renamed its transport classes satisfies the pin, so `pip install 'httpx2<3'` reports "already satisfied" and changes nothing. Say "the range the lab supports; if a release inside it is the one that broke, pin the previous release", or record the last versions the daily legs saw. (3) `get_airgap_status` qualifies the airgapped definition from `uncovered()` and not from `guard_installed`, so an `install_guard()` failure other than `EgressGuardIncomplete`, before coverage is recorded, would leave "Cloud-provider APIs are blocked" beside an amber pill (no reachable path was found); also qualify it when `not _INSTALLED`. (4) The static help text at `src/arail/portal/templates/admin.html:923`, "Airgapped: zero network calls, fully local.", is pre-existing and over-claims in every state. | TD56's work, or the next change to the doctor's environment section, `_incomplete_message` or the status definition. |
+
+---
+
+## aiml-slm-engine follow-ups (TD1-TD6)
+
+**Filed by:** `sprints/2026-11-18-aiml-slm-engine/` (ARCHITECTURE.md "Tech debt"), added by the builder in the
+last build commit.
+
+- **TD1: chat tab think policy.** The chat tab still sends no `think`. A pin of a Qwen3 model gives the chat
+  tab hidden thinking that uses up `max_tokens` (the `OllamaNativeBackend` docstring says traces are kept, but
+  only `message.content` is read). Ticket: "chat tab: think policy per model from the pin record".
+- **TD2: vendored Buddy prompt has no drift check.** `src/arail/brain_bench/vendor/buddy_prompt.v1.json` is a
+  stamped copy of Buddy's persona and answer grammar (`qukaizen-buddy@d9d660c0`). Ticket: a re-vendor script
+  plus a check against a published Buddy contract artifact (no sibling path).
+- **TD3: non-family bare-name fallback.** `model_resolve._match_installed` and `models_api._validate_pin` still
+  silently map `X:a` to `X:b` for every model outside the opt-in family.
+- **TD4: template check approximation.** `brain_bench.grade.template_usable` omits the polarity check of
+  Buddy's `usable_sentence`.
+- **TD5: no `arailctl` verb** for the harness or for pinning (pinning is HTTP only; the harness is
+  `python -m arail.brain_bench`).
+- **TD6: 60 s re-tag window.** Per-turn pin verification is cached for 60 s, so a model re-tagged under a
+  running edge is noticed within a minute, not instantly.
+
+---
+
+## aiml-slm-engine review follow-ups (TD7, TD10, owner note)
+
+**Filed by:** `sprints/2026-11-18-aiml-slm-engine/` review loop 1 (REVIEW.md findings 10, 12, 14e).
+TD8 (the `ARAIL_MODEL_PINS_FILE` production override) was **fixed, not filed** (test-only now). TD9 (the frozen-surface test
+freezing all of `eval/`) is moot: the harness inputs moved to `bench/buddy_brain/` and the frozen test is untouched.
+
+- **TD7: a family value in `MODEL_NAME` bypasses verify outside the resolver.** `model_defaults.apply()` stamps the
+  cached or pinned slot-A value into `MODEL_NAME` at `arail.config` import without re-verifying it, and `stamp_env` never
+  erases `MODEL_NAME` when A is unresolved. A `.env` `MODEL_NAME=qkz-aiml-qwen3-1.7b:control-merge`, with only that tag
+  installed or Ollama down, leaves the unverified family tag where registry tier 0 and the chat tab can use it (the Buddy
+  edge is protected by `describe()`). Reachable only through an explicit operator edit. QA should probe the scenario once.
+- **TD10: the test suite writes into the real `lab/data`.** `agent_workflows.py` does `from arail.config import DATA_DIR`
+  (bound at import), so conftest's `monkeypatch.setattr(config, "DATA_DIR", ...)` cannot redirect it, and
+  `test_egress_bootstrap` writes the real `egress.jsonl`. Make `agent_workflows` and the egress audit default resolve
+  `DATA_DIR` per call, and add a suite-level guard that fails if `lab/data` changes during a test session. (The brain bench
+  now reports this as an inconclusive SC8b instead of a false isolation failure.)
+- **Owner note (cross-repo, nothing sent to `qukaizen-buddy`):** Buddy's persona (vendored verbatim at `d9d660c0`) says
+  "Pick the one term that is closest to what the question asks and put its slug first in cite" before "Use kind abstain only
+  when no term is about the question". A closest term always exists, and no tested 1-2B brain overrides it (M2 was 0/32 on all
+  three arms in the first full run). On Buddy's real path abstain is mostly enforced by code (retrieval withholding cards makes
+  `answer_schema([])` abstain-only). Whether unrelated cards reach the brain in production depends on Buddy's retrieval
+  threshold, which is unverified. The owner decides whether to raise it with the Buddy repo.
+
+## aiml-slm-engine review loop 2 follow-up (finding 19)
+
+**Filed by:** `sprints/2026-11-18-aiml-slm-engine/` re-review 1 (REVIEW.md finding 19). Prefix: `aiml-TD11`, to avoid
+colliding with other sprints' TD labels.
+
+- **aiml-TD11: sample `/api/ps` during the run.** The harness records `/api/ps` only before and after. R7 is now
+  `not_assessable` when the "before" sample shows another client (this fixes the committed run's report), but a client that
+  starts mid-run goes unseen. Sample `/api/ps` before, per block and after; if a model outside the arm set appears, or an arm
+  tag was already resident at the start, set R7 to `not_assessable` and warn. SC8b's quiet-lab check covers lab files, not
+  Ollama. **The R7 latency in `bench/buddy_brain/runs/20261118T175243Z-620ebcfa/` is not evidence** (the nucleus mint shared
+  Ollama; the arms ran on ggml and llamacpp). Correctness numbers are unaffected.
+- **Note (from re-review):** the TD7/TD10 labels above reuse numbers other sprints' sections already use; read them inside
+  their own section (or as `aiml-TD7`, `aiml-TD10`).
