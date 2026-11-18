@@ -12,7 +12,44 @@ EVAL_DIR = REPO_ROOT / "bench" / "buddy_brain"
 WORLDS_DIR = REPO_ROOT / "lab" / "worlds"
 TASKS_PATH = EVAL_DIR / "tasks.v1.jsonl"
 MANIFEST_PATH = EVAL_DIR / "tasks.v1.manifest.json"
-RULES_PATH = EVAL_DIR / "rules.v1.json"
+RULES_PIN_PATH = EVAL_DIR / "rules.pin.json"
+RULES_V1_PATH = EVAL_DIR / "rules.v1.json"
+
+
+def _rules_pin() -> Dict[str, Any]:
+    try:
+        return json.loads(RULES_PIN_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raise TaskError("rules_pin_unreadable") from None
+
+
+def active_rules_path() -> Path:
+    """The rules file the pin record names as active (pre-registered before any run)."""
+    return EVAL_DIR / _rules_pin()["active"]
+
+
+def verify_rules(path: Optional[Path] = None) -> Path:
+    """The rules file must be one the pin record lists, with the sha256 it lists (review finding 4).
+    Returns the path; raises TaskError(rules_hash_mismatch) for any other file or digest."""
+    p = Path(path) if path else active_rules_path()
+    want = _rules_pin().get("files", {}).get(p.name)
+    try:
+        got = sha256_file(p)
+    except OSError:
+        raise TaskError("rules_unreadable") from None
+    if want is None or got != want:
+        raise TaskError("rules_hash_mismatch")
+    return p
+
+
+def repo_relative(path: Path) -> str:
+    try:
+        return str(Path(path).resolve().relative_to(REPO_ROOT.resolve()))
+    except ValueError:
+        return Path(path).name
+
+
+RULES_PATH = RULES_V1_PATH
 
 
 class TaskError(RuntimeError):

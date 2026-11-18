@@ -20,7 +20,7 @@ from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Tuple
 
 from arail import brain_bench, model_pins
-from arail.brain_bench import compose, grade, metrics, ollama, report, stats, tasks as T, vendor_data, verdict
+from arail.brain_bench import compose, grade, isolation, metrics, ollama, report, stats, tasks as T, vendor_data, verdict
 
 EXIT_OK, EXIT_UNTRUSTED, EXIT_REFUSED, EXIT_ABORTED, EXIT_USAGE = 0, 3, 4, 5, 2
 SEED = stats.SEED
@@ -472,6 +472,8 @@ def child_main(cfg_path: str) -> int:
         print("refused: egress guard incomplete", file=sys.stderr)
         return EXIT_REFUSED
     try:
+        paths_start = isolation.child_paths()
+        isolation.write_canary()
         runner = Runner(opts)
         all_tasks = T.load_tasks()
         res = runner.run(all_tasks, opts.get("pin_id"))
@@ -487,7 +489,8 @@ def child_main(cfg_path: str) -> int:
             fh.write(json.dumps(r, ensure_ascii=False) + "\n")
     res["warnings"] = runner.warnings
     res["isolation"] = {"env_keys": sorted(os.environ), "lab_root": os.environ.get("LAB_ROOT", ""),
-                        "lab_mode": os.environ.get("LAB_MODE", "")}
+                        "lab_mode": os.environ.get("LAB_MODE", ""), "paths_start": paths_start,
+                        "paths_end": isolation.child_paths()}
     res["wall_s"] = time.monotonic() - runner.t0
     res["finished"] = _utc()
     (out / "partial.json").write_text(json.dumps(res, indent=2, default=str))
@@ -528,7 +531,7 @@ def _guarded_paths() -> List[Path]:
 def child_env(tmp: Path, host_port: Tuple[str, str]) -> Dict[str, str]:
     env = {"PATH": os.environ.get("PATH", ""), "LANG": os.environ.get("LANG", "C.UTF-8"),
            "PYTHONPATH": str(T.REPO_ROOT / "src"), "HOME": str(tmp / "home"),
-           "LAB_ROOT": str(tmp / "lab"), "ARAIL_ENV_FILE": str(tmp / ".env"),
+           "LAB_ROOT": str(tmp / "lab"), "ARAIL_DATA_DIR": str(tmp / "lab" / "data"), "ARAIL_ENV_FILE": str(tmp / ".env"),
            "ARAIL_MODEL_DEFAULTS_FILE": str(tmp / "model_defaults.yaml"),
            "ARAIL_MODEL_REGISTRY_FILE": str(tmp / "model_registry.json"),
            "ARAIL_SECRETS_FILE": str(tmp / "secrets.env"), "ARAIL_AIRGAP_AUDIT_FILE": str(tmp / "airgap_audit.jsonl"),
@@ -545,7 +548,8 @@ def run(opts: Dict[str, Any]) -> int:
         man = T.verify(opts.get("tasks"), None)
         if not vendor_data.stamp_ok():
             raise Refused("vendor_stamp_mismatch")
-        rules = json.loads(Path(opts.get("rules") or T.RULES_PATH).read_text())
+        rules_path = T.verify_rules(Path(opts["rules"]) if opts.get("rules") else None)
+        rules = json.loads(rules_path.read_text())
         o = ollama.Ollama()
         version = o.version()
         root = o.root
@@ -597,24 +601,36 @@ def run(opts: Dict[str, Any]) -> int:
     cfg = tmp / "child.json"
     cfg.write_text(json.dumps(child_opts))
     env = child_env(tmp, (os.getenv("OLLAMA_HOST", "127.0.0.1").split("://")[-1].split(":")[0] or "127.0.0.1", port))
-    proc = subprocess.run([sys.executable, "-m", "arail.brain_bench", "_child", str(cfg)], env=env,
-                          cwd=str(T.REPO_ROOT), check=False)
+    interrupted = False
+    proc = None
     touched = sorted({b["tag"] for b in blocks})
-    restore = ollama.restore(o, res_before, touched)
-    snap_after = _mtimes(guarded, out)
+    restore: Dict[str, Any] = {"restored": False, "ps_after": []}
+    try:
+        proc = subprocess.run([sys.executable, "-m", "arail.brain_bench", "_child", str(cfg)], env=env,
+                              cwd=str(T.REPO_ROOT), check=False)
+    except KeyboardInterrupt:
+        interrupted = True
+    finally:
+        # always: put Ollama residency back (FM17) and look at the lab again, even on an interrupt
+        restore = ollama.restore(o, res_before, touched)
+        snap_after = _mtimes(guarded, out)
 
     partial_path = out / "partial.json"
-    if not partial_path.exists():
+    if interrupted or not partial_path.exists():
         shutil.rmtree(tmp, ignore_errors=True)
-        return proc.returncode or EXIT_REFUSED
+        if interrupted:
+            print("aborted: interrupted; residency restored: " + str(restore["restored"]), file=sys.stderr)
+            return EXIT_ABORTED
+        return (proc.returncode if proc else 0) or EXIT_REFUSED
     res = json.loads(partial_path.read_text())
     partial_path.unlink()
     changed = sorted(k for k in set(snap_before) | set(snap_after) if snap_before.get(k) != snap_after.get(k))
-    iso_ok = (not changed) and restore["restored"]
-    res["self_checks"].append({"id": "SC8", "passed": iso_ok,
-                               "expected": "lab/, the data dir and model_defaults.yaml untouched; Ollama residency restored",
-                               "observed": f"{len(changed)} guarded paths changed; residency restored: {restore['restored']}",
-                               "detail": ("changed: " + ", ".join(sorted({Path(c).name for c in changed})[:5])) if changed else ""})
+    iso = res.get("isolation") or {}
+    a8 = isolation.sc8a(iso.get("paths_start") or {}, iso.get("paths_end") or {}, tmp)
+    res["self_checks"] += [a8, isolation.sc8b(a8["passed"], changed, restore["restored"], T.REPO_ROOT)]
+    # the child's absolute paths are not kept in the evidence: only whether each was inside the temp root
+    for k in ("paths_start", "paths_end"):
+        iso[k] = {n: ("temp root" if isolation.inside(v, tmp) else "OUTSIDE") for n, v in (iso.get(k) or {}).items()}
     res["self_checks"].sort(key=lambda c: c["id"])
     sub = opts.get("limit_per_category")
     res.update({
@@ -622,8 +638,8 @@ def run(opts: Dict[str, Any]) -> int:
         "started_utc": res.pop("started"), "finished_utc": res.pop("finished"), "subset": sub,
         "tasks": {"path": "bench/buddy_brain/tasks.v1.jsonl", "sha256": man["tasks_sha256"],
                   "manifest_sha256": T.sha256_file(T.MANIFEST_PATH), "counts_by_category": man["counts"]},
-        "rules": {"path": "bench/buddy_brain/rules.v1.json", "sha256": T.sha256_file(Path(opts.get("rules") or T.RULES_PATH)),
-                  "status": rules.get("status")},
+        "rules": {"path": T.repo_relative(rules_path), "sha256": T.sha256_file(rules_path),
+                  "status": rules.get("status"), "pinned": True},
         "vendor": {"buddy_prompt_sha256": vendor_data.prompt_sha256(),
                    "source_repo": vendor_data.provenance()["source_repo"],
                    "source_commit": vendor_data.provenance()["source_commit"]},
@@ -641,9 +657,17 @@ def run(opts: Dict[str, Any]) -> int:
     (out / "report.md").write_text(report.render(res, rules))
     shutil.rmtree(tmp, ignore_errors=True) if not opts.get("keep_root") else print(f"kept {tmp}")
     print(report.summary_line(res))
+    return exit_code(res, bool(sub))
+
+
+def exit_code(res: Dict[str, Any], subset: bool) -> int:
+    """0 only when the contract's 0 holds: complete, no self-check failed, and a verdict printed. A
+    --limit-per-category smoke run may end 0 without a verdict; a full run may not (review finding 3)."""
     if res.get("complete") is False:
         return EXIT_ABORTED
-    return EXIT_UNTRUSTED if any(c["passed"] is False for c in res["self_checks"]) else EXIT_OK
+    if any(c["passed"] is False for c in res["self_checks"]):
+        return EXIT_UNTRUSTED
+    return EXIT_UNTRUSTED if (not subset and not res["verdict"]["printed"]) else EXIT_OK
 
 
 def _pin_summary(pin_id: Optional[str]) -> Dict[str, Any]:

@@ -144,7 +144,9 @@ def test_two_item_run_end_to_end_isolation_and_residency(stub, tmp_path, monkeyp
     assert "OPENAI_API_KEY" not in keys and not any(k.endswith("_API_KEY") for k in keys)
     assert res["isolation"]["lab_mode"] == "airgapped" and "brain-bench-" in res["isolation"]["lab_root"]
     sc = {c["id"]: c for c in res["self_checks"]}
-    assert sc["SC8"]["passed"] is True, sc["SC8"]
+    assert sc["SC8a"]["passed"] is True, sc["SC8a"]
+    assert sc["SC8b"]["passed"] is True, sc["SC8b"]
+    assert set(res["isolation"]["paths_end"].values()) == {"temp root"}
     assert sc["SC5"]["passed"] is True and sc["SC6"]["passed"] is True and sc["SC3"]["passed"] is True
     if before is not None:
         assert lab.stat().st_mtime == before
@@ -298,3 +300,82 @@ def test_verdict_is_printed_only_when_everything_passed_on_the_full_set():
     assert _results(subset=3)["verdict"]["printed"] is False
     assert _results(complete=False)["verdict"]["printed"] is False
     assert _results(self_checks=[{"id": "SC2", "passed": None, "expected": "e", "observed": "o"}])["verdict"]["printed"] is False
+
+
+# ── review loop 1: exit code, interrupt, rules pin, SC8a/SC8b ───────────────────
+
+def _res(checks, printed=False, complete=True):
+    return {"complete": complete, "self_checks": [{"id": f"SC{i}", "passed": p} for i, p in enumerate(checks)],
+            "verdict": {"printed": printed}}
+
+
+def test_finding_3_exit_codes():
+    assert R.exit_code(_res([True, True], printed=True), False) == R.EXIT_OK
+    assert R.exit_code(_res([True, None], printed=False), False) == R.EXIT_UNTRUSTED     # withheld on a full run
+    assert R.exit_code(_res([True, None], printed=False), True) == R.EXIT_OK              # smoke run
+    assert R.exit_code(_res([True, False], printed=False), True) == R.EXIT_UNTRUSTED
+    assert R.exit_code(_res([True], printed=False, complete=False), False) == R.EXIT_ABORTED
+
+
+def test_finding_5_interrupt_restores_residency_cleans_up_and_exits_5(stub, tmp_path, monkeypatch):
+    import subprocess
+    real_run = subprocess.run
+
+    def interrupted(cmd, *a, **k):
+        if "_child" in cmd:
+            raise KeyboardInterrupt
+        return real_run(cmd, *a, **k)
+    monkeypatch.setattr("subprocess.run", interrupted)
+    import glob
+    import tempfile
+    before = set(glob.glob(tempfile.gettempdir() + "/brain-bench-*"))
+    assert R.run(opts(tmp_path)) == R.EXIT_ABORTED
+    assert set(glob.glob(tempfile.gettempdir() + "/brain-bench-*")) == before
+    assert set(stub.loaded) == {"llama-ai-eng:latest", "unrelated:1b"}
+
+
+def test_finding_4_rules_are_hash_pinned(stub, tmp_path):
+    edited = tmp_path / "rules.v1.json"
+    edited.write_text(T.RULES_V1_PATH.read_text().replace("2.0", "9.0", 1))
+    assert R.run(opts(tmp_path, rules=str(edited))) == R.EXIT_REFUSED
+    other = tmp_path / "rules.mine.json"
+    other.write_text(T.RULES_V1_PATH.read_text())
+    assert R.run(opts(tmp_path, rules=str(other))) == R.EXIT_REFUSED
+    assert not stub.chat_bodies
+    assert T.verify_rules().name == json.loads(T.RULES_PIN_PATH.read_text())["active"]
+
+
+def test_finding_4_results_record_the_real_rules_path(stub, tmp_path):
+    R.run(opts(tmp_path))
+    r = load(tmp_path)["rules"]
+    assert r["path"] == T.repo_relative(T.active_rules_path()) and r["pinned"] is True
+
+
+def test_sc8a_fails_when_a_path_is_outside_the_temp_root_or_the_canary_is_missing(tmp_path):
+    from arail.brain_bench import isolation as I
+    tmp = tmp_path / "root"
+    (tmp / "lab" / "data").mkdir(parents=True)
+    good = {"DATA_DIR": str(tmp / "lab" / "data"), "LAB_ROOT": str(tmp / "lab")}
+    assert I.sc8a(good, good, tmp)["passed"] is False                      # no canary, no trace yet
+    (tmp / "lab" / "data" / I.CANARY).write_text("x")
+    (tmp / "lab" / "data" / I.TRACE_FILE).write_text("{}")
+    assert I.sc8a(good, good, tmp)["passed"] is True
+    bad = {**good, "egress_audit": str(tmp_path / "elsewhere" / "egress.jsonl")}
+    r = I.sc8a(bad, bad, tmp)
+    assert r["passed"] is False and "egress_audit" in r["detail"]
+    assert I.sc8a(good, {**good, "LAB_ROOT": str(tmp_path / "x")}, tmp)["passed"] is False
+    assert I.sc8a({}, {}, tmp)["passed"] is False
+
+
+def test_sc8b_is_inconclusive_when_someone_else_wrote_and_groups_by_directory(tmp_path):
+    from arail.brain_bench import isolation as I
+    root = T.REPO_ROOT
+    changed = [str(root / "lab/data/lance/agent_workflows.lance" / f"f{i}") for i in range(5)] + [str(root / "lab/data/egress.jsonl")]
+    r = I.sc8b(True, changed, True, root)
+    assert r["passed"] is None and "inconclusive: another process wrote to the lab during the run" == r["observed"]
+    assert "lab/data/lance/agent_workflows.lance: 5 files" in r["detail"]
+    assert I.sc8b(False, changed, True, root)["passed"] is False           # an isolation bug
+    assert I.sc8b(True, [], False, root)["passed"] is False                # residency not restored
+    assert I.sc8b(True, [], True, root)["passed"] is True
+    assert verdict.decide({"complete": True, "subset": None, "self_checks": [{"id": "SC8b", "passed": None}]},
+                          json.loads(T.RULES_V1_PATH.read_text()))["printed"] is False
