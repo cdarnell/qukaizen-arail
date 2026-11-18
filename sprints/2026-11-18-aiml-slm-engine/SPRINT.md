@@ -29,8 +29,8 @@ and security gates green.
 
 | Phase | Subagent | Artifact | Status | Started | Finished | Verdict |
 |---|---|---|---|---|---|---|
-| think | visionary | VISION.md | pending | — | — | — |
-| plan | architect (design) | ARCHITECTURE.md | pending | — | — | — |
+| think | visionary | VISION.md | done | 2026-11-18 | 2026-11-18 | proceed (`1867ce99`) |
+| plan | architect (design) | ARCHITECTURE.md | in progress | 2026-11-18 | — | — |
 | build | builder | BUILD_LOG.md | pending | — | — | — |
 | review | architect (review) | REVIEW.md | pending | — | — | — |
 | test | qa | TEST_REPORT.md | pending | — | — | — |
@@ -48,3 +48,4 @@ and security gates green.
 |---|---|
 
 ## Notes
+- VISION.md commit `1867ce99` carries a `Claude Opus 5.5` co-author trailer: that is the model the visionary subagent ran on. Left as is (accurate).
