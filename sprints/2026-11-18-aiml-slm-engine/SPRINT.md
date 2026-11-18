@@ -32,7 +32,7 @@ and security gates green.
 | think | visionary | VISION.md | done | 2026-11-18 | 2026-11-18 | proceed (`1867ce99`) |
 | plan | architect (design) | ARCHITECTURE.md | done | 2026-11-18 | 2026-11-18 | complete (`d0922a40`) |
 | build | builder | BUILD_LOG.md | done | 2026-11-18 | 2026-11-18 | done (`31ef7a08..e2c47bca`) |
-| review | architect (review) | REVIEW.md | in progress | 2026-11-18 | — | — |
+| review | architect (review) | REVIEW.md | BLOCK → fix loop 1 | 2026-11-18 | — | BLOCK (`94a247f3`) |
 | test | qa | TEST_REPORT.md | pending | — | — | — |
 | ship | — | PR | pending | — | — | — |
 
@@ -50,3 +50,4 @@ and security gates green.
 ## Notes
 - VISION.md commit `1867ce99` carries a `Claude Opus 5.5` co-author trailer: that is the model the visionary subagent ran on. Left as is (accurate).
 - Plan findings (ARCHITECTURE.md): (1) same-base-name fallback would serve `:control-merge` for a pin on the real tag — closed by exact-tag + GGUF-digest check; (2) Qwen3 thinks by default on Ollama 0.40.11 and Buddy's path never sends `think`, so replies come back empty — fix is `think:false` only for models reporting the thinking capability. Owner questions O1–O10 are open; none blocks the build.
+- Review 1 BLOCK: the build's NOTICE edit (`298d5898`) turned the frozen NOTICE-sha256 test red and BUILD_LOG called it pre-existing. Nine further ASK/INFO findings. Fix loop waits for the in-flight harness run to end (the loop moves/edits harness files), then a fresh evidence run is made on the fixed code.
