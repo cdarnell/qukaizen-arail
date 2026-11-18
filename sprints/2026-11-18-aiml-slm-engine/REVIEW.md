@@ -150,3 +150,78 @@ Net: as predicted, slightly positive. The repaid items (F1/A1 closed, the thinki
 9. QA: re-run `test_cli_picker`/`test_cli_status`/`test_cli_verbs` at base and head once Ollama is free. Run W1 (clean-machine before/after). Check FM26 (`MODEL_BACKEND` on the owner's lab). Read the reference run's self-checks.
 
 Items 2–7 are ASKs. If the builder files them as follow-up tickets instead, a re-review can come back WEAK_PASS once item 1 is resolved. Item 2 should land before the reference `report.md` is committed, because W5 is a win condition.
+
+---
+
+## Review 1 addendum: full-run findings
+
+**Run:** `eval/buddy_brain/runs/20261118T170647Z-e2c47bca/`, at `e2c47bca`, 17:07:03–17:22:04 UTC (12:07–12:22 local). It exited 3 with no verdict: SC4 and SC8 failed, and SC1–SC3 and SC5–SC7 passed. I worked from `rows.jsonl`, `results.json` and the code, and started no model calls. The addendum verdict is unchanged: **BLOCK** (finding 1). The run also cannot serve as step-14 evidence until findings 12–14 are fixed and it is re-run on a quiet machine.
+
+12. **[ASK] SC8: real writes to the lab happened during the run, and the harness child did not make them. SC8 cannot tell who did.**
+    - **What changed.** All 282 entries are in the worktree's real `lab/data/`: about 277 under `lab/data/lance/agent_workflows.lance/` (plus their directories), `lab/data/agent_workflows.json` and `lab/data/egress.jsonl`.
+    - **When.** The lance files and the json were modified between 12:09:14 and 12:09:34 local, and `egress.jsonl` at 12:10:40. Both times fall inside **my own review pytest runs** (the targeted suite, then the egress gate). The last `egress.jsonl` entries name their callers as `tests.test_egress_bootstrap.*`.
+    - **Why it was not the child.** The child runs with `LAB_ROOT=<tmp>/lab`. `config.DATA_DIR` derives from that (`config.py:96-97`), and `agent_workflows` writes only under `DATA_DIR` (`agent_workflows.py:31-38`). The child cannot reach the real `lab/data`. No portal was running from this worktree; the only uvicorn processes were stubs in temp dirs.
+    - **Ruling.** SC8 was right to fail: the guarded lab really changed during the run. Its flaw is that it cannot attribute writes. **Do not exclude `*.lance` or "index caches".** `agent_workflows.lance` is agent-memory lab state, not a harness cache. Excluding it would blind SC8 to exactly the writes it exists to catch.
+    - **Required fix** (in `brain_bench/run.py`):
+      - (a) **SC8a, attribution, hard pass/fail.**
+        - At start and at exit, the child reports every write-capable path it resolved: `config.LAB_ROOT`, `DATA_DIR`, `PKB_ROOT`, `WORLDS_DIR`, `EXPERIMENTS_DIR`, `model_defaults._path()`, the registry file, the `agent_trace` file, `redact`'s secrets path and the egress audit file. The parent fails SC8a if any of them is outside `<tmp>`.
+        - Add a positive canary. The child writes `<config.DATA_DIR>/.brain-bench-canary`, and its `agent_traces.jsonl` must exist under `<tmp>` after the run. The parent checks both before `rmtree`. This proves the child's writes landed in the temp root.
+      - (b) **SC8b, quiet lab.** Keep today's mtime snapshot of the real roots, plus a residency restore.
+        - If SC8a passed but the real roots changed, set `passed: None` with observed text `"inconclusive: another process wrote to the lab during the run"`. The verdict stays withheld, because `decide()` already treats `None` as not passed, and the exit is 3 (finding 3).
+        - Group the detail by directory (for example `lab/data/lance/agent_workflows.lance: 277 files`) instead of the first 5 basenames.
+        - If SC8a failed, SC8 is FAIL (an isolation bug).
+      - (c) In `docs/buddy-brain-bench.md`, add a **"quiet lab" precondition** for any run that produces evidence: no portal, pytest or `arailctl` on the same checkout during the run.
+    - **Filed debt (pre-existing, not this branch).** The test suite writes into the real `lab/data`. `agent_workflows.py:22` does `from arail.config import DATA_DIR`, binding the value at import time, so conftest's `monkeypatch.setattr(config, "DATA_DIR", …)` cannot redirect it. `test_egress_bootstrap` writes the real `egress.jsonl`. Running the suite file by file did not reproduce the `agent_workflows` write, so it depends on test order. **TD10** in `sprints/BACKLOG.md`: make `agent_workflows` (and the egress audit default) resolve `DATA_DIR` per call, and add a suite-level guard that fails if `lab/data` changes during a test session.
+
+13. **[ASK] SC4 is mis-designed on two counts: the wrong arm and the wrong manipulation. M1 on the baseline measures slot position, not card content.**
+    - **Wrong arm. `llama-ai-eng` is at chance.**
+      - It cites slot 0 first on 77 of 132 D+G items (58 %), and 92 of 132 in the withheld arm.
+      - Its accuracy is 14/27 when the gold card is in slot 0 and 20/105 elsewhere (19 %, which is the 1-in-5 chance rate).
+      - A brain that does not read the cards cannot lose 15 pp when the cards are taken away. -3.8 pp is the expected result.
+      - By contrast, both qwen arms are flat across slots (23/27, 22/27, 18/26, 20/26, 19/26) and do read something.
+    - **Wrong manipulation. "Withheld" keeps slug and term, and 62 of the 132 D+G items are name-form ("What is X?").**
+      - Matching the term string answers those items: the reference arm scores 30/30 on D name-form and 15/16 on G name-form.
+      - Only the 70 example-form D items and 16 short-form G items need the card text. Even there, a model can map an example to a term name from its own knowledge.
+    - **The finding about the metric.** For the default brain, M1 is a position-bias reading. For the qwen arms, M1 mixes recognising the term name with reading the card. As composed, no check separates "read the World" from "knew the name".
+    - **Required fix: replace SC4 with this check (pre-registered in `rules.v1.json` / the manifest before the re-run):**
+      - Arm: the `reference` arm. Rule: the non-candidate arm with the highest M1, fixed by role, not chosen after seeing results.
+      - Items: example-form D plus short-form G, 86 items.
+      - Two blocks, both with **opaque cite ids** in place of slugs (`t1`–`t5` in the card lines and in the schema `cite.items.enum`, mapped back to slugs before grading):
+        - (i) `opaque+content`: the cards show `short` and `definition`, with no slug or term.
+        - (ii) `opaque-empty`: the cards show only their id.
+      - **Pass condition:**
+        - M1(i) − M1(ii) ≥ 15 pp, with the paired 95 % CI upper bound < 0 for (ii) − (i).
+        - M1(ii) lies within ±10 pp of chance (20 %).
+        - M1(i) ≥ 35 %.
+      - This proves the tasks can be answered from card content, and that the harness sees content removed. Cost: about 172 calls on the reference arm. The run took 901 s against a 45-minute cap, so this fits.
+    - **Keep the current slug+term "withheld" block, but make it informational and not a gate.** Report it as each arm's "content dependence" (M1 full − M1 slug+term), and run it on the reference and candidate arms too.
+    - **Add a chance guard to the report.** For every arm, show the first-cite position distribution and the M1 confidence interval against 20 % chance. Label any arm whose M1 CI includes chance with "M1 at chance: does not reflect card content for this arm".
+
+14. **[ASK] M2 = 0/32 on all three arms is real model behaviour, not a grading or plumbing bug. As a comparison metric it carries no information.**
+    - **Abstain is reachable.**
+      - The composed schema allows `kind: "abstain"` with `cite: []` (`compose.py:37-49`: `kinds` includes abstain, and `cite` has no `minItems`).
+      - The qwen arms emit `abstain` on 4 pressure items in this run, so the grammar and decoding path do produce it.
+      - Not every O item was graded `cite.wrong_chip`. The reference arm answered O-005 and O-022 with `kind: "answer", cite: []`, which fails `abstain.correct` without being a wrong chip.
+    - **The O items are genuinely out of World.**
+      - I read all 32. At least 28 have no relevant offered card ("What is Learning Rate?" offered qukaizen cards such as `buddy` and `teacher`).
+      - A few are borderline: O-004 QuKaiZen → `aerollm-runtime`, O-013 SFT → `build-time-teacher`, O-009 Guardrails → `adversarial-swarm`.
+      - `absent()` checks only exact names and slugs. That is acceptable, but list the borderline items in the report.
+    - **Cause.** Buddy's own persona (vendored verbatim) says "Pick the one term that is closest to what the question asks and put its slug first in cite" *before* "Use kind abstain only when no term is about the question". A closest term always exists, and no 1–2B brain overrides that. On Buddy's real path, abstain is mostly enforced by code: when retrieval finds no card, `answer_schema([])` allows only `abstain`. The O items model the case where retrieval passed unrelated cards. How often that happens in production depends on Buddy's retrieval threshold, which is unverified (Assumption 5).
+    - **Required fix:**
+      - (a) The report states under M2: "No tested brain abstains on its own when shown unrelated cards (0/32 each). Buddy's abstain therefore depends on code: retrieval must withhold cards. M2 cannot rank these arms."
+      - (b) SC2 and the comparisons mark a metric where every arm is at 0 % or 100 % as "uninformative (zero variance)". Today SC2 counts M2 as one of "3 metrics inside", which is vacuous.
+      - (c) Add a grader check `answer.uncited` (`kind == "answer"` and `cite == []`), report it separately in the M2o detail, and keep it a failure.
+      - (d) Add a unit test that `{"kind":"abstain","answer":"","cite":[],"propose":"none"}` validates against `answer_schema(task["offered"])` for every O item. This is the static proof that abstain is reachable.
+      - (e) Cross-repo feedback, not an ARAIL code change: send a one-paragraph finding to `qukaizen-buddy` that the persona's "closest term" sentence pre-empts the abstain rule. Record it in SPRINT.md.
+
+15. **[ASK] Effect on the promotion-rule proposal. These findings change the proposal; owner question O11 to be added to ARCHITECTURE's owner questions.**
+    - **R3 (M8 ≥ default + 10 pp) is uninformative while the default is at chance.** Even the UNTRAINED stand-in clears it (+46 pp). Proposal: measure R3 against `max(default, reference)`, or on example-form items only. R4 (vs stock qwen3) then carries the domain question, still gated by R11.
+    - **R1 is vacuous against a chance-level default and the 32 = 32 O floor.** Proposal: bound M3 against the **reference** arm (CI upper ≤ +2 pp). Mark the O-count clause "uninformative while all arms are at the floor". Add a P2 note that a default brain's abstain must stay code-enforced (finding 14).
+    - **New R12 (proposal):** first-cite position bias, the largest share of cites in any single slot, ≤ 35 % (gold position is uniform at 20 %). It catches a positional guesser directly.
+    - **The new SC4 (finding 13)** becomes the R10 sensitivity requirement.
+    - **Unchanged:** R2a, R2b, R5, R6, R7, R8, R9, R11. SC8 (finding 12) does not touch the rules.
+    - **Process.** Commit these as `rules.v2.json`, PROPOSAL and hash-pinned (finding 4), **before** the re-run. Do not edit `rules.v1.json` after its results have been seen.
+
+**Informational, not a verdict:** the stand-in and stock qwen3 are near-identical (M1 101 vs 102/132; SC2 passed). Both beat the default by about 50 pp on M1 because the default is at chance. This run says nothing about the house model. The report labels this correctly.
+
+**Updated required actions:** add findings 12–15 to the list above (items 10–13). Before any re-run, findings 2, 3, 4, 12, 13 and 14(b–d) must land, and `rules.v2.json` must be committed and pinned. Then re-run once on a quiet machine.
