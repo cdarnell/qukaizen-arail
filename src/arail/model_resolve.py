@@ -153,6 +153,8 @@ def _add_pin_state(row: Dict[str, Any], tag: str) -> None:
     row["pickable"] = chk.ok
     if not chk.ok:
         row["install_command"] = None
+        if row.get("present"):
+            row["pin_note"] = f"{chk.reason} Installed but not the pinned build: `{tag}`."
 
 
 def slot_b_candidates(airgapped: bool) -> List[Dict[str, Any]]:

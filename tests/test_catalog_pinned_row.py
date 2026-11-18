@@ -69,6 +69,7 @@ def test_t_c2_gallery_marks_installed_control_as_not_the_pinned_build(control_in
 def test_t_c2_slot_a_candidates_carry_pin_state(control_installed, monkeypatch):
     rows = {r["id"]: r for r in mr.slot_a_candidates(False)}
     assert rows[CONTROL]["pickable"] is False and rows[CONTROL]["pin_state"] == "pending"
+    assert f"Installed but not the pinned build: `{CONTROL}`" in rows[CONTROL]["pin_note"]
     assert "pin_state" not in rows["llama-ai-eng:latest"]
 
 
