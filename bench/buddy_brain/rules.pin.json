@@ -1,0 +1,11 @@
+{
+  "schema": "arail.buddy-brain-rules-pin/v1",
+  "active": "rules.v2.json",
+  "files": {
+    "rules.v1.json": "b4d8463a1cd105baf1fdb11605237daca294f552fcbdd4969fa50712f6fa45c9",
+    "rules.v2.json": "99d3b2e160590dad27270a65958fe9e464f500b159d2c0f112c9c735412845ed"
+  },
+  "superseded": [
+    "rules.v1.json"
+  ]
+}

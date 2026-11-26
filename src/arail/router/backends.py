@@ -101,6 +101,11 @@ class ModelResponse:
     # backend that doesn't report it (only OllamaNativeBackend does today,
     # from prompt_eval_duration).
     prefill_ms: Optional[float] = None
+    # Server-reported stop reason and prompt size (OllamaNativeBackend only;
+    # None elsewhere). The Buddy brain A/B harness grades a "length" stop as
+    # a truncated reply.
+    done_reason: Optional[str] = None
+    prompt_tokens: Optional[int] = None
 
 
 StreamResult = str | ModelResponse
@@ -2051,6 +2056,16 @@ def _raise_for_status_with_detail(resp) -> None:
         raise
 
 
+_SAMPLING_KEYS = ("temperature", "seed", "top_p", "top_k")
+
+
+def _sampling_options(sampling: Optional[dict]) -> dict:
+    """The allowed subset of *sampling* as Ollama ``options`` ({} for None)."""
+    if not sampling:
+        return {}
+    return {k: sampling[k] for k in _SAMPLING_KEYS if sampling.get(k) is not None}
+
+
 class OllamaNativeBackend(OpenAICompatBackend):
     """Talks to Ollama's NATIVE /api/chat endpoint (not the OpenAI /v1 shim).
 
@@ -2170,8 +2185,14 @@ class OllamaNativeBackend(OpenAICompatBackend):
                  messages: Optional[list] = None,
                  think: Optional[bool] = None,
                  response_schema: Optional[dict] = None,
-                 system_as_message: bool = False) -> ModelResponse:
-        """``response_schema`` (sprint 2026-10-20-buddy-always-on, A4): a JSON
+                 system_as_message: bool = False,
+                 sampling: Optional[dict] = None) -> ModelResponse:
+        """``sampling`` (sprint 2026-11-18-aiml-slm-engine): ``{temperature,
+        seed, top_p, top_k}`` merged into ``options``. Only the brain A/B
+        harness sets it; None (every other caller, the Buddy edge included)
+        adds nothing to the request.
+
+        ``response_schema`` (sprint 2026-10-20-buddy-always-on, A4): a JSON
         Schema sent as Ollama's ``format`` for grammar-constrained decoding.
         None (every existing caller) adds nothing to the request body.
 
@@ -2200,6 +2221,7 @@ class OllamaNativeBackend(OpenAICompatBackend):
             options["num_ctx"] = int(num_ctx)
         if max_tokens is not None:
             options["num_predict"] = int(max_tokens)
+        options.update(_sampling_options(sampling))
         if options:
             body["options"] = options
         # think=False disables the hidden reasoning pass entirely (Ollama
@@ -2238,6 +2260,8 @@ class OllamaNativeBackend(OpenAICompatBackend):
             latency_ms=(time.time() - start) * 1000,
             cost_usd=0.0,
             prefill_ms=(prefill_ns / 1_000_000.0) if prefill_ns is not None else None,
+            done_reason=data.get("done_reason"),
+            prompt_tokens=data.get("prompt_eval_count"),
         )
 
     def stream_complete(self, prompt: str, max_tokens: int = 512,
@@ -2247,10 +2271,11 @@ class OllamaNativeBackend(OpenAICompatBackend):
                         messages: Optional[list] = None,
                         think: Optional[bool] = None,
                         response_schema: Optional[dict] = None,
-                        system_as_message: bool = False) -> Iterator[StreamResult]:
+                        system_as_message: bool = False,
+                        sampling: Optional[dict] = None) -> Iterator[StreamResult]:
         """Symmetry with OpenAICompatBackend; chat path only calls complete().
         Streams via /api/chat with stream:true, yields deltas then ModelResponse.
-        ``response_schema`` and ``system_as_message``: see complete()."""
+        ``response_schema``, ``system_as_message`` and ``sampling``: see complete()."""
         start = time.time()
         num_ctx = getattr(self, "_num_ctx", None)
 
@@ -2267,6 +2292,7 @@ class OllamaNativeBackend(OpenAICompatBackend):
             options["num_ctx"] = int(num_ctx)
         if max_tokens is not None:
             options["num_predict"] = int(max_tokens)
+        options.update(_sampling_options(sampling))
         if options:
             body["options"] = options
         if think is not None:
@@ -2281,6 +2307,8 @@ class OllamaNativeBackend(OpenAICompatBackend):
         full_text = ""
         eval_count = 0
         prefill_ns = None
+        done_reason = None
+        prompt_tokens = None
         with self._session.post(
             f"{self._ollama_root()}/api/chat",
             headers={"Authorization": f"Bearer {self.api_key}",
@@ -2305,6 +2333,10 @@ class OllamaNativeBackend(OpenAICompatBackend):
                     eval_count = int(data["eval_count"])
                 if data.get("prompt_eval_duration") is not None:
                     prefill_ns = data["prompt_eval_duration"]
+                if data.get("prompt_eval_count") is not None:
+                    prompt_tokens = data["prompt_eval_count"]
+                if data.get("done_reason"):
+                    done_reason = data["done_reason"]
                 if data.get("done"):
                     break
 
@@ -2316,6 +2348,8 @@ class OllamaNativeBackend(OpenAICompatBackend):
             latency_ms=(time.time() - start) * 1000,
             cost_usd=0.0,
             prefill_ms=(prefill_ns / 1_000_000.0) if prefill_ns is not None else None,
+            done_reason=done_reason,
+            prompt_tokens=prompt_tokens,
         )
 
 

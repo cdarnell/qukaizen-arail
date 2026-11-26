@@ -222,6 +222,7 @@ class ChatPlan:
     schema: Optional[dict]
     stream: bool
     router: Any
+    entry: Any = None
 
 
 class _End:
@@ -275,15 +276,15 @@ def _core_brain_chat(adm: Admitted) -> ChatPlan:
         raise
     system, prompt = brain.flatten(body["messages"])
     return ChatPlan(header, system, prompt, brain.max_tokens_of(body), header.response_schema,
-                    bool(body.get("stream", False)), router)
+                    bool(body.get("stream", False)), router, view.entry)
 
 
 def _drain(plan: ChatPlan, loop: asyncio.AbstractEventLoop, queue: "asyncio.Queue") -> None:
     """Runs in a worker thread inside a copy of the caller's context (the agent_call is on it)."""
     # system_as_message: Buddy's persona must be the model's system message (R1-4c). Prepended to the prompt, Ollama would still
     # substitute the Modelfile's own SYSTEM ("You are an AI engineering assistant ...") and read Buddy's rules as user text.
-    for item in plan.router.stream_complete(plan.prompt, plan.max_tokens, system=plan.system,
-                                            response_schema=plan.schema, system_as_message=True):
+    for item in brain.stream_turn(plan.router, system=plan.system, prompt=plan.prompt, max_tokens=plan.max_tokens,
+                                  schema=plan.schema, entry=plan.entry):
         loop.call_soon_threadsafe(queue.put_nowait, item)
 
 

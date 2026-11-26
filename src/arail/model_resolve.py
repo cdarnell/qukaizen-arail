@@ -116,10 +116,12 @@ def slot_a_candidates(airgapped: bool) -> List[Dict[str, Any]]:
     seen: set = set()
     for m in _ollama_installed_models():
         rid = m["id"]
-        rows.append({"id": rid, "name": rid, "source": "ollama",
-                     "size_gb": m.get("size_gb"), "present": True,
-                     "fit": fit_primary(rid), "install_command": None,
-                     "hf_url": None})
+        row = {"id": rid, "name": rid, "source": "ollama",
+               "size_gb": m.get("size_gb"), "present": True,
+               "fit": fit_primary(rid), "install_command": None,
+               "hf_url": None}
+        _add_pin_state(row, rid)
+        rows.append(row)
         seen.add(rid)
         seen.add(rid.split(":", 1)[0])
     catalog = sorted(
@@ -128,12 +130,31 @@ def slot_a_candidates(airgapped: bool) -> List[Dict[str, Any]]:
     for e in catalog:
         if e.id in seen or e.id.split(":", 1)[0] in seen:
             continue
-        rows.append({"id": e.id, "name": e.name, "source": "ollama",
-                     "size_gb": e.size_gb, "present": False,
-                     "fit": fit_primary(e.id),
-                     "install_command": e.install or None, "hf_url": None})
+        row = {"id": e.id, "name": e.name, "source": "ollama",
+               "size_gb": e.size_gb, "present": False,
+               "fit": fit_primary(e.id),
+               "install_command": e.install or None, "hf_url": None}
+        _add_pin_state(row, e.id)
+        rows.append(row)
         seen.add(e.id)
     return rows
+
+
+def _add_pin_state(row: Dict[str, Any], tag: str) -> None:
+    """Opt-in family rows carry ``pin_state`` / ``pin_note`` and are pickable
+    only on a digest match. Other rows are left exactly as they were."""
+    from arail import model_pins as _pins
+    rec = _pins.family_of(tag)
+    if rec is None:
+        return
+    chk = _pins.verify(rec, None if tag == rec.id else tag)
+    row["pin_state"] = chk.state
+    row["pin_note"] = chk.reason
+    row["pickable"] = chk.ok
+    if not chk.ok:
+        row["install_command"] = None
+        if row.get("present"):
+            row["pin_note"] = f"{chk.reason} Installed but not the pinned build: `{tag}`."
 
 
 def slot_b_candidates(airgapped: bool) -> List[Dict[str, Any]]:
@@ -328,27 +349,46 @@ def _match_installed(name: str, pool: List[Dict[str, Any]]) -> Optional[Dict[str
 def _resolve_a(pin, env_pref, tags, cache_a, total_ram, notes) -> SlotResolution:
     from arail.registry.ceiling import PRIMARY_CEILING_B
 
+    from arail import model_pins as _pins
+
+    def _fam(tag):
+        return _pins.family_of(tag) if tag else None
+
     if tags is None:
         notes.append({"slot": "a", "kind": "ollama_down",
                       "detail": "Ollama isn't running — start it with `ollama serve`"})
         # Can't verify anything: an explicit pin is still the operator's intent,
-        # then the last verified result, then the .env preference.
-        if pin:
-            return SlotResolution(model=pin, source="pin",
-                                  reason="Ollama unreachable; unverified")
-        if cache_a:
-            return SlotResolution(model=cache_a, source="cache",
-                                  reason="Ollama unreachable; using last resolved model")
-        if env_pref:
-            return SlotResolution(model=env_pref, source="env",
-                                  reason="Ollama unreachable; unverified")
+        # then the last verified result, then the .env preference. The opt-in
+        # family is never honoured unverified (it must match its pinned digest).
+        skipped_family = False
+        for source, val, why in (("pin", pin, "Ollama unreachable; unverified"),
+                                 ("cache", cache_a,
+                                  "Ollama unreachable; using last resolved model"),
+                                 ("env", env_pref, "Ollama unreachable; unverified")):
+            if not val:
+                continue
+            if _fam(val):
+                skipped_family = True
+                continue
+            return SlotResolution(model=val, source=source, reason=why)
+        if skipped_family:
+            msg = "can't verify the pinned build while Ollama is down"
+            notes.append({"slot": "a", "kind": "pin_mismatch", "detail": msg})
+            return SlotResolution(reason=msg)
         return SlotResolution(reason="Ollama unreachable and no previous model")
 
-    show_budget = [SHOW_CAP]
+    # Verifying a pinned-family value spends one /api/show of the shared
+    # budget, and runs before the capability probes.
+    n_family = sum(1 for v in (pin, env_pref) if _fam(v))
+    show_budget = [max(SHOW_CAP - n_family, 0)]
     budget_gb = total_ram * RAM_BUDGET_FRACTION if total_ram else None
     eligible: List[Dict[str, Any]] = []
     for m in tags:
-        if not _is_completion_capable(m, show_budget):
+        if _fam(m["id"]):
+            # Opt-in family: no capability probe; verified separately below.
+            if _looks_like_embedding(m["id"], m.get("family", "")):
+                continue
+        elif not _is_completion_capable(m, show_budget):
             continue
         params = _params_for_a(m)
         m = dict(m, params_b=params)
@@ -371,7 +411,18 @@ def _resolve_a(pin, env_pref, tags, cache_a, total_ram, notes) -> SlotResolution
     for source, val in (("pin", pin), ("env", env_pref)):
         if not val:
             continue
-        m = _match_installed(val, eligible)
+        rec = _fam(val)
+        if rec is not None:
+            chk = _pins.verify(rec, None if val == rec.id else val)
+            if not chk.ok:
+                kind = ("pin_mismatch" if chk.state in ("mismatch", "unverifiable")
+                        else "missing")
+                reasons.append(chk.reason)
+                notes.append({"slot": "a", "kind": kind, "detail": chk.reason})
+                continue
+            m = next((e for e in eligible if e["id"] == chk.tag), None)
+        else:
+            m = _match_installed(val, eligible)
         if m is None:
             hint = f"ollama pull {val}"
             reasons.append(f"`{val}` ({'pinned' if source == 'pin' else 'from .env'}) "
@@ -384,8 +435,15 @@ def _resolve_a(pin, env_pref, tags, cache_a, total_ram, notes) -> SlotResolution
             continue
         return _res(m, source)
 
-    ok = [m for m in eligible if m["_ok"]]
+    # Auto never picks the opt-in family, whatever its digest (A1/F2).
+    ok = [m for m in eligible if m["_ok"] and not _fam(m["id"])]
     if not ok:
+        optin = sorted({_fam(m["id"]).id for m in eligible if _fam(m["id"])})
+        if optin:
+            msg = (f"only an opt-in model is installed ({', '.join(optin)}); pin it "
+                   f"to use it, or install llama-ai-eng: {PULL_HINT}")
+            notes.append({"slot": "a", "kind": "missing", "detail": msg})
+            return SlotResolution(reason=msg)
         if not eligible and not tags:
             notes.append({"slot": "a", "kind": "missing",
                           "detail": f"No chat model installed. Run: {PULL_HINT}"})
